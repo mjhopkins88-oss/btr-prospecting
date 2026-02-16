@@ -87,7 +87,7 @@
             const [selectedProspect, setSelectedProspect] = useState(null);
             const [searchCity, setSearchCity] = useState('Texas');
             const [filterScore, setFilterScore] = useState('all');
-            const [emailTemplate, setEmailTemplate] = useState('');
+            const [emailTemplate, setEmailTemplate] = useState({ subject: '', body: '' });
             const [showEmailModal, setShowEmailModal] = useState(false);
             const [searchStatus, setSearchStatus] = useState('');
             const [cooldown, setCooldown] = useState(0);
@@ -163,35 +163,56 @@
                 setLoading(true);
                 setSearchStatus('✍️ AI is writing a personalized email...');
 
+                // 30-second timeout
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 30000);
+
                 try {
                     const response = await fetch(`${API_BASE}/api/email/generate`, {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             prospect: prospect,
                             emailPurpose: options.emailPurpose || 'cold_outreach',
                             tone: options.tone || 'professional_direct',
                             offer: options.offer || '15_min_call',
                             triggerEvent: options.triggerEvent || ''
-                        })
+                        }),
+                        signal: controller.signal
                     });
 
-                    const data = await response.json();
+                    clearTimeout(timeout);
+
+                    const text = await response.text();
+                    let data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch (e) {
+                        console.error('Email response not JSON:', text.substring(0, 200));
+                        setSearchStatus('❌ Email generation returned an invalid response. Try again.');
+                        setTimeout(() => setSearchStatus(''), 5000);
+                        return;
+                    }
 
                     if (data.success) {
-                        setEmailTemplate({ subject: data.subject || '', body: data.body || data.email || '' });
-                        setShowEmailModal(true);
+                        const subject = data.subject || '';
+                        const body = data.body || data.email || 'No email body returned. Try again.';
                         setSelectedProspect(prospect);
+                        setEmailTemplate({ subject, body });
+                        setShowEmailModal(true);
                         setSearchStatus('');
                     } else {
-                        setSearchStatus(`❌ ${data.message}`);
+                        setSearchStatus(`❌ ${data.message || 'Email generation failed.'}`);
                         setTimeout(() => setSearchStatus(''), 5000);
                     }
                 } catch (error) {
+                    clearTimeout(timeout);
                     console.error('Email generation error:', error);
-                    setSearchStatus('❌ Email generation failed.');
+                    if (error.name === 'AbortError') {
+                        setSearchStatus('❌ Email generation timed out. Try again.');
+                    } else {
+                        setSearchStatus(`❌ Email generation failed: ${error.message}`);
+                    }
                     setTimeout(() => setSearchStatus(''), 5000);
                 } finally {
                     setLoading(false);
