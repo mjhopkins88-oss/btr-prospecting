@@ -507,20 +507,26 @@ def api_generate_email():
         data = request.json
         prospect = data.get('prospect', {})
 
+        if not prospect or not prospect.get('company'):
+            return jsonify({
+                'success': False,
+                'message': 'No prospect data provided.'
+            }), 400
+
         # Email options (with defaults)
         email_purpose = data.get('emailPurpose', 'cold_outreach')
         tone = data.get('tone', 'professional_direct')
         offer = data.get('offer', '15_min_call')
         trigger_event = data.get('triggerEvent', '')
 
-        # Extract name parts
-        full_name = prospect.get('executive', '').strip()
+        # Extract name parts safely
+        full_name = str(prospect.get('executive', '') or '').strip()
         name_parts = full_name.split() if full_name else []
         first_name = name_parts[0] if name_parts else 'there'
         last_name = name_parts[-1] if len(name_parts) > 1 else ''
 
         # Determine role-based angle from title
-        title = prospect.get('title', '').lower()
+        title = str(prospect.get('title', '') or '').lower()
         if any(k in title for k in ['cfo', 'finance', 'capital', 'treasurer']):
             role_angle = "CFO/Finance: cost of risk -> DSCR/refi/exit impact"
         elif any(k in title for k in ['asset', 'portfolio']):
@@ -534,10 +540,21 @@ def api_generate_email():
         else:
             role_angle = "Developer/Construction: structure early + construction-to-perm + cost control"
 
-        signals = ', '.join(prospect.get('signals', [])) if isinstance(prospect.get('signals'), list) else prospect.get('signals', '')
-        trigger = trigger_event or prospect.get('whyNow', '') or ''
+        # Safely handle signals - could be list, JSON string, or plain string
+        raw_signals = prospect.get('signals', [])
+        if isinstance(raw_signals, str):
+            try:
+                raw_signals = json.loads(raw_signals)
+            except (json.JSONDecodeError, ValueError):
+                raw_signals = [raw_signals] if raw_signals else []
+        if isinstance(raw_signals, list):
+            signals = ', '.join(str(s) for s in raw_signals)
+        else:
+            signals = str(raw_signals)
 
-        system_prompt = """You are an expert B2B email copywriter for commercial insurance. Follow the EMAIL GEN SPEC exactly.
+        trigger = str(trigger_event or prospect.get('whyNow', '') or '')
+
+        prompt = f"""You are an expert B2B email copywriter for commercial insurance. Follow the EMAIL GEN SPEC exactly.
 
 RULES:
 - 90-150 words total (HARD CAP 170)
@@ -550,26 +567,15 @@ RULES:
 - If you cannot verify a detail, omit it — NEVER invent facts
 - No generic flattery ("impressive company", "love what you're doing")
 
-OUTPUT FORMAT:
-Return ONLY valid JSON, nothing else:
-{"subject": "...", "body": "Hi FirstName,\\n\\n...\\n\\nBest,\\nMax Hopkins\\nBTR Insurance Specialist\\nmax@btrinsurance.com"}
-
-QUALITY CHECKS before finalizing:
-- Word count <= 170
-- One question mark total
-- One CTA only
-- No forbidden phrases
-- No unverified claims"""
-
-        user_prompt = f"""Generate a personalized email with these inputs:
+Generate a personalized email with these inputs:
 
 RECIPIENT:
 - recipient_first_name: {first_name}
 - recipient_last_name: {last_name}
-- recipient_title: {prospect.get('title', 'Executive')}
+- recipient_title: {prospect.get('title') or 'Executive'}
 - company_name: {prospect.get('company', '')}
 - industry: BTR (Build-to-Rent)
-- geography: {prospect.get('city', '')}, {prospect.get('state', 'TX')}
+- geography: {prospect.get('city') or 'Texas'}, {prospect.get('state') or 'TX'}
 
 EMAIL CONFIG:
 - email_purpose: {email_purpose}
@@ -584,10 +590,10 @@ SENDER:
 - sender_email: max@btrinsurance.com
 
 CONTEXT:
-- Project: {prospect.get('projectName', 'N/A')}
-- Project Status: {prospect.get('projectStatus', 'N/A')}
-- TIV: {prospect.get('tiv', 'N/A')}
-- Units: {prospect.get('units', 'N/A')}
+- Project: {prospect.get('projectName') or 'N/A'}
+- Project Status: {prospect.get('projectStatus') or 'N/A'}
+- TIV: {prospect.get('tiv') or 'N/A'}
+- Units: {prospect.get('units') or 'N/A'}
 - Signals: {signals}
 - Trigger Event / Why Now: {trigger}
 
@@ -598,44 +604,73 @@ CTA RULES:
 - If offer is share_resource: Offer to send a relevant resource
 - If offer is quick_question: Ask one specific question about their situation
 
-Return ONLY the JSON object."""
+OUTPUT FORMAT — Return ONLY valid JSON, nothing else:
+{{"subject": "3-6 word subject line", "body": "Hi {first_name},\\n\\n[paragraph 1]\\n\\n[paragraph 2]\\n\\nBest,\\nMax Hopkins\\nBTR Insurance Specialist\\nmax@btrinsurance.com"}}
+
+QUALITY CHECKS before finalizing:
+- Word count <= 170
+- One question mark total
+- One CTA only
+- No forbidden phrases
+- No unverified claims"""
+
+        print(f"Email gen: generating for {prospect.get('company')} / {full_name}")
 
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=800,
             messages=[
-                {"role": "user", "content": user_prompt}
-            ],
-            system=system_prompt
+                {"role": "user", "content": prompt}
+            ]
         )
 
         email_text = message.content[0].text if message.content else ""
+        print(f"Email gen raw response: {email_text[:200]}")
 
         # Try to parse JSON response
         try:
             # Strip any markdown code fences
             cleaned = email_text.strip()
             if cleaned.startswith('```'):
-                cleaned = cleaned.split('\n', 1)[1] if '\n' in cleaned else cleaned[3:]
-                if cleaned.endswith('```'):
-                    cleaned = cleaned[:-3]
+                # Remove opening fence (with optional language tag)
+                first_newline = cleaned.find('\n')
+                if first_newline != -1:
+                    cleaned = cleaned[first_newline + 1:]
+                else:
+                    cleaned = cleaned[3:]
+                # Remove closing fence
+                if cleaned.rstrip().endswith('```'):
+                    cleaned = cleaned.rstrip()[:-3]
                 cleaned = cleaned.strip()
-            if cleaned.startswith('json'):
-                cleaned = cleaned[4:].strip()
 
             email_json = json.loads(cleaned)
+            subject = email_json.get('subject', '')
+            body = email_json.get('body', '')
+
+            print(f"Email gen success: subject='{subject[:50]}', body length={len(body)}")
+
             return jsonify({
                 'success': True,
-                'subject': email_json.get('subject', ''),
-                'body': email_json.get('body', ''),
-                'email': f"SUBJECT: {email_json.get('subject', '')}\n\n{email_json.get('body', '')}"
+                'subject': subject,
+                'body': body,
+                'email': f"Subject: {subject}\n\n{body}" if subject else body
             })
-        except (json.JSONDecodeError, ValueError):
-            # Fallback: return raw text
+        except (json.JSONDecodeError, ValueError) as parse_err:
+            print(f"Email gen JSON parse failed: {parse_err}, returning raw text")
+            # Fallback: try to extract subject line from raw text
+            subject = ''
+            body = email_text
+            lines = email_text.strip().split('\n')
+            for i, line in enumerate(lines):
+                if line.upper().startswith('SUBJECT:'):
+                    subject = line.split(':', 1)[1].strip()
+                    body = '\n'.join(lines[i+1:]).strip()
+                    break
+
             return jsonify({
                 'success': True,
-                'subject': '',
-                'body': email_text,
+                'subject': subject,
+                'body': body,
                 'email': email_text
             })
         
