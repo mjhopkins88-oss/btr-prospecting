@@ -45,12 +45,31 @@ DISCOVERY_CONFIG = {
     ],
     'icp_keywords': [
         'build to rent developer',
+        'single family rental',
+        'residential land developer',
+        'homebuilder',
+        'horizontal multifamily',
         'BTR community builder',
-        'single family rental developer',
-        'multifamily housing developer',
-        'residential real estate developer',
-        'property development company',
-        'apartment construction company',
+    ],
+    'target_sources': [
+        'bisnow.com',
+        'multihousingnews.com',
+        'credaily.com',
+        'commercialobserver.com',
+        'bizjournals.com',
+        'linkedin.com',
+        'sec.gov EDGAR',
+    ],
+    'search_patterns': [
+        '"build to rent" + {city}',
+        '"single family rental community" + {city}',
+        '"groundbreaking" + {city}',
+    ],
+    'monitor_operators': [
+        'Invitation Homes',
+        'American Homes 4 Rent',
+        'Tricon Residential',
+        'Progress Residential',
     ],
     'min_rating': 4.0,
     'min_reviews': 10,
@@ -451,32 +470,48 @@ def search_city_directory(city_info, config):
         seen_clause = f"\n\nSKIP these businesses I have already catalogued — do NOT include them:\n{names_list}\n"
 
     keywords_list = "\n".join(f"- {kw}" for kw in config['icp_keywords'])
+    sources_list = "\n".join(f"- {src}" for src in config.get('target_sources', []))
+    patterns_list = "\n".join(f"- {p.replace('{city}', city)}" for p in config.get('search_patterns', []))
+    operators_list = ", ".join(config.get('monitor_operators', []))
     today = datetime.now().strftime('%B %d, %Y')
     min_rating = config['min_rating']
     min_reviews = config['min_reviews']
 
-    prompt = f"""You are a business directory researcher. Today is {today}.
+    prompt = f"""You are a BTR/SFR industry researcher. Today is {today}.
 
-Search Google Maps and online business directories for companies in {city}, {state} that match these Ideal Customer Profile (ICP) categories:
+Find companies actively building or operating Build-to-Rent / Single-Family Rental communities in {city}, {state}.
+
+PRIORITY SOURCES — search these first:
+{sources_list}
+
+SEARCH PATTERNS to use:
+{patterns_list}
+
+ICP KEYWORDS:
 {keywords_list}
 
-SEARCH INSTRUCTIONS:
-- Search for each ICP keyword + "{city}, {state}" on Google Maps and business directories
-- For each business extract: name, full address, phone number, website, Google star rating (1-5), and total number of reviews
-- Only include businesses with a rating of {min_rating}+ stars AND {min_reviews}+ reviews
-- Focus on established, currently active companies with real directory listings
+ALSO CHECK for recent activity from these major BTR operators in {city}:
+{operators_list}
+
+WHAT TO LOOK FOR:
+- News articles about BTR groundbreakings, land acquisitions, or construction starts in {city}
+- LinkedIn profiles of BTR developers headquartered in or expanding to {city}
+- Developer press releases announcing new communities
+- Companies listed as BTR/SFR builders on industry sites
+
+For each company found, extract: name, address, phone, website, rating (if available, otherwise use 5.0), review_count (if available, otherwise use 10), category, and which ICP keyword they match.
 {seen_clause}
 Return ONLY valid JSON in this exact format:
 {{
   "businesses": [
     {{
-      "name": "Business Name",
+      "name": "Company Name",
       "address": "Full Address, {city}, {state} ZIP",
       "phone": "(555) 123-4567",
       "website": "https://example.com",
       "rating": 4.5,
       "review_count": 87,
-      "category": "Real Estate Developer",
+      "category": "BTR Developer",
       "icp_match": "build to rent developer"
     }}
   ]
