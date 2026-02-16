@@ -15,6 +15,11 @@ import anthropic
 from dotenv import load_dotenv
 import sqlite3
 import re
+import threading
+import traceback
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+import pytz
 
 # Load environment variables
 load_dotenv()
@@ -29,6 +34,38 @@ client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 # Key: "city|limit", Value: {"prospects": [...], "timestamp": datetime}
 _search_cache = {}
 CACHE_TTL_SECONDS = 900  # 15 minutes
+
+# Daily Discovery configuration
+DISCOVERY_CONFIG = {
+    'cities': [
+        {'city': 'Phoenix', 'state': 'AZ'},
+        {'city': 'Dallas', 'state': 'TX'},
+        {'city': 'Atlanta', 'state': 'GA'},
+        {'city': 'Charlotte', 'state': 'NC'},
+        {'city': 'Tampa', 'state': 'FL'},
+        {'city': 'Raleigh', 'state': 'NC'},
+    ],
+    'icp_keywords': [
+        'build to rent developer',
+        'BTR community builder',
+        'single family rental developer',
+        'multifamily housing developer',
+        'residential real estate developer',
+        'property development company',
+        'apartment construction company',
+    ],
+    'min_rating': 4.0,
+    'min_reviews': 10,
+    'top_n_per_city': 6,
+    'schedule_hour': 7,
+    'schedule_minute': 0,
+    'timezone': 'America/Los_Angeles',
+    'delivery_method': 'in_app',  # 'in_app' or 'webhook'
+    'webhook_url': '',
+}
+
+# Track whether a discovery run is in progress
+_discovery_running = False
 
 # Database setup
 def init_db():
@@ -55,6 +92,34 @@ def init_db():
             why_now TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(company, project_name)
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS discovery_seen (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            business_name TEXT NOT NULL,
+            city TEXT NOT NULL,
+            state TEXT NOT NULL,
+            address TEXT,
+            phone TEXT,
+            website TEXT,
+            rating REAL,
+            review_count INTEGER,
+            category TEXT,
+            icp_keyword TEXT,
+            first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(business_name, city, state)
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS discovery_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            results_json TEXT,
+            digest_text TEXT,
+            city_count INTEGER DEFAULT 0,
+            total_new INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'completed'
         )
     ''')
     conn.commit()
@@ -357,6 +422,313 @@ def generate_master_csv():
 
 # Generate master CSV on startup if prospects exist
 generate_master_csv()
+
+# --- Daily Discovery Engine ---
+
+def get_seen_businesses(city, state):
+    """Get list of business names already seen for a city"""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT business_name FROM discovery_seen WHERE LOWER(city) = ? AND LOWER(state) = ?',
+              (city.lower(), state.lower()))
+    names = [row[0] for row in c.fetchall()]
+    conn.close()
+    return names
+
+
+def search_city_directory(city_info, config):
+    """Search business directories for one city using Claude web search.
+    Returns (filtered_businesses_list, error_message_or_None)."""
+    city = city_info['city']
+    state = city_info['state']
+
+    api_key = os.getenv('ANTHROPIC_API_KEY')
+    if not api_key or api_key == 'your_anthropic_api_key_here':
+        return [], "API key not configured"
+
+    seen_names = get_seen_businesses(city, state)
+    seen_clause = ""
+    if seen_names:
+        names_list = ", ".join(seen_names[:30])
+        seen_clause = f"\n\nSKIP these businesses I have already catalogued — do NOT include them:\n{names_list}\n"
+
+    keywords_list = "\n".join(f"- {kw}" for kw in config['icp_keywords'])
+    today = datetime.now().strftime('%B %d, %Y')
+    min_rating = config['min_rating']
+    min_reviews = config['min_reviews']
+
+    prompt = f"""You are a business directory researcher. Today is {today}.
+
+Search Google Maps and online business directories for companies in {city}, {state} that match these Ideal Customer Profile (ICP) categories:
+{keywords_list}
+
+SEARCH INSTRUCTIONS:
+- Search for each ICP keyword + "{city}, {state}" on Google Maps and business directories
+- For each business extract: name, full address, phone number, website, Google star rating (1-5), and total number of reviews
+- Only include businesses with a rating of {min_rating}+ stars AND {min_reviews}+ reviews
+- Focus on established, currently active companies with real directory listings
+{seen_clause}
+Return ONLY valid JSON in this exact format:
+{{
+  "businesses": [
+    {{
+      "name": "Business Name",
+      "address": "Full Address, {city}, {state} ZIP",
+      "phone": "(555) 123-4567",
+      "website": "https://example.com",
+      "rating": 4.5,
+      "review_count": 87,
+      "category": "Real Estate Developer",
+      "icp_match": "build to rent developer"
+    }}
+  ]
+}}
+
+Find up to 12 businesses. Return ONLY the JSON object, no other text."""
+
+    try:
+        max_retries = 3
+        message = None
+        for attempt in range(max_retries + 1):
+            try:
+                message = client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=2000,
+                    tools=[{
+                        "type": "web_search_20250305",
+                        "name": "web_search",
+                        "max_uses": 3
+                    }],
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                break
+            except anthropic.RateLimitError:
+                if attempt < max_retries:
+                    wait_time = 2 ** (attempt + 1)
+                    print(f"[Discovery] Rate limited for {city}, {state} (attempt {attempt + 1}), waiting {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    return [], "Rate limited after retries"
+
+        if message is None:
+            return [], "No response from API"
+
+        response_text = ""
+        for block in message.content:
+            if block.type == "text":
+                response_text += block.text
+
+        if not response_text.strip():
+            return [], "Empty response"
+
+        # Parse JSON using balanced-brace extraction
+        json_start = response_text.find('{"businesses"')
+        if json_start == -1:
+            json_start = response_text.find('{\n')
+        if json_start == -1:
+            json_start = response_text.find('{')
+
+        if json_start == -1:
+            return [], "No JSON found in response"
+
+        brace_count = 0
+        json_end = json_start
+        for i in range(json_start, len(response_text)):
+            if response_text[i] == '{':
+                brace_count += 1
+            elif response_text[i] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    json_end = i + 1
+                    break
+
+        json_str = response_text[json_start:json_end]
+        data = json.loads(json_str)
+        businesses = data.get('businesses', [])
+
+        # Filter by minimum rating and review count, deduplicate
+        seen_lower = [s.lower() for s in seen_names]
+        filtered = []
+        for b in businesses:
+            try:
+                rating = float(b.get('rating', 0))
+                reviews = int(b.get('review_count', 0))
+            except (ValueError, TypeError):
+                continue
+            name = b.get('name', '').strip()
+            if not name:
+                continue
+            if rating < min_rating or reviews < min_reviews:
+                continue
+            if name.lower() in seen_lower:
+                continue
+            b['rating'] = rating
+            b['review_count'] = reviews
+            filtered.append(b)
+
+        # Rank by rating DESC, then review_count DESC
+        filtered.sort(key=lambda x: (-x['rating'], -x['review_count']))
+
+        return filtered, None
+
+    except anthropic.AuthenticationError:
+        return [], "Invalid API key"
+    except json.JSONDecodeError as e:
+        print(f"[Discovery] JSON parse error for {city}, {state}: {e}")
+        return [], "Failed to parse response"
+    except Exception as e:
+        print(f"[Discovery] Error for {city}, {state}: {e}")
+        return [], str(e)
+
+
+def format_discovery_digest(results):
+    """Format discovery results into a human-readable digest"""
+    lines = []
+    lines.append("=" * 60)
+    lines.append("  BTR DAILY DISCOVERY DIGEST")
+    lines.append(f"  {datetime.now().strftime('%A, %B %d, %Y at %I:%M %p PT')}")
+    lines.append("=" * 60)
+    lines.append("")
+
+    total_new = 0
+    for location, data in results.items():
+        businesses = data.get('businesses', [])
+        new_count = data.get('new_count', 0)
+        error = data.get('error', '')
+        total_new += new_count
+
+        lines.append(f"--- {location} ---")
+        if error:
+            lines.append(f"  [Error: {error}]")
+        elif not businesses:
+            lines.append("  No new businesses found.")
+        else:
+            for i, b in enumerate(businesses, 1):
+                lines.append(f"  {i}. {b.get('name', 'Unknown')}")
+                lines.append(f"     Rating: {b.get('rating', 'N/A')} stars ({b.get('review_count', 0)} reviews)")
+                lines.append(f"     Category: {b.get('category', 'N/A')}")
+                if b.get('address'):
+                    lines.append(f"     Address: {b['address']}")
+                if b.get('phone'):
+                    lines.append(f"     Phone: {b['phone']}")
+                if b.get('website'):
+                    lines.append(f"     Website: {b['website']}")
+                lines.append("")
+        lines.append("")
+
+    lines.append(f"TOTAL NEW DISCOVERIES: {total_new}")
+    lines.append("=" * 60)
+    return "\n".join(lines)
+
+
+def run_daily_discovery():
+    """Main daily discovery orchestrator — searches all configured cities"""
+    config = DISCOVERY_CONFIG
+    top_n = config['top_n_per_city']
+
+    print(f"[Discovery] Starting daily discovery run at {datetime.now().isoformat()}")
+
+    all_results = {}
+    total_new = 0
+
+    for city_info in config['cities']:
+        city = city_info['city']
+        state = city_info['state']
+        location = f"{city}, {state}"
+
+        print(f"[Discovery] Searching {location}...")
+
+        businesses, error = search_city_directory(city_info, config)
+
+        if error:
+            print(f"[Discovery] Error for {location}: {error}")
+            all_results[location] = {'businesses': [], 'error': error}
+            continue
+
+        # Take top N per city
+        top_businesses = businesses[:top_n]
+
+        # Persist new results to discovery_seen
+        conn = sqlite3.connect('prospects.db')
+        c = conn.cursor()
+        new_count = 0
+        for b in top_businesses:
+            try:
+                c.execute('''
+                    INSERT OR IGNORE INTO discovery_seen
+                    (business_name, city, state, address, phone, website, rating, review_count, category, icp_keyword)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    b.get('name', ''),
+                    city, state,
+                    b.get('address', ''),
+                    b.get('phone', ''),
+                    b.get('website', ''),
+                    b.get('rating', 0),
+                    b.get('review_count', 0),
+                    b.get('category', ''),
+                    b.get('icp_match', '')
+                ))
+                if c.rowcount > 0:
+                    new_count += 1
+            except Exception as e:
+                print(f"[Discovery] Error saving {b.get('name')}: {e}")
+        conn.commit()
+        conn.close()
+
+        total_new += new_count
+        all_results[location] = {
+            'businesses': top_businesses,
+            'new_count': new_count,
+            'total_found': len(businesses)
+        }
+        print(f"[Discovery] {location}: {len(top_businesses)} top results, {new_count} new")
+
+        # Pace between cities to avoid rate limiting
+        time.sleep(2)
+
+    # Generate formatted digest
+    digest = format_discovery_digest(all_results)
+
+    # Save run record
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('''
+        INSERT INTO discovery_runs (results_json, digest_text, city_count, total_new, status)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (
+        json.dumps(all_results),
+        digest,
+        len(config['cities']),
+        total_new,
+        'completed'
+    ))
+    conn.commit()
+    conn.close()
+
+    # Deliver via webhook if configured
+    if config['delivery_method'] == 'webhook' and config['webhook_url']:
+        try:
+            import urllib.request
+            payload = json.dumps({
+                'type': 'daily_discovery',
+                'run_at': datetime.now().isoformat(),
+                'total_new': total_new,
+                'results': all_results,
+                'digest': digest
+            }).encode('utf-8')
+            req = urllib.request.Request(
+                config['webhook_url'],
+                data=payload,
+                headers={'Content-Type': 'application/json'}
+            )
+            urllib.request.urlopen(req, timeout=10)
+            print(f"[Discovery] Webhook delivered to {config['webhook_url']}")
+        except Exception as e:
+            print(f"[Discovery] Webhook delivery failed: {e}")
+
+    print(f"[Discovery] Run complete. {total_new} new businesses across {len(config['cities'])} cities.")
+    return all_results, digest
 
 # API Routes
 
@@ -680,6 +1052,138 @@ QUALITY CHECKS before finalizing:
             'message': str(e),
             'email': ''
         }), 500
+
+# --- Daily Discovery API Routes ---
+
+@app.route('/api/discovery/config', methods=['GET'])
+def api_discovery_config():
+    """Get current discovery configuration"""
+    return jsonify({'success': True, 'config': DISCOVERY_CONFIG})
+
+
+@app.route('/api/discovery/config', methods=['PUT'])
+def api_update_discovery_config():
+    """Update discovery configuration (runtime only)"""
+    data = request.json
+    if 'min_rating' in data:
+        DISCOVERY_CONFIG['min_rating'] = float(data['min_rating'])
+    if 'min_reviews' in data:
+        DISCOVERY_CONFIG['min_reviews'] = int(data['min_reviews'])
+    if 'top_n_per_city' in data:
+        DISCOVERY_CONFIG['top_n_per_city'] = int(data['top_n_per_city'])
+    if 'icp_keywords' in data:
+        DISCOVERY_CONFIG['icp_keywords'] = data['icp_keywords']
+    if 'delivery_method' in data:
+        DISCOVERY_CONFIG['delivery_method'] = data['delivery_method']
+    if 'webhook_url' in data:
+        DISCOVERY_CONFIG['webhook_url'] = data['webhook_url']
+    return jsonify({'success': True, 'config': DISCOVERY_CONFIG})
+
+
+@app.route('/api/discovery/latest', methods=['GET'])
+def api_discovery_latest():
+    """Get the most recent discovery run"""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT * FROM discovery_runs ORDER BY run_at DESC LIMIT 1')
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'success': True, 'run': None, 'message': 'No discovery runs yet.'})
+    return jsonify({
+        'success': True,
+        'run': {
+            'id': row[0], 'run_at': row[1],
+            'results': json.loads(row[2]) if row[2] else {},
+            'digest': row[3], 'city_count': row[4],
+            'total_new': row[5], 'status': row[6]
+        }
+    })
+
+
+@app.route('/api/discovery/run', methods=['POST'])
+def api_discovery_run():
+    """Manually trigger a discovery run (background thread)"""
+    global _discovery_running
+    if _discovery_running:
+        return jsonify({'success': False, 'message': 'A discovery run is already in progress.'})
+
+    _discovery_running = True
+
+    def run_bg():
+        global _discovery_running
+        try:
+            run_daily_discovery()
+        except Exception as e:
+            print(f"[Discovery] Background run failed: {e}")
+            traceback.print_exc()
+        finally:
+            _discovery_running = False
+
+    thread = threading.Thread(target=run_bg, daemon=True)
+    thread.start()
+    return jsonify({'success': True, 'message': 'Discovery run started. Results will appear shortly.'})
+
+
+@app.route('/api/discovery/status', methods=['GET'])
+def api_discovery_status():
+    """Check if a discovery run is currently in progress"""
+    return jsonify({'success': True, 'running': _discovery_running})
+
+
+@app.route('/api/discovery/history', methods=['GET'])
+def api_discovery_history():
+    """Get past discovery run summaries"""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT id, run_at, city_count, total_new, status FROM discovery_runs ORDER BY run_at DESC LIMIT 20')
+    runs = []
+    for row in c.fetchall():
+        runs.append({
+            'id': row[0], 'run_at': row[1],
+            'city_count': row[2], 'total_new': row[3], 'status': row[4]
+        })
+    conn.close()
+    return jsonify({'success': True, 'runs': runs})
+
+
+@app.route('/api/discovery/run/<int:run_id>', methods=['GET'])
+def api_discovery_run_detail(run_id):
+    """Get full results for a specific discovery run"""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT * FROM discovery_runs WHERE id = ?', (run_id,))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'success': False, 'message': 'Run not found'}), 404
+    return jsonify({
+        'success': True,
+        'run': {
+            'id': row[0], 'run_at': row[1],
+            'results': json.loads(row[2]) if row[2] else {},
+            'digest': row[3], 'city_count': row[4],
+            'total_new': row[5], 'status': row[6]
+        }
+    })
+
+
+# --- Scheduler Setup ---
+_scheduler = BackgroundScheduler(daemon=True)
+_scheduler.add_job(
+    run_daily_discovery,
+    CronTrigger(
+        hour=DISCOVERY_CONFIG['schedule_hour'],
+        minute=DISCOVERY_CONFIG['schedule_minute'],
+        timezone=pytz.timezone(DISCOVERY_CONFIG['timezone'])
+    ),
+    id='daily_discovery',
+    name='Daily BTR Discovery',
+    replace_existing=True
+)
+_scheduler.start()
+print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
+
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
