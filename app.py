@@ -502,55 +502,142 @@ def api_export_csv():
 
 @app.route('/api/email/generate', methods=['POST'])
 def api_generate_email():
-    """Generate personalized email for a prospect"""
+    """Generate personalized email for a prospect using EMAIL GEN SPEC"""
     try:
         data = request.json
-        prospect = data.get('prospect')
-        
-        # Use Claude to generate personalized email
-        prompt = f"""Generate a personalized cold email for this BTR prospect:
+        prospect = data.get('prospect', {})
 
-Company: {prospect.get('company')}
-Executive: {prospect.get('executive')}
-Title: {prospect.get('title')}
-Project: {prospect.get('projectName')}
-Status: {prospect.get('projectStatus')}
-Signals: {', '.join(prospect.get('signals', []))}
-Why Now: {prospect.get('whyNow')}
+        # Email options (with defaults)
+        email_purpose = data.get('emailPurpose', 'cold_outreach')
+        tone = data.get('tone', 'professional_direct')
+        offer = data.get('offer', '15_min_call')
+        trigger_event = data.get('triggerEvent', '')
 
-Write a concise, professional email that:
-1. References their specific project/recent activity
-2. Highlights why NOW is the time to talk about insurance
-3. Focuses on protecting NOI and exit valuations (not just buildings)
-4. Includes a clear call-to-action
-5. Is 150 words or less
+        # Extract name parts
+        full_name = prospect.get('executive', '').strip()
+        name_parts = full_name.split() if full_name else []
+        first_name = name_parts[0] if name_parts else 'there'
+        last_name = name_parts[-1] if len(name_parts) > 1 else ''
 
-Format:
-SUBJECT: [subject line]
+        # Determine role-based angle from title
+        title = prospect.get('title', '').lower()
+        if any(k in title for k in ['cfo', 'finance', 'capital', 'treasurer']):
+            role_angle = "CFO/Finance: cost of risk -> DSCR/refi/exit impact"
+        elif any(k in title for k in ['asset', 'portfolio']):
+            role_angle = "Asset Management: portfolio consistency + claims outcomes + renewals stability"
+        elif any(k in title for k in ['develop', 'construction', 'build', 'project']):
+            role_angle = "Developer/Construction: structure early + construction-to-perm + cost control"
+        elif any(k in title for k in ['operat', 'property', 'manage']):
+            role_angle = "Operations: fewer surprises + smoother renewals + practical risk fixes"
+        elif any(k in title for k in ['broker', 'agent']):
+            role_angle = "Broker/AM: partnership + differentiated capacity + program fit"
+        else:
+            role_angle = "Developer/Construction: structure early + construction-to-perm + cost control"
 
-[email body]
+        signals = ', '.join(prospect.get('signals', [])) if isinstance(prospect.get('signals'), list) else prospect.get('signals', '')
+        trigger = trigger_event or prospect.get('whyNow', '') or ''
 
-Best,
-Max Hopkins
-BTR Insurance Specialist"""
+        system_prompt = """You are an expert B2B email copywriter for commercial insurance. Follow the EMAIL GEN SPEC exactly.
+
+RULES:
+- 90-150 words total (HARD CAP 170)
+- 2-4 short paragraphs, 1-2 sentences each
+- Grade level: clear, plain English; no jargon unless industry-specific
+- Ask exactly ONE question, and it must be the CTA
+- No bullet lists
+- Do NOT use any of these phrases: "Hope you're doing well", "hope this finds you well", "Just checking in", "Circling back" (unless follow_up), multiple CTAs, overconfident claims
+- Include at most ONE specific detail reference about the company/project
+- If you cannot verify a detail, omit it — NEVER invent facts
+- No generic flattery ("impressive company", "love what you're doing")
+
+OUTPUT FORMAT:
+Return ONLY valid JSON, nothing else:
+{"subject": "...", "body": "Hi FirstName,\\n\\n...\\n\\nBest,\\nMax Hopkins\\nBTR Insurance Specialist\\nmax@btrinsurance.com"}
+
+QUALITY CHECKS before finalizing:
+- Word count <= 170
+- One question mark total
+- One CTA only
+- No forbidden phrases
+- No unverified claims"""
+
+        user_prompt = f"""Generate a personalized email with these inputs:
+
+RECIPIENT:
+- recipient_first_name: {first_name}
+- recipient_last_name: {last_name}
+- recipient_title: {prospect.get('title', 'Executive')}
+- company_name: {prospect.get('company', '')}
+- industry: BTR (Build-to-Rent)
+- geography: {prospect.get('city', '')}, {prospect.get('state', 'TX')}
+
+EMAIL CONFIG:
+- email_purpose: {email_purpose}
+- tone: {tone}
+- offer: {offer}
+- value_prop: We specialize in protecting BTR portfolios — structuring insurance programs that safeguard NOI, stabilize renewal costs, and protect exit valuations from day one.
+
+SENDER:
+- sender_name: Max Hopkins
+- sender_title: BTR Insurance Specialist
+- sender_company: BTR Insurance
+- sender_email: max@btrinsurance.com
+
+CONTEXT:
+- Project: {prospect.get('projectName', 'N/A')}
+- Project Status: {prospect.get('projectStatus', 'N/A')}
+- TIV: {prospect.get('tiv', 'N/A')}
+- Units: {prospect.get('units', 'N/A')}
+- Signals: {signals}
+- Trigger Event / Why Now: {trigger}
+
+ROLE-BASED ANGLE TO USE: {role_angle}
+
+CTA RULES:
+- If offer is 15_min_call: "Open to a quick 15-minute call this week?"
+- If offer is share_resource: Offer to send a relevant resource
+- If offer is quick_question: Ask one specific question about their situation
+
+Return ONLY the JSON object."""
 
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=800,
             messages=[
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ]
+                {"role": "user", "content": user_prompt}
+            ],
+            system=system_prompt
         )
-        
+
         email_text = message.content[0].text if message.content else ""
-        
-        return jsonify({
-            'success': True,
-            'email': email_text
-        })
+
+        # Try to parse JSON response
+        try:
+            # Strip any markdown code fences
+            cleaned = email_text.strip()
+            if cleaned.startswith('```'):
+                cleaned = cleaned.split('\n', 1)[1] if '\n' in cleaned else cleaned[3:]
+                if cleaned.endswith('```'):
+                    cleaned = cleaned[:-3]
+                cleaned = cleaned.strip()
+            if cleaned.startswith('json'):
+                cleaned = cleaned[4:].strip()
+
+            email_json = json.loads(cleaned)
+            return jsonify({
+                'success': True,
+                'subject': email_json.get('subject', ''),
+                'body': email_json.get('body', ''),
+                'email': f"SUBJECT: {email_json.get('subject', '')}\n\n{email_json.get('body', '')}"
+            })
+        except (json.JSONDecodeError, ValueError):
+            # Fallback: return raw text
+            return jsonify({
+                'success': True,
+                'subject': '',
+                'body': email_text,
+                'email': email_text
+            })
         
     except Exception as e:
         return jsonify({
