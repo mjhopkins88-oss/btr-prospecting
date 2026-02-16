@@ -229,12 +229,12 @@ CRITICAL: Return ONLY the JSON object, no other text. Use real web search to fin
             try:
                 message = client.messages.create(
                     model="claude-sonnet-4-20250514",
-                    max_tokens=2000,
+                    max_tokens=4096,
                     tools=[
                         {
                             "type": "web_search_20250305",
                             "name": "web_search",
-                            "max_uses": 2
+                            "max_uses": 5
                         }
                     ],
                     messages=[
@@ -614,6 +614,194 @@ Find up to 3 businesses. Return ONLY the JSON object, no other text."""
         return [], str(e)
 
 
+def search_all_cities_batched(config):
+    """Search ALL configured cities in a single API call.
+    Returns dict keyed by 'City, ST' with businesses and metadata."""
+    api_key = os.getenv('ANTHROPIC_API_KEY')
+    if not api_key or api_key == 'your_anthropic_api_key_here':
+        return {f"{c['city']}, {c['state']}": {'businesses': [], 'error': 'API key not configured'}
+                for c in config['cities']}
+
+    # Build per-city seen lists and a combined skip clause
+    city_seen = {}
+    skip_sections = []
+    for ci in config['cities']:
+        city, state = ci['city'], ci['state']
+        seen = get_seen_businesses(city, state)
+        city_seen[f"{city}, {state}"] = seen
+        if seen:
+            names = ", ".join(seen[:20])
+            skip_sections.append(f"  {city}, {state}: {names}")
+
+    skip_clause = ""
+    if skip_sections:
+        skip_clause = "\n\nSKIP these already-catalogued businesses — do NOT include them:\n" + "\n".join(skip_sections) + "\n"
+
+    cities_label = ", ".join(f"{c['city']}, {c['state']}" for c in config['cities'])
+    keywords_list = "\n".join(f"- {kw}" for kw in config['icp_keywords'])
+    sources_list = "\n".join(f"- {src}" for src in config.get('target_sources', []))
+    operators_list = ", ".join(config.get('monitor_operators', []))
+    today = datetime.now().strftime('%B %d, %Y')
+
+    # Build search patterns for all cities
+    all_patterns = []
+    for ci in config['cities']:
+        for p in config.get('search_patterns', []):
+            all_patterns.append(f"- {p.replace('{city}', ci['city'])}")
+    patterns_list = "\n".join(all_patterns)
+
+    # Build city JSON keys for the output template
+    city_keys_json = ",\n    ".join(
+        f'"{c["city"]}, {c["state"]}": {{"businesses": [...]}}'
+        for c in config['cities']
+    )
+
+    prompt = f"""You are a BTR/SFR industry researcher. Today is {today}.
+
+Find companies actively building or operating Build-to-Rent / Single-Family Rental communities in ALL of these cities: {cities_label}.
+
+PRIORITY SOURCES — search these sites:
+{sources_list}
+
+SEARCH PATTERNS (use these across all cities):
+{patterns_list}
+
+ICP KEYWORDS:
+{keywords_list}
+
+ALSO CHECK for recent activity from these major BTR operators in each city:
+{operators_list}
+
+WHAT TO LOOK FOR:
+- News articles about BTR groundbreakings, land acquisitions, or construction starts
+- LinkedIn profiles of BTR developers headquartered in or expanding to these cities
+- Developer press releases announcing new communities
+- Companies listed as BTR/SFR builders on industry sites
+
+For each company found, extract: name, address, phone, website, rating (if available, otherwise 5.0), review_count (if available, otherwise 10), category, and which ICP keyword they match.
+{skip_clause}
+Return ONLY valid JSON grouped by city in this exact format:
+{{
+    {city_keys_json}
+}}
+
+Where each city's businesses array contains objects like:
+{{
+    "name": "Company Name",
+    "address": "Full Address, City, ST ZIP",
+    "phone": "(555) 123-4567",
+    "website": "https://example.com",
+    "rating": 4.5,
+    "review_count": 87,
+    "category": "BTR Developer",
+    "icp_match": "build to rent developer"
+}}
+
+Find up to 3 businesses PER CITY. Return ONLY the JSON object, no other text."""
+
+    try:
+        max_retries = 3
+        message = None
+        for attempt in range(max_retries + 1):
+            try:
+                message = client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=4096,
+                    tools=[{
+                        "type": "web_search_20250305",
+                        "name": "web_search",
+                        "max_uses": 5
+                    }],
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                break
+            except anthropic.RateLimitError:
+                if attempt < max_retries:
+                    wait_time = 2 ** (attempt + 1)
+                    print(f"[Discovery] Rate limited (attempt {attempt + 1}), waiting {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    return {f"{c['city']}, {c['state']}": {'businesses': [], 'error': 'Rate limited after retries'}
+                            for c in config['cities']}
+
+        if message is None:
+            return {f"{c['city']}, {c['state']}": {'businesses': [], 'error': 'No response from API'}
+                    for c in config['cities']}
+
+        response_text = ""
+        for block in message.content:
+            if block.type == "text":
+                response_text += block.text
+
+        if not response_text.strip():
+            return {f"{c['city']}, {c['state']}": {'businesses': [], 'error': 'Empty response'}
+                    for c in config['cities']}
+
+        # Parse JSON using balanced-brace extraction
+        json_start = response_text.find('{')
+        if json_start == -1:
+            return {f"{c['city']}, {c['state']}": {'businesses': [], 'error': 'No JSON found'}
+                    for c in config['cities']}
+
+        brace_count = 0
+        json_end = json_start
+        for i in range(json_start, len(response_text)):
+            if response_text[i] == '{':
+                brace_count += 1
+            elif response_text[i] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    json_end = i + 1
+                    break
+
+        json_str = response_text[json_start:json_end]
+        data = json.loads(json_str)
+
+        # Process each city's results
+        min_rating = config['min_rating']
+        min_reviews = config['min_reviews']
+        results = {}
+
+        for ci in config['cities']:
+            location = f"{ci['city']}, {ci['state']}"
+            city_data = data.get(location, {})
+            businesses = city_data if isinstance(city_data, list) else city_data.get('businesses', [])
+
+            seen_lower = [s.lower() for s in city_seen.get(location, [])]
+            filtered = []
+            for b in businesses:
+                try:
+                    rating = float(b.get('rating', 0))
+                    reviews = int(b.get('review_count', 0))
+                except (ValueError, TypeError):
+                    continue
+                name = b.get('name', '').strip()
+                if not name or name.lower() in seen_lower:
+                    continue
+                if rating < min_rating or reviews < min_reviews:
+                    continue
+                b['rating'] = rating
+                b['review_count'] = reviews
+                filtered.append(b)
+
+            filtered.sort(key=lambda x: (-x['rating'], -x['review_count']))
+            results[location] = filtered
+
+        return results
+
+    except anthropic.AuthenticationError:
+        return {f"{c['city']}, {c['state']}": {'businesses': [], 'error': 'Invalid API key'}
+                for c in config['cities']}
+    except json.JSONDecodeError as e:
+        print(f"[Discovery] JSON parse error for batched call: {e}")
+        return {f"{c['city']}, {c['state']}": {'businesses': [], 'error': 'Failed to parse response'}
+                for c in config['cities']}
+    except Exception as e:
+        print(f"[Discovery] Batched search error: {e}")
+        return {f"{c['city']}, {c['state']}": {'businesses': [], 'error': str(e)}
+                for c in config['cities']}
+
+
 def format_discovery_digest(results):
     """Format discovery results into a human-readable digest"""
     lines = []
@@ -655,11 +843,15 @@ def format_discovery_digest(results):
 
 
 def run_daily_discovery():
-    """Main daily discovery orchestrator — searches all configured cities"""
+    """Main daily discovery orchestrator — single batched API call for all cities"""
     config = DISCOVERY_CONFIG
     top_n = config['top_n_per_city']
 
     print(f"[Discovery] Starting daily discovery run at {datetime.now().isoformat()}")
+    print(f"[Discovery] Batched search across {len(config['cities'])} cities in 1 API call...")
+
+    # Single API call for all cities
+    batched_results = search_all_cities_batched(config)
 
     all_results = {}
     total_new = 0
@@ -669,14 +861,16 @@ def run_daily_discovery():
         state = city_info['state']
         location = f"{city}, {state}"
 
-        print(f"[Discovery] Searching {location}...")
+        businesses = batched_results.get(location, [])
 
-        businesses, error = search_city_directory(city_info, config)
-
-        if error:
-            print(f"[Discovery] Error for {location}: {error}")
-            all_results[location] = {'businesses': [], 'error': error}
+        # Handle error dicts from batched call
+        if isinstance(businesses, dict) and 'error' in businesses:
+            print(f"[Discovery] Error for {location}: {businesses['error']}")
+            all_results[location] = {'businesses': [], 'error': businesses['error']}
             continue
+
+        if not isinstance(businesses, list):
+            businesses = []
 
         # Take top N per city
         top_businesses = businesses[:top_n]
@@ -716,9 +910,6 @@ def run_daily_discovery():
             'total_found': len(businesses)
         }
         print(f"[Discovery] {location}: {len(top_businesses)} top results, {new_count} new")
-
-        # Pace between cities to avoid rate limiting
-        time.sleep(2)
 
     # Generate formatted digest
     digest = format_discovery_digest(all_results)
