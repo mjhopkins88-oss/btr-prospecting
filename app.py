@@ -56,8 +56,14 @@ init_db()
 
 def search_btr_prospects(city="Texas", limit=10):
     """
-    Use Claude API to search for BTR prospects
+    Use Claude API to search for BTR prospects.
+    Returns (prospects_list, error_message) tuple.
     """
+    # Check API key first
+    api_key = os.getenv('ANTHROPIC_API_KEY')
+    if not api_key or api_key == 'your_anthropic_api_key_here':
+        return [], "ANTHROPIC_API_KEY is not set. Add it to your .env file or Railway environment variables."
+
     try:
         # Construct search prompt
         search_prompt = f"""You are a real estate intelligence researcher. Search for Build-to-Rent (BTR) / Single-Family Rental (SFR) developers in {city}.
@@ -87,7 +93,7 @@ Search for {limit} prospects and return ONLY valid JSON in this exact format:
       "linkedin": "linkedin.com/in/profile",
       "city": "City",
       "state": "TX",
-      "score": 85-95,
+      "score": 85,
       "tiv": "$50M-200M",
       "units": "200-500 units",
       "projectName": "Project Name",
@@ -99,6 +105,8 @@ Search for {limit} prospects and return ONLY valid JSON in this exact format:
 }}
 
 CRITICAL: Return ONLY the JSON object, no other text. Use real web search to find current, accurate data."""
+
+        print(f"Calling Claude API for {city} prospects...")
 
         # Call Claude API with web search tool
         message = client.messages.create(
@@ -119,26 +127,64 @@ CRITICAL: Return ONLY the JSON object, no other text. Use real web search to fin
             ]
         )
 
-        # Extract response
+        # Extract response text from all text blocks
         response_text = ""
         for block in message.content:
             if block.type == "text":
                 response_text += block.text
 
-        # Parse JSON from response
-        # Try to find JSON in the response
-        json_match = re.search(r'\{[\s\S]*"prospects"[\s\S]*\}', response_text)
-        if json_match:
-            json_str = json_match.group(0)
-            data = json.loads(json_str)
-            return data.get('prospects', [])
-        else:
-            print("No JSON found in response:", response_text)
-            return []
+        print(f"Claude response length: {len(response_text)} chars")
 
+        if not response_text.strip():
+            return [], "Claude returned an empty response. The AI may still be searching - try again."
+
+        # Parse JSON from response - find the JSON object containing "prospects"
+        # Use a balanced brace approach for more reliable extraction
+        json_start = response_text.find('{"prospects"')
+        if json_start == -1:
+            json_start = response_text.find('{  "prospects"')
+        if json_start == -1:
+            json_start = response_text.find('{\n')
+
+        if json_start != -1:
+            # Find the matching closing brace
+            brace_count = 0
+            json_end = json_start
+            for i in range(json_start, len(response_text)):
+                if response_text[i] == '{':
+                    brace_count += 1
+                elif response_text[i] == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        json_end = i + 1
+                        break
+
+            json_str = response_text[json_start:json_end]
+            try:
+                data = json.loads(json_str)
+                prospects = data.get('prospects', [])
+                if prospects:
+                    print(f"Successfully parsed {len(prospects)} prospects")
+                    return prospects, None
+                else:
+                    return [], "Claude found no prospects in this area. Try a different city or state."
+            except json.JSONDecodeError as e:
+                print(f"JSON parse error: {e}")
+                print(f"Attempted to parse: {json_str[:500]}")
+                return [], f"Failed to parse AI response. Try searching again."
+        else:
+            print(f"No JSON found in response: {response_text[:500]}")
+            return [], "AI response did not contain prospect data. Try searching again."
+
+    except anthropic.AuthenticationError:
+        return [], "Invalid ANTHROPIC_API_KEY. Check your API key in .env or Railway variables."
+    except anthropic.RateLimitError:
+        return [], "API rate limit reached. Wait a minute and try again."
+    except anthropic.APIConnectionError:
+        return [], "Cannot connect to Claude API. Check your internet connection."
     except Exception as e:
         print(f"Search error: {str(e)}")
-        return []
+        return [], f"Search failed: {str(e)}"
 
 def save_prospects_to_db(prospects):
     """Save prospects to SQLite database"""
@@ -229,10 +275,14 @@ def health():
 @app.route('/api/health')
 def api_health():
     """API health check endpoint"""
+    api_key = os.getenv('ANTHROPIC_API_KEY')
+    key_status = 'not set'
+    if api_key and api_key != 'your_anthropic_api_key_here':
+        key_status = f'configured (ends in ...{api_key[-4:]})'
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
-        'api_key_configured': bool(os.getenv('ANTHROPIC_API_KEY'))
+        'api_key_status': key_status
     }), 200
 
 @app.route('/api/search', methods=['POST'])
@@ -242,29 +292,36 @@ def api_search():
         data = request.json
         city = data.get('city', 'Texas')
         limit = data.get('limit', 10)
-        
+
         print(f"Searching for {limit} prospects in {city}...")
-        
-        # Search using Claude API
-        prospects = search_btr_prospects(city, limit)
-        
+
+        # Search using Claude API - now returns (prospects, error_msg)
+        prospects, error_msg = search_btr_prospects(city, limit)
+
+        if error_msg:
+            return jsonify({
+                'success': False,
+                'message': error_msg,
+                'prospects': []
+            }), 200
+
         if not prospects:
             return jsonify({
                 'success': False,
-                'message': 'No prospects found. Please try again or try a different location.',
+                'message': 'No prospects found. Try a different city or state.',
                 'prospects': []
             }), 200
-        
+
         # Save to database
         saved_count = save_prospects_to_db(prospects)
-        
+
         return jsonify({
             'success': True,
             'message': f'Found {len(prospects)} prospects, saved {saved_count} new ones',
             'prospects': prospects,
             'savedCount': saved_count
         })
-        
+
     except Exception as e:
         print(f"API Error: {str(e)}")
         return jsonify({
