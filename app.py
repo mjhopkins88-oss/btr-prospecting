@@ -216,6 +216,11 @@ def index():
     """Serve the main HTML app"""
     return send_from_directory('static', 'index.html')
 
+@app.route('/favicon.ico')
+def favicon():
+    """Prevent favicon 404 errors"""
+    return '', 204
+
 @app.route('/health')
 def health():
     """Simple health check for Railway"""
