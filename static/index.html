@@ -90,11 +90,19 @@
             const [emailTemplate, setEmailTemplate] = useState('');
             const [showEmailModal, setShowEmailModal] = useState(false);
             const [searchStatus, setSearchStatus] = useState('');
+            const [cooldown, setCooldown] = useState(0);
 
             // Load prospects from backend on mount
             useEffect(() => {
                 loadProspects();
             }, []);
+
+            // Cooldown timer to prevent rapid-fire searches
+            useEffect(() => {
+                if (cooldown <= 0) return;
+                const timer = setTimeout(() => setCooldown(cooldown - 1), 1000);
+                return () => clearTimeout(timer);
+            }, [cooldown]);
 
             const loadProspects = async () => {
                 try {
@@ -109,9 +117,11 @@
             };
 
             const searchProspects = async () => {
+                if (cooldown > 0) return;
                 setLoading(true);
                 setSearchStatus('🤖 AI is searching the web for BTR prospects...');
-                
+                setCooldown(30); // 30-second cooldown between searches
+
                 try {
                     const response = await fetch(`${API_BASE}/api/search`, {
                         method: 'POST',
@@ -125,14 +135,20 @@
                     });
 
                     const data = await response.json();
-                    
+
                     if (data.success) {
                         setSearchStatus(`✅ Found ${data.prospects.length} prospects! ${data.savedCount} new ones added.`);
-                        await loadProspects(); // Reload from database
+                        await loadProspects();
                         setTimeout(() => setSearchStatus(''), 3000);
                     } else {
-                        setSearchStatus(`❌ ${data.message}`);
-                        setTimeout(() => setSearchStatus(''), 5000);
+                        // If rate limited but server returned cached DB results, show them
+                        if (data.prospects && data.prospects.length > 0) {
+                            setProspects(data.prospects);
+                            setSearchStatus(`⚠️ ${data.message} — Showing ${data.prospects.length} saved prospects.`);
+                        } else {
+                            setSearchStatus(`❌ ${data.message}`);
+                        }
+                        setTimeout(() => setSearchStatus(''), 8000);
                     }
                 } catch (error) {
                     console.error('Search error:', error);
@@ -226,7 +242,7 @@
                 <div style={styles.container}>
                     <Header />
                     <Stats prospects={prospects} />
-                    <Controls 
+                    <Controls
                         searchCity={searchCity}
                         setSearchCity={setSearchCity}
                         filterScore={filterScore}
@@ -235,6 +251,7 @@
                         onExport={exportToCSV}
                         loading={loading}
                         hasProspects={prospects.length > 0}
+                        cooldown={cooldown}
                     />
                     {searchStatus && <SearchStatus message={searchStatus} />}
                     {loading && <Loading />}
@@ -290,15 +307,20 @@
             );
         }
 
-        function Controls({ searchCity, setSearchCity, filterScore, setFilterScore, onSearch, onExport, loading, hasProspects }) {
+        function Controls({ searchCity, setSearchCity, filterScore, setFilterScore, onSearch, onExport, loading, hasProspects, cooldown }) {
+            const isDisabled = loading || cooldown > 0;
+            let btnLabel = '🚀 Search for Prospects';
+            if (loading) btnLabel = '🔍 Searching...';
+            else if (cooldown > 0) btnLabel = `⏳ Wait ${cooldown}s`;
+
             return (
                 <div style={styles.controls}>
-                    <button 
-                        style={styles.btnPrimary} 
+                    <button
+                        style={{...styles.btnPrimary, ...(isDisabled ? {opacity: 0.6, cursor: 'not-allowed'} : {})}}
                         onClick={onSearch}
-                        disabled={loading}
+                        disabled={isDisabled}
                     >
-                        {loading ? '🔍 Searching...' : '🚀 Search for Prospects'}
+                        {btnLabel}
                     </button>
                     <input
                         type="text"
