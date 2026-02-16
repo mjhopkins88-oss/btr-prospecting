@@ -159,10 +159,10 @@
                 }
             };
 
-            const generateEmail = async (prospect) => {
+            const generateEmail = async (prospect, options = {}) => {
                 setLoading(true);
                 setSearchStatus('✍️ AI is writing a personalized email...');
-                
+
                 try {
                     const response = await fetch(`${API_BASE}/api/email/generate`, {
                         method: 'POST',
@@ -170,14 +170,18 @@
                             'Content-Type': 'application/json',
                         },
                         body: JSON.stringify({
-                            prospect: prospect
+                            prospect: prospect,
+                            emailPurpose: options.emailPurpose || 'cold_outreach',
+                            tone: options.tone || 'professional_direct',
+                            offer: options.offer || '15_min_call',
+                            triggerEvent: options.triggerEvent || ''
                         })
                     });
 
                     const data = await response.json();
-                    
+
                     if (data.success) {
-                        setEmailTemplate(data.email);
+                        setEmailTemplate({ subject: data.subject || '', body: data.body || data.email || '' });
                         setShowEmailModal(true);
                         setSelectedProspect(prospect);
                         setSearchStatus('');
@@ -390,9 +394,19 @@
         }
 
         function ProspectCard({ prospect, onGenerateEmail, onDelete }) {
+            const [showEmailOptions, setShowEmailOptions] = useState(false);
+            const [emailPurpose, setEmailPurpose] = useState('cold_outreach');
+            const [tone, setTone] = useState('professional_direct');
+            const [offer, setOffer] = useState('15_min_call');
+
             const foundDate = prospect.createdAt
                 ? new Date(prospect.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                 : null;
+
+            const handleGenerate = () => {
+                onGenerateEmail(prospect, { emailPurpose, tone, offer });
+                setShowEmailOptions(false);
+            };
 
             return (
                 <div style={styles.card}>
@@ -406,8 +420,8 @@
                     <div style={styles.executive}>
                         <strong>{prospect.executive || 'Contact via company'}</strong> {prospect.title && `- ${prospect.title}`}
                         {prospect.linkedin && (
-                            <a 
-                                href={`https://${prospect.linkedin}`} 
+                            <a
+                                href={`https://${prospect.linkedin}`}
                                 target="_blank"
                                 style={styles.linkedinLink}
                             >
@@ -435,14 +449,52 @@
                             </ul>
                         </div>
                     )}
+
+                    {showEmailOptions && (
+                        <div style={styles.emailOptions}>
+                            <div style={styles.emailOptionRow}>
+                                <label style={styles.emailOptionLabel}>Purpose</label>
+                                <select style={styles.select} value={emailPurpose} onChange={e => setEmailPurpose(e.target.value)}>
+                                    <option value="cold_outreach">Cold Outreach</option>
+                                    <option value="follow_up">Follow Up</option>
+                                    <option value="event_invite">Event Invite</option>
+                                    <option value="post_event_follow_up">Post-Event Follow Up</option>
+                                    <option value="referral_intro">Referral Intro</option>
+                                    <option value="renewal_quote_follow_up">Renewal/Quote Follow Up</option>
+                                </select>
+                            </div>
+                            <div style={styles.emailOptionRow}>
+                                <label style={styles.emailOptionLabel}>Tone</label>
+                                <select style={styles.select} value={tone} onChange={e => setTone(e.target.value)}>
+                                    <option value="professional_direct">Professional Direct</option>
+                                    <option value="strategic_exec">Strategic Exec</option>
+                                    <option value="conversational">Conversational</option>
+                                    <option value="friendly">Friendly</option>
+                                    <option value="urgent_light">Urgent (Light)</option>
+                                </select>
+                            </div>
+                            <div style={styles.emailOptionRow}>
+                                <label style={styles.emailOptionLabel}>CTA / Offer</label>
+                                <select style={styles.select} value={offer} onChange={e => setOffer(e.target.value)}>
+                                    <option value="15_min_call">15-Min Call</option>
+                                    <option value="share_resource">Share a Resource</option>
+                                    <option value="quick_question">Quick Question</option>
+                                </select>
+                            </div>
+                            <button style={styles.btnPrimary} onClick={handleGenerate}>
+                                ✍️ Generate Now
+                            </button>
+                        </div>
+                    )}
+
                     <div style={styles.cardActions}>
-                        <button 
+                        <button
                             style={styles.emailBtn}
-                            onClick={() => onGenerateEmail(prospect)}
+                            onClick={() => setShowEmailOptions(!showEmailOptions)}
                         >
-                            ✉️ Generate Email
+                            {showEmailOptions ? '✕ Cancel' : '✉️ Generate Email'}
                         </button>
-                        <button 
+                        <button
                             style={styles.deleteBtn}
                             onClick={() => onDelete(prospect.id)}
                         >
@@ -454,22 +506,42 @@
         }
 
         function EmailModal({ email, prospect, onClose }) {
+            const subject = email.subject || '';
+            const body = email.body || email || '';
+            const fullText = subject ? `Subject: ${subject}\n\n${body}` : body;
+
             const copyEmail = () => {
-                navigator.clipboard.writeText(email);
+                navigator.clipboard.writeText(fullText);
                 alert('Email copied to clipboard!');
+            };
+
+            const copySubject = () => {
+                navigator.clipboard.writeText(subject);
+                alert('Subject line copied!');
             };
 
             return (
                 <div style={styles.modalOverlay} onClick={onClose}>
                     <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
                         <div style={styles.modalHeader}>
-                            <h2>Generated Email for {prospect.company}</h2>
+                            <h2>Email for {prospect.company}</h2>
                             <button style={styles.closeBtn} onClick={onClose}>✕</button>
                         </div>
-                        <pre style={styles.emailText}>{email}</pre>
+                        {subject && (
+                            <div style={styles.subjectRow}>
+                                <span style={styles.subjectLabel}>SUBJECT:</span>
+                                <span style={styles.subjectText}>{subject}</span>
+                                <button style={styles.copySmall} onClick={copySubject} title="Copy subject">📋</button>
+                            </div>
+                        )}
+                        <div style={styles.emailBody}>
+                            {body.split('\n').map((line, i) => (
+                                <React.Fragment key={i}>{line}<br/></React.Fragment>
+                            ))}
+                        </div>
                         <div style={styles.modalActions}>
                             <button style={styles.btnPrimary} onClick={copyEmail}>
-                                📋 Copy Email
+                                📋 Copy Full Email
                             </button>
                             <button style={styles.btn} onClick={onClose}>Close</button>
                         </div>
@@ -521,7 +593,15 @@
             modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' },
             closeBtn: { background: 'none', border: 'none', color: '#e8eef7', fontSize: '1.5rem', cursor: 'pointer' },
             emailText: { background: '#0a0e1a', padding: '1.5rem', borderRadius: '8px', whiteSpace: 'pre-wrap', fontFamily: 'JetBrains Mono, monospace', fontSize: '0.9rem', lineHeight: '1.6', marginBottom: '1rem' },
-            modalActions: { display: 'flex', gap: '1rem' }
+            modalActions: { display: 'flex', gap: '1rem' },
+            emailOptions: { background: 'rgba(0, 255, 136, 0.05)', border: '1px solid rgba(0, 255, 136, 0.2)', borderRadius: '8px', padding: '1rem', marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' },
+            emailOptionRow: { display: 'flex', alignItems: 'center', gap: '0.75rem' },
+            emailOptionLabel: { fontWeight: 600, fontSize: '0.85rem', color: '#8b95ab', minWidth: '80px', textTransform: 'uppercase' },
+            subjectRow: { display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(0, 212, 255, 0.1)', border: '1px solid rgba(0, 212, 255, 0.3)', borderRadius: '8px', padding: '0.75rem 1rem', marginBottom: '1rem' },
+            subjectLabel: { fontWeight: 700, fontSize: '0.8rem', color: '#00d4ff', textTransform: 'uppercase', flexShrink: 0 },
+            subjectText: { fontSize: '1rem', fontWeight: 600, flex: 1 },
+            copySmall: { background: 'none', border: 'none', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', flexShrink: 0 },
+            emailBody: { background: '#0a0e1a', padding: '1.5rem', borderRadius: '8px', fontSize: '0.95rem', lineHeight: '1.7', marginBottom: '1rem', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }
         };
 
         ReactDOM.render(<App />, document.getElementById('root'));
