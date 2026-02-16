@@ -6,7 +6,7 @@ Flask API with Claude AI integration for automated prospect discovery
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import time
 import anthropic
@@ -82,12 +82,25 @@ def search_btr_prospects(city="Texas", limit=10):
             del _search_cache[cache_key]
 
     try:
-        # Construct search prompt
-        search_prompt = f"""You are a real estate intelligence researcher. Search for Build-to-Rent (BTR) / Single-Family Rental (SFR) developers in {city}.
+        # Get existing companies so we can ask for NEW ones
+        existing = get_existing_companies(city)
+        exclude_clause = ""
+        if existing:
+            names = ", ".join(existing[:20])  # Cap at 20 to keep prompt short
+            exclude_clause = f"\n\nIMPORTANT: I already have these companies in my database, so DO NOT include them. Find DIFFERENT companies:\n{names}\n"
 
+        today = datetime.now().strftime('%B %d, %Y')
+
+        # Construct search prompt with date awareness
+        search_prompt = f"""You are a real estate intelligence researcher. Today's date is {today}.
+
+Search for Build-to-Rent (BTR) / Single-Family Rental (SFR) developers in {city}.
+
+FOCUS ON RECENT ACTIVITY: Prioritize news, deals, and developments from the last 90 days (since {(datetime.now() - timedelta(days=90)).strftime('%B %Y')}). Look for the most current and up-to-date information available.
+{exclude_clause}
 Find companies that are:
-1. Actively developing BTR/SFR communities
-2. Have recent news (capital raises, acquisitions, new projects, construction starts)
+1. Actively developing BTR/SFR communities with recent activity
+2. Have news from the last 1-3 months (capital raises, acquisitions, new projects, construction starts, land purchases)
 3. Are expansion-focused or institutional-backed
 
 For each prospect, extract:
@@ -95,7 +108,7 @@ For each prospect, extract:
 - CEO/key executive name
 - LinkedIn profile (if findable)
 - City location
-- Recent project details
+- Recent project details (include dates when available)
 - Active signals (financing, construction, sales, expansion)
 - Total Investment Value estimate
 
@@ -220,6 +233,19 @@ CRITICAL: Return ONLY the JSON object, no other text. Use real web search to fin
     except Exception as e:
         print(f"Search error: {str(e)}")
         return [], f"Search failed: {str(e)}"
+
+def get_existing_companies(city=None):
+    """Get list of company names already in the database, optionally filtered by city"""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    if city:
+        c.execute('SELECT DISTINCT company FROM prospects WHERE LOWER(city) LIKE ? OR LOWER(state) LIKE ?',
+                  (f'%{city.lower()}%', f'%{city.lower()}%'))
+    else:
+        c.execute('SELECT DISTINCT company FROM prospects')
+    companies = [row[0] for row in c.fetchall()]
+    conn.close()
+    return companies
 
 def save_prospects_to_db(prospects):
     """Save prospects to SQLite database"""

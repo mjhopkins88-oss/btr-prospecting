@@ -389,12 +389,16 @@
         }
 
         function ProspectCard({ prospect, onGenerateEmail, onDelete }) {
+            const foundDate = prospect.createdAt
+                ? new Date(prospect.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                : null;
+
             return (
                 <div style={styles.card}>
                     <div style={styles.cardHeader}>
                         <div>
                             <h3 style={styles.companyName}>{prospect.company}</h3>
-                            <p style={styles.location}>{prospect.city}, {prospect.state}</p>
+                            <p style={styles.location}>{prospect.city}, {prospect.state}{foundDate ? ` · Found ${foundDate}` : ''}</p>
                         </div>
                         <div style={styles.scoreBadge}>{prospect.score}</div>
                     </div>
