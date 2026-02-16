@@ -107,7 +107,8 @@ CRITICAL: Return ONLY the JSON object, no other text. Use real web search to fin
             tools=[
                 {
                     "type": "web_search_20250305",
-                    "name": "web_search"
+                    "name": "web_search",
+                    "max_uses": 5
                 }
             ],
             messages=[
@@ -223,7 +224,11 @@ def health():
 @app.route('/api/health')
 def api_health():
     """API health check endpoint"""
-    return jsonify({'status': 'ok'}), 200
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'api_key_configured': bool(os.getenv('ANTHROPIC_API_KEY'))
+    }), 200
 
 @app.route('/api/search', methods=['POST'])
 def api_search():
@@ -357,15 +362,6 @@ BTR Insurance Specialist"""
             'message': str(e),
             'email': ''
         }), 500
-
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Health check endpoint"""
-    return jsonify({
-        'status': 'healthy',
-        'timestamp': datetime.now().isoformat(),
-        'api_key_configured': bool(os.getenv('ANTHROPIC_API_KEY'))
-    })
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
