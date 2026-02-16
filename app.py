@@ -220,6 +220,11 @@ def health():
     """Simple health check for Railway"""
     return jsonify({'status': 'ok'}), 200
 
+@app.route('/api/health')
+def api_health():
+    """API health check endpoint"""
+    return jsonify({'status': 'ok'}), 200
+
 @app.route('/api/search', methods=['POST'])
 def api_search():
     """Search for new BTR prospects"""
