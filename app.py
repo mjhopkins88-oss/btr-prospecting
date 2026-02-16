@@ -8,6 +8,7 @@ from flask_cors import CORS
 import os
 from datetime import datetime
 import json
+import time
 import anthropic
 from dotenv import load_dotenv
 import sqlite3
@@ -21,6 +22,11 @@ CORS(app)
 
 # Initialize Claude client
 client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+
+# Simple in-memory cache to avoid redundant API calls
+# Key: "city|limit", Value: {"prospects": [...], "timestamp": datetime}
+_search_cache = {}
+CACHE_TTL_SECONDS = 300  # 5 minutes
 
 # Database setup
 def init_db():
@@ -63,6 +69,17 @@ def search_btr_prospects(city="Texas", limit=10):
     api_key = os.getenv('ANTHROPIC_API_KEY')
     if not api_key or api_key == 'your_anthropic_api_key_here':
         return [], "ANTHROPIC_API_KEY is not set. Add it to your .env file or Railway environment variables."
+
+    # Check cache first to avoid redundant API calls
+    cache_key = f"{city.lower().strip()}|{limit}"
+    if cache_key in _search_cache:
+        cached = _search_cache[cache_key]
+        age = (datetime.now() - cached['timestamp']).total_seconds()
+        if age < CACHE_TTL_SECONDS:
+            print(f"Returning cached results for {city} ({int(age)}s old)")
+            return cached['prospects'], None
+        else:
+            del _search_cache[cache_key]
 
     try:
         # Construct search prompt
@@ -108,24 +125,39 @@ CRITICAL: Return ONLY the JSON object, no other text. Use real web search to fin
 
         print(f"Calling Claude API for {city} prospects...")
 
-        # Call Claude API with web search tool
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=4000,
-            tools=[
-                {
-                    "type": "web_search_20250305",
-                    "name": "web_search",
-                    "max_uses": 5
-                }
-            ],
-            messages=[
-                {
-                    "role": "user",
-                    "content": search_prompt
-                }
-            ]
-        )
+        # Retry with exponential backoff on rate limit errors
+        max_retries = 3
+        message = None
+        for attempt in range(max_retries + 1):
+            try:
+                message = client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=4000,
+                    tools=[
+                        {
+                            "type": "web_search_20250305",
+                            "name": "web_search",
+                            "max_uses": 5
+                        }
+                    ],
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": search_prompt
+                        }
+                    ]
+                )
+                break  # Success - exit retry loop
+            except anthropic.RateLimitError:
+                if attempt < max_retries:
+                    wait_time = 2 ** (attempt + 1)  # 2s, 4s, 8s
+                    print(f"Rate limited (attempt {attempt + 1}/{max_retries + 1}), waiting {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    return [], "API rate limit reached after retries. Please wait 1-2 minutes and try again."
+
+        if message is None:
+            return [], "Failed to get a response from Claude API. Try again."
 
         # Extract response text from all text blocks
         response_text = ""
@@ -165,6 +197,11 @@ CRITICAL: Return ONLY the JSON object, no other text. Use real web search to fin
                 prospects = data.get('prospects', [])
                 if prospects:
                     print(f"Successfully parsed {len(prospects)} prospects")
+                    # Cache successful results
+                    _search_cache[cache_key] = {
+                        'prospects': prospects,
+                        'timestamp': datetime.now()
+                    }
                     return prospects, None
                 else:
                     return [], "Claude found no prospects in this area. Try a different city or state."
@@ -178,8 +215,6 @@ CRITICAL: Return ONLY the JSON object, no other text. Use real web search to fin
 
     except anthropic.AuthenticationError:
         return [], "Invalid ANTHROPIC_API_KEY. Check your API key in .env or Railway variables."
-    except anthropic.RateLimitError:
-        return [], "API rate limit reached. Wait a minute and try again."
     except anthropic.APIConnectionError:
         return [], "Cannot connect to Claude API. Check your internet connection."
     except Exception as e:
