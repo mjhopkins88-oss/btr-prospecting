@@ -739,6 +739,26 @@
                                     ))}
                                 </div>
                             </div>
+                            {config.target_sources && config.target_sources.length > 0 && (
+                                <div>
+                                    <div style={ds.configLabel}>Target Sources</div>
+                                    <div style={ds.chipGroup}>
+                                        {config.target_sources.map((src, i) => (
+                                            <span key={i} style={ds.sourceChip}>{src}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {config.monitor_operators && config.monitor_operators.length > 0 && (
+                                <div>
+                                    <div style={ds.configLabel}>Monitored Operators</div>
+                                    <div style={ds.chipGroup}>
+                                        {config.monitor_operators.map((op, i) => (
+                                            <span key={i} style={ds.operatorChip}>{op}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                             <div>
                                 <div style={ds.configLabel}>Filters</div>
                                 <div style={ds.filterRow}>
@@ -844,7 +864,7 @@
                         <div style={styles.empty}>
                             <h2 style={styles.emptyTitle}>No discovery runs yet</h2>
                             <p style={styles.emptyText}>Click "Run Discovery Now" to search business directories across all 6 cities</p>
-                            <p style={styles.emptySubtext}>The AI will search Google Maps and directories for businesses matching your ICP keywords</p>
+                            <p style={styles.emptySubtext}>The AI will search Bisnow, Multi-Housing News, BizJournals, LinkedIn and other CRE sources for BTR companies</p>
                         </div>
                     )}
 
@@ -886,6 +906,8 @@
             chipGroup: { display: 'flex', flexWrap: 'wrap', gap: '0.5rem' },
             chip: { background: 'rgba(0, 255, 136, 0.1)', border: '1px solid rgba(0, 255, 136, 0.3)', borderRadius: '20px', padding: '0.3rem 0.8rem', fontSize: '0.85rem', color: '#00ff88' },
             keywordChip: { background: 'rgba(0, 212, 255, 0.1)', border: '1px solid rgba(0, 212, 255, 0.2)', borderRadius: '20px', padding: '0.3rem 0.8rem', fontSize: '0.8rem', color: '#00d4ff' },
+            sourceChip: { background: 'rgba(255, 217, 61, 0.1)', border: '1px solid rgba(255, 217, 61, 0.3)', borderRadius: '20px', padding: '0.3rem 0.8rem', fontSize: '0.8rem', color: '#ffd93d' },
+            operatorChip: { background: 'rgba(255, 71, 87, 0.1)', border: '1px solid rgba(255, 71, 87, 0.3)', borderRadius: '20px', padding: '0.3rem 0.8rem', fontSize: '0.8rem', color: '#ff4757' },
             filterRow: { display: 'flex', gap: '1.5rem', flexWrap: 'wrap' },
             filterItem: { color: '#e8eef7', fontSize: '0.9rem' },
             actionBar: { display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '2rem', flexWrap: 'wrap' },
