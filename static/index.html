@@ -194,28 +194,29 @@
                 }
             };
 
-            const exportToCSV = () => {
-                const headers = ['Company', 'Executive', 'Title', 'LinkedIn', 'City', 'Score', 'TIV', 'Project', 'Status', 'Why Now'];
-                const rows = prospects.map(p => [
-                    p.company,
-                    p.executive,
-                    p.title,
-                    p.linkedin,
-                    p.city,
-                    p.score,
-                    p.tiv,
-                    p.projectName,
-                    p.projectStatus,
-                    p.whyNow
-                ]);
-
-                const csv = [headers, ...rows].map(row => row.map(cell => `"${cell || ''}"`).join(',')).join('\n');
-                const blob = new Blob([csv], { type: 'text/csv' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `btr-prospects-${new Date().toISOString().split('T')[0]}.csv`;
-                a.click();
+            const exportToCSV = async () => {
+                try {
+                    const response = await fetch(`${API_BASE}/api/export`);
+                    if (response.ok) {
+                        const blob = await response.blob();
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `btr-prospects-master-${new Date().toISOString().split('T')[0]}.csv`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                        setSearchStatus(`✅ Master spreadsheet downloaded (${prospects.length} prospects)`);
+                        setTimeout(() => setSearchStatus(''), 3000);
+                    } else {
+                        const data = await response.json();
+                        setSearchStatus(`❌ ${data.message || 'Export failed'}`);
+                        setTimeout(() => setSearchStatus(''), 5000);
+                    }
+                } catch (error) {
+                    console.error('Export error:', error);
+                    setSearchStatus('❌ Export failed. Try again.');
+                    setTimeout(() => setSearchStatus(''), 5000);
+                }
             };
 
             const deleteProspect = async (prospectId) => {
@@ -340,7 +341,7 @@
                     </select>
                     {hasProspects && (
                         <button style={styles.btn} onClick={onExport}>
-                            📥 Export CSV
+                            📥 Download Master Spreadsheet
                         </button>
                     )}
                 </div>
@@ -389,12 +390,16 @@
         }
 
         function ProspectCard({ prospect, onGenerateEmail, onDelete }) {
+            const foundDate = prospect.createdAt
+                ? new Date(prospect.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                : null;
+
             return (
                 <div style={styles.card}>
                     <div style={styles.cardHeader}>
                         <div>
                             <h3 style={styles.companyName}>{prospect.company}</h3>
-                            <p style={styles.location}>{prospect.city}, {prospect.state}</p>
+                            <p style={styles.location}>{prospect.city}, {prospect.state}{foundDate ? ` · Found ${foundDate}` : ''}</p>
                         </div>
                         <div style={styles.scoreBadge}>{prospect.score}</div>
                     </div>
