@@ -45,3 +45,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Generated exports
+btr-prospects-master.csv

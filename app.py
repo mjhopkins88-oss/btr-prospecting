@@ -3,12 +3,14 @@ BTR Prospecting System - Backend Server
 Flask API with Claude AI integration for automated prospect discovery
 """
 
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, send_file
 from flask_cors import CORS
 import os
 from datetime import datetime, timedelta
 import json
 import time
+import csv
+import io
 import anthropic
 from dotenv import load_dotenv
 import sqlite3
@@ -316,6 +318,46 @@ def get_all_prospects_from_db():
     conn.close()
     return prospects
 
+MASTER_CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'btr-prospects-master.csv')
+
+def generate_master_csv():
+    """Regenerate the master CSV spreadsheet from all database prospects"""
+    prospects = get_all_prospects_from_db()
+
+    headers = [
+        'Company', 'Executive', 'Title', 'LinkedIn', 'City', 'State',
+        'Score', 'TIV', 'Units', 'Project Name', 'Project Status',
+        'Signals', 'Why Call Now', 'Date Found'
+    ]
+
+    with open(MASTER_CSV_PATH, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+        for p in prospects:
+            signals = ', '.join(p.get('signals', [])) if isinstance(p.get('signals'), list) else p.get('signals', '')
+            writer.writerow([
+                p.get('company', ''),
+                p.get('executive', ''),
+                p.get('title', ''),
+                p.get('linkedin', ''),
+                p.get('city', ''),
+                p.get('state', ''),
+                p.get('score', ''),
+                p.get('tiv', ''),
+                p.get('units', ''),
+                p.get('projectName', ''),
+                p.get('projectStatus', ''),
+                signals,
+                p.get('whyNow', ''),
+                p.get('createdAt', '')
+            ])
+
+    print(f"Master CSV updated: {len(prospects)} prospects written to {MASTER_CSV_PATH}")
+    return len(prospects)
+
+# Generate master CSV on startup if prospects exist
+generate_master_csv()
+
 # API Routes
 
 @app.route('/')
@@ -379,11 +421,15 @@ def api_search():
         # Save to database
         saved_count = save_prospects_to_db(prospects)
 
+        # Auto-update master spreadsheet
+        total = generate_master_csv()
+
         return jsonify({
             'success': True,
-            'message': f'Found {len(prospects)} prospects, saved {saved_count} new ones',
+            'message': f'Found {len(prospects)} prospects, saved {saved_count} new ones. Master spreadsheet updated ({total} total).',
             'prospects': prospects,
-            'savedCount': saved_count
+            'savedCount': saved_count,
+            'totalInSpreadsheet': total
         })
 
     except Exception as e:
@@ -428,6 +474,30 @@ def api_delete_prospect(prospect_id):
         return jsonify({
             'success': False,
             'message': str(e)
+        }), 500
+
+@app.route('/api/export', methods=['GET'])
+def api_export_csv():
+    """Download the master CSV spreadsheet with all prospects"""
+    try:
+        # Always regenerate fresh from DB before download
+        count = generate_master_csv()
+        if count == 0:
+            return jsonify({
+                'success': False,
+                'message': 'No prospects to export. Run a search first.'
+            }), 200
+
+        return send_file(
+            MASTER_CSV_PATH,
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=f'btr-prospects-master-{datetime.now().strftime("%Y-%m-%d")}.csv'
+        )
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Export failed: {str(e)}'
         }), 500
 
 @app.route('/api/email/generate', methods=['POST'])
