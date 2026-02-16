@@ -42,8 +42,6 @@ DISCOVERY_CONFIG = {
         {'city': 'Dallas', 'state': 'TX'},
         {'city': 'Atlanta', 'state': 'GA'},
         {'city': 'Charlotte', 'state': 'NC'},
-        {'city': 'Tampa', 'state': 'FL'},
-        {'city': 'Raleigh', 'state': 'NC'},
     ],
     'icp_keywords': [
         'build to rent developer',
