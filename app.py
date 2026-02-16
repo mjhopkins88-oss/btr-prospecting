@@ -26,7 +26,7 @@ client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 # Simple in-memory cache to avoid redundant API calls
 # Key: "city|limit", Value: {"prospects": [...], "timestamp": datetime}
 _search_cache = {}
-CACHE_TTL_SECONDS = 300  # 5 minutes
+CACHE_TTL_SECONDS = 900  # 15 minutes
 
 # Database setup
 def init_db():
@@ -99,7 +99,7 @@ For each prospect, extract:
 - Active signals (financing, construction, sales, expansion)
 - Total Investment Value estimate
 
-Search for {limit} prospects and return ONLY valid JSON in this exact format:
+Search for {min(limit, 5)} prospects and return ONLY valid JSON in this exact format:
 
 {{
   "prospects": [
@@ -132,12 +132,12 @@ CRITICAL: Return ONLY the JSON object, no other text. Use real web search to fin
             try:
                 message = client.messages.create(
                     model="claude-sonnet-4-20250514",
-                    max_tokens=4000,
+                    max_tokens=2000,
                     tools=[
                         {
                             "type": "web_search_20250305",
                             "name": "web_search",
-                            "max_uses": 5
+                            "max_uses": 2
                         }
                     ],
                     messages=[
@@ -334,10 +334,13 @@ def api_search():
         prospects, error_msg = search_btr_prospects(city, limit)
 
         if error_msg:
+            # On rate limit or API failure, return existing DB results so UI isn't empty
+            db_prospects = get_all_prospects_from_db()
             return jsonify({
                 'success': False,
                 'message': error_msg,
-                'prospects': []
+                'prospects': db_prospects,
+                'fromCache': True
             }), 200
 
         if not prospects:
