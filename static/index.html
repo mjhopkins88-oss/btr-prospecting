@@ -82,6 +82,7 @@
             : window.location.origin;
 
         function App() {
+            const [activeTab, setActiveTab] = useState('search');
             const [prospects, setProspects] = useState([]);
             const [loading, setLoading] = useState(false);
             const [selectedProspect, setSelectedProspect] = useState(null);
@@ -267,27 +268,33 @@
             return (
                 <div style={styles.container}>
                     <Header />
-                    <Stats prospects={prospects} />
-                    <Controls
-                        searchCity={searchCity}
-                        setSearchCity={setSearchCity}
-                        filterScore={filterScore}
-                        setFilterScore={setFilterScore}
-                        onSearch={searchProspects}
-                        onExport={exportToCSV}
-                        loading={loading}
-                        hasProspects={prospects.length > 0}
-                        cooldown={cooldown}
-                    />
-                    {searchStatus && <SearchStatus message={searchStatus} />}
-                    {loading && <Loading />}
-                    <ProspectsList 
-                        prospects={filteredProspects}
-                        onGenerateEmail={generateEmail}
-                        onDelete={deleteProspect}
-                    />
+                    <TabBar activeTab={activeTab} setActiveTab={setActiveTab} />
+                    {activeTab === 'search' && (
+                        <React.Fragment>
+                            <Stats prospects={prospects} />
+                            <Controls
+                                searchCity={searchCity}
+                                setSearchCity={setSearchCity}
+                                filterScore={filterScore}
+                                setFilterScore={setFilterScore}
+                                onSearch={searchProspects}
+                                onExport={exportToCSV}
+                                loading={loading}
+                                hasProspects={prospects.length > 0}
+                                cooldown={cooldown}
+                            />
+                            {searchStatus && <SearchStatus message={searchStatus} />}
+                            {loading && <Loading />}
+                            <ProspectsList
+                                prospects={filteredProspects}
+                                onGenerateEmail={generateEmail}
+                                onDelete={deleteProspect}
+                            />
+                        </React.Fragment>
+                    )}
+                    {activeTab === 'discovery' && <DailyDiscovery />}
                     {showEmailModal && (
-                        <EmailModal 
+                        <EmailModal
                             email={emailTemplate}
                             prospect={selectedProspect}
                             onClose={() => setShowEmailModal(false)}
@@ -302,6 +309,29 @@
                 <div style={styles.header}>
                     <h1 style={styles.title}>⚡ BTR PROSPECTING ENGINE</h1>
                     <p style={styles.subtitle}>AI-Powered Lead Intelligence System</p>
+                </div>
+            );
+        }
+
+        function TabBar({ activeTab, setActiveTab }) {
+            const tabs = [
+                { id: 'search', label: 'Prospect Search', icon: '🔍' },
+                { id: 'discovery', label: 'Daily Discovery', icon: '📡' },
+            ];
+            return (
+                <div style={ds.tabBar}>
+                    {tabs.map(tab => (
+                        <button
+                            key={tab.id}
+                            style={{
+                                ...ds.tab,
+                                ...(activeTab === tab.id ? ds.tabActive : {})
+                            }}
+                            onClick={() => setActiveTab(tab.id)}
+                        >
+                            {tab.icon} {tab.label}
+                        </button>
+                    ))}
                 </div>
             );
         }
@@ -570,6 +600,324 @@
                 </div>
             );
         }
+
+        function DailyDiscovery() {
+            const [config, setConfig] = useState(null);
+            const [latestRun, setLatestRun] = useState(null);
+            const [selectedRun, setSelectedRun] = useState(null);
+            const [history, setHistory] = useState([]);
+            const [running, setRunning] = useState(false);
+            const [status, setStatus] = useState('');
+            const [showDigest, setShowDigest] = useState(false);
+
+            useEffect(() => {
+                loadConfig();
+                loadLatest();
+                loadHistory();
+                checkStatus();
+            }, []);
+
+            // Poll when running
+            useEffect(() => {
+                if (!running) return;
+                const interval = setInterval(async () => {
+                    try {
+                        const res = await fetch(`${API_BASE}/api/discovery/status`);
+                        const data = await res.json();
+                        if (!data.running) {
+                            setRunning(false);
+                            setStatus('Discovery complete!');
+                            loadLatest();
+                            loadHistory();
+                            setTimeout(() => setStatus(''), 5000);
+                        }
+                    } catch (e) { console.error('Poll error:', e); }
+                }, 5000);
+                return () => clearInterval(interval);
+            }, [running]);
+
+            const loadConfig = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/discovery/config`);
+                    const data = await res.json();
+                    if (data.success) setConfig(data.config);
+                } catch (e) { console.error('Config load error:', e); }
+            };
+
+            const loadLatest = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/discovery/latest`);
+                    const data = await res.json();
+                    if (data.success && data.run) {
+                        setLatestRun(data.run);
+                        setSelectedRun(data.run);
+                    }
+                } catch (e) { console.error('Latest load error:', e); }
+            };
+
+            const loadHistory = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/discovery/history`);
+                    const data = await res.json();
+                    if (data.success) setHistory(data.runs);
+                } catch (e) { console.error('History load error:', e); }
+            };
+
+            const checkStatus = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/discovery/status`);
+                    const data = await res.json();
+                    if (data.running) { setRunning(true); setStatus('Discovery is running...'); }
+                } catch (e) { console.error('Status check error:', e); }
+            };
+
+            const triggerRun = async () => {
+                try {
+                    setRunning(true);
+                    setStatus('Starting discovery run across all cities...');
+                    const res = await fetch(`${API_BASE}/api/discovery/run`, { method: 'POST' });
+                    const data = await res.json();
+                    if (!data.success) {
+                        setRunning(false);
+                        setStatus(data.message);
+                        setTimeout(() => setStatus(''), 5000);
+                    } else {
+                        setStatus('Discovery is running — searching 6 cities...');
+                    }
+                } catch (e) {
+                    setRunning(false);
+                    setStatus('Failed to start discovery.');
+                    setTimeout(() => setStatus(''), 5000);
+                }
+            };
+
+            const loadRunDetail = async (runId) => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/discovery/run/${runId}`);
+                    const data = await res.json();
+                    if (data.success) setSelectedRun(data.run);
+                } catch (e) { console.error('Run detail error:', e); }
+            };
+
+            const renderStars = (rating) => {
+                const full = Math.floor(rating);
+                const half = rating % 1 >= 0.5;
+                let stars = '';
+                for (let i = 0; i < full; i++) stars += '\u2605';
+                if (half) stars += '\u00BD';
+                return stars;
+            };
+
+            if (!config) return <div style={ds.loadingMsg}>Loading configuration...</div>;
+
+            const results = selectedRun?.results || {};
+
+            return (
+                <div>
+                    {/* Config Panel */}
+                    <div style={ds.configPanel}>
+                        <div style={ds.configHeader}>
+                            <h2 style={ds.sectionTitle}>Daily Discovery</h2>
+                            <div style={ds.schedule}>
+                                Runs daily at {config.schedule_hour}:{String(config.schedule_minute).padStart(2, '0')} AM PT
+                            </div>
+                        </div>
+                        <div style={ds.configGrid}>
+                            <div>
+                                <div style={ds.configLabel}>Target Cities</div>
+                                <div style={ds.chipGroup}>
+                                    {config.cities.map((c, i) => (
+                                        <span key={i} style={ds.chip}>{c.city}, {c.state}</span>
+                                    ))}
+                                </div>
+                            </div>
+                            <div>
+                                <div style={ds.configLabel}>ICP Keywords</div>
+                                <div style={ds.chipGroup}>
+                                    {config.icp_keywords.map((kw, i) => (
+                                        <span key={i} style={ds.keywordChip}>{kw}</span>
+                                    ))}
+                                </div>
+                            </div>
+                            <div>
+                                <div style={ds.configLabel}>Filters</div>
+                                <div style={ds.filterRow}>
+                                    <span style={ds.filterItem}>Min Rating: {config.min_rating}\u2605</span>
+                                    <span style={ds.filterItem}>Min Reviews: {config.min_reviews}</span>
+                                    <span style={ds.filterItem}>Top {config.top_n_per_city} per city</span>
+                                    <span style={ds.filterItem}>Delivery: {config.delivery_method}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Action Bar */}
+                    <div style={ds.actionBar}>
+                        <button
+                            style={{...styles.btnPrimary, ...(running ? {opacity: 0.6, cursor: 'not-allowed'} : {}), fontSize: '1rem', padding: '0.85rem 2rem'}}
+                            onClick={triggerRun}
+                            disabled={running}
+                        >
+                            {running ? '🔍 Running Discovery...' : '🚀 Run Discovery Now'}
+                        </button>
+                        {selectedRun && (
+                            <button
+                                style={{...styles.btn, fontSize: '0.9rem'}}
+                                onClick={() => setShowDigest(!showDigest)}
+                            >
+                                {showDigest ? '📊 Show Cards' : '📝 Show Digest'}
+                            </button>
+                        )}
+                        {latestRun && (
+                            <span style={ds.lastRun}>
+                                Last run: {new Date(latestRun.run_at).toLocaleString()} &middot; {latestRun.total_new} new
+                            </span>
+                        )}
+                    </div>
+
+                    {status && (
+                        <div style={styles.searchStatus}><p>{status}</p></div>
+                    )}
+                    {running && (
+                        <div style={styles.loading}>
+                            <div style={styles.loadingText}>Searching business directories...</div>
+                        </div>
+                    )}
+
+                    {/* Digest View */}
+                    {showDigest && selectedRun?.digest && (
+                        <div style={ds.digestBox}>
+                            <pre style={ds.digestText}>{selectedRun.digest}</pre>
+                        </div>
+                    )}
+
+                    {/* Results by City */}
+                    {!showDigest && selectedRun && (
+                        <div>
+                            {Object.entries(results).map(([location, data]) => (
+                                <div key={location} style={ds.citySection}>
+                                    <div style={ds.cityHeader}>
+                                        <h3 style={ds.cityTitle}>{location}</h3>
+                                        {data.new_count !== undefined && (
+                                            <span style={ds.newBadge}>{data.new_count} new</span>
+                                        )}
+                                    </div>
+                                    {data.error && <p style={ds.errorText}>Error: {data.error}</p>}
+                                    {!data.error && (!data.businesses || data.businesses.length === 0) && (
+                                        <p style={ds.noResults}>No new businesses found</p>
+                                    )}
+                                    <div style={ds.businessGrid}>
+                                        {(data.businesses || []).map((b, i) => (
+                                            <div key={i} style={ds.businessCard}>
+                                                <div style={ds.businessHeader}>
+                                                    <h4 style={ds.businessName}>{b.name}</h4>
+                                                    <div style={ds.ratingBadge}>
+                                                        <span style={ds.stars}>{renderStars(b.rating)}</span>
+                                                        <span style={ds.ratingNum}>{b.rating}</span>
+                                                    </div>
+                                                </div>
+                                                <div style={ds.reviewCount}>{b.review_count} reviews</div>
+                                                <div style={ds.businessCategory}>{b.category}</div>
+                                                {b.address && <div style={ds.businessDetail}>{b.address}</div>}
+                                                {b.phone && <div style={ds.businessDetail}>{b.phone}</div>}
+                                                {b.website && (
+                                                    <a
+                                                        href={b.website.startsWith('http') ? b.website : `https://${b.website}`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        style={ds.websiteLink}
+                                                    >
+                                                        🔗 Website
+                                                    </a>
+                                                )}
+                                                <div style={ds.icpMatch}>ICP: {b.icp_match}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Empty state */}
+                    {!selectedRun && !running && (
+                        <div style={styles.empty}>
+                            <h2 style={styles.emptyTitle}>No discovery runs yet</h2>
+                            <p style={styles.emptyText}>Click "Run Discovery Now" to search business directories across all 6 cities</p>
+                            <p style={styles.emptySubtext}>The AI will search Google Maps and directories for businesses matching your ICP keywords</p>
+                        </div>
+                    )}
+
+                    {/* Run History */}
+                    {history.length > 0 && (
+                        <div style={ds.historySection}>
+                            <h3 style={ds.sectionTitle}>Run History</h3>
+                            <div style={ds.historyList}>
+                                {history.map(run => (
+                                    <div
+                                        key={run.id}
+                                        style={{...ds.historyItem, ...(selectedRun?.id === run.id ? ds.historyItemActive : {})}}
+                                        onClick={() => loadRunDetail(run.id)}
+                                    >
+                                        <span style={ds.historyDate}>{new Date(run.run_at).toLocaleString()}</span>
+                                        <span style={ds.historyStats}>{run.total_new} new &middot; {run.city_count} cities</span>
+                                        <span style={{...ds.historyStatus, color: run.status === 'completed' ? '#00ff88' : '#ffd93d'}}>{run.status}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Discovery-specific styles
+        const ds = {
+            tabBar: { display: 'flex', gap: '0.25rem', marginBottom: '2rem', borderBottom: '2px solid #1f2937', paddingBottom: '0' },
+            tab: { background: 'transparent', border: 'none', color: '#8b95ab', padding: '0.75rem 1.5rem', fontSize: '1rem', fontWeight: 600, cursor: 'pointer', borderBottom: '2px solid transparent', marginBottom: '-2px', fontFamily: 'Orbitron, sans-serif', transition: 'color 0.2s, border-color 0.2s' },
+            tabActive: { color: '#00ff88', borderBottomColor: '#00ff88' },
+            loadingMsg: { textAlign: 'center', padding: '3rem', color: '#8b95ab' },
+            configPanel: { background: '#151b2e', border: '1px solid #1f2937', borderRadius: '12px', padding: '1.5rem', marginBottom: '2rem' },
+            configHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' },
+            sectionTitle: { fontFamily: 'Orbitron, sans-serif', fontSize: '1.3rem', fontWeight: 700, color: '#00ff88' },
+            schedule: { color: '#8b95ab', fontSize: '0.9rem' },
+            configGrid: { display: 'grid', gap: '1rem' },
+            configLabel: { fontSize: '0.8rem', color: '#8b95ab', textTransform: 'uppercase', fontWeight: 600, marginBottom: '0.5rem' },
+            chipGroup: { display: 'flex', flexWrap: 'wrap', gap: '0.5rem' },
+            chip: { background: 'rgba(0, 255, 136, 0.1)', border: '1px solid rgba(0, 255, 136, 0.3)', borderRadius: '20px', padding: '0.3rem 0.8rem', fontSize: '0.85rem', color: '#00ff88' },
+            keywordChip: { background: 'rgba(0, 212, 255, 0.1)', border: '1px solid rgba(0, 212, 255, 0.2)', borderRadius: '20px', padding: '0.3rem 0.8rem', fontSize: '0.8rem', color: '#00d4ff' },
+            filterRow: { display: 'flex', gap: '1.5rem', flexWrap: 'wrap' },
+            filterItem: { color: '#e8eef7', fontSize: '0.9rem' },
+            actionBar: { display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '2rem', flexWrap: 'wrap' },
+            lastRun: { color: '#8b95ab', fontSize: '0.85rem' },
+            digestBox: { background: '#0a0e1a', border: '1px solid #1f2937', borderRadius: '12px', padding: '1.5rem', marginBottom: '2rem', overflow: 'auto', maxHeight: '600px' },
+            digestText: { fontFamily: 'JetBrains Mono, monospace', fontSize: '0.85rem', color: '#e8eef7', whiteSpace: 'pre-wrap', lineHeight: '1.5', margin: 0 },
+            citySection: { marginBottom: '2rem' },
+            cityHeader: { display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem', paddingBottom: '0.5rem', borderBottom: '1px solid #1f2937' },
+            cityTitle: { fontFamily: 'Orbitron, sans-serif', fontSize: '1.1rem', fontWeight: 700, color: '#00d4ff' },
+            newBadge: { background: 'rgba(0, 255, 136, 0.15)', border: '1px solid #00ff88', borderRadius: '12px', padding: '0.15rem 0.6rem', fontSize: '0.75rem', color: '#00ff88', fontWeight: 600 },
+            errorText: { color: '#ff4757', fontSize: '0.9rem' },
+            noResults: { color: '#8b95ab', fontSize: '0.9rem', fontStyle: 'italic' },
+            businessGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1rem' },
+            businessCard: { background: '#151b2e', border: '1px solid #1f2937', borderRadius: '10px', padding: '1.25rem' },
+            businessHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' },
+            businessName: { fontFamily: 'Orbitron, sans-serif', fontSize: '1rem', fontWeight: 600, color: '#e8eef7', flex: 1, marginRight: '0.5rem' },
+            ratingBadge: { display: 'flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0 },
+            stars: { color: '#ffd93d', fontSize: '0.9rem' },
+            ratingNum: { color: '#ffd93d', fontWeight: 700, fontSize: '0.9rem' },
+            reviewCount: { color: '#8b95ab', fontSize: '0.8rem', marginBottom: '0.5rem' },
+            businessCategory: { color: '#00d4ff', fontSize: '0.85rem', marginBottom: '0.75rem', fontWeight: 500 },
+            businessDetail: { color: '#8b95ab', fontSize: '0.85rem', marginBottom: '0.25rem' },
+            websiteLink: { color: '#00d4ff', textDecoration: 'none', fontSize: '0.85rem', display: 'inline-block', marginTop: '0.5rem' },
+            icpMatch: { marginTop: '0.75rem', paddingTop: '0.5rem', borderTop: '1px solid #1f2937', color: '#00ff88', fontSize: '0.8rem', fontStyle: 'italic' },
+            historySection: { marginTop: '2rem', background: '#151b2e', border: '1px solid #1f2937', borderRadius: '12px', padding: '1.5rem' },
+            historyList: { display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1rem' },
+            historyItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderRadius: '8px', cursor: 'pointer', background: '#0a0e1a', border: '1px solid transparent' },
+            historyItemActive: { border: '1px solid #00ff88', background: 'rgba(0, 255, 136, 0.05)' },
+            historyDate: { fontSize: '0.85rem', color: '#e8eef7' },
+            historyStats: { fontSize: '0.85rem', color: '#8b95ab' },
+            historyStatus: { fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase' },
+        };
 
         const styles = {
             container: { maxWidth: '1400px', margin: '0 auto', padding: '2rem' },
