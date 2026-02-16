@@ -56,7 +56,7 @@ DISCOVERY_CONFIG = {
     ],
     'min_rating': 4.0,
     'min_reviews': 10,
-    'top_n_per_city': 6,
+    'top_n_per_city': 1,
     'schedule_hour': 7,
     'schedule_minute': 0,
     'timezone': 'America/Los_Angeles',
@@ -484,7 +484,7 @@ Return ONLY valid JSON in this exact format:
   ]
 }}
 
-Find up to 12 businesses. Return ONLY the JSON object, no other text."""
+Find up to 3 businesses. Return ONLY the JSON object, no other text."""
 
     try:
         max_retries = 3
@@ -493,11 +493,11 @@ Find up to 12 businesses. Return ONLY the JSON object, no other text."""
             try:
                 message = client.messages.create(
                     model="claude-sonnet-4-20250514",
-                    max_tokens=2000,
+                    max_tokens=1000,
                     tools=[{
                         "type": "web_search_20250305",
                         "name": "web_search",
-                        "max_uses": 3
+                        "max_uses": 2
                     }],
                     messages=[{"role": "user", "content": prompt}]
                 )
