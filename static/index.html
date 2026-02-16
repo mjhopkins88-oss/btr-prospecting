@@ -264,26 +264,28 @@
         }
 
         function Stats({ prospects }) {
-            const avgScore = prospects.length > 0 
+            const avgScore = prospects.length > 0
                 ? Math.round(prospects.reduce((sum, p) => sum + p.score, 0) / prospects.length)
                 : 0;
             const hotLeads = prospects.filter(p => p.score >= 90).length;
+            const hasData = prospects.length > 0;
 
             return (
                 <div style={styles.statsBar}>
-                    <StatCard label="Total Prospects" value={prospects.length} />
-                    <StatCard label="Hot Leads (90+)" value={hotLeads} pulse />
-                    <StatCard label="Avg Score" value={avgScore} />
+                    <StatCard label="Total Prospects" value={hasData ? prospects.length : '--'} />
+                    <StatCard label="Hot Leads (90+)" value={hasData ? hotLeads : '--'} pulse={hasData && hotLeads > 0} />
+                    <StatCard label="Avg Score" value={hasData ? avgScore : '--'} />
                     <StatCard label="Status" value="LIVE" />
                 </div>
             );
         }
 
         function StatCard({ label, value, pulse }) {
+            const displayValue = String(value);
             return (
                 <div style={styles.statCard}>
                     <div style={styles.statLabel}>{label}</div>
-                    <div style={{...styles.statValue, ...(pulse ? styles.pulse : {})}}>{String(value)}</div>
+                    <div style={{...styles.statValue, ...(pulse ? styles.pulse : {})}}>{displayValue}</div>
                 </div>
             );
         }
@@ -457,7 +459,7 @@
             statsBar: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem', marginBottom: '3rem' },
             statCard: { background: '#151b2e', border: '1px solid #1f2937', borderRadius: '12px', padding: '1.5rem' },
             statLabel: { fontSize: '0.85rem', color: '#8b95ab', textTransform: 'uppercase', marginBottom: '0.5rem' },
-            statValue: { fontFamily: 'Orbitron, sans-serif', fontSize: '2rem', fontWeight: 700, color: '#00ff88', lineHeight: '1.2', display: 'block', minHeight: '2.4rem' },
+            statValue: { fontFamily: "'JetBrains Mono', monospace", fontSize: '2rem', fontWeight: 700, color: '#00ff88', lineHeight: '1.2', display: 'block', minHeight: '2.4rem' },
             pulse: { animation: 'pulse 2s ease-in-out infinite' },
             controls: { display: 'flex', gap: '1rem', marginBottom: '2rem', flexWrap: 'wrap' },
             btn: { background: '#151b2e', border: '1px solid #1f2937', color: '#e8eef7', padding: '0.75rem 1.5rem', borderRadius: '8px', fontSize: '0.9rem', cursor: 'pointer' },
