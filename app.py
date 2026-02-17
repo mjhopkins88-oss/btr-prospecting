@@ -17,6 +17,7 @@ import sqlite3
 import re
 import threading
 import traceback
+import uuid
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
@@ -139,6 +140,39 @@ def init_db():
             status TEXT DEFAULT 'completed'
         )
     ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_runs (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL DEFAULT 'pending',
+            search_params TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMP,
+            total_prospects INTEGER DEFAULT 0,
+            error TEXT
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS run_prospects (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL REFERENCES prospecting_runs(id),
+            company_name TEXT NOT NULL,
+            city TEXT,
+            state TEXT,
+            score INTEGER DEFAULT 0,
+            tiv_estimate TEXT,
+            deal_status TEXT,
+            signals TEXT,
+            why_call_now TEXT,
+            executive TEXT,
+            title TEXT,
+            linkedin TEXT,
+            units TEXT,
+            project_name TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_score ON run_prospects(run_id, score DESC)')
     conn.commit()
     conn.close()
 
@@ -196,7 +230,7 @@ For each prospect, extract:
 - Active signals (financing, construction, sales, expansion)
 - Total Investment Value estimate
 
-Search for {min(limit, 5)} prospects and return ONLY valid JSON in this exact format:
+Search for {min(limit, 10)} prospects and return ONLY valid JSON in this exact format:
 
 {{
   "prospects": [
@@ -1085,6 +1119,145 @@ QUALITY CHECKS before finalizing:
             'message': str(e),
             'email': ''
         }), 500
+
+# --- Async Prospecting Run Endpoints ---
+
+@app.route('/api/prospecting/run', methods=['POST'])
+def api_start_prospecting_run():
+    """Start an async prospecting run. Returns immediately with a run_id."""
+    try:
+        data = request.json or {}
+        raw_cities = data.get('cities', [])
+        max_per_city = min(int(data.get('maxProspectsPerCity', 25)), 50)
+        max_total = min(int(data.get('maxTotalProspects', 300)), 300)
+
+        # Normalize cities: accept strings or {city, state} objects
+        cities = []
+        for c in raw_cities:
+            if isinstance(c, str):
+                cities.append({'city': c, 'state': ''})
+            elif isinstance(c, dict):
+                cities.append({'city': c.get('city', ''), 'state': c.get('state', '')})
+
+        if not cities:
+            return jsonify({'success': False, 'message': 'No cities provided.'}), 400
+
+        run_id = str(uuid.uuid4())
+        search_params = {
+            'cities': cities,
+            'maxProspectsPerCity': max_per_city,
+            'maxTotalProspects': max_total,
+        }
+
+        # Create run record
+        conn = sqlite3.connect('prospects.db')
+        c = conn.cursor()
+        c.execute('''
+            INSERT INTO prospecting_runs (id, status, search_params, created_at, updated_at)
+            VALUES (?, 'pending', ?, ?, ?)
+        ''', (run_id, json.dumps(search_params),
+              datetime.utcnow().isoformat(), datetime.utcnow().isoformat()))
+        conn.commit()
+        conn.close()
+
+        # Enqueue background job
+        from queue_config import enqueue
+        from jobs import execute_prospecting_run
+        enqueue(execute_prospecting_run, run_id, search_params, job_timeout=600)
+
+        return jsonify({
+            'success': True,
+            'run_id': run_id,
+            'status': 'pending'
+        })
+
+    except Exception as e:
+        print(f"[Prospecting] Start error: {e}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/prospecting/run/<run_id>/status', methods=['GET'])
+def api_prospecting_run_status(run_id):
+    """Poll the status of a prospecting run."""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT status, total_prospects, error, created_at, completed_at FROM prospecting_runs WHERE id = ?',
+              (run_id,))
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return jsonify({'success': False, 'message': 'Run not found'}), 404
+
+    return jsonify({
+        'success': True,
+        'run_id': run_id,
+        'status': row[0],
+        'total_prospects': row[1] or 0,
+        'error': row[2],
+        'created_at': row[3],
+        'completed_at': row[4],
+    })
+
+
+@app.route('/api/prospecting/run/<run_id>/results', methods=['GET'])
+def api_prospecting_run_results(run_id):
+    """Get results for a prospecting run, sorted by score DESC, with pagination."""
+    limit = min(int(request.args.get('limit', 50)), 200)
+    offset = int(request.args.get('offset', 0))
+
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+
+    # Total count
+    c.execute('SELECT COUNT(*) FROM run_prospects WHERE run_id = ?', (run_id,))
+    total = c.fetchone()[0]
+
+    # Fetch page
+    c.execute('''
+        SELECT id, company_name, city, state, score, tiv_estimate, deal_status,
+               signals, why_call_now, executive, title, linkedin, units, project_name, created_at
+        FROM run_prospects
+        WHERE run_id = ?
+        ORDER BY score DESC
+        LIMIT ? OFFSET ?
+    ''', (run_id, limit, offset))
+
+    prospects = []
+    for row in c.fetchall():
+        signals_raw = row[7]
+        try:
+            signals = json.loads(signals_raw) if signals_raw else []
+        except (json.JSONDecodeError, TypeError):
+            signals = [signals_raw] if signals_raw else []
+
+        prospects.append({
+            'id': row[0],
+            'company': row[1],
+            'city': row[2],
+            'state': row[3],
+            'score': row[4],
+            'tiv': row[5],
+            'projectStatus': row[6],
+            'signals': signals,
+            'whyNow': row[8],
+            'executive': row[9],
+            'title': row[10],
+            'linkedin': row[11],
+            'units': row[12],
+            'projectName': row[13],
+            'createdAt': row[14],
+        })
+
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'total': total,
+        'prospects': prospects,
+    })
+
 
 # --- Daily Discovery API Routes ---
 
