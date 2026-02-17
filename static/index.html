@@ -74,7 +74,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
 
         // Get API base URL (works both locally and on Railway)
         const API_BASE = window.location.hostname === 'localhost' 
@@ -117,46 +117,77 @@
                 }
             };
 
+            const pollRef = useRef(null);
+
+            // Clean up polling on unmount
+            useEffect(() => {
+                return () => { if (pollRef.current) clearInterval(pollRef.current); };
+            }, []);
+
             const searchProspects = async () => {
                 if (cooldown > 0) return;
                 setLoading(true);
-                setSearchStatus('🤖 AI is searching the web for BTR prospects...');
-                setCooldown(30); // 30-second cooldown between searches
+                setSearchStatus('🚀 Starting prospecting run...');
+                setCooldown(30);
 
                 try {
-                    const response = await fetch(`${API_BASE}/api/search`, {
+                    // 1. Start async run — returns immediately
+                    const response = await fetch(`${API_BASE}/api/prospecting/run`, {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            city: searchCity,
-                            limit: 10
+                            cities: [{ city: searchCity, state: '' }],
+                            maxProspectsPerCity: 25,
+                            maxTotalProspects: 300
                         })
                     });
 
                     const data = await response.json();
-
-                    if (data.success) {
-                        setSearchStatus(`✅ Found ${data.prospects.length} prospects! ${data.savedCount} new ones added.`);
-                        await loadProspects();
-                        setTimeout(() => setSearchStatus(''), 3000);
-                    } else {
-                        // If rate limited but server returned cached DB results, show them
-                        if (data.prospects && data.prospects.length > 0) {
-                            setProspects(data.prospects);
-                            setSearchStatus(`⚠️ ${data.message} — Showing ${data.prospects.length} saved prospects.`);
-                        } else {
-                            setSearchStatus(`❌ ${data.message}`);
-                        }
-                        setTimeout(() => setSearchStatus(''), 8000);
+                    if (!data.success) {
+                        setSearchStatus(`❌ ${data.message}`);
+                        setLoading(false);
+                        setTimeout(() => setSearchStatus(''), 5000);
+                        return;
                     }
+
+                    const runId = data.run_id;
+                    setSearchStatus('🤖 AI is searching CRE sources for BTR prospects...');
+
+                    // 2. Poll status every 3 seconds
+                    if (pollRef.current) clearInterval(pollRef.current);
+                    pollRef.current = setInterval(async () => {
+                        try {
+                            const statusRes = await fetch(`${API_BASE}/api/prospecting/run/${runId}/status`);
+                            const statusData = await statusRes.json();
+
+                            if (statusData.total_prospects > 0) {
+                                setSearchStatus(`🔍 Found ${statusData.total_prospects} prospects so far...`);
+                            }
+
+                            if (statusData.status === 'completed') {
+                                clearInterval(pollRef.current);
+                                pollRef.current = null;
+                                setSearchStatus(`✅ Found ${statusData.total_prospects} prospects!`);
+                                await loadProspects();
+                                setLoading(false);
+                                setTimeout(() => setSearchStatus(''), 5000);
+                            } else if (statusData.status === 'failed') {
+                                clearInterval(pollRef.current);
+                                pollRef.current = null;
+                                setSearchStatus(`❌ Search failed: ${statusData.error || 'Unknown error'}`);
+                                setLoading(false);
+                                setTimeout(() => setSearchStatus(''), 8000);
+                            }
+                        } catch (e) {
+                            console.error('Poll error:', e);
+                        }
+                    }, 3000);
+
                 } catch (error) {
                     console.error('Search error:', error);
-                    setSearchStatus('❌ Search failed. Check your internet connection and API key.');
-                    setTimeout(() => setSearchStatus(''), 5000);
-                } finally {
+                    setSearchStatus('❌ Failed to start search. Check your connection.');
                     setLoading(false);
+                    setTimeout(() => setSearchStatus(''), 5000);
                 }
             };
 
