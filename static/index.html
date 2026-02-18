@@ -713,7 +713,7 @@
                         setStatus(data.message);
                         setTimeout(() => setStatus(''), 5000);
                     } else {
-                        setStatus('Discovery is running — searching 6 cities...');
+                        setStatus('Discovery is running — scanning news sources...');
                     }
                 } catch (e) {
                     setRunning(false);
@@ -728,15 +728,6 @@
                     const data = await res.json();
                     if (data.success) setSelectedRun(data.run);
                 } catch (e) { console.error('Run detail error:', e); }
-            };
-
-            const renderStars = (rating) => {
-                const full = Math.floor(rating);
-                const half = rating % 1 >= 0.5;
-                let stars = '';
-                for (let i = 0; i < full; i++) stars += '\u2605';
-                if (half) stars += '\u00BD';
-                return stars;
             };
 
             if (!config) return <div style={ds.loadingMsg}>Loading configuration...</div>;
@@ -791,11 +782,9 @@
                                 </div>
                             )}
                             <div>
-                                <div style={ds.configLabel}>Filters</div>
+                                <div style={ds.configLabel}>Settings</div>
                                 <div style={ds.filterRow}>
-                                    <span style={ds.filterItem}>Min Rating: {config.min_rating}\u2605</span>
-                                    <span style={ds.filterItem}>Min Reviews: {config.min_reviews}</span>
-                                    <span style={ds.filterItem}>Top {config.top_n_per_city} per city</span>
+                                    <span style={ds.filterItem}>Max {config.max_signals_per_day || 10} new activity signals per day</span>
                                     <span style={ds.filterItem}>Delivery: {config.delivery_method}</span>
                                 </div>
                             </div>
@@ -831,7 +820,7 @@
                     )}
                     {running && (
                         <div style={styles.loading}>
-                            <div style={styles.loadingText}>Searching business directories...</div>
+                            <div style={styles.loadingText}>Scanning CRE news sources for BTR activity...</div>
                         </div>
                     )}
 
@@ -842,7 +831,7 @@
                         </div>
                     )}
 
-                    {/* Results by City */}
+                    {/* Results by City — Signal Cards */}
                     {!showDigest && selectedRun && (
                         <div>
                             {Object.entries(results).map(([location, data]) => (
@@ -854,36 +843,44 @@
                                         )}
                                     </div>
                                     {data.error && <p style={ds.errorText}>Error: {data.error}</p>}
-                                    {!data.error && (!data.businesses || data.businesses.length === 0) && (
-                                        <p style={ds.noResults}>No new businesses found</p>
+                                    {!data.error && (!data.signals || data.signals.length === 0) && (
+                                        <p style={ds.noResults}>No new activity signals found</p>
                                     )}
-                                    <div style={ds.businessGrid}>
-                                        {(data.businesses || []).map((b, i) => (
-                                            <div key={i} style={ds.businessCard}>
-                                                <div style={ds.businessHeader}>
-                                                    <h4 style={ds.businessName}>{b.name}</h4>
-                                                    <div style={ds.ratingBadge}>
-                                                        <span style={ds.stars}>{renderStars(b.rating)}</span>
-                                                        <span style={ds.ratingNum}>{b.rating}</span>
+                                    <div style={ds.signalGrid}>
+                                        {(data.signals || []).map((s, i) => {
+                                            const typeLabel = (s.signal_type || 'other').replace(/_/g, ' ');
+                                            const typeColor = {
+                                                'new build': '#00ff88',
+                                                'under construction': '#00d4ff',
+                                                'permit rezoning': '#ffd93d',
+                                                'acquisition': '#ff4757',
+                                                'sale': '#ff6b81',
+                                                'recapitalization': '#a29bfe',
+                                            }[typeLabel] || '#8b95ab';
+                                            return (
+                                                <div key={i} style={ds.signalCard}>
+                                                    <div style={ds.signalCardHeader}>
+                                                        <span style={{...ds.signalTypeBadge, borderColor: typeColor, color: typeColor}}>
+                                                            {typeLabel}
+                                                        </span>
+                                                        {s.entity_name && (
+                                                            <span style={ds.entityName}>{s.entity_name}</span>
+                                                        )}
                                                     </div>
+                                                    <div style={ds.signalTitle}>{s.title}</div>
+                                                    {s.summary && <div style={ds.signalSummary}>{s.summary}</div>}
+                                                    <div style={ds.signalMeta}>
+                                                        {s.source_name && <span style={ds.signalSource}>{s.source_name}</span>}
+                                                        {s.published_at && <span style={ds.signalDate}>{s.published_at}</span>}
+                                                    </div>
+                                                    {s.url && (
+                                                        <a href={s.url} target="_blank" rel="noopener noreferrer" style={ds.signalLink}>
+                                                            Read article
+                                                        </a>
+                                                    )}
                                                 </div>
-                                                <div style={ds.reviewCount}>{b.review_count} reviews</div>
-                                                <div style={ds.businessCategory}>{b.category}</div>
-                                                {b.address && <div style={ds.businessDetail}>{b.address}</div>}
-                                                {b.phone && <div style={ds.businessDetail}>{b.phone}</div>}
-                                                {b.website && (
-                                                    <a
-                                                        href={b.website.startsWith('http') ? b.website : `https://${b.website}`}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        style={ds.websiteLink}
-                                                    >
-                                                        🔗 Website
-                                                    </a>
-                                                )}
-                                                <div style={ds.icpMatch}>ICP: {b.icp_match}</div>
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             ))}
@@ -894,8 +891,8 @@
                     {!selectedRun && !running && (
                         <div style={styles.empty}>
                             <h2 style={styles.emptyTitle}>No discovery runs yet</h2>
-                            <p style={styles.emptyText}>Click "Run Discovery Now" to search business directories across all 6 cities</p>
-                            <p style={styles.emptySubtext}>The AI will search Bisnow, Multi-Housing News, BizJournals, LinkedIn and other CRE sources for BTR companies</p>
+                            <p style={styles.emptyText}>Click "Run Discovery Now" to scan CRE news for BTR activity signals</p>
+                            <p style={styles.emptySubtext}>Searches Bisnow, Multi-Housing News, BizJournals, and other CRE sources for new builds, permits, acquisitions, and sales</p>
                         </div>
                     )}
 
@@ -951,18 +948,17 @@
             newBadge: { background: 'rgba(0, 255, 136, 0.15)', border: '1px solid #00ff88', borderRadius: '12px', padding: '0.15rem 0.6rem', fontSize: '0.75rem', color: '#00ff88', fontWeight: 600 },
             errorText: { color: '#ff4757', fontSize: '0.9rem' },
             noResults: { color: '#8b95ab', fontSize: '0.9rem', fontStyle: 'italic' },
-            businessGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1rem' },
-            businessCard: { background: '#151b2e', border: '1px solid #1f2937', borderRadius: '10px', padding: '1.25rem' },
-            businessHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' },
-            businessName: { fontFamily: 'Orbitron, sans-serif', fontSize: '1rem', fontWeight: 600, color: '#e8eef7', flex: 1, marginRight: '0.5rem' },
-            ratingBadge: { display: 'flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0 },
-            stars: { color: '#ffd93d', fontSize: '0.9rem' },
-            ratingNum: { color: '#ffd93d', fontWeight: 700, fontSize: '0.9rem' },
-            reviewCount: { color: '#8b95ab', fontSize: '0.8rem', marginBottom: '0.5rem' },
-            businessCategory: { color: '#00d4ff', fontSize: '0.85rem', marginBottom: '0.75rem', fontWeight: 500 },
-            businessDetail: { color: '#8b95ab', fontSize: '0.85rem', marginBottom: '0.25rem' },
-            websiteLink: { color: '#00d4ff', textDecoration: 'none', fontSize: '0.85rem', display: 'inline-block', marginTop: '0.5rem' },
-            icpMatch: { marginTop: '0.75rem', paddingTop: '0.5rem', borderTop: '1px solid #1f2937', color: '#00ff88', fontSize: '0.8rem', fontStyle: 'italic' },
+            signalGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '1rem' },
+            signalCard: { background: '#151b2e', border: '1px solid #1f2937', borderRadius: '10px', padding: '1.25rem' },
+            signalCardHeader: { display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem', flexWrap: 'wrap' },
+            signalTypeBadge: { border: '1px solid', borderRadius: '20px', padding: '0.2rem 0.7rem', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' },
+            entityName: { fontFamily: 'Orbitron, sans-serif', fontSize: '0.95rem', fontWeight: 600, color: '#e8eef7' },
+            signalTitle: { fontSize: '0.9rem', color: '#e8eef7', marginBottom: '0.5rem', lineHeight: '1.4' },
+            signalSummary: { fontSize: '0.85rem', color: '#8b95ab', marginBottom: '0.75rem', lineHeight: '1.5' },
+            signalMeta: { display: 'flex', gap: '1rem', marginBottom: '0.5rem', flexWrap: 'wrap' },
+            signalSource: { fontSize: '0.8rem', color: '#ffd93d' },
+            signalDate: { fontSize: '0.8rem', color: '#8b95ab' },
+            signalLink: { color: '#00d4ff', textDecoration: 'none', fontSize: '0.85rem', display: 'inline-block', marginTop: '0.25rem' },
             historySection: { marginTop: '2rem', background: '#151b2e', border: '1px solid #1f2937', borderRadius: '12px', padding: '1.5rem' },
             historyList: { display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1rem' },
             historyItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderRadius: '8px', cursor: 'pointer', background: '#0a0e1a', border: '1px solid transparent' },
