@@ -470,8 +470,8 @@ def generate_master_csv():
     print(f"Master CSV updated: {len(prospects)} prospects written to {MASTER_CSV_PATH}")
     return len(prospects)
 
-# Generate master CSV on startup if prospects exist
-generate_master_csv()
+# Generate master CSV on startup (in background to avoid blocking)
+threading.Thread(target=generate_master_csv, daemon=True).start()
 
 # --- Daily Discovery Engine ---
 
