@@ -14,7 +14,12 @@ if REDIS_URL:
     try:
         from rq import Queue
         import redis as redis_lib
-        _redis_conn = redis_lib.from_url(REDIS_URL)
+        _redis_conn = redis_lib.from_url(
+            REDIS_URL,
+            socket_connect_timeout=5,
+            socket_timeout=10,
+            retry_on_timeout=True
+        )
         _redis_conn.ping()
         _use_redis = True
         _queue = Queue(connection=_redis_conn)
