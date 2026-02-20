@@ -130,9 +130,15 @@ def init_db():
             digest_text TEXT,
             city_count INTEGER DEFAULT 0,
             total_new INTEGER DEFAULT 0,
-            status TEXT DEFAULT 'completed'
+            status TEXT DEFAULT 'completed',
+            adapter_stats TEXT
         )
     ''')
+    # Add adapter_stats column if missing (migration for existing DBs)
+    try:
+        c.execute("SELECT adapter_stats FROM discovery_runs LIMIT 1")
+    except sqlite3.OperationalError:
+        c.execute("ALTER TABLE discovery_runs ADD COLUMN adapter_stats TEXT")
     c.execute('''
         CREATE TABLE IF NOT EXISTS prospecting_runs (
             id TEXT PRIMARY KEY,
@@ -180,6 +186,13 @@ def init_db():
             payload_json TEXT
         )
     ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS discovery_source_refresh (
+            source_type TEXT PRIMARY KEY,
+            last_refreshed_at TIMESTAMP,
+            items_found INTEGER DEFAULT 0
+        )
+    ''')
     conn.commit()
     conn.close()
 
@@ -198,8 +211,7 @@ def search_btr_prospects(city="Texas", limit=10):
         return [], "ANTHROPIC_API_KEY is not set. Add it to your .env file or Railway environment variables."
 
     serp_key = os.getenv('SERPAPI_API_KEY')
-    if not serp_key:
-        return [], "SERPAPI_API_KEY is not set. Add it to your environment variables."
+    use_serpapi = bool(serp_key)
 
     # Check in-memory cache first
     cache_key = f"{city.lower().strip()}|{limit}"
@@ -213,43 +225,6 @@ def search_btr_prospects(city="Texas", limit=10):
             del _search_cache[cache_key]
 
     try:
-        # --- Stage A: SerpAPI candidate retrieval ---
-        queries = [
-            f'site:bisnow.com ("build to rent" OR BTR) "{city}"',
-            f'site:multihousingnews.com ("build to rent" OR BTR) "{city}"',
-            f'site:bizjournals.com ("build to rent" OR BTR) "{city}"',
-            f'("build to rent" OR "single family rental community") "{city}" (acquires OR acquisition OR sells OR sale OR groundbreaking OR "under construction")',
-        ]
-
-        all_candidates = []
-        seen_links = set()
-
-        print(f"Fetching SerpAPI candidates for {city}...")
-
-        for query in queries:
-            try:
-                results = cached_serpapi_search(
-                    query, num=5, feature='prospect', city=city, state=''
-                )
-                for r in results:
-                    link = r.get('link', '')
-                    if link and link not in seen_links:
-                        seen_links.add(link)
-                        all_candidates.append(r)
-            except SerpAPIError as e:
-                return [], f"Search temporarily rate limited: {e}"
-            except Exception as e:
-                print(f"SerpAPI query error: {e}")
-
-            if len(all_candidates) >= 20:
-                break
-
-        if not all_candidates:
-            return [], "No search results found for this area. Try a different city or state."
-
-        print(f"SerpAPI returned {len(all_candidates)} candidates for {city}")
-
-        # --- Stage B: Claude extraction from candidates ---
         existing = get_existing_companies(city)
         exclude_clause = ""
         if existing:
@@ -260,15 +235,54 @@ def search_btr_prospects(city="Texas", limit=10):
         ninety_days_ago = (datetime.now() - timedelta(days=90)).strftime('%B %Y')
         ask_count = min(limit, 10)
 
-        candidates_json = json.dumps([{
-            'title': c['title'],
-            'url': c['link'],
-            'snippet': c.get('snippet', ''),
-            'source': c.get('source', ''),
-            'date': c.get('date', ''),
-        } for c in all_candidates[:20]], indent=2)
+        if use_serpapi:
+            # --- Path A: SerpAPI candidate retrieval + Claude extraction ---
+            from serpapi_client import cached_serpapi_search, SerpAPIError
 
-        extraction_prompt = f"""You are a real estate intelligence researcher. Today's date is {today}.
+            queries = [
+                f'site:bisnow.com ("build to rent" OR BTR) "{city}"',
+                f'site:multihousingnews.com ("build to rent" OR BTR) "{city}"',
+                f'site:bizjournals.com ("build to rent" OR BTR) "{city}"',
+                f'("build to rent" OR "single family rental community") "{city}" (acquires OR acquisition OR sells OR sale OR groundbreaking OR "under construction")',
+            ]
+
+            all_candidates = []
+            seen_links = set()
+
+            print(f"Fetching SerpAPI candidates for {city}...")
+
+            for query in queries:
+                try:
+                    results = cached_serpapi_search(
+                        query, num=5, feature='prospect', city=city, state=''
+                    )
+                    for r in results:
+                        link = r.get('link', '')
+                        if link and link not in seen_links:
+                            seen_links.add(link)
+                            all_candidates.append(r)
+                except SerpAPIError as e:
+                    return [], f"Search temporarily rate limited: {e}"
+                except Exception as e:
+                    print(f"SerpAPI query error: {e}")
+
+                if len(all_candidates) >= 20:
+                    break
+
+            if not all_candidates:
+                return [], "No search results found for this area. Try a different city or state."
+
+            print(f"SerpAPI returned {len(all_candidates)} candidates for {city}")
+
+            candidates_json = json.dumps([{
+                'title': c['title'],
+                'url': c['link'],
+                'snippet': c.get('snippet', ''),
+                'source': c.get('source', ''),
+                'date': c.get('date', ''),
+            } for c in all_candidates[:20]], indent=2)
+
+            extraction_prompt = f"""You are a real estate intelligence researcher. Today's date is {today}.
 
 I have search results about Build-to-Rent (BTR) / Single-Family Rental (SFR) activity in {city}.
 Analyze these search results and extract BTR developer prospects.
@@ -313,13 +327,95 @@ Return ONLY valid JSON in this exact format:
 
 CRITICAL: Return ONLY the JSON object, no other text. Only include companies clearly related to BTR/SFR development."""
 
-        print(f"Calling Claude API for {city} extraction...")
+            print(f"Calling Claude API for {city} extraction...")
 
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=4096,
-            messages=[{"role": "user", "content": extraction_prompt}]
-        )
+            message = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=4096,
+                messages=[{"role": "user", "content": extraction_prompt}]
+            )
+
+        else:
+            # --- Path B: Claude web_search fallback (no SerpAPI key) ---
+            print(f"No SERPAPI_API_KEY set, using Claude web_search for {city}...")
+
+            search_prompt = f"""You are a real estate intelligence researcher. Today's date is {today}.
+
+Search for Build-to-Rent (BTR) and Single-Family Rental (SFR) development activity in {city}.
+
+Search for recent news about:
+- BTR groundbreakings, land acquisitions, construction starts in {city}
+- Single family rental community developments in {city}
+- Build to rent developers active in {city}
+
+FOCUS ON RECENT ACTIVITY from the last 90 days (since {ninety_days_ago}).
+{exclude_clause}
+Find up to {ask_count} companies actively developing BTR/SFR projects. For each extract:
+- Company name
+- CEO/key executive name (if mentioned)
+- LinkedIn profile (if mentioned)
+- City location
+- Recent project details (include dates when available)
+- Active signals (financing, construction, sales, expansion)
+- Total Investment Value estimate (if mentioned)
+- Why to call them NOW (specific trigger from the search result)
+- Score 0-100 based on: recency of activity, deal size, expansion signals
+
+Return ONLY valid JSON in this exact format:
+
+{{
+  "prospects": [
+    {{
+      "company": "Company Name",
+      "executive": "Executive Name",
+      "title": "CEO",
+      "linkedin": "linkedin.com/in/profile",
+      "city": "City",
+      "state": "TX",
+      "score": 85,
+      "tiv": "$50M-200M",
+      "units": "200-500 units",
+      "projectName": "Project Name",
+      "projectStatus": "Under construction / Pre-leasing / Recently opened",
+      "signals": ["Signal 1", "Signal 2", "Signal 3"],
+      "whyNow": "Why call this prospect now"
+    }}
+  ]
+}}
+
+CRITICAL: Return ONLY the JSON object, no other text. Only include companies clearly related to BTR/SFR development."""
+
+            print(f"Calling Claude API with web_search for {city}...")
+
+            max_retries = 3
+            message = None
+            for attempt in range(max_retries + 1):
+                try:
+                    message = client.messages.create(
+                        model="claude-sonnet-4-20250514",
+                        max_tokens=4096,
+                        tools=[
+                            {
+                                "type": "web_search_20250305",
+                                "name": "web_search",
+                                "max_uses": 5
+                            }
+                        ],
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": search_prompt
+                            }
+                        ]
+                    )
+                    break
+                except anthropic.RateLimitError:
+                    if attempt < max_retries:
+                        wait_time = 2 ** (attempt + 1)
+                        print(f"Rate limited (attempt {attempt + 1}/{max_retries + 1}), waiting {wait_time}s...")
+                        time.sleep(wait_time)
+                    else:
+                        return [], "API rate limit reached after retries. Please wait 1-2 minutes and try again."
 
         response_text = ""
         for block in message.content:
@@ -504,9 +600,9 @@ threading.Thread(target=generate_master_csv, daemon=True).start()
 
 # --- Daily Discovery Engine ---
 
-def run_daily_discovery():
+def run_daily_discovery(is_scheduled=False):
     """Main daily discovery orchestrator — event signal scanner.
-    Uses discovery_engine.py to fetch news, deduplicate, and classify."""
+    Uses discovery_engine.py with adapter architecture to fetch from multiple sources."""
     global _discovery_running
     _discovery_running = True
     try:
@@ -515,20 +611,21 @@ def run_daily_discovery():
 
         print(f"[Discovery] Starting signal scan at {datetime.now().isoformat()}")
 
-        results, digest, total_new = run_discovery_job(config)
+        results, digest, total_new, adapter_stats = run_discovery_job(config, is_scheduled=is_scheduled)
 
         # Save run record
         conn = sqlite3.connect('prospects.db')
         c = conn.cursor()
         c.execute('''
-            INSERT INTO discovery_runs (results_json, digest_text, city_count, total_new, status)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO discovery_runs (results_json, digest_text, city_count, total_new, status, adapter_stats)
+            VALUES (?, ?, ?, ?, ?, ?)
         ''', (
             json.dumps(results),
             digest,
             len(config['cities']),
             total_new,
-            'completed'
+            'completed',
+            json.dumps(adapter_stats)
         ))
         conn.commit()
         conn.close()
@@ -542,7 +639,8 @@ def run_daily_discovery():
                     'run_at': datetime.now().isoformat(),
                     'total_new': total_new,
                     'results': results,
-                    'digest': digest
+                    'digest': digest,
+                    'adapter_stats': adapter_stats
                 }).encode('utf-8')
                 req = urllib.request.Request(
                     config['webhook_url'],
@@ -1059,13 +1157,19 @@ def api_discovery_latest():
     conn.close()
     if not row:
         return jsonify({'success': True, 'run': None, 'message': 'No discovery runs yet.'})
+    adapter_stats = None
+    try:
+        adapter_stats = json.loads(row[7]) if len(row) > 7 and row[7] else None
+    except (json.JSONDecodeError, TypeError, IndexError):
+        pass
     return jsonify({
         'success': True,
         'run': {
             'id': row[0], 'run_at': row[1],
             'results': json.loads(row[2]) if row[2] else {},
             'digest': row[3], 'city_count': row[4],
-            'total_new': row[5], 'status': row[6]
+            'total_new': row[5], 'status': row[6],
+            'adapter_stats': adapter_stats
         }
     })
 
@@ -1082,7 +1186,7 @@ def api_discovery_run():
     def run_bg():
         global _discovery_running
         try:
-            run_daily_discovery()
+            run_daily_discovery(is_scheduled=False)
         except Exception as e:
             print(f"[Discovery] Background run failed: {e}")
             traceback.print_exc()
@@ -1126,22 +1230,35 @@ def api_discovery_run_detail(run_id):
     conn.close()
     if not row:
         return jsonify({'success': False, 'message': 'Run not found'}), 404
+    adapter_stats = None
+    try:
+        adapter_stats = json.loads(row[7]) if len(row) > 7 and row[7] else None
+    except (json.JSONDecodeError, TypeError, IndexError):
+        pass
     return jsonify({
         'success': True,
         'run': {
             'id': row[0], 'run_at': row[1],
             'results': json.loads(row[2]) if row[2] else {},
             'digest': row[3], 'city_count': row[4],
-            'total_new': row[5], 'status': row[6]
+            'total_new': row[5], 'status': row[6],
+            'adapter_stats': adapter_stats
         }
     })
 
 
+@app.route('/api/discovery/source-refresh', methods=['GET'])
+def api_discovery_source_refresh():
+    """Get last-refreshed timestamps for each source type"""
+    from discovery_engine import get_source_refresh_times
+    return jsonify({'success': True, 'sources': get_source_refresh_times()})
+
+
 # --- Scheduler Setup ---
 def _scheduled_discovery():
-    """Wrapper that enqueues the discovery job via queue_config."""
+    """Wrapper that enqueues the scheduled discovery job (runs ALL adapters including permits)."""
     from queue_config import enqueue
-    enqueue(run_daily_discovery, job_timeout=600)
+    enqueue(run_daily_discovery, True, job_timeout=600)  # is_scheduled=True
 
 _scheduler = BackgroundScheduler(daemon=True)
 _scheduler.add_job(

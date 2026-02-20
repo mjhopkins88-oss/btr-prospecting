@@ -640,12 +640,17 @@
             const [running, setRunning] = useState(false);
             const [status, setStatus] = useState('');
             const [showDigest, setShowDigest] = useState(false);
+            const [sourceRefresh, setSourceRefresh] = useState({});
+            const [sourceFilters, setSourceFilters] = useState({
+                filing: true, permit: true, news: true, press_release: true
+            });
 
             useEffect(() => {
                 loadConfig();
                 loadLatest();
                 loadHistory();
                 checkStatus();
+                loadSourceRefresh();
             }, []);
 
             // Poll when running
@@ -660,6 +665,7 @@
                             setStatus('Discovery complete!');
                             loadLatest();
                             loadHistory();
+                            loadSourceRefresh();
                             setTimeout(() => setStatus(''), 5000);
                         }
                     } catch (e) { console.error('Poll error:', e); }
@@ -702,10 +708,18 @@
                 } catch (e) { console.error('Status check error:', e); }
             };
 
+            const loadSourceRefresh = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/discovery/source-refresh`);
+                    const data = await res.json();
+                    if (data.success) setSourceRefresh(data.sources || {});
+                } catch (e) { console.error('Source refresh load error:', e); }
+            };
+
             const triggerRun = async () => {
                 try {
                     setRunning(true);
-                    setStatus('Starting discovery run across all cities...');
+                    setStatus('Starting discovery run — scanning EDGAR, press releases, permits, and news...');
                     const res = await fetch(`${API_BASE}/api/discovery/run`, { method: 'POST' });
                     const data = await res.json();
                     if (!data.success) {
@@ -713,7 +727,7 @@
                         setStatus(data.message);
                         setTimeout(() => setStatus(''), 5000);
                     } else {
-                        setStatus('Discovery is running — scanning news sources...');
+                        setStatus('Discovery is running — scanning multiple sources...');
                     }
                 } catch (e) {
                     setRunning(false);
@@ -730,9 +744,43 @@
                 } catch (e) { console.error('Run detail error:', e); }
             };
 
+            const toggleSourceFilter = (source) => {
+                setSourceFilters(prev => ({...prev, [source]: !prev[source]}));
+            };
+
+            const filterSignals = (signals) => {
+                if (!signals) return [];
+                return signals.filter(s => {
+                    const st = s.source_type || 'news';
+                    return sourceFilters[st] !== false;
+                });
+            };
+
+            const formatRefreshTime = (isoStr) => {
+                if (!isoStr) return 'Never';
+                try {
+                    return new Date(isoStr).toLocaleString();
+                } catch (e) { return 'Unknown'; }
+            };
+
             if (!config) return <div style={ds.loadingMsg}>Loading configuration...</div>;
 
             const results = selectedRun?.results || {};
+            const adapterStats = selectedRun?.adapter_stats || {};
+
+            // Source type colors and labels
+            const sourceTypeConfig = {
+                filing: { label: 'SEC Filing', color: '#a29bfe', icon: '📄' },
+                permit: { label: 'Permit', color: '#ffd93d', icon: '🏗️' },
+                news: { label: 'News', color: '#00d4ff', icon: '📰' },
+                press_release: { label: 'Press Release', color: '#ff6b81', icon: '📢' },
+            };
+
+            const confidenceConfig = {
+                high: { color: '#00ff88', label: 'HIGH' },
+                medium: { color: '#ffd93d', label: 'MED' },
+                low: { color: '#8b95ab', label: 'LOW' },
+            };
 
             return (
                 <div>
@@ -761,19 +809,9 @@
                                     ))}
                                 </div>
                             </div>
-                            {config.target_sources && config.target_sources.length > 0 && (
-                                <div>
-                                    <div style={ds.configLabel}>Target Sources</div>
-                                    <div style={ds.chipGroup}>
-                                        {config.target_sources.map((src, i) => (
-                                            <span key={i} style={ds.sourceChip}>{src}</span>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
                             {config.monitor_operators && config.monitor_operators.length > 0 && (
                                 <div>
-                                    <div style={ds.configLabel}>Monitored Operators</div>
+                                    <div style={ds.configLabel}>Monitored Operators (EDGAR)</div>
                                     <div style={ds.chipGroup}>
                                         {config.monitor_operators.map((op, i) => (
                                             <span key={i} style={ds.operatorChip}>{op}</span>
@@ -784,12 +822,30 @@
                             <div>
                                 <div style={ds.configLabel}>Settings</div>
                                 <div style={ds.filterRow}>
-                                    <span style={ds.filterItem}>Max {config.max_signals_per_day || 10} new activity signals per day</span>
+                                    <span style={ds.filterItem}>Max {config.max_signals_per_day || 10} signals/day</span>
                                     <span style={ds.filterItem}>Delivery: {config.delivery_method}</span>
                                 </div>
                             </div>
                         </div>
                     </div>
+
+                    {/* Source Refresh Status */}
+                    {Object.keys(sourceRefresh).length > 0 && (
+                        <div style={ds.sourceRefreshBar}>
+                            <div style={ds.configLabel}>Last Refreshed</div>
+                            <div style={{display: 'flex', gap: '1.5rem', flexWrap: 'wrap', marginTop: '0.4rem'}}>
+                                {Object.entries(sourceTypeConfig).map(([key, cfg]) => {
+                                    const info = sourceRefresh[key];
+                                    return (
+                                        <span key={key} style={{fontSize: '0.8rem', color: cfg.color}}>
+                                            {cfg.icon} {cfg.label}: {info ? formatRefreshTime(info.last_refreshed_at) : 'Never'}
+                                            {info && info.items_found > 0 ? ` (${info.items_found})` : ''}
+                                        </span>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
 
                     {/* Action Bar */}
                     <div style={ds.actionBar}>
@@ -815,12 +871,50 @@
                         )}
                     </div>
 
+                    {/* Source Type Filters */}
+                    {selectedRun && !showDigest && (
+                        <div style={ds.filterBar}>
+                            <span style={{fontSize: '0.85rem', color: '#8b95ab', marginRight: '0.75rem'}}>Filter:</span>
+                            {Object.entries(sourceTypeConfig).map(([key, cfg]) => (
+                                <button
+                                    key={key}
+                                    onClick={() => toggleSourceFilter(key)}
+                                    style={{
+                                        ...ds.filterToggle,
+                                        borderColor: sourceFilters[key] ? cfg.color : '#1f2937',
+                                        color: sourceFilters[key] ? cfg.color : '#555',
+                                        background: sourceFilters[key] ? `${cfg.color}15` : 'transparent',
+                                    }}
+                                >
+                                    {cfg.icon} {cfg.label}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Adapter Stats (when run has them) */}
+                    {selectedRun && adapterStats && Object.keys(adapterStats).length > 0 && !showDigest && (
+                        <div style={ds.adapterStatsBar}>
+                            {Object.entries(adapterStats).map(([key, stat]) => (
+                                <span key={key} style={{
+                                    fontSize: '0.8rem',
+                                    color: stat.status === 'ok' ? '#00ff88' : stat.status === 'skipped' ? '#8b95ab' : '#ff4757',
+                                    padding: '0.25rem 0.6rem',
+                                    borderRadius: '12px',
+                                    border: `1px solid ${stat.status === 'ok' ? 'rgba(0,255,136,0.3)' : 'rgba(139,149,171,0.3)'}`,
+                                }}>
+                                    {(sourceTypeConfig[key] || {icon: '🔍'}).icon} {key}: {stat.items} items ({stat.status})
+                                </span>
+                            ))}
+                        </div>
+                    )}
+
                     {status && (
                         <div style={styles.searchStatus}><p>{status}</p></div>
                     )}
                     {running && (
                         <div style={styles.loading}>
-                            <div style={styles.loadingText}>Scanning CRE news sources for BTR activity...</div>
+                            <div style={styles.loadingText}>Scanning EDGAR, press releases, permits, and news...</div>
                         </div>
                     )}
 
@@ -834,56 +928,68 @@
                     {/* Results by City — Signal Cards */}
                     {!showDigest && selectedRun && (
                         <div>
-                            {Object.entries(results).map(([location, data]) => (
-                                <div key={location} style={ds.citySection}>
-                                    <div style={ds.cityHeader}>
-                                        <h3 style={ds.cityTitle}>{location}</h3>
-                                        {data.new_count !== undefined && (
-                                            <span style={ds.newBadge}>{data.new_count} new</span>
+                            {Object.entries(results).map(([location, data]) => {
+                                const filtered = filterSignals(data.signals);
+                                return (
+                                    <div key={location} style={ds.citySection}>
+                                        <div style={ds.cityHeader}>
+                                            <h3 style={ds.cityTitle}>{location}</h3>
+                                            {data.new_count !== undefined && (
+                                                <span style={ds.newBadge}>{data.new_count} new</span>
+                                            )}
+                                        </div>
+                                        {data.error && <p style={ds.errorText}>Error: {data.error}</p>}
+                                        {!data.error && filtered.length === 0 && (
+                                            <p style={ds.noResults}>No new activity signals found</p>
                                         )}
-                                    </div>
-                                    {data.error && <p style={ds.errorText}>Error: {data.error}</p>}
-                                    {!data.error && (!data.signals || data.signals.length === 0) && (
-                                        <p style={ds.noResults}>No new activity signals found</p>
-                                    )}
-                                    <div style={ds.signalGrid}>
-                                        {(data.signals || []).map((s, i) => {
-                                            const typeLabel = (s.signal_type || 'other').replace(/_/g, ' ');
-                                            const typeColor = {
-                                                'new build': '#00ff88',
-                                                'under construction': '#00d4ff',
-                                                'permit rezoning': '#ffd93d',
-                                                'acquisition': '#ff4757',
-                                                'sale': '#ff6b81',
-                                                'recapitalization': '#a29bfe',
-                                            }[typeLabel] || '#8b95ab';
-                                            return (
-                                                <div key={i} style={ds.signalCard}>
-                                                    <div style={ds.signalCardHeader}>
-                                                        <span style={{...ds.signalTypeBadge, borderColor: typeColor, color: typeColor}}>
-                                                            {typeLabel}
-                                                        </span>
+                                        <div style={ds.signalGrid}>
+                                            {filtered.map((s, i) => {
+                                                const typeLabel = (s.signal_type || 'other').replace(/_/g, ' ');
+                                                const typeColor = {
+                                                    'new build': '#00ff88',
+                                                    'under construction': '#00d4ff',
+                                                    'permit rezoning': '#ffd93d',
+                                                    'acquisition': '#ff4757',
+                                                    'sale': '#ff6b81',
+                                                    'recapitalization': '#a29bfe',
+                                                    'financing': '#a29bfe',
+                                                }[typeLabel] || '#8b95ab';
+                                                const srcCfg = sourceTypeConfig[s.source_type] || sourceTypeConfig.news;
+                                                const confCfg = confidenceConfig[s.confidence] || confidenceConfig.medium;
+                                                return (
+                                                    <div key={i} style={ds.signalCard}>
+                                                        <div style={ds.signalCardHeader}>
+                                                            <span style={{...ds.signalTypeBadge, borderColor: typeColor, color: typeColor}}>
+                                                                {typeLabel}
+                                                            </span>
+                                                            <span style={{...ds.sourceTypeBadge, borderColor: srcCfg.color, color: srcCfg.color}}>
+                                                                {srcCfg.icon} {srcCfg.label}
+                                                            </span>
+                                                            <span style={{...ds.confidenceBadge, color: confCfg.color}}>
+                                                                {confCfg.label}
+                                                            </span>
+                                                        </div>
                                                         {s.entity_name && (
-                                                            <span style={ds.entityName}>{s.entity_name}</span>
+                                                            <div style={ds.entityName}>{s.entity_name}</div>
+                                                        )}
+                                                        <div style={ds.signalTitle}>{s.title}</div>
+                                                        {s.summary && <div style={ds.signalSummary}>{s.summary}</div>}
+                                                        <div style={ds.signalMeta}>
+                                                            {s.source_name && <span style={ds.signalSource}>{s.source_name}</span>}
+                                                            {s.published_at && <span style={ds.signalDate}>{s.published_at}</span>}
+                                                        </div>
+                                                        {s.url && (
+                                                            <a href={s.url} target="_blank" rel="noopener noreferrer" style={ds.signalLink}>
+                                                                Read source
+                                                            </a>
                                                         )}
                                                     </div>
-                                                    <div style={ds.signalTitle}>{s.title}</div>
-                                                    {s.summary && <div style={ds.signalSummary}>{s.summary}</div>}
-                                                    <div style={ds.signalMeta}>
-                                                        {s.source_name && <span style={ds.signalSource}>{s.source_name}</span>}
-                                                        {s.published_at && <span style={ds.signalDate}>{s.published_at}</span>}
-                                                    </div>
-                                                    {s.url && (
-                                                        <a href={s.url} target="_blank" rel="noopener noreferrer" style={ds.signalLink}>
-                                                            Read article
-                                                        </a>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
+                                                );
+                                            })}
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
 
@@ -891,8 +997,8 @@
                     {!selectedRun && !running && (
                         <div style={styles.empty}>
                             <h2 style={styles.emptyTitle}>No discovery runs yet</h2>
-                            <p style={styles.emptyText}>Click "Run Discovery Now" to scan CRE news for BTR activity signals</p>
-                            <p style={styles.emptySubtext}>Searches Bisnow, Multi-Housing News, BizJournals, and other CRE sources for new builds, permits, acquisitions, and sales</p>
+                            <p style={styles.emptyText}>Click "Run Discovery Now" to scan multiple sources for BTR activity signals</p>
+                            <p style={styles.emptySubtext}>Searches SEC EDGAR filings, press releases, city permits, and CRE news for new builds, permits, acquisitions, and sales</p>
                         </div>
                     )}
 
@@ -966,6 +1072,12 @@
             historyDate: { fontSize: '0.85rem', color: '#e8eef7' },
             historyStats: { fontSize: '0.85rem', color: '#8b95ab' },
             historyStatus: { fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase' },
+            sourceRefreshBar: { background: '#151b2e', border: '1px solid #1f2937', borderRadius: '10px', padding: '1rem 1.25rem', marginBottom: '1.5rem' },
+            filterBar: { display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem', flexWrap: 'wrap' },
+            filterToggle: { background: 'transparent', border: '1px solid #1f2937', borderRadius: '20px', padding: '0.3rem 0.8rem', fontSize: '0.8rem', cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', transition: 'all 0.2s' },
+            sourceTypeBadge: { border: '1px solid', borderRadius: '20px', padding: '0.15rem 0.55rem', fontSize: '0.7rem', fontWeight: 600 },
+            confidenceBadge: { fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.05em', padding: '0.15rem 0.4rem', borderRadius: '4px', background: 'rgba(255,255,255,0.05)' },
+            adapterStatsBar: { display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.5rem' },
         };
 
         const styles = {
