@@ -172,6 +172,14 @@ def init_db():
             first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS search_cache (
+            cache_key TEXT PRIMARY KEY,
+            created_at TIMESTAMP,
+            expires_at TIMESTAMP,
+            payload_json TEXT
+        )
+    ''')
     conn.commit()
     conn.close()
 
@@ -179,15 +187,21 @@ init_db()
 
 def search_btr_prospects(city="Texas", limit=10):
     """
-    Use Claude API to search for BTR prospects.
+    Use SerpAPI (Stage A) + Claude extraction (Stage B) to find BTR prospects.
     Returns (prospects_list, error_message) tuple.
     """
-    # Check API key first
+    from serpapi_client import cached_serpapi_search, SerpAPIError
+
+    # Check API keys first
     api_key = os.getenv('ANTHROPIC_API_KEY')
     if not api_key or api_key == 'your_anthropic_api_key_here':
         return [], "ANTHROPIC_API_KEY is not set. Add it to your .env file or Railway environment variables."
 
-    # Check cache first to avoid redundant API calls
+    serp_key = os.getenv('SERPAPI_API_KEY')
+    if not serp_key:
+        return [], "SERPAPI_API_KEY is not set. Add it to your environment variables."
+
+    # Check in-memory cache first
     cache_key = f"{city.lower().strip()}|{limit}"
     if cache_key in _search_cache:
         cached = _search_cache[cache_key]
@@ -199,37 +213,83 @@ def search_btr_prospects(city="Texas", limit=10):
             del _search_cache[cache_key]
 
     try:
-        # Get existing companies so we can ask for NEW ones
+        # --- Stage A: SerpAPI candidate retrieval ---
+        queries = [
+            f'site:bisnow.com ("build to rent" OR BTR) "{city}"',
+            f'site:multihousingnews.com ("build to rent" OR BTR) "{city}"',
+            f'site:bizjournals.com ("build to rent" OR BTR) "{city}"',
+            f'("build to rent" OR "single family rental community") "{city}" (acquires OR acquisition OR sells OR sale OR groundbreaking OR "under construction")',
+        ]
+
+        all_candidates = []
+        seen_links = set()
+
+        print(f"Fetching SerpAPI candidates for {city}...")
+
+        for query in queries:
+            try:
+                results = cached_serpapi_search(
+                    query, num=5, feature='prospect', city=city, state=''
+                )
+                for r in results:
+                    link = r.get('link', '')
+                    if link and link not in seen_links:
+                        seen_links.add(link)
+                        all_candidates.append(r)
+            except SerpAPIError as e:
+                return [], f"Search temporarily rate limited: {e}"
+            except Exception as e:
+                print(f"SerpAPI query error: {e}")
+
+            if len(all_candidates) >= 20:
+                break
+
+        if not all_candidates:
+            return [], "No search results found for this area. Try a different city or state."
+
+        print(f"SerpAPI returned {len(all_candidates)} candidates for {city}")
+
+        # --- Stage B: Claude extraction from candidates ---
         existing = get_existing_companies(city)
         exclude_clause = ""
         if existing:
-            names = ", ".join(existing[:20])  # Cap at 20 to keep prompt short
+            names = ", ".join(existing[:20])
             exclude_clause = f"\n\nIMPORTANT: I already have these companies in my database, so DO NOT include them. Find DIFFERENT companies:\n{names}\n"
 
         today = datetime.now().strftime('%B %d, %Y')
+        ninety_days_ago = (datetime.now() - timedelta(days=90)).strftime('%B %Y')
+        ask_count = min(limit, 10)
 
-        # Construct search prompt with date awareness
-        search_prompt = f"""You are a real estate intelligence researcher. Today's date is {today}.
+        candidates_json = json.dumps([{
+            'title': c['title'],
+            'url': c['link'],
+            'snippet': c.get('snippet', ''),
+            'source': c.get('source', ''),
+            'date': c.get('date', ''),
+        } for c in all_candidates[:20]], indent=2)
 
-Search for Build-to-Rent (BTR) / Single-Family Rental (SFR) developers in {city}.
+        extraction_prompt = f"""You are a real estate intelligence researcher. Today's date is {today}.
 
-FOCUS ON RECENT ACTIVITY: Prioritize news, deals, and developments from the last 90 days (since {(datetime.now() - timedelta(days=90)).strftime('%B %Y')}). Look for the most current and up-to-date information available.
+I have search results about Build-to-Rent (BTR) / Single-Family Rental (SFR) activity in {city}.
+Analyze these search results and extract BTR developer prospects.
+
+SEARCH RESULTS:
+{candidates_json}
+
+FOCUS ON RECENT ACTIVITY from the last 90 days (since {ninety_days_ago}). Look for groundbreakings, land acquisitions, construction starts, capital raises, new projects.
 {exclude_clause}
-Find companies that are:
-1. Actively developing BTR/SFR communities with recent activity
-2. Have news from the last 1-3 months (capital raises, acquisitions, new projects, construction starts, land purchases)
-3. Are expansion-focused or institutional-backed
-
-For each prospect, extract:
+Find up to {ask_count} companies. For each extract:
 - Company name
-- CEO/key executive name
-- LinkedIn profile (if findable)
+- CEO/key executive name (if mentioned)
+- LinkedIn profile (if mentioned)
 - City location
 - Recent project details (include dates when available)
 - Active signals (financing, construction, sales, expansion)
-- Total Investment Value estimate
+- Total Investment Value estimate (if mentioned)
+- Why to call them NOW (specific trigger from the search result)
+- Score 0-100 based on: recency of activity, deal size, expansion signals
 
-Search for {min(limit, 10)} prospects and return ONLY valid JSON in this exact format:
+Return ONLY valid JSON in this exact format:
 
 {{
   "prospects": [
@@ -251,45 +311,16 @@ Search for {min(limit, 10)} prospects and return ONLY valid JSON in this exact f
   ]
 }}
 
-CRITICAL: Return ONLY the JSON object, no other text. Use real web search to find current, accurate data."""
+CRITICAL: Return ONLY the JSON object, no other text. Only include companies clearly related to BTR/SFR development."""
 
-        print(f"Calling Claude API for {city} prospects...")
+        print(f"Calling Claude API for {city} extraction...")
 
-        # Retry with exponential backoff on rate limit errors
-        max_retries = 3
-        message = None
-        for attempt in range(max_retries + 1):
-            try:
-                message = client.messages.create(
-                    model="claude-sonnet-4-20250514",
-                    max_tokens=4096,
-                    tools=[
-                        {
-                            "type": "web_search_20250305",
-                            "name": "web_search",
-                            "max_uses": 5
-                        }
-                    ],
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": search_prompt
-                        }
-                    ]
-                )
-                break  # Success - exit retry loop
-            except anthropic.RateLimitError:
-                if attempt < max_retries:
-                    wait_time = 2 ** (attempt + 1)  # 2s, 4s, 8s
-                    print(f"Rate limited (attempt {attempt + 1}/{max_retries + 1}), waiting {wait_time}s...")
-                    time.sleep(wait_time)
-                else:
-                    return [], "API rate limit reached after retries. Please wait 1-2 minutes and try again."
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": extraction_prompt}]
+        )
 
-        if message is None:
-            return [], "Failed to get a response from Claude API. Try again."
-
-        # Extract response text from all text blocks
         response_text = ""
         for block in message.content:
             if block.type == "text":
@@ -298,10 +329,9 @@ CRITICAL: Return ONLY the JSON object, no other text. Use real web search to fin
         print(f"Claude response length: {len(response_text)} chars")
 
         if not response_text.strip():
-            return [], "Claude returned an empty response. The AI may still be searching - try again."
+            return [], "Claude returned an empty response. Try again."
 
-        # Parse JSON from response - find the JSON object containing "prospects"
-        # Use a balanced brace approach for more reliable extraction
+        # Parse JSON from response
         json_start = response_text.find('{"prospects"')
         if json_start == -1:
             json_start = response_text.find('{  "prospects"')
@@ -309,7 +339,6 @@ CRITICAL: Return ONLY the JSON object, no other text. Use real web search to fin
             json_start = response_text.find('{\n')
 
         if json_start != -1:
-            # Find the matching closing brace
             brace_count = 0
             json_end = json_start
             for i in range(json_start, len(response_text)):
@@ -327,18 +356,16 @@ CRITICAL: Return ONLY the JSON object, no other text. Use real web search to fin
                 prospects = data.get('prospects', [])
                 if prospects:
                     print(f"Successfully parsed {len(prospects)} prospects")
-                    # Cache successful results
                     _search_cache[cache_key] = {
                         'prospects': prospects,
                         'timestamp': datetime.now()
                     }
                     return prospects, None
                 else:
-                    return [], "Claude found no prospects in this area. Try a different city or state."
+                    return [], "No BTR prospects found in search results. Try a different city or state."
             except json.JSONDecodeError as e:
                 print(f"JSON parse error: {e}")
-                print(f"Attempted to parse: {json_str[:500]}")
-                return [], f"Failed to parse AI response. Try searching again."
+                return [], "Failed to parse AI response. Try searching again."
         else:
             print(f"No JSON found in response: {response_text[:500]}")
             return [], "AI response did not contain prospect data. Try searching again."
@@ -347,6 +374,8 @@ CRITICAL: Return ONLY the JSON object, no other text. Use real web search to fin
         return [], "Invalid ANTHROPIC_API_KEY. Check your API key in .env or Railway variables."
     except anthropic.APIConnectionError:
         return [], "Cannot connect to Claude API. Check your internet connection."
+    except anthropic.RateLimitError:
+        return [], "Claude API rate limit reached. Please wait 1-2 minutes and try again."
     except Exception as e:
         print(f"Search error: {str(e)}")
         return [], f"Search failed: {str(e)}"

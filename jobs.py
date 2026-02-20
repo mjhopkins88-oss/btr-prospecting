@@ -81,9 +81,10 @@ def execute_prospecting_run(run_id, search_params):
 
             print(f"[Job {run_id[:8]}] {city}: {len(new_batch)} new prospects stored ({len(all_prospects)} total)")
 
-            # Rate-limit between cities
+            # Rate-limit between cities (configurable)
             if len(cities) > 1:
-                time.sleep(2)
+                between_delay = float(os.getenv('SERP_BETWEEN_CITY_DELAY_SECONDS', '5'))
+                time.sleep(between_delay)
 
         _update_run(run_id, status='completed',
                     completed_at=datetime.utcnow().isoformat(),
@@ -97,11 +98,56 @@ def execute_prospecting_run(run_id, search_params):
 
 
 def _search_city(client, city, state, limit, seen_companies):
-    """Search for BTR prospects in a single city using Claude web search."""
+    """
+    Search for BTR prospects in a single city.
+    Stage A: SerpAPI retrieves candidate URLs/snippets.
+    Stage B: Claude extracts + scores + generates "Why Call Now".
+    """
+    from serpapi_client import cached_serpapi_search, SerpAPIError
+
     location = f"{city}, {state}" if state else city
     today = datetime.now().strftime('%B %d, %Y')
     ninety_days_ago = (datetime.now() - timedelta(days=90)).strftime('%B %Y')
 
+    # --- Stage A: SerpAPI candidate retrieval ---
+    queries = [
+        f'site:bisnow.com ("build to rent" OR BTR) "{city} {state}"',
+        f'site:multihousingnews.com ("build to rent" OR BTR) "{city} {state}"',
+        f'site:bizjournals.com ("build to rent" OR BTR) "{city} {state}"',
+        f'("build to rent" OR "single family rental community") ("{city}" OR "{city} {state}") (acquires OR acquisition OR sells OR sale OR groundbreaking OR "under construction")',
+    ]
+
+    all_candidates = []
+    seen_links = set()
+
+    for query in queries:
+        try:
+            results = cached_serpapi_search(
+                query, num=5, feature='prospect', city=city, state=state
+            )
+            for r in results:
+                link = r.get('link', '')
+                if link and link not in seen_links:
+                    seen_links.add(link)
+                    all_candidates.append(r)
+        except SerpAPIError as e:
+            print(f"[Job] SerpAPI error for {location}: {e}")
+            # Surface error so it propagates to the UI
+            raise
+        except Exception as e:
+            print(f"[Job] SerpAPI query failed for {location}: {e}")
+
+        # Stop early if we have enough candidates
+        if len(all_candidates) >= 20:
+            break
+
+    if not all_candidates:
+        print(f"[Job] No SerpAPI candidates found for {location}")
+        return []
+
+    print(f"[Job] {location}: {len(all_candidates)} candidate URLs from SerpAPI")
+
+    # --- Stage B: Claude extraction from candidates ---
     # Exclude already-known companies
     exclude_names = [n for n in list(seen_companies)[:30] if n]
     exclude_clause = ""
@@ -109,39 +155,43 @@ def _search_city(client, city, state, limit, seen_companies):
         names = ", ".join(exclude_names)
         exclude_clause = f"\n\nIMPORTANT: I already have these companies. Find DIFFERENT ones:\n{names}\n"
 
-    # Cap per-API-call at 10 to keep response reliable
     ask_count = min(limit, 10)
+    all_prospects = []
 
-    search_prompt = f"""You are a real estate intelligence researcher. Today's date is {today}.
+    # Process candidates in batches of 10
+    for batch_start in range(0, len(all_candidates), 10):
+        if len(all_prospects) >= ask_count:
+            break
 
-Search for Build-to-Rent (BTR) / Single-Family Rental (SFR) developers in {location}.
+        batch = all_candidates[batch_start:batch_start + 10]
+        candidates_json = json.dumps([{
+            'title': c['title'],
+            'url': c['link'],
+            'snippet': c.get('snippet', ''),
+            'source': c.get('source', ''),
+            'date': c.get('date', ''),
+        } for c in batch], indent=2)
 
-SEARCH THESE SOURCES:
-- bisnow.com — "build to rent {city}" or "BTR {city}"
-- multihousingnews.com — "single family rental {city}"
-- bizjournals.com — "build to rent {city}"
-- linkedin.com — BTR developers in {city}
-- commercialobserver.com, credaily.com — CRE news for {city}
+        extraction_prompt = f"""You are a real estate intelligence researcher. Today's date is {today}.
 
-SEARCH PATTERNS:
-- "build to rent" + "{city}"
-- "single family rental community" + "{city}"
-- "groundbreaking" + "{city}"
+I have search results about Build-to-Rent (BTR) / Single-Family Rental (SFR) activity in {location}.
+Analyze these search results and extract BTR developer prospects.
 
-ALSO CHECK for activity from: Invitation Homes, American Homes 4 Rent, Tricon Residential, Progress Residential in {location}.
+SEARCH RESULTS:
+{candidates_json}
 
 FOCUS ON RECENT ACTIVITY from the last 90 days (since {ninety_days_ago}). Look for groundbreakings, land acquisitions, construction starts, capital raises, new projects.
 {exclude_clause}
-Find up to {ask_count} companies. For each extract:
+Extract up to {ask_count - len(all_prospects)} companies from these results. For each extract:
 - Company name
-- CEO/key executive name and title
-- LinkedIn profile URL (if findable)
+- CEO/key executive name and title (if mentioned)
+- LinkedIn profile URL (if mentioned)
 - City and state
 - Recent project name and details
 - Project status (Under construction / Pre-leasing / etc.)
-- Total Investment Value estimate
+- Total Investment Value estimate (if mentioned)
 - Active signals (financing, construction, sales, expansion)
-- Why to call them NOW (specific trigger)
+- Why to call them NOW (specific trigger from the search result)
 - Score 0-100 based on: recency of activity, deal size, expansion signals
 
 Return ONLY valid JSON:
@@ -165,72 +215,55 @@ Return ONLY valid JSON:
   ]
 }}
 
-CRITICAL: Return ONLY the JSON object, no other text."""
+CRITICAL: Return ONLY the JSON object, no other text. Only include companies clearly related to BTR/SFR development."""
 
-    try:
-        max_retries = 3
-        message = None
-        for attempt in range(max_retries + 1):
-            try:
-                message = client.messages.create(
-                    model="claude-sonnet-4-20250514",
-                    max_tokens=4096,
-                    tools=[{
-                        "type": "web_search_20250305",
-                        "name": "web_search",
-                        "max_uses": 5
-                    }],
-                    messages=[{"role": "user", "content": search_prompt}]
-                )
-                break
-            except anthropic.RateLimitError:
-                if attempt < max_retries:
-                    wait_time = 2 ** (attempt + 1)
-                    print(f"[Job] Rate limited for {location} (attempt {attempt + 1}), waiting {wait_time}s")
-                    time.sleep(wait_time)
-                else:
-                    print(f"[Job] Rate limited for {location} after all retries")
-                    return []
+        try:
+            message = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=4096,
+                messages=[{"role": "user", "content": extraction_prompt}]
+            )
 
-        if not message:
-            return []
+            response_text = ""
+            for block in message.content:
+                if block.type == "text":
+                    response_text += block.text
 
-        response_text = ""
-        for block in message.content:
-            if block.type == "text":
-                response_text += block.text
+            if not response_text.strip():
+                continue
 
-        if not response_text.strip():
-            return []
+            # Parse JSON with balanced-brace extraction
+            json_start = response_text.find('{"prospects"')
+            if json_start == -1:
+                json_start = response_text.find('{  "prospects"')
+            if json_start == -1:
+                json_start = response_text.find('{\n')
 
-        # Parse JSON with balanced-brace extraction
-        json_start = response_text.find('{"prospects"')
-        if json_start == -1:
-            json_start = response_text.find('{  "prospects"')
-        if json_start == -1:
-            json_start = response_text.find('{\n')
+            if json_start == -1:
+                continue
 
-        if json_start == -1:
-            return []
+            brace_count = 0
+            json_end = json_start
+            for i in range(json_start, len(response_text)):
+                if response_text[i] == '{':
+                    brace_count += 1
+                elif response_text[i] == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        json_end = i + 1
+                        break
 
-        brace_count = 0
-        json_end = json_start
-        for i in range(json_start, len(response_text)):
-            if response_text[i] == '{':
-                brace_count += 1
-            elif response_text[i] == '}':
-                brace_count -= 1
-                if brace_count == 0:
-                    json_end = i + 1
-                    break
+            data = json.loads(response_text[json_start:json_end])
+            prospects = data.get('prospects', [])
+            all_prospects.extend(prospects)
 
-        data = json.loads(response_text[json_start:json_end])
-        prospects = data.get('prospects', [])
-        return prospects[:limit]
+        except anthropic.RateLimitError:
+            print(f"[Job] Claude rate limited during extraction for {location}")
+            time.sleep(5)
+        except Exception as e:
+            print(f"[Job] Claude extraction error for {location}: {e}")
 
-    except Exception as e:
-        print(f"[Job] Search error for {location}: {e}")
-        return []
+    return all_prospects[:limit]
 
 
 def _get_all_existing_companies():
