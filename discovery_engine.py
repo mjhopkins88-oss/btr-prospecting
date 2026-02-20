@@ -2,45 +2,25 @@
 Daily Discovery Engine — Event Signal Scanner
 
 Searches CRE news sources for BTR/SFR activity signals (builds, permits,
-acquisitions, sales, recapitalizations). Uses Google News RSS for fetching
+acquisitions, sales, recapitalizations). Uses SerpAPI for candidate retrieval
 and Claude for classification only (no web_search tool).
 """
 import hashlib
 import json
 import time
 import sqlite3
-import xml.etree.ElementTree as ET
 from datetime import datetime
-from urllib.parse import quote_plus
-import requests
 import anthropic
 import os
 
+from serpapi_client import cached_serpapi_search, SerpAPIError
+
 DB_PATH = 'prospects.db'
 
-# Search terms for BTR activity signals
-SIGNAL_SEARCH_TERMS = [
-    '"build to rent"',
-    '"multifamily"',
-    '"breaking ground"',
-    '"under construction"',
-    '"permit"',
-    '"rezoning"',
-    '"acquires" OR "acquisition"',
-    '"sells" OR "sale"',
-    '"recapitalization"',
+# Discovery query patterns per city — activity-focused
+DISCOVERY_QUERIES = [
+    '("build to rent" OR BTR OR multifamily) "{city} {state}" (acquires OR acquisition OR sells OR sale OR groundbreaking OR permit OR rezoning OR entitlement OR "under construction")',
 ]
-
-# Grouped to minimize HTTP requests (3 groups = 3 requests per city)
-TERM_GROUPS = [
-    '"build to rent" OR "breaking ground" OR "under construction" OR "multifamily"',
-    '"permit" OR "rezoning" OR "acquisition" OR "acquires"',
-    '"sale" OR "sells" OR "recapitalization"',
-]
-
-# 24-hour in-memory response cache
-_response_cache = {}
-CACHE_TTL = 86400  # seconds
 
 
 def get_db():
@@ -49,9 +29,9 @@ def get_db():
     return conn
 
 
-def compute_fingerprint(title, url, city):
-    """Compute dedup fingerprint from normalized title + url + city."""
-    normalized = f"{title.lower().strip()}|{url.lower().strip()}|{city.lower().strip()}"
+def compute_fingerprint(title, url, city, state):
+    """Compute dedup fingerprint from normalized title + url + city + state."""
+    normalized = f"{title.lower().strip()}|{url.lower().strip()}|{city.lower().strip()}|{state.lower().strip()}"
     return hashlib.sha256(normalized.encode()).hexdigest()[:32]
 
 
@@ -81,117 +61,43 @@ def mark_seen(fingerprint):
 
 
 # ---------------------------------------------------------------------------
-# Fetching — Google News RSS
+# Fetching — SerpAPI
 # ---------------------------------------------------------------------------
 
-def fetch_city_signals(city, state, sources, request_count, max_requests=50):
+def fetch_city_signals(city, state):
     """
-    Fetch news signals for a city from configured sources via Google News RSS.
-    Returns (list_of_raw_signal_dicts, updated_request_count).
+    Fetch news/activity signals for a city via SerpAPI.
+    Returns list of raw signal dicts.
     """
-    if request_count >= max_requests:
-        return [], request_count
-
-    # Build site: filter from configured sources (skip non-scrapable ones)
-    scrapable = [s for s in sources if s not in ('sec.gov EDGAR', 'linkedin.com')]
-    site_filter = " OR ".join(f"site:{s}" for s in scrapable) if scrapable else ""
-
     all_items = []
+    seen_links = set()
 
-    for terms in TERM_GROUPS:
-        if request_count >= max_requests:
-            break
+    for query_template in DISCOVERY_QUERIES:
+        query = query_template.replace('{city}', city).replace('{state}', state)
 
-        query = f"({site_filter}) ({terms}) {city}" if site_filter else f"({terms}) {city}"
-        cache_key = f"{query}|{datetime.utcnow().strftime('%Y-%m-%d')}"
-
-        # Check 24h cache
-        if cache_key in _response_cache:
-            cached = _response_cache[cache_key]
-            if (datetime.utcnow() - cached['ts']).total_seconds() < CACHE_TTL:
-                all_items.extend(cached['items'])
-                continue
-
-        # Fetch
-        encoded = quote_plus(query)
-        url = f"https://news.google.com/rss/search?q={encoded}&hl=en-US&gl=US&ceid=US:en"
-        items = _fetch_with_backoff(url)
-        request_count += 1
-
-        _response_cache[cache_key] = {'items': items, 'ts': datetime.utcnow()}
-        all_items.extend(items)
-
-        # Concurrency = 1: pause between requests
-        time.sleep(1)
-
-    # Attach city/state
-    for item in all_items:
-        item['city'] = city
-        item['state'] = state
-
-    return all_items, request_count
-
-
-def _fetch_with_backoff(url, max_retries=5):
-    """Fetch URL with exponential backoff on 429s."""
-    for attempt in range(max_retries + 1):
         try:
-            resp = requests.get(url, timeout=15, headers={
-                'User-Agent': 'BTR-Prospecting-Engine/1.0'
-            })
-
-            if resp.status_code == 429:
-                retry_after = int(resp.headers.get('Retry-After', 2 ** (attempt + 1)))
-                if attempt < max_retries:
-                    print(f"[Discovery] 429 rate limited, waiting {retry_after}s...")
-                    time.sleep(retry_after)
-                    continue
-                else:
-                    print("[Discovery] 429 after all retries")
-                    return []
-
-            if resp.status_code != 200:
-                print(f"[Discovery] HTTP {resp.status_code} for {url[:80]}")
-                return []
-
-            return _parse_rss(resp.text)
-
-        except requests.exceptions.Timeout:
-            if attempt < max_retries:
-                time.sleep(2 ** attempt)
-                continue
-            return []
+            results = cached_serpapi_search(
+                query, num=10, feature='discovery', city=city, state=state
+            )
+            for r in results:
+                link = r.get('link', '')
+                if link and link not in seen_links:
+                    seen_links.add(link)
+                    all_items.append({
+                        'title': r.get('title', ''),
+                        'url': link,
+                        'snippet': r.get('snippet', ''),
+                        'published_at': r.get('date', ''),
+                        'source_name': r.get('source', ''),
+                        'city': city,
+                        'state': state,
+                    })
+        except SerpAPIError as e:
+            print(f"[Discovery] SerpAPI error for {city}, {state}: {e}")
         except Exception as e:
-            print(f"[Discovery] Fetch error: {e}")
-            return []
+            print(f"[Discovery] Fetch error for {city}, {state}: {e}")
 
-    return []
-
-
-def _parse_rss(xml_text):
-    """Parse Google News RSS XML into signal dicts."""
-    items = []
-    try:
-        root = ET.fromstring(xml_text)
-        for item_el in root.findall('.//item'):
-            title = (item_el.findtext('title') or '').strip()
-            link = (item_el.findtext('link') or '').strip()
-            description = (item_el.findtext('description') or '').strip()
-            pub_date = (item_el.findtext('pubDate') or '').strip()
-            source_el = item_el.find('source')
-            source_name = (source_el.text or '').strip() if source_el is not None else ''
-
-            if title and link:
-                items.append({
-                    'title': title,
-                    'url': link,
-                    'snippet': description[:500] if description else '',
-                    'published_at': pub_date,
-                    'source_name': source_name,
-                })
-    except ET.ParseError as e:
-        print(f"[Discovery] RSS parse error: {e}")
-    return items
+    return all_items
 
 
 # ---------------------------------------------------------------------------
@@ -297,14 +203,12 @@ def run_discovery_job(config):
     client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 
     cities = config['cities']
-    sources = config.get('target_sources', [])
     max_new = config.get('max_signals_per_day', 10)
 
     print(f"[Discovery] Starting signal scan across {len(cities)} cities (max {max_new} new)...")
 
     all_new_signals = []
     results = {}
-    request_count = 0
 
     for city_info in cities:
         if len(all_new_signals) >= max_new:
@@ -316,8 +220,8 @@ def run_discovery_job(config):
 
         print(f"[Discovery] Scanning {location}...")
 
-        # 1. Fetch raw signals
-        raw_items, request_count = fetch_city_signals(city, state, sources, request_count)
+        # 1. Fetch raw signals via SerpAPI
+        raw_items = fetch_city_signals(city, state)
 
         if not raw_items:
             results[location] = {'signals': [], 'new_count': 0}
@@ -327,7 +231,7 @@ def run_discovery_job(config):
         # 2. Deduplicate against seen fingerprints
         unseen = []
         for item in raw_items:
-            fp = compute_fingerprint(item['title'], item['url'], city)
+            fp = compute_fingerprint(item['title'], item['url'], city, state)
             if not is_seen(fp):
                 item['fingerprint'] = fp
                 unseen.append(item)
