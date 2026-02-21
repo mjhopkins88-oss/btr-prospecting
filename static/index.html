@@ -606,6 +606,7 @@
                     {activeTab === 'discovery' && <DailyDiscovery />}
                     {activeTab === 'pipeline' && <PipelinePage user={user} />}
                     {activeTab === 'followups' && <FollowUpsPage user={user} />}
+                    {activeTab === 'statewide' && <StatewideDiscovery />}
                     {showEmailModal && (
                         <EmailModal
                             email={emailTemplate}
@@ -649,6 +650,7 @@
             const tabs = [
                 { id: 'search', label: 'Prospect Search' },
                 { id: 'discovery', label: 'Daily Discovery' },
+                { id: 'statewide', label: 'Statewide' },
                 { id: 'pipeline', label: 'My Pipeline' },
                 { id: 'followups', label: 'Follow-ups Due' },
             ];
@@ -1470,6 +1472,240 @@
                                     </div>
                                 ))}
                             </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ======= STATEWIDE DISCOVERY =======
+        const STATEWIDE_STATES = [
+            { abbr: 'TX', name: 'Texas' },
+            { abbr: 'AZ', name: 'Arizona' },
+            { abbr: 'GA', name: 'Georgia' },
+            { abbr: 'NC', name: 'North Carolina' },
+            { abbr: 'FL', name: 'Florida' },
+        ];
+
+        const EVENT_TYPE_COLORS = {
+            'acquisition': { bg: 'rgba(239,68,68,0.15)', color: '#f87171' },
+            'sale': { bg: 'rgba(236,72,153,0.15)', color: '#f9a8d4' },
+            'groundbreaking': { bg: 'rgba(16,185,129,0.15)', color: '#34d399' },
+            'permit': { bg: 'rgba(245,158,11,0.15)', color: '#fcd34d' },
+            'rezoning': { bg: 'rgba(245,158,11,0.15)', color: '#fcd34d' },
+            'financing': { bg: 'rgba(168,85,247,0.15)', color: '#c4b5fd' },
+            'JV': { bg: 'rgba(168,85,247,0.15)', color: '#c4b5fd' },
+            'construction': { bg: 'rgba(6,182,212,0.15)', color: '#67e8f9' },
+            'other': { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' },
+        };
+
+        function StatewideDiscovery() {
+            const [rankings, setRankings] = useState([]);
+            const [selectedState, setSelectedState] = useState(null);
+            const [stateData, setStateData] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const [scanningState, setScanningState] = useState(null);
+            const [status, setStatus] = useState('');
+
+            useEffect(() => { loadRankings(); }, []);
+
+            const loadRankings = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/discovery/state-rankings`);
+                    const data = await res.json();
+                    if (data.success) setRankings(data.rankings);
+                } catch (e) { console.error('Rankings load error:', e); }
+            };
+
+            const scanState = async (stateAbbr) => {
+                setScanningState(stateAbbr);
+                setStatus(`Scanning ${stateAbbr}...`);
+                try {
+                    const res = await fetch(`${API_BASE}/api/discovery/statewide/run`, {
+                        method: 'POST', headers: {'Content-Type':'application/json'},
+                        body: JSON.stringify({ state: stateAbbr })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        setStatus(`Found ${data.count} signals in ${stateAbbr}`);
+                        loadRankings();
+                        if (selectedState === stateAbbr) loadStateSummary(stateAbbr);
+                    } else {
+                        setStatus(data.message || 'Scan failed');
+                    }
+                } catch (e) { setStatus('Scan error: ' + e.message); }
+                setScanningState(null);
+                setTimeout(() => setStatus(''), 5000);
+            };
+
+            const scanAllStates = async () => {
+                for (const s of STATEWIDE_STATES) {
+                    await scanState(s.abbr);
+                }
+            };
+
+            const loadStateSummary = async (stateAbbr) => {
+                setSelectedState(stateAbbr);
+                setLoading(true);
+                try {
+                    const res = await fetch(`${API_BASE}/api/discovery/state-summary?state=${stateAbbr}`);
+                    const data = await res.json();
+                    if (data.success) setStateData(data);
+                } catch (e) { console.error('State summary error:', e); }
+                setLoading(false);
+            };
+
+            // Compute intensity for heat grid
+            const maxScore = Math.max(1, ...rankings.map(r => r.state_activity_score));
+
+            return (
+                <div>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.5rem',flexWrap:'wrap',gap:'0.75rem'}}>
+                        <div>
+                            <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:'1.3rem',fontWeight:700,color:'#34d399',marginBottom:'0.3rem'}}>Statewide Intelligence</h2>
+                            <p style={{fontSize:'0.85rem',color:'#64748b'}}>BTR activity scanning across TX, AZ, GA, NC, FL</p>
+                        </div>
+                        <button
+                            className="action-btn"
+                            style={{...styles.btnPrimary,fontSize:'0.9rem',padding:'0.65rem 1.5rem',...(scanningState?{opacity:0.5,cursor:'not-allowed'}:{})}}
+                            onClick={scanAllStates}
+                            disabled={!!scanningState}
+                        >
+                            {scanningState ? `Scanning ${scanningState}...` : 'Scan All States'}
+                        </button>
+                    </div>
+
+                    {status && <div style={styles.searchStatus}><p>{status}</p></div>}
+
+                    {/* State Heat Grid */}
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:'1rem',marginBottom:'2rem'}}>
+                        {STATEWIDE_STATES.map(s => {
+                            const ranking = rankings.find(r => r.state === s.abbr) || {};
+                            const score = ranking.state_activity_score || 0;
+                            const intensity = maxScore > 0 ? score / maxScore : 0;
+                            const isSelected = selectedState === s.abbr;
+                            const borderColor = intensity > 0.7 ? '#34d399' : intensity > 0.4 ? '#fbbf24' : intensity > 0 ? '#3b82f6' : '#334155';
+                            const glowColor = intensity > 0.7 ? 'rgba(16,185,129,0.2)' : intensity > 0.4 ? 'rgba(251,191,36,0.15)' : 'transparent';
+                            return (
+                                <div key={s.abbr} onClick={() => loadStateSummary(s.abbr)} style={{
+                                    background: isSelected ? '#263548' : '#1e293b',
+                                    border: `2px solid ${isSelected ? '#34d399' : borderColor}`,
+                                    borderRadius:'12px',padding:'1.25rem',cursor:'pointer',
+                                    boxShadow: isSelected ? '0 0 20px rgba(16,185,129,0.15)' : `0 0 12px ${glowColor}`,
+                                    transition:'all 0.2s',
+                                }}>
+                                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.75rem'}}>
+                                        <div>
+                                            <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:'1.6rem',fontWeight:900,color:'#f1f5f9'}}>{s.abbr}</div>
+                                            <div style={{fontSize:'0.8rem',color:'#64748b'}}>{s.name}</div>
+                                        </div>
+                                        <div style={{
+                                            width:'3rem',height:'3rem',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',
+                                            border:`2px solid ${borderColor}`,fontFamily:"'JetBrains Mono',monospace",fontSize:'0.9rem',fontWeight:700,
+                                            color: intensity > 0.4 ? '#f1f5f9' : '#64748b',
+                                            boxShadow: intensity > 0.5 ? `0 0 10px ${glowColor}` : 'none',
+                                        }}>{score}</div>
+                                    </div>
+                                    <div style={{display:'flex',gap:'1rem',fontSize:'0.8rem',color:'#94a3b8'}}>
+                                        <span>{ranking.total_signals || 0} signals</span>
+                                        <span>{ranking.capital_events_count || 0} capital</span>
+                                        <span>{ranking.construction_signals_count || 0} construction</span>
+                                    </div>
+                                    {ranking.top_cities && ranking.top_cities.length > 0 && (
+                                        <div style={{marginTop:'0.5rem',display:'flex',gap:'0.4rem',flexWrap:'wrap'}}>
+                                            {ranking.top_cities.map((tc,i) => (
+                                                <span key={i} style={{fontSize:'0.7rem',padding:'0.15rem 0.45rem',borderRadius:'4px',
+                                                    background:'rgba(16,185,129,0.1)',color:'#6ee7b7'}}>{tc.city}</span>
+                                            ))}
+                                        </div>
+                                    )}
+                                    <button className="action-btn" style={{...styles.actionBtn,marginTop:'0.75rem',fontSize:'0.75rem',
+                                        ...(scanningState===s.abbr?{opacity:0.5}:{})}}
+                                        onClick={(e) => { e.stopPropagation(); scanState(s.abbr); }}
+                                        disabled={!!scanningState}>
+                                        {scanningState===s.abbr ? 'Scanning...' : 'Scan'}
+                                    </button>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* State Detail */}
+                    {selectedState && loading && <div style={styles.loading}><div style={styles.loadingText}>Loading {selectedState}...</div></div>}
+
+                    {selectedState && !loading && stateData && (
+                        <div>
+                            <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:'1.2rem',fontWeight:700,color:'#22d3ee',marginBottom:'1rem'}}>
+                                {STATEWIDE_STATES.find(s=>s.abbr===selectedState)?.name} — Detail
+                            </h3>
+
+                            {/* Top Cities 7d */}
+                            {stateData.top_cities_7d && stateData.top_cities_7d.length > 0 && (
+                                <div style={{marginBottom:'1.5rem'}}>
+                                    <div style={{fontSize:'0.75rem',color:'#64748b',textTransform:'uppercase',fontWeight:600,letterSpacing:'0.05em',marginBottom:'0.5rem'}}>Top Cities (7-Day Activity)</div>
+                                    <div style={{display:'flex',gap:'0.75rem',flexWrap:'wrap'}}>
+                                        {stateData.top_cities_7d.map((tc,i) => (
+                                            <div key={i} style={{background:'#1e293b',border:'1px solid #334155',borderRadius:'10px',padding:'0.85rem 1.25rem',minWidth:'160px'}}>
+                                                <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:'1rem',fontWeight:700,color:'#f1f5f9'}}>{tc.city}</div>
+                                                <div style={{display:'flex',gap:'0.75rem',marginTop:'0.3rem',fontSize:'0.8rem',color:'#94a3b8'}}>
+                                                    <span>Score: <b style={{color:'#34d399'}}>{tc.activity_score}</b></span>
+                                                    <span>{tc.signals_count} signals</span>
+                                                </div>
+                                                {tc.dominant_event_types && (
+                                                    <div style={{display:'flex',gap:'0.3rem',marginTop:'0.4rem',flexWrap:'wrap'}}>
+                                                        {tc.dominant_event_types.map((et,j) => {
+                                                            const ec = EVENT_TYPE_COLORS[et] || EVENT_TYPE_COLORS.other;
+                                                            return <span key={j} style={{fontSize:'0.65rem',padding:'0.1rem 0.4rem',borderRadius:'4px',background:ec.bg,color:ec.color}}>{et}</span>;
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Signal List */}
+                            <div style={{fontSize:'0.75rem',color:'#64748b',textTransform:'uppercase',fontWeight:600,letterSpacing:'0.05em',marginBottom:'0.75rem'}}>
+                                All Signals ({stateData.total_signals || 0})
+                            </div>
+                            {(!stateData.items || stateData.items.length === 0) && (
+                                <div style={styles.empty}>
+                                    <p style={styles.emptyText}>No signals found. Click "Scan" on the state tile above to search.</p>
+                                </div>
+                            )}
+                            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(360px,1fr))',gap:'0.75rem'}}>
+                                {(stateData.items || []).map((item, i) => {
+                                    const ec = EVENT_TYPE_COLORS[item.event_type] || EVENT_TYPE_COLORS.other;
+                                    const confColor = item.confidence === 'high' ? '#34d399' : item.confidence === 'medium' ? '#fbbf24' : '#94a3b8';
+                                    return (
+                                        <div key={i} style={{background:'#1e293b',border:'1px solid #334155',borderRadius:'10px',padding:'1rem'}}>
+                                            <div style={{display:'flex',gap:'0.5rem',alignItems:'center',marginBottom:'0.5rem',flexWrap:'wrap'}}>
+                                                <span style={{fontSize:'0.7rem',padding:'0.15rem 0.5rem',borderRadius:'9999px',fontWeight:600,
+                                                    background:ec.bg,color:ec.color,textTransform:'uppercase'}}>{item.event_type}</span>
+                                                <span style={{fontSize:'0.7rem',color:confColor,fontWeight:600}}>{(item.confidence||'').toUpperCase()}</span>
+                                                {item.city && item.city !== 'Unknown' && (
+                                                    <span style={{fontSize:'0.75rem',color:'#22d3ee'}}>{item.city}, {item.state}</span>
+                                                )}
+                                            </div>
+                                            {item.company && <div style={{fontSize:'0.9rem',fontWeight:600,color:'#f1f5f9',marginBottom:'0.25rem'}}>{item.company}</div>}
+                                            <div style={{fontSize:'0.85rem',color:'#cbd5e1',marginBottom:'0.4rem',lineHeight:'1.4'}}>{item.summary || item.title}</div>
+                                            <div style={{display:'flex',gap:'0.75rem',flexWrap:'wrap',fontSize:'0.75rem',color:'#64748b'}}>
+                                                {item.units && <span>Units: {item.units}</span>}
+                                                {item.date && <span>{item.date}</span>}
+                                            </div>
+                                            {item.url && <a href={item.url} target="_blank" rel="noopener noreferrer" style={{color:'#22d3ee',textDecoration:'none',fontSize:'0.8rem',display:'inline-block',marginTop:'0.3rem'}}>Read source</a>}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
+                    {!selectedState && rankings.length === 0 && (
+                        <div style={styles.empty}>
+                            <h2 style={styles.emptyTitle}>No statewide data yet</h2>
+                            <p style={styles.emptyText}>Click "Scan All States" or select a state to begin scanning</p>
                         </div>
                     )}
                 </div>
