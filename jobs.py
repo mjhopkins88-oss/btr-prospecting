@@ -192,7 +192,17 @@ Extract up to {ask_count - len(all_prospects)} companies from these results. For
 - Total Investment Value estimate (if mentioned)
 - Active signals (financing, construction, sales, expansion)
 - Why to call them NOW (specific trigger from the search result)
-- Score 0-100 based on: recency of activity, deal size, expansion signals
+- Score 0-100 (the total of the four sub-scores below)
+- Score breakdown (must sum to the total score):
+  - capital_event (0-40): recapitalizations, credit facilities, JV capital, acquisitions, institutional partners
+  - construction_stage (0-25): under construction, groundbreaking, permitting, first deliveries
+  - expansion_velocity (0-20): multi-market growth, pipeline mentions, "expanding into", multiple projects
+  - freshness (0-15): activity within last 14 days=15, last 30 days=10, last 90 days=5
+- Score explanation: 2-4 bullet points explaining why it scored that way
+- Insurance triggers: 0-4 labels from this list that apply:
+  "Builder's Risk → Property conversion", "New lender covenants / insurance requirements",
+  "Portfolio scale / blanket limits", "New state expansion", "JV / institutional capital event",
+  "Refinance window / debt facility", "Lease-up stabilization shift"
 
 Return ONLY valid JSON:
 {{
@@ -205,6 +215,22 @@ Return ONLY valid JSON:
       "city": "{city}",
       "state": "{state}",
       "score": 85,
+      "score_breakdown": {{
+        "capital_event": 35,
+        "construction_stage": 20,
+        "expansion_velocity": 18,
+        "freshness": 12
+      }},
+      "score_explanation": [
+        "Recent $200M credit facility with institutional lender",
+        "3 communities under construction across TX",
+        "Expanding into AZ and FL markets",
+        "Activity reported within last 2 weeks"
+      ],
+      "insurance_triggers": [
+        "Builder's Risk → Property conversion",
+        "JV / institutional capital event"
+      ],
       "tiv": "$50M-200M",
       "units": "200-500 units",
       "projectName": "Project Name",
@@ -288,12 +314,18 @@ def _store_run_prospects(run_id, prospects):
     c = conn.cursor()
     for p in prospects:
         try:
+            # Pack new scoring fields into score_meta JSON blob
+            score_meta = json.dumps({
+                'score_breakdown': p.get('score_breakdown', {}),
+                'score_explanation': p.get('score_explanation', []),
+                'insurance_triggers': p.get('insurance_triggers', []),
+            })
             c.execute('''
                 INSERT OR IGNORE INTO run_prospects
                 (id, run_id, company_name, city, state, score, tiv_estimate,
                  deal_status, signals, why_call_now, executive, title, linkedin,
-                 units, project_name, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 units, project_name, created_at, score_meta)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 str(uuid.uuid4()),
                 run_id,
@@ -310,7 +342,8 @@ def _store_run_prospects(run_id, prospects):
                 p.get('linkedin', ''),
                 p.get('units', ''),
                 p.get('projectName', ''),
-                datetime.utcnow().isoformat()
+                datetime.utcnow().isoformat(),
+                score_meta
             ))
         except Exception as e:
             print(f"[Job] Error storing prospect {p.get('company')}: {e}")
