@@ -31,7 +31,7 @@ load_dotenv()
 
 SESSION_SECRET = os.getenv('SESSION_SECRET', secrets.token_hex(32))
 COOKIE_SECURE = os.getenv('COOKIE_SECURE', 'false').lower() == 'true'
-SESSION_DURATION_HOURS = 72  # 3 days
+SESSION_DURATION_HOURS = 720  # 30 days
 
 app = Flask(__name__, static_folder='static')
 CORS(app, supports_credentials=True)
@@ -499,6 +499,17 @@ def _make_prospect_key(company_name, website=None, city=None, state=None):
 # AUTH API ROUTES
 # ===================================================================
 
+def _cleanup_expired_sessions():
+    """Remove expired sessions to prevent DB bloat. Called during login."""
+    try:
+        conn = sqlite3.connect('prospects.db')
+        c = conn.cursor()
+        c.execute('DELETE FROM sessions WHERE expires_at < ?', (datetime.utcnow().isoformat(),))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
 @app.route('/api/auth/bootstrap', methods=['POST'])
 def api_auth_bootstrap():
     """Create the first admin user + workspace. Only works if zero users exist."""
@@ -544,13 +555,14 @@ def api_auth_bootstrap():
         'user': {'id': user_id, 'name': name, 'email': email, 'role': 'admin', 'workspace_id': workspace_id}
     }))
     resp.set_cookie('session_token', session_token, httponly=True, samesite='Lax',
-                    secure=COOKIE_SECURE, max_age=SESSION_DURATION_HOURS * 3600)
+                    secure=COOKIE_SECURE, path='/', max_age=SESSION_DURATION_HOURS * 3600)
     return resp
 
 
 @app.route('/api/auth/login', methods=['POST'])
 def api_auth_login():
     """Login with email + password."""
+    _cleanup_expired_sessions()
     data = request.json or {}
     email = data.get('email', '').strip().lower()
     password = data.get('password', '')
@@ -589,7 +601,7 @@ def api_auth_login():
         'user': {'id': user_id, 'name': name, 'email': user_email, 'role': role, 'workspace_id': workspace_id}
     }))
     resp.set_cookie('session_token', session_token, httponly=True, samesite='Lax',
-                    secure=COOKIE_SECURE, max_age=SESSION_DURATION_HOURS * 3600)
+                    secure=COOKIE_SECURE, path='/', max_age=SESSION_DURATION_HOURS * 3600)
     return resp
 
 
@@ -604,7 +616,7 @@ def api_auth_logout():
         conn.commit()
         conn.close()
     resp = make_response(jsonify({'success': True}))
-    resp.delete_cookie('session_token')
+    resp.delete_cookie('session_token', path='/')
     return resp
 
 
@@ -618,6 +630,12 @@ def api_auth_me():
     if not user:
         return jsonify({'success': False, 'user': None, 'auth_required': True}), 401
     return jsonify({'success': True, 'user': user})
+
+
+@app.route('/api/auth/has-users', methods=['GET'])
+def api_auth_has_users():
+    """Check if any users exist (determines bootstrap vs login)."""
+    return jsonify({'has_users': _has_users()})
 
 
 @app.route('/api/auth/users', methods=['GET'])

@@ -138,6 +138,16 @@
             ? 'http://localhost:5000'
             : window.location.origin;
 
+        // Wrap native fetch to always include credentials for API calls
+        // This ensures session cookies are sent with every request
+        const _origFetch = window.fetch.bind(window);
+        window.fetch = function(url, opts = {}) {
+            if (typeof url === 'string' && url.startsWith(API_BASE)) {
+                opts = { ...opts, credentials: 'include' };
+            }
+            return _origFetch(url, opts);
+        };
+
         // Trigger pill color mapping
         function getTriggerStyle(trigger) {
             const t = trigger.toLowerCase();
@@ -196,10 +206,24 @@
                 try {
                     const res = await fetch(`${API_BASE}/api/auth/me`);
                     const data = await res.json();
-                    if (data.needs_bootstrap) { setAuthState('bootstrap'); }
-                    else if (data.success && data.user) { setUser(data.user); setAuthState('authenticated'); }
-                    else { setAuthState('login'); }
-                } catch (e) { setAuthState('login'); }
+                    if (data.needs_bootstrap) {
+                        setAuthState('bootstrap');
+                    } else if (data.success && data.user) {
+                        setUser(data.user);
+                        setAuthState('authenticated');
+                    } else {
+                        // 401 or no user — check if bootstrap needed vs login
+                        try {
+                            const huRes = await fetch(`${API_BASE}/api/auth/has-users`);
+                            const huData = await huRes.json();
+                            setAuthState(huData.has_users ? 'login' : 'bootstrap');
+                        } catch (e2) {
+                            setAuthState('login');
+                        }
+                    }
+                } catch (e) {
+                    setAuthState('login');
+                }
             };
 
             const handleBootstrap = async (form) => {
