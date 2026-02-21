@@ -1838,6 +1838,8 @@
             const [trends, setTrends] = useState([]);
             const [rankings, setRankings] = useState([]);
             const [momentumCities, setMomentumCities] = useState([]);
+            const [stateSummary, setStateSummary] = useState([]);
+            const [momentumStateFilter, setMomentumStateFilter] = useState('');
             const [loading, setLoading] = useState(false);
             const [genLoading, setGenLoading] = useState(false);
             const [optLoading, setOptLoading] = useState(false);
@@ -1849,6 +1851,7 @@
                 fetchTrends();
                 fetchRankings();
                 fetchMomentum();
+                fetchStateSummary();
             }, []);
 
             const fetchLatestBrief = async () => {
@@ -1886,12 +1889,23 @@
                 } catch (e) { console.error('Rankings fetch error:', e); }
             };
 
-            const fetchMomentum = async () => {
+            const fetchMomentum = async (stateFilter) => {
                 try {
-                    const res = await fetch(`${API_BASE}/api/intelligence/momentum/top`);
+                    let url = `${API_BASE}/api/intel/momentum/top-cities?limit=10`;
+                    const sf = stateFilter !== undefined ? stateFilter : momentumStateFilter;
+                    if (sf) url += `&state=${sf}`;
+                    const res = await fetch(url);
                     const data = await res.json();
                     setMomentumCities(data.cities || []);
                 } catch (e) { console.error('Momentum fetch error:', e); }
+            };
+
+            const fetchStateSummary = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/intel/momentum/state-summary`);
+                    const data = await res.json();
+                    setStateSummary(data.states || []);
+                } catch (e) { console.error('State summary fetch error:', e); }
             };
 
             const runOptimization = async () => {
@@ -1901,7 +1915,7 @@
                     const res = await fetch(`${API_BASE}/api/intelligence/optimization/run`, { method: 'POST' });
                     const data = await res.json();
                     if (data.error) { setError(data.error); }
-                    else { await fetchMomentum(); await fetchRankings(); }
+                    else { await fetchMomentum(); await fetchStateSummary(); await fetchRankings(); }
                 } catch (e) { setError('Failed to run optimization'); }
                 setOptLoading(false);
             };
@@ -2006,6 +2020,29 @@
                     {/* MOMENTUM INDEX TAB */}
                     {subTab === 'momentum' && (
                         <div>
+                            {/* State tiles row */}
+                            {stateSummary.length > 0 && (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem', marginBottom: '1.5rem' }}>
+                                    {stateSummary.map(s => (
+                                        <div key={s.state} onClick={() => {
+                                            const newSt = momentumStateFilter === s.state ? '' : s.state;
+                                            setMomentumStateFilter(newSt);
+                                            fetchMomentum(newSt);
+                                        }} style={{
+                                            background: momentumStateFilter === s.state ? 'rgba(16,185,129,0.12)' : '#1e293b',
+                                            border: momentumStateFilter === s.state ? '1px solid #34d399' : '1px solid #334155',
+                                            borderRadius: '10px', padding: '1rem', cursor: 'pointer', textAlign: 'center',
+                                            transition: 'all 0.2s'
+                                        }}>
+                                            <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '0.9rem', fontWeight: 700, color: '#f1f5f9', marginBottom: '0.3rem' }}>{s.state}</div>
+                                            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '1.4rem', fontWeight: 700, color: '#34d399' }}>{s.weighted_signals_7d}</div>
+                                            <div style={{ fontSize: '0.65rem', color: '#64748b', marginTop: '0.2rem' }}>weighted 7d</div>
+                                            <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '0.15rem' }}>avg {s.avg_momentum_score}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
                             <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', alignItems: 'center' }}>
                                 {user?.role === 'admin' && (
                                     <button onClick={runOptimization} disabled={optLoading} style={{
@@ -2013,7 +2050,9 @@
                                         cursor: optLoading ? 'not-allowed' : 'pointer'
                                     }}>{optLoading ? 'Running...' : 'Run Optimization'}</button>
                                 )}
-                                <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Top 10 cities by momentum</span>
+                                <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                                    Top {momentumStateFilter ? momentumStateFilter : 'all'} cities by momentum (7d)
+                                </span>
                             </div>
 
                             {momentumCities.length > 0 ? (
