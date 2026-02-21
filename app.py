@@ -2003,6 +2003,302 @@ def api_discovery_source_refresh():
     return jsonify({'success': True, 'sources': get_source_refresh_times()})
 
 
+# ===================================================================
+# STATEWIDE SEARCH + RANKINGS
+# ===================================================================
+
+STATEWIDE_STATES = {
+    'TX': 'Texas',
+    'AZ': 'Arizona',
+    'GA': 'Georgia',
+    'NC': 'North Carolina',
+    'FL': 'Florida',
+}
+
+def _run_statewide_search(state_abbr):
+    """
+    Run statewide BTR search for a single state.
+    Uses max 2 SerpAPI queries, 24h caching, Claude extraction (no web search tool).
+    Returns (items_list, error_message) tuple.
+    Each item: {event_type, city, state, company, units, summary, confidence, title, url, snippet, date}
+    """
+    from serpapi_client import cached_serpapi_search, get_cached, set_cached, SerpAPIError
+
+    state_name = STATEWIDE_STATES.get(state_abbr, state_abbr)
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+
+    # Check full-result cache first (Claude-processed output)
+    result_cache_key = f"statewide_result:{state_abbr.lower()}:{today}"
+    cached_result = get_cached(result_cache_key)
+    if cached_result is not None:
+        print(f"[Statewide] Cache hit for {state_abbr} processed results")
+        return cached_result, None
+
+    serp_key = os.getenv('SERPAPI_API_KEY', '')
+    if not serp_key:
+        return [], "SerpAPI key not configured. Statewide search requires SerpAPI."
+
+    # Stage A: 2 SerpAPI queries (cached per-query for 24h via cached_serpapi_search)
+    q1 = f'("build to rent" OR BTR OR "single-family rental") "{state_name}" (acquires OR acquisition OR sale OR sells OR JV OR recap OR refinancing OR "credit facility")'
+    q2 = f'("build to rent" OR BTR OR "horizontal multifamily") "{state_name}" (groundbreaking OR "under construction" OR permit OR rezoning OR entitlement OR "planning commission")'
+
+    all_candidates = []
+    seen_links = set()
+
+    for query in [q1, q2]:
+        try:
+            results = cached_serpapi_search(query, num=15, feature='statewide', city=state_abbr, state=state_abbr)
+            for r in results:
+                link = r.get('link', '')
+                if link and link not in seen_links:
+                    seen_links.add(link)
+                    all_candidates.append(r)
+        except SerpAPIError as e:
+            print(f"[Statewide] SerpAPI error for {state_abbr}: {e}")
+            # Continue with what we have
+
+    if not all_candidates:
+        return [], None
+
+    # Stage B: Claude extraction (no web search tool)
+    candidates_json = json.dumps([{
+        'title': c.get('title', ''),
+        'url': c.get('link', ''),
+        'snippet': c.get('snippet', ''),
+        'source': c.get('source', ''),
+        'date': c.get('date', ''),
+    } for c in all_candidates], indent=2)
+
+    today_str = datetime.utcnow().strftime('%B %d, %Y')
+    ninety_days_ago = (datetime.utcnow() - timedelta(days=90)).strftime('%B %Y')
+
+    extraction_prompt = f"""You are an analyst for a Build-to-Rent (BTR) and Single-Family Rental (SFR) insurance brokerage.
+
+Analyze these search results for BTR/SFR activity in {state_name} ({state_abbr}).
+
+CANDIDATE RESULTS:
+{candidates_json}
+
+Today is {today_str}. Only include events from the last 90 days (since {ninety_days_ago}).
+
+For EACH relevant result, extract:
+- event_type: one of "acquisition", "sale", "groundbreaking", "permit", "rezoning", "financing", "JV", "construction", "other"
+- city: infer from title/snippet. If unknown, set "Unknown"
+- state: "{state_abbr}"
+- company: the operator/developer/buyer involved (if identifiable)
+- units: numeric estimate if mentioned, else null
+- summary: one-sentence description of the event
+- confidence: "high" (explicit BTR/SFR mention), "medium" (likely BTR context), "low" (possible but uncertain)
+- title: the original title
+- url: the original url
+- date: the date from the result if available
+
+IMPORTANT:
+- Skip results that are clearly NOT about BTR/SFR real estate (e.g. other industries)
+- One result may yield one item
+- Do NOT fabricate data; only extract what is in the snippets/titles
+
+Return ONLY valid JSON:
+{{"items": [
+  {{"event_type": "...", "city": "...", "state": "{state_abbr}", "company": "...", "units": null, "summary": "...", "confidence": "...", "title": "...", "url": "...", "date": "..."}}
+]}}"""
+
+    try:
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": extraction_prompt}]
+        )
+        response_text = message.content[0].text if message.content else ''
+
+        # Parse JSON from response
+        items = []
+        try:
+            # Try direct parse
+            parsed = json.loads(response_text)
+            items = parsed.get('items', [])
+        except json.JSONDecodeError:
+            # Find JSON block in response
+            start = response_text.find('{"items"')
+            if start == -1:
+                start = response_text.find('```json')
+                if start != -1:
+                    start = response_text.find('{', start)
+            if start != -1:
+                depth = 0
+                end = start
+                for i in range(start, len(response_text)):
+                    if response_text[i] == '{':
+                        depth += 1
+                    elif response_text[i] == '}':
+                        depth -= 1
+                        if depth == 0:
+                            end = i + 1
+                            break
+                try:
+                    parsed = json.loads(response_text[start:end])
+                    items = parsed.get('items', [])
+                except json.JSONDecodeError:
+                    print(f"[Statewide] Failed to parse Claude response for {state_abbr}")
+
+        # Cache processed results for 24h
+        set_cached(result_cache_key, items)
+        return items, None
+
+    except Exception as e:
+        print(f"[Statewide] Claude extraction error for {state_abbr}: {e}")
+        traceback.print_exc()
+        return [], str(e)
+
+
+def _compute_activity_scores(items, days=7):
+    """
+    Compute activity scores grouped by city from statewide items.
+    Returns dict: {city: {activity_score, signals_count, dominant_event_types}}
+    """
+    from collections import Counter
+    cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+
+    city_items = {}
+    for item in items:
+        city = item.get('city', 'Unknown')
+        if city == 'Unknown':
+            continue
+        if city not in city_items:
+            city_items[city] = []
+        city_items[city].append(item)
+
+    city_scores = {}
+    for city, city_item_list in city_items.items():
+        score = 0
+        event_counts = Counter()
+
+        for item in city_item_list:
+            event_type = item.get('event_type', 'other')
+            confidence = item.get('confidence', 'low')
+            event_counts[event_type] += 1
+
+            # Base point per signal
+            base = 1
+            # Confidence weight
+            if confidence == 'high':
+                base *= 2.0
+            elif confidence == 'medium':
+                base *= 1.5
+
+            # Event type weight
+            if event_type in ('acquisition', 'sale', 'financing', 'JV'):
+                base *= 3.0  # Capital events weighted higher
+            elif event_type in ('groundbreaking', 'construction', 'permit', 'rezoning'):
+                base *= 2.0  # Construction activity
+            else:
+                base *= 1.0
+
+            score += base
+
+        # Dominant event types (top 3)
+        dominant = [et for et, _ in event_counts.most_common(3)]
+
+        city_scores[city] = {
+            'city': city,
+            'activity_score': round(score, 1),
+            'signals_count': len(city_item_list),
+            'dominant_event_types': dominant,
+        }
+
+    return city_scores
+
+
+@app.route('/api/discovery/statewide/run', methods=['POST'])
+@require_auth
+def api_statewide_run():
+    """Run statewide search for a single state. Returns items immediately (cached)."""
+    data = request.json or {}
+    state = data.get('state', '').upper()
+    if state not in STATEWIDE_STATES:
+        return jsonify({'success': False, 'message': f'State must be one of: {", ".join(STATEWIDE_STATES.keys())}'}), 400
+
+    try:
+        items, error = _run_statewide_search(state)
+        if error:
+            return jsonify({'success': False, 'message': error}), 500
+        return jsonify({'success': True, 'state': state, 'items': items, 'count': len(items)})
+    except Exception as e:
+        print(f"[Statewide] Run error: {e}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/discovery/state-summary', methods=['GET'])
+@require_auth
+def api_state_summary():
+    """Get activity summary for a state: top cities (7d + 30d) + items."""
+    from serpapi_client import get_cached
+    state = request.args.get('state', '').upper()
+    if state not in STATEWIDE_STATES:
+        return jsonify({'success': False, 'message': 'Invalid state'}), 400
+
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    result_cache_key = f"statewide_result:{state.lower()}:{today}"
+    items = get_cached(result_cache_key) or []
+
+    # Compute top cities
+    scores_7d = _compute_activity_scores(items, days=7)
+    scores_30d = _compute_activity_scores(items, days=30)
+
+    top_7d = sorted(scores_7d.values(), key=lambda x: x['activity_score'], reverse=True)[:3]
+    top_30d = sorted(scores_30d.values(), key=lambda x: x['activity_score'], reverse=True)[:3]
+
+    return jsonify({
+        'success': True,
+        'state': state,
+        'top_cities_7d': top_7d,
+        'top_cities_30d': top_30d,
+        'items': items,
+        'total_signals': len(items),
+    })
+
+
+@app.route('/api/discovery/state-rankings', methods=['GET'])
+@require_auth
+def api_state_rankings():
+    """Get rankings across all 5 states for the last 7 days."""
+    from serpapi_client import get_cached
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+
+    rankings = []
+    for state_abbr in STATEWIDE_STATES:
+        result_cache_key = f"statewide_result:{state_abbr.lower()}:{today}"
+        items = get_cached(result_cache_key) or []
+
+        capital_count = 0
+        construction_count = 0
+        for item in items:
+            et = item.get('event_type', '')
+            if et in ('acquisition', 'sale', 'financing', 'JV'):
+                capital_count += 1
+            elif et in ('groundbreaking', 'construction', 'permit', 'rezoning'):
+                construction_count += 1
+
+        scores = _compute_activity_scores(items, days=7)
+        total_score = sum(s['activity_score'] for s in scores.values())
+        top_cities = sorted(scores.values(), key=lambda x: x['activity_score'], reverse=True)[:3]
+
+        rankings.append({
+            'state': state_abbr,
+            'state_name': STATEWIDE_STATES[state_abbr],
+            'state_activity_score': round(total_score, 1),
+            'total_signals': len(items),
+            'capital_events_count': capital_count,
+            'construction_signals_count': construction_count,
+            'top_cities': top_cities,
+            'last_updated': today if items else None,
+        })
+
+    rankings.sort(key=lambda x: x['state_activity_score'], reverse=True)
+    return jsonify({'success': True, 'rankings': rankings})
+
+
 # --- Scheduler Setup ---
 def _scheduled_discovery():
     """Wrapper that enqueues the scheduled discovery job (runs ALL adapters including permits)."""
