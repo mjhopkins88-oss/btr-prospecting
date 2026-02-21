@@ -131,14 +131,14 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect, useRef, useCallback } = React;
 
         // Get API base URL (works both locally and on Railway)
         const API_BASE = window.location.hostname === 'localhost'
             ? 'http://localhost:5000'
             : window.location.origin;
 
-        // Trigger pill color mapping (spec: Capital/Financing=purple, Construction=cyan, Expansion=teal, Refinance=amber, JV/Partner=pink, Default=slate)
+        // Trigger pill color mapping
         function getTriggerStyle(trigger) {
             const t = trigger.toLowerCase();
             if (t.includes('capital') || t.includes('financing') || t.includes('institutional'))
@@ -160,7 +160,163 @@
             return { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' };
         }
 
-        function App() {
+        // Generate stable prospect_key for CRM matching
+        function makeProspectKey(company, website, city, state) {
+            const normCompany = (company || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (website) {
+                const normDomain = (website || '').toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
+                return normCompany + '|' + normDomain;
+            }
+            const normCity = (city || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const normState = (state || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            return normCompany + '|' + normCity + '|' + normState;
+        }
+
+        // CRM status color mapping
+        const CRM_STATUS_COLORS = {
+            'New': { bg: 'rgba(99,102,241,0.15)', color: '#a5b4fc' },
+            'Contacted': { bg: 'rgba(6,182,212,0.15)', color: '#67e8f9' },
+            'InDiscussion': { bg: 'rgba(245,158,11,0.15)', color: '#fcd34d' },
+            'Quoted': { bg: 'rgba(168,85,247,0.15)', color: '#c4b5fd' },
+            'Won': { bg: 'rgba(16,185,129,0.15)', color: '#34d399' },
+            'Lost': { bg: 'rgba(239,68,68,0.15)', color: '#f87171' },
+            'Nurture': { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' },
+        };
+        const CRM_STATUSES = ['New', 'Contacted', 'InDiscussion', 'Quoted', 'Won', 'Lost', 'Nurture'];
+
+        // ======= ROOT: Auth Gate =======
+        function Root() {
+            const [authState, setAuthState] = useState('loading'); // 'loading','bootstrap','login','authenticated'
+            const [user, setUser] = useState(null);
+            const [authError, setAuthError] = useState('');
+
+            useEffect(() => { checkAuth(); }, []);
+
+            const checkAuth = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/auth/me`);
+                    const data = await res.json();
+                    if (data.needs_bootstrap) { setAuthState('bootstrap'); }
+                    else if (data.success && data.user) { setUser(data.user); setAuthState('authenticated'); }
+                    else { setAuthState('login'); }
+                } catch (e) { setAuthState('login'); }
+            };
+
+            const handleBootstrap = async (form) => {
+                setAuthError('');
+                try {
+                    const res = await fetch(`${API_BASE}/api/auth/bootstrap`, {
+                        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(form)
+                    });
+                    const data = await res.json();
+                    if (data.success) { setUser(data.user); setAuthState('authenticated'); }
+                    else { setAuthError(data.message || 'Bootstrap failed'); }
+                } catch (e) { setAuthError('Network error'); }
+            };
+
+            const handleLogin = async (email, password) => {
+                setAuthError('');
+                try {
+                    const res = await fetch(`${API_BASE}/api/auth/login`, {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ email, password })
+                    });
+                    const data = await res.json();
+                    if (data.success) { setUser(data.user); setAuthState('authenticated'); }
+                    else { setAuthError(data.message || 'Login failed'); }
+                } catch (e) { setAuthError('Network error'); }
+            };
+
+            const handleLogout = async () => {
+                await fetch(`${API_BASE}/api/auth/logout`, { method: 'POST' });
+                setUser(null);
+                setAuthState('login');
+            };
+
+            if (authState === 'loading') return (
+                <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                    <div style={{fontFamily:"'Orbitron',sans-serif",color:'#34d399',fontSize:'1.2rem',animation:'pulse 1.5s ease-in-out infinite'}}>Loading...</div>
+                </div>
+            );
+            if (authState === 'bootstrap') return <BootstrapPage onBootstrap={handleBootstrap} error={authError} />;
+            if (authState === 'login') return <LoginPage onLogin={handleLogin} error={authError} />;
+            return <App user={user} onLogout={handleLogout} />;
+        }
+
+        // ======= LOGIN PAGE =======
+        function LoginPage({ onLogin, error }) {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [submitting, setSubmitting] = useState(false);
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setSubmitting(true);
+                await onLogin(email, password);
+                setSubmitting(false);
+            };
+            return (
+                <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:'2rem'}}>
+                    <div style={{background:'#1e293b',border:'1px solid #334155',borderRadius:'16px',padding:'2.5rem',maxWidth:'400px',width:'100%'}}>
+                        <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:'1.5rem',fontWeight:900,
+                            background:'linear-gradient(135deg,#34d399 0%,#22d3ee 100%)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',
+                            marginBottom:'0.5rem',textAlign:'center'}}>BTR INTELLIGENCE</h1>
+                        <p style={{color:'#64748b',textAlign:'center',marginBottom:'1.5rem',fontSize:'0.9rem'}}>Sign in to continue</p>
+                        {error && <div style={{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:'8px',padding:'0.75rem',marginBottom:'1rem',color:'#f87171',fontSize:'0.85rem',textAlign:'center'}}>{error}</div>}
+                        <form onSubmit={handleSubmit} style={{display:'flex',flexDirection:'column',gap:'0.85rem'}}>
+                            <input type="email" required placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)}
+                                style={{...styles.input,width:'100%',minWidth:0}} />
+                            <input type="password" required placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)}
+                                style={{...styles.input,width:'100%',minWidth:0}} />
+                            <button type="submit" disabled={submitting}
+                                style={{...styles.btnPrimary,width:'100%',padding:'0.75rem',fontSize:'1rem',...(submitting?{opacity:0.5}:{})}}>
+                                {submitting ? 'Signing in...' : 'Sign In'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        // ======= BOOTSTRAP PAGE =======
+        function BootstrapPage({ onBootstrap, error }) {
+            const [form, setForm] = useState({ workspace_name: '', name: '', email: '', password: '' });
+            const [submitting, setSubmitting] = useState(false);
+            const update = (k, v) => setForm(f => ({...f, [k]: v}));
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setSubmitting(true);
+                await onBootstrap(form);
+                setSubmitting(false);
+            };
+            return (
+                <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:'2rem'}}>
+                    <div style={{background:'#1e293b',border:'1px solid #334155',borderRadius:'16px',padding:'2.5rem',maxWidth:'440px',width:'100%'}}>
+                        <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:'1.5rem',fontWeight:900,
+                            background:'linear-gradient(135deg,#34d399 0%,#22d3ee 100%)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',
+                            marginBottom:'0.5rem',textAlign:'center'}}>SETUP</h1>
+                        <p style={{color:'#64748b',textAlign:'center',marginBottom:'1.5rem',fontSize:'0.9rem'}}>Create your workspace and admin account</p>
+                        {error && <div style={{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:'8px',padding:'0.75rem',marginBottom:'1rem',color:'#f87171',fontSize:'0.85rem',textAlign:'center'}}>{error}</div>}
+                        <form onSubmit={handleSubmit} style={{display:'flex',flexDirection:'column',gap:'0.85rem'}}>
+                            <input required placeholder="Workspace Name (e.g., BTR Agency)" value={form.workspace_name} onChange={e=>update('workspace_name',e.target.value)}
+                                style={{...styles.input,width:'100%',minWidth:0}} />
+                            <input required placeholder="Your Name" value={form.name} onChange={e=>update('name',e.target.value)}
+                                style={{...styles.input,width:'100%',minWidth:0}} />
+                            <input type="email" required placeholder="Email" value={form.email} onChange={e=>update('email',e.target.value)}
+                                style={{...styles.input,width:'100%',minWidth:0}} />
+                            <input type="password" required placeholder="Password (8+ chars)" value={form.password} onChange={e=>update('password',e.target.value)}
+                                style={{...styles.input,width:'100%',minWidth:0}} />
+                            <button type="submit" disabled={submitting}
+                                style={{...styles.btnPrimary,width:'100%',padding:'0.75rem',fontSize:'1rem',...(submitting?{opacity:0.5}:{})}}>
+                                {submitting ? 'Creating...' : 'Create Workspace'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        // ======= MAIN APP =======
+        function App({ user, onLogout }) {
             const [activeTab, setActiveTab] = useState('search');
             const [prospects, setProspects] = useState([]);
             const [loading, setLoading] = useState(false);
@@ -171,6 +327,9 @@
             const [showEmailModal, setShowEmailModal] = useState(false);
             const [searchStatus, setSearchStatus] = useState('');
             const [cooldown, setCooldown] = useState(0);
+            // CRM state
+            const [crmStatuses, setCrmStatuses] = useState({});
+            const [touchpointTarget, setTouchpointTarget] = useState(null); // {lead_id, company_name}
 
             useEffect(() => { loadProspects(); }, []);
 
@@ -180,11 +339,27 @@
                 return () => clearTimeout(timer);
             }, [cooldown]);
 
+            // Fetch CRM statuses for all visible prospects
+            const loadCrmStatuses = useCallback(async (prospectsList) => {
+                if (!user || !prospectsList || prospectsList.length === 0) return;
+                const keys = prospectsList.map(p => makeProspectKey(p.company, null, p.city, p.state));
+                const uniqueKeys = [...new Set(keys)].slice(0, 200);
+                if (uniqueKeys.length === 0) return;
+                try {
+                    const res = await fetch(`${API_BASE}/api/crm/leads/bulk-status?keys=${encodeURIComponent(uniqueKeys.join(','))}`);
+                    const data = await res.json();
+                    if (data.success) setCrmStatuses(data.statuses || {});
+                } catch (e) { console.error('CRM bulk status error:', e); }
+            }, [user]);
+
             const loadProspects = async () => {
                 try {
                     const response = await fetch(`${API_BASE}/api/prospects`);
                     const data = await response.json();
-                    if (data.success) { setProspects(data.prospects); }
+                    if (data.success) {
+                        setProspects(data.prospects);
+                        loadCrmStatuses(data.prospects);
+                    }
                 } catch (error) { console.error('Error loading prospects:', error); }
             };
 
@@ -367,10 +542,28 @@
                 return (b.score || 0) - (a.score || 0);
             });
 
+            const saveToPipeline = async (prospect) => {
+                const pk = makeProspectKey(prospect.company, null, prospect.city, prospect.state);
+                try {
+                    const res = await fetch(`${API_BASE}/api/crm/lead/upsert`, {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ prospect_key: pk, company_name: prospect.company })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        setCrmStatuses(prev => ({...prev, [pk]: { lead_id: data.lead.id, status: data.lead.status, owner_user_id: data.lead.owner_user_id }}));
+                    }
+                } catch (e) { console.error('Save to pipeline error:', e); }
+            };
+
+            const openTouchpoint = (leadId, companyName) => {
+                setTouchpointTarget({ lead_id: leadId, company_name: companyName });
+            };
+
             return (
                 <div style={styles.container}>
-                    <Header />
-                    <TabBar activeTab={activeTab} setActiveTab={setActiveTab} />
+                    <Header user={user} onLogout={onLogout} />
+                    <TabBar activeTab={activeTab} setActiveTab={setActiveTab} user={user} />
                     {activeTab === 'search' && (
                         <React.Fragment>
                             <Stats prospects={prospects} />
@@ -403,10 +596,16 @@
                                 prospects={filteredProspects}
                                 onGenerateEmail={generateEmail}
                                 onDelete={deleteProspect}
+                                crmStatuses={crmStatuses}
+                                onSaveToPipeline={saveToPipeline}
+                                onLogTouchpoint={openTouchpoint}
+                                user={user}
                             />
                         </React.Fragment>
                     )}
                     {activeTab === 'discovery' && <DailyDiscovery />}
+                    {activeTab === 'pipeline' && <PipelinePage user={user} />}
+                    {activeTab === 'followups' && <FollowUpsPage user={user} />}
                     {showEmailModal && (
                         <EmailModal
                             email={emailTemplate}
@@ -414,23 +613,44 @@
                             onClose={() => setShowEmailModal(false)}
                         />
                     )}
+                    {touchpointTarget && (
+                        <TouchpointModal
+                            target={touchpointTarget}
+                            onClose={() => setTouchpointTarget(null)}
+                            onSaved={() => { loadCrmStatuses(prospects); }}
+                        />
+                    )}
                 </div>
             );
         }
 
-        function Header() {
+        function Header({ user, onLogout }) {
             return (
-                <div style={styles.header}>
-                    <h1 style={styles.title}>BTR INTELLIGENCE TERMINAL</h1>
-                    <p style={styles.subtitle}>AI-Powered Lead Intelligence System</p>
+                <div style={{...styles.header, display:'flex', justifyContent:'space-between', alignItems:'center', textAlign:'left'}}>
+                    <div>
+                        <h1 style={{...styles.title, fontSize:'1.8rem'}}>BTR INTELLIGENCE TERMINAL</h1>
+                        <p style={styles.subtitle}>AI-Powered Lead Intelligence System</p>
+                    </div>
+                    {user && (
+                        <div style={{display:'flex',alignItems:'center',gap:'0.75rem',flexShrink:0}}>
+                            <span style={{fontSize:'0.85rem',color:'#94a3b8'}}>{user.name}</span>
+                            <span style={{fontSize:'0.65rem',padding:'0.15rem 0.5rem',borderRadius:'4px',
+                                background: user.role==='admin' ? 'rgba(168,85,247,0.15)' : 'rgba(6,182,212,0.15)',
+                                color: user.role==='admin' ? '#c4b5fd' : '#67e8f9',
+                                textTransform:'uppercase',fontWeight:600}}>{user.role}</span>
+                            <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.75rem'}} onClick={onLogout}>Logout</button>
+                        </div>
+                    )}
                 </div>
             );
         }
 
-        function TabBar({ activeTab, setActiveTab }) {
+        function TabBar({ activeTab, setActiveTab, user }) {
             const tabs = [
-                { id: 'search', label: 'Prospect Search', icon: '/' },
-                { id: 'discovery', label: 'Daily Discovery', icon: '/' },
+                { id: 'search', label: 'Prospect Search' },
+                { id: 'discovery', label: 'Daily Discovery' },
+                { id: 'pipeline', label: 'My Pipeline' },
+                { id: 'followups', label: 'Follow-ups Due' },
             ];
             return (
                 <div style={ds.tabBar}>
@@ -571,7 +791,7 @@
             );
         }
 
-        function ProspectsList({ prospects, onGenerateEmail, onDelete }) {
+        function ProspectsList({ prospects, onGenerateEmail, onDelete, crmStatuses, onSaveToPipeline, onLogTouchpoint, user }) {
             if (prospects.length === 0) {
                 return (
                     <div style={styles.empty}>
@@ -583,14 +803,22 @@
             }
             return (
                 <div style={styles.grid}>
-                    {prospects.map((prospect) => (
-                        <ProspectCard
-                            key={prospect.id}
-                            prospect={prospect}
-                            onGenerateEmail={onGenerateEmail}
-                            onDelete={onDelete}
-                        />
-                    ))}
+                    {prospects.map((prospect) => {
+                        const pk = makeProspectKey(prospect.company, null, prospect.city, prospect.state);
+                        const crmInfo = (crmStatuses || {})[pk];
+                        return (
+                            <ProspectCard
+                                key={prospect.id}
+                                prospect={prospect}
+                                onGenerateEmail={onGenerateEmail}
+                                onDelete={onDelete}
+                                crmInfo={crmInfo}
+                                onSaveToPipeline={onSaveToPipeline}
+                                onLogTouchpoint={onLogTouchpoint}
+                                user={user}
+                            />
+                        );
+                    })}
                 </div>
             );
         }
@@ -608,7 +836,7 @@
             );
         }
 
-        function ProspectCard({ prospect, onGenerateEmail, onDelete }) {
+        function ProspectCard({ prospect, onGenerateEmail, onDelete, crmInfo, onSaveToPipeline, onLogTouchpoint, user }) {
             const [showEmailOptions, setShowEmailOptions] = useState(false);
             const [whyNowExpanded, setWhyNowExpanded] = useState(false);
             const [emailPurpose, setEmailPurpose] = useState('cold_outreach');
@@ -654,7 +882,18 @@
                     {/* Header: Company + Score */}
                     <div style={styles.cardHeader}>
                         <div style={{flex: 1, minWidth: 0}}>
-                            <h3 style={styles.companyName}>{prospect.company}</h3>
+                            <div style={{display:'flex',alignItems:'center',gap:'0.5rem',flexWrap:'wrap'}}>
+                                <h3 style={{...styles.companyName,marginBottom:0}}>{prospect.company}</h3>
+                                {crmInfo && (
+                                    <span style={{fontSize:'0.65rem',padding:'0.15rem 0.45rem',borderRadius:'4px',fontWeight:600,
+                                        background:(CRM_STATUS_COLORS[crmInfo.status]||CRM_STATUS_COLORS.New).bg,
+                                        color:(CRM_STATUS_COLORS[crmInfo.status]||CRM_STATUS_COLORS.New).color,
+                                        textTransform:'uppercase',letterSpacing:'0.03em'}}>{crmInfo.status}</span>
+                                )}
+                                {crmInfo && crmInfo.owner_name && (
+                                    <span style={{fontSize:'0.65rem',color:'#64748b'}}>{crmInfo.owner_name}</span>
+                                )}
+                            </div>
                             <p style={styles.location}>{prospect.city}, {prospect.state}{foundDate ? ` · ${foundDate}` : ''}</p>
                         </div>
                         <div style={{display: 'flex', gap: '0.6rem', alignItems: 'center', flexShrink: 0}}>
@@ -846,6 +1085,15 @@
 
                     {/* Action Buttons */}
                     <div style={{...styles.cardActions, justifyContent: 'flex-end'}}>
+                        {!crmInfo ? (
+                            <button className="action-btn" style={{...styles.actionBtn,borderColor:'#10b981',color:'#34d399'}} onClick={() => onSaveToPipeline(prospect)}>
+                                Save to Pipeline
+                            </button>
+                        ) : (
+                            <button className="action-btn" style={styles.actionBtn} onClick={() => onLogTouchpoint(crmInfo.lead_id, prospect.company)}>
+                                Log Touchpoint
+                            </button>
+                        )}
                         <button className="action-btn" style={styles.actionBtn} onClick={() => setShowEmailOptions(!showEmailOptions)}>
                             {showEmailOptions ? 'Cancel' : 'Generate Email'}
                         </button>
@@ -860,9 +1108,6 @@
                         )}
                         <button className="action-btn btn-disabled" style={styles.actionBtn} disabled>
                             Call Angle
-                        </button>
-                        <button className="action-btn btn-disabled" style={styles.actionBtn} disabled>
-                            Follow
                         </button>
                         <button className="action-btn" style={styles.actionBtn} onClick={() => onDelete(prospect.id)}>
                             Delete
@@ -1231,6 +1476,268 @@
             );
         }
 
+        // ======= TOUCHPOINT MODAL =======
+        function TouchpointModal({ target, onClose, onSaved }) {
+            const [type, setType] = useState('Call');
+            const [outcome, setOutcome] = useState('');
+            const [notes, setNotes] = useState('');
+            const [nextFollowup, setNextFollowup] = useState('');
+            const [saving, setSaving] = useState(false);
+
+            const handleSave = async () => {
+                setSaving(true);
+                try {
+                    const body = { type, outcome: outcome || null, notes: notes || null };
+                    if (nextFollowup) body.next_followup_at = new Date(nextFollowup).toISOString();
+                    const res = await fetch(`${API_BASE}/api/crm/leads/${target.lead_id}/touchpoints`, {
+                        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+                    });
+                    const data = await res.json();
+                    if (data.success) { onSaved(); onClose(); }
+                } catch (e) { console.error('Touchpoint save error:', e); }
+                setSaving(false);
+            };
+
+            return (
+                <div style={styles.modalOverlay} onClick={onClose}>
+                    <div style={{...styles.modal,maxWidth:'480px'}} onClick={e => e.stopPropagation()}>
+                        <div style={styles.modalHeader}>
+                            <h2 style={{fontSize:'1.1rem'}}>Log Touchpoint — {target.company_name}</h2>
+                            <button style={styles.closeBtn} onClick={onClose}>&#10005;</button>
+                        </div>
+                        <div style={{display:'flex',flexDirection:'column',gap:'0.85rem'}}>
+                            <div>
+                                <label style={{fontSize:'0.75rem',color:'#64748b',fontWeight:600,textTransform:'uppercase',display:'block',marginBottom:'0.3rem'}}>Type</label>
+                                <select style={{...styles.select,width:'100%'}} value={type} onChange={e=>setType(e.target.value)}>
+                                    <option value="Call">Call</option>
+                                    <option value="Email">Email</option>
+                                    <option value="LinkedIn">LinkedIn</option>
+                                    <option value="Meeting">Meeting</option>
+                                    <option value="Quote">Quote</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style={{fontSize:'0.75rem',color:'#64748b',fontWeight:600,textTransform:'uppercase',display:'block',marginBottom:'0.3rem'}}>Outcome</label>
+                                <select style={{...styles.select,width:'100%'}} value={outcome} onChange={e=>setOutcome(e.target.value)}>
+                                    <option value="">— Select —</option>
+                                    <option value="Connected">Connected</option>
+                                    <option value="Left Voicemail">Left Voicemail</option>
+                                    <option value="No Answer">No Answer</option>
+                                    <option value="Meeting Set">Meeting Set</option>
+                                    <option value="Sent Info">Sent Info</option>
+                                    <option value="Not Interested">Not Interested</option>
+                                    <option value="Follow Up Later">Follow Up Later</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style={{fontSize:'0.75rem',color:'#64748b',fontWeight:600,textTransform:'uppercase',display:'block',marginBottom:'0.3rem'}}>Notes</label>
+                                <textarea rows={3} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Call notes..."
+                                    style={{...styles.input,width:'100%',minWidth:0,resize:'vertical',fontFamily:"'Inter',sans-serif"}} />
+                            </div>
+                            <div>
+                                <label style={{fontSize:'0.75rem',color:'#64748b',fontWeight:600,textTransform:'uppercase',display:'block',marginBottom:'0.3rem'}}>Next Follow-up</label>
+                                <input type="date" value={nextFollowup} onChange={e=>setNextFollowup(e.target.value)}
+                                    style={{...styles.input,width:'100%',minWidth:0}} />
+                            </div>
+                            <div style={{display:'flex',gap:'0.75rem',justifyContent:'flex-end'}}>
+                                <button className="action-btn" style={styles.btn} onClick={onClose}>Cancel</button>
+                                <button className="action-btn" style={{...styles.btnPrimary,...(saving?{opacity:0.5}:{})}} onClick={handleSave} disabled={saving}>
+                                    {saving ? 'Saving...' : 'Save Touchpoint'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ======= PIPELINE PAGE =======
+        function PipelinePage({ user }) {
+            const [leads, setLeads] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [filter, setFilter] = useState('all'); // status filter
+            const [ownerFilter, setOwnerFilter] = useState('me');
+            const [touchpointTarget, setTouchpointTarget] = useState(null);
+
+            useEffect(() => { loadLeads(); }, [filter, ownerFilter]);
+
+            const loadLeads = async () => {
+                setLoading(true);
+                let url = `${API_BASE}/api/crm/leads?owner=${ownerFilter}`;
+                if (filter !== 'all') url += `&status=${filter}`;
+                try {
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    if (data.success) setLeads(data.leads);
+                } catch (e) { console.error('Pipeline load error:', e); }
+                setLoading(false);
+            };
+
+            const updateLead = async (leadId, field, value) => {
+                try {
+                    await fetch(`${API_BASE}/api/crm/leads/${leadId}`, {
+                        method: 'PATCH', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ [field]: value })
+                    });
+                    loadLeads();
+                } catch (e) { console.error('Lead update error:', e); }
+            };
+
+            const statusPill = (active, label) => ({
+                fontSize:'0.8rem', padding:'0.35rem 0.75rem', borderRadius:'9999px',
+                border:`1px solid ${active ? '#34d399' : '#334155'}`,
+                background: active ? 'rgba(16,185,129,0.15)' : 'transparent',
+                color: active ? '#34d399' : '#94a3b8', cursor:'pointer',
+                fontFamily:'Inter,sans-serif', fontWeight:500,
+            });
+
+            return (
+                <div>
+                    <div style={{display:'flex',gap:'0.5rem',flexWrap:'wrap',marginBottom:'1.5rem',alignItems:'center'}}>
+                        <span style={{fontSize:'0.75rem',color:'#64748b',textTransform:'uppercase',fontWeight:600,marginRight:'0.25rem'}}>Owner</span>
+                        <button className="filter-pill" style={statusPill(ownerFilter==='me','Me')} onClick={() => setOwnerFilter('me')}>My Leads</button>
+                        {user?.role === 'admin' && (
+                            <React.Fragment>
+                                <button className="filter-pill" style={statusPill(ownerFilter==='unassigned','Unassigned')} onClick={() => setOwnerFilter('unassigned')}>Unassigned</button>
+                                <button className="filter-pill" style={statusPill(ownerFilter==='all','All')} onClick={() => setOwnerFilter('all')}>All</button>
+                            </React.Fragment>
+                        )}
+                        <span style={{fontSize:'0.75rem',color:'#64748b',textTransform:'uppercase',fontWeight:600,marginLeft:'1rem',marginRight:'0.25rem'}}>Status</span>
+                        <button className="filter-pill" style={statusPill(filter==='all','All')} onClick={() => setFilter('all')}>All</button>
+                        {CRM_STATUSES.map(s => (
+                            <button key={s} className="filter-pill" style={statusPill(filter===s,s)} onClick={() => setFilter(s)}>{s}</button>
+                        ))}
+                    </div>
+
+                    {loading && <div style={styles.loading}><div style={styles.loadingText}>Loading pipeline...</div></div>}
+
+                    {!loading && leads.length === 0 && (
+                        <div style={styles.empty}>
+                            <h2 style={styles.emptyTitle}>No leads in pipeline</h2>
+                            <p style={styles.emptyText}>Save prospects to your pipeline from the search tab</p>
+                        </div>
+                    )}
+
+                    {!loading && leads.length > 0 && (
+                        <div style={{display:'flex',flexDirection:'column',gap:'0.75rem'}}>
+                            {leads.map(lead => (
+                                <div key={lead.id} style={{background:'#1e293b',border:'1px solid #334155',borderRadius:'12px',padding:'1rem',display:'flex',alignItems:'center',gap:'1rem',flexWrap:'wrap'}}>
+                                    <div style={{flex:1,minWidth:'200px'}}>
+                                        <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:'1rem',fontWeight:700,color:'#f1f5f9',marginBottom:'0.2rem'}}>{lead.company_name}</div>
+                                        {lead.owner_name && <span style={{fontSize:'0.75rem',color:'#64748b'}}>Owner: {lead.owner_name}</span>}
+                                    </div>
+                                    <select style={{...styles.select,fontSize:'0.8rem',padding:'0.35rem 0.5rem'}} value={lead.status}
+                                        onChange={e => updateLead(lead.id, 'status', e.target.value)}>
+                                        {CRM_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                                    </select>
+                                    <div style={{display:'flex',alignItems:'center',gap:'0.5rem'}}>
+                                        <label style={{fontSize:'0.7rem',color:'#64748b'}}>Follow-up:</label>
+                                        <input type="date" style={{...styles.input,minWidth:'130px',fontSize:'0.8rem',padding:'0.3rem 0.5rem'}}
+                                            value={lead.next_followup_at ? lead.next_followup_at.split('T')[0] : ''}
+                                            onChange={e => updateLead(lead.id, 'next_followup_at', e.target.value ? new Date(e.target.value).toISOString() : null)} />
+                                    </div>
+                                    {lead.last_touch_at && <span style={{fontSize:'0.7rem',color:'#475569'}}>Last touch: {new Date(lead.last_touch_at).toLocaleDateString()}</span>}
+                                    <button className="action-btn" style={styles.actionBtn} onClick={() => setTouchpointTarget({lead_id:lead.id,company_name:lead.company_name})}>
+                                        Log Touchpoint
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {touchpointTarget && (
+                        <TouchpointModal target={touchpointTarget} onClose={() => setTouchpointTarget(null)} onSaved={loadLeads} />
+                    )}
+                </div>
+            );
+        }
+
+        // ======= FOLLOW-UPS DUE PAGE =======
+        function FollowUpsPage({ user }) {
+            const [leads, setLeads] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [touchpointTarget, setTouchpointTarget] = useState(null);
+
+            useEffect(() => { loadDueLeads(); }, []);
+
+            const loadDueLeads = async () => {
+                setLoading(true);
+                try {
+                    const res = await fetch(`${API_BASE}/api/crm/leads?due=1`);
+                    const data = await res.json();
+                    if (data.success) setLeads(data.leads);
+                } catch (e) { console.error('Follow-ups load error:', e); }
+                setLoading(false);
+            };
+
+            const updateLead = async (leadId, field, value) => {
+                try {
+                    await fetch(`${API_BASE}/api/crm/leads/${leadId}`, {
+                        method: 'PATCH', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ [field]: value })
+                    });
+                    loadDueLeads();
+                } catch (e) { console.error('Lead update error:', e); }
+            };
+
+            return (
+                <div>
+                    <div style={{marginBottom:'1.5rem'}}>
+                        <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:'1.3rem',fontWeight:700,color:'#ef4444',marginBottom:'0.3rem'}}>Follow-ups Due</h2>
+                        <p style={{fontSize:'0.85rem',color:'#64748b'}}>Leads with follow-up dates at or before today</p>
+                    </div>
+
+                    {loading && <div style={styles.loading}><div style={styles.loadingText}>Loading...</div></div>}
+
+                    {!loading && leads.length === 0 && (
+                        <div style={styles.empty}>
+                            <h2 style={styles.emptyTitle}>No follow-ups due</h2>
+                            <p style={styles.emptyText}>All caught up! Set follow-up dates on your pipeline leads.</p>
+                        </div>
+                    )}
+
+                    {!loading && leads.length > 0 && (
+                        <div style={{display:'flex',flexDirection:'column',gap:'0.75rem'}}>
+                            {leads.map(lead => {
+                                const dueDate = lead.next_followup_at ? new Date(lead.next_followup_at) : null;
+                                const isOverdue = dueDate && dueDate < new Date(new Date().toDateString());
+                                return (
+                                    <div key={lead.id} style={{
+                                        background:'#1e293b',border:`1px solid ${isOverdue ? 'rgba(239,68,68,0.4)' : '#334155'}`,
+                                        borderLeft: isOverdue ? '4px solid #ef4444' : '4px solid #fbbf24',
+                                        borderRadius:'12px',padding:'1rem',display:'flex',alignItems:'center',gap:'1rem',flexWrap:'wrap'}}>
+                                        <div style={{flex:1,minWidth:'200px'}}>
+                                            <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:'1rem',fontWeight:700,color:'#f1f5f9',marginBottom:'0.2rem'}}>{lead.company_name}</div>
+                                            <div style={{display:'flex',gap:'0.5rem',alignItems:'center'}}>
+                                                <span style={{fontSize:'0.75rem',padding:'0.15rem 0.45rem',borderRadius:'4px',fontWeight:600,
+                                                    background:(CRM_STATUS_COLORS[lead.status]||CRM_STATUS_COLORS.New).bg,
+                                                    color:(CRM_STATUS_COLORS[lead.status]||CRM_STATUS_COLORS.New).color}}>{lead.status}</span>
+                                                {lead.owner_name && <span style={{fontSize:'0.75rem',color:'#64748b'}}>{lead.owner_name}</span>}
+                                            </div>
+                                        </div>
+                                        <div style={{fontSize:'0.85rem',color: isOverdue ? '#f87171' : '#fbbf24',fontWeight:600}}>
+                                            {isOverdue ? 'OVERDUE' : 'DUE TODAY'}: {dueDate ? dueDate.toLocaleDateString() : '—'}
+                                        </div>
+                                        <input type="date" style={{...styles.input,minWidth:'130px',fontSize:'0.8rem',padding:'0.3rem 0.5rem'}}
+                                            value={lead.next_followup_at ? lead.next_followup_at.split('T')[0] : ''}
+                                            onChange={e => updateLead(lead.id, 'next_followup_at', e.target.value ? new Date(e.target.value).toISOString() : null)} />
+                                        <button className="action-btn" style={styles.actionBtn} onClick={() => setTouchpointTarget({lead_id:lead.id,company_name:lead.company_name})}>
+                                            Log Touchpoint
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    {touchpointTarget && (
+                        <TouchpointModal target={touchpointTarget} onClose={() => setTouchpointTarget(null)} onSaved={loadDueLeads} />
+                    )}
+                </div>
+            );
+        }
+
         // Discovery styles
         const ds = {
             tabBar: { display: 'flex', gap: '0.25rem', marginBottom: '2rem', borderBottom: '2px solid #334155', paddingBottom: '0' },
@@ -1365,7 +1872,7 @@
             modalActions: { display: 'flex', gap: '1rem' },
         };
 
-        ReactDOM.render(<App />, document.getElementById('root'));
+        ReactDOM.render(<Root />, document.getElementById('root'));
     </script>
 </body>
 </html>
