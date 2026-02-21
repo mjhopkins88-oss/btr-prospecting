@@ -2419,6 +2419,9 @@ def get_signal_weight(topic_or_text):
     Construction: 3, Permits/rezoning: 2, Generic: 1.
     """
     t = (topic_or_text or '').lower()
+    # Weight 4: Refinance / debt renewal (check BEFORE financing to avoid false match)
+    if any(k in t for k in ('refinanc', 'debt facility', 'renewal', 'loan')):
+        return 4
     # Weight 5: Financing / capital events
     if any(k in t for k in ('financing', 'credit facility', 'recap', 'recapitalization',
                              'jv', 'joint venture', 'preferred equity', 'capital',
@@ -2427,9 +2430,6 @@ def get_signal_weight(topic_or_text):
     # Weight 4: Acquisitions / dispositions
     if any(k in t for k in ('acquisition', 'acquires', 'disposition', 'portfolio sale',
                              'sale', 'sells', 'purchase', 'bought')):
-        return 4
-    # Weight 4: Refinance / debt renewal
-    if any(k in t for k in ('refinanc', 'debt facility', 'renewal', 'loan')):
         return 4
     # Weight 3: Construction activity
     if any(k in t for k in ('groundbreaking', 'under construction', 'construction',
