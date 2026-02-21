@@ -8,6 +8,20 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        orbitron: ['Orbitron', 'sans-serif'],
+                        jetbrains: ['JetBrains Mono', 'monospace'],
+                        inter: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -76,15 +90,16 @@
             transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
         .prospect-card:hover {
-            transform: scale(1.005);
-            box-shadow: 0 4px 24px rgba(16,185,129,0.08);
+            transform: scale(1.01);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.2), 0 0 20px rgba(16,185,129,0.1);
         }
         .action-btn {
             transition: all 0.2s ease;
         }
-        .action-btn:hover {
+        .action-btn:hover:not(:disabled) {
             border-color: #34d399 !important;
             color: #34d399 !important;
+            background: rgba(16,185,129,0.05) !important;
         }
         .why-now-text {
             display: -webkit-box;
@@ -92,10 +107,10 @@
             -webkit-box-orient: vertical;
             overflow: hidden;
             transition: all 0.3s ease;
-            cursor: pointer;
         }
-        .why-now-text:hover {
+        .why-now-text.expanded {
             -webkit-line-clamp: unset;
+            overflow: visible;
         }
         .filter-pill {
             transition: all 0.2s ease;
@@ -104,6 +119,11 @@
         }
         .filter-pill:hover {
             border-color: #34d399 !important;
+            color: #6ee7b7 !important;
+        }
+        .btn-disabled {
+            opacity: 0.6;
+            cursor: not-allowed !important;
         }
     </style>
 </head>
@@ -118,23 +138,25 @@
             ? 'http://localhost:5000'
             : window.location.origin;
 
-        // Trigger pill color mapping
+        // Trigger pill color mapping (spec: Capital/Financing=purple, Construction=cyan, Expansion=teal, Refinance=amber, JV/Partner=pink, Default=slate)
         function getTriggerStyle(trigger) {
             const t = trigger.toLowerCase();
-            if (t.includes('capital') || t.includes('jv') || t.includes('institutional'))
-                return { bg: 'rgba(168,85,247,0.2)', color: '#c4b5fd' };
+            if (t.includes('capital') || t.includes('financing') || t.includes('institutional'))
+                return { bg: 'rgba(168,85,247,0.15)', color: '#c4b5fd' };
             if (t.includes('builder') || t.includes('construction') || t.includes('property conversion'))
-                return { bg: 'rgba(6,182,212,0.2)', color: '#67e8f9' };
+                return { bg: 'rgba(6,182,212,0.15)', color: '#67e8f9' };
             if (t.includes('expansion') || t.includes('state'))
-                return { bg: 'rgba(20,184,166,0.2)', color: '#5eead4' };
+                return { bg: 'rgba(20,184,166,0.15)', color: '#5eead4' };
             if (t.includes('refinance') || t.includes('debt'))
-                return { bg: 'rgba(245,158,11,0.2)', color: '#fcd34d' };
+                return { bg: 'rgba(245,158,11,0.15)', color: '#fcd34d' };
+            if (t.includes('jv') || t.includes('partner'))
+                return { bg: 'rgba(236,72,153,0.15)', color: '#f9a8d4' };
             if (t.includes('lease'))
-                return { bg: 'rgba(236,72,153,0.2)', color: '#f9a8d4' };
+                return { bg: 'rgba(236,72,153,0.15)', color: '#f9a8d4' };
             if (t.includes('portfolio') || t.includes('blanket') || t.includes('scale'))
-                return { bg: 'rgba(59,130,246,0.2)', color: '#93c5fd' };
+                return { bg: 'rgba(59,130,246,0.15)', color: '#93c5fd' };
             if (t.includes('lender') || t.includes('covenant'))
-                return { bg: 'rgba(249,115,22,0.2)', color: '#fdba74' };
+                return { bg: 'rgba(249,115,22,0.15)', color: '#fdba74' };
             return { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' };
         }
 
@@ -588,6 +610,7 @@
 
         function ProspectCard({ prospect, onGenerateEmail, onDelete }) {
             const [showEmailOptions, setShowEmailOptions] = useState(false);
+            const [whyNowExpanded, setWhyNowExpanded] = useState(false);
             const [emailPurpose, setEmailPurpose] = useState('cold_outreach');
             const [tone, setTone] = useState('professional_direct');
             const [offer, setOffer] = useState('15_min_call');
@@ -614,8 +637,8 @@
             let scoreBorderColor = '#475569';
             let scoreGlow = 'none';
             let scoreAnim = 'none';
-            if (score >= 90) { scoreBorderColor = '#34d399'; scoreGlow = '0 0 12px rgba(16,185,129,0.5)'; scoreAnim = 'glowPulse 2s ease-in-out infinite'; }
-            else if (score >= 80) { scoreBorderColor = '#10b981'; }
+            if (score >= 90) { scoreBorderColor = '#6ee7b7'; scoreGlow = '0 0 14px rgba(16,185,129,0.45)'; scoreAnim = 'glowPulse 2s ease-in-out infinite'; }
+            else if (score >= 80) { scoreBorderColor = '#10b981'; scoreGlow = '0 0 10px rgba(16,185,129,0.25)'; }
             else if (score >= 70) { scoreBorderColor = '#3b82f6'; }
 
             // Card left accent
@@ -640,9 +663,10 @@
                                     fontSize: '0.75rem',
                                     padding: '0.25rem 0.55rem',
                                     borderRadius: '6px',
-                                    background: 'rgba(99,102,241,0.2)',
+                                    background: 'rgba(99,102,241,0.15)',
                                     color: '#a5b4fc',
                                     fontWeight: 500,
+                                    letterSpacing: '0.02em',
                                 }}>
                                     Swim Fit {swimLane}
                                 </div>
@@ -677,7 +701,7 @@
 
                     {/* Score Breakdown */}
                     {hasBreakdown && (
-                        <div style={{margin: '0.75rem 0', padding: '0.75rem', background: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b'}}>
+                        <div style={{padding: '0.75rem', background: '#0b1220', borderRadius: '8px', border: '1px solid #1e293b'}}>
                             <div style={{fontSize: '0.7rem', color: '#64748b', fontWeight: 600, marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Trigger Severity</div>
                             <ScoreBar label="Capital Event" value={breakdown.capital_event || 0} max={40} color="#ef4444" />
                             <ScoreBar label="Construction" value={breakdown.construction_stage || 0} max={25} color="#06b6d4" />
@@ -688,7 +712,7 @@
 
                     {/* Score Explanation */}
                     {explanation.length > 0 && (
-                        <div style={{margin: '0.5rem 0', padding: '0.5rem 0.75rem', background: 'rgba(6,182,212,0.05)', borderLeft: '2px solid #06b6d4', borderRadius: '0 6px 6px 0'}}>
+                        <div style={{padding: '0.5rem 0.75rem', background: 'rgba(6,182,212,0.05)', borderLeft: '2px solid #06b6d4', borderRadius: '0 6px 6px 0'}}>
                             <div style={{fontSize: '0.65rem', color: '#06b6d4', fontWeight: 600, marginBottom: '0.3rem', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Score Rationale</div>
                             {explanation.map((line, idx) => (
                                 <div key={idx} style={{fontSize: '0.78rem', color: '#94a3b8', lineHeight: '1.4', marginBottom: '0.15rem'}}>• {line}</div>
@@ -698,7 +722,7 @@
 
                     {/* Insurance Trigger Pills */}
                     {triggers.length > 0 && (
-                        <div style={{margin: '0.5rem 0'}}>
+                        <div>
                             <div style={{fontSize: '0.65rem', color: '#64748b', fontWeight: 600, marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Insurance Triggers</div>
                             <div style={{display: 'flex', flexWrap: 'wrap', gap: '0.4rem'}}>
                                 {triggers.map((trigger, idx) => {
@@ -721,7 +745,7 @@
 
                     {/* Swim Lane + Competitive Difficulty */}
                     {(unitBand || competitiveDifficulty) && (
-                        <div style={{display: 'flex', gap: '0.75rem', flexWrap: 'wrap', margin: '0.5rem 0', alignItems: 'center'}}>
+                        <div style={{display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center'}}>
                             {unitBand && (
                                 <span style={{
                                     fontSize: '0.75rem',
@@ -757,10 +781,18 @@
                     </div>
 
                     {/* Why Call Now */}
-                    <div style={styles.whyNow}>
-                        <div style={{fontSize: '0.7rem', color: '#ef4444', fontWeight: 600, marginBottom: '0.3rem', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Why Call Now</div>
-                        <p className="why-now-text" style={{color: '#cbd5e1', fontSize: '0.875rem', margin: 0, lineHeight: '1.5'}}>{prospect.whyNow}</p>
-                    </div>
+                    {prospect.whyNow && (
+                        <div style={styles.whyNow}>
+                            <div style={{fontSize: '0.7rem', color: '#ef4444', fontWeight: 600, marginBottom: '0.3rem', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Why Call Now</div>
+                            <p className={`why-now-text${whyNowExpanded ? ' expanded' : ''}`} style={{color: '#cbd5e1', fontSize: '0.875rem', margin: 0, lineHeight: '1.5'}}>{prospect.whyNow}</p>
+                            <span
+                                onClick={() => setWhyNowExpanded(!whyNowExpanded)}
+                                style={{fontSize: '0.75rem', color: '#ef4444', cursor: 'pointer', marginTop: '0.25rem', display: 'inline-block', opacity: 0.8}}
+                            >
+                                {whyNowExpanded ? 'Collapse' : 'Expand'}
+                            </span>
+                        </div>
+                    )}
 
                     {/* Signals */}
                     {prospect.signals && prospect.signals.length > 0 && (
@@ -813,15 +845,25 @@
                     )}
 
                     {/* Action Buttons */}
-                    <div style={styles.cardActions}>
+                    <div style={{...styles.cardActions, justifyContent: 'flex-end'}}>
                         <button className="action-btn" style={styles.actionBtn} onClick={() => setShowEmailOptions(!showEmailOptions)}>
                             {showEmailOptions ? 'Cancel' : 'Generate Email'}
                         </button>
-                        {prospect.linkedin && (
+                        {prospect.linkedin ? (
                             <a href={`https://${prospect.linkedin}`} target="_blank" rel="noopener noreferrer" style={{...styles.actionBtn, textDecoration: 'none', textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center'}}>
                                 LinkedIn DM
                             </a>
+                        ) : (
+                            <button className="action-btn btn-disabled" style={styles.actionBtn} disabled>
+                                LinkedIn DM
+                            </button>
                         )}
+                        <button className="action-btn btn-disabled" style={styles.actionBtn} disabled>
+                            Call Angle
+                        </button>
+                        <button className="action-btn btn-disabled" style={styles.actionBtn} disabled>
+                            Follow
+                        </button>
                         <button className="action-btn" style={styles.actionBtn} onClick={() => onDelete(prospect.id)}>
                             Delete
                         </button>
@@ -1246,7 +1288,7 @@
 
         // Main styles
         const styles = {
-            container: { maxWidth: '1400px', margin: '0 auto', padding: '2rem' },
+            container: { maxWidth: '1400px', margin: '0 auto', padding: '2rem', minHeight: '100vh' },
             header: { marginBottom: '2.5rem', textAlign: 'center' },
             title: { fontFamily: "'Orbitron', sans-serif", fontSize: '2.5rem', fontWeight: 900, background: 'linear-gradient(135deg, #34d399 0%, #22d3ee 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '0.5rem', letterSpacing: '0.05em' },
             subtitle: { fontSize: '1rem', color: '#64748b', fontWeight: 400 },
@@ -1256,12 +1298,12 @@
             statValue: { fontFamily: "'JetBrains Mono', monospace", fontSize: '1.8rem', fontWeight: 700, color: '#34d399', lineHeight: '1.2', display: 'block', minHeight: '2.2rem' },
             pulse: { animation: 'pulse 2s ease-in-out infinite' },
             controls: {
-                position: 'sticky', top: 0, zIndex: 10,
-                background: 'rgba(15,23,42,0.92)',
+                position: 'sticky', top: 0, zIndex: 20,
+                background: 'rgba(2,6,23,0.80)',
                 backdropFilter: 'blur(12px)',
                 WebkitBackdropFilter: 'blur(12px)',
-                borderBottom: '1px solid #334155',
-                padding: '1rem 0',
+                borderBottom: '1px solid #1e293b',
+                padding: '0.75rem 1rem',
                 marginBottom: '2rem',
                 display: 'flex', flexDirection: 'column', gap: '0.65rem',
             },
@@ -1280,33 +1322,35 @@
             card: {
                 background: '#1e293b',
                 border: '1px solid #334155',
-                borderRadius: '12px',
-                padding: '1.5rem',
-                boxShadow: '0 4px 6px -1px rgba(0,0,0,0.2)',
+                borderRadius: '16px',
+                padding: '1rem',
+                boxShadow: '0 10px 15px -3px rgba(0,0,0,0.2), 0 4px 6px -4px rgba(0,0,0,0.2)',
+                display: 'grid',
+                gap: '0.75rem',
             },
-            cardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem', gap: '1rem' },
+            cardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' },
             companyName: { fontFamily: "'Orbitron', sans-serif", fontSize: '1.15rem', fontWeight: 700, color: '#f1f5f9', marginBottom: '0.2rem' },
             location: { color: '#64748b', fontSize: '0.85rem' },
-            executive: { marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px solid #1e293b', fontSize: '0.9rem', color: '#94a3b8' },
+            executive: { paddingBottom: '0.5rem', borderBottom: '1px solid #1e293b', fontSize: '0.9rem', color: '#94a3b8' },
             linkedinLink: { marginLeft: '0.75rem', color: '#3b82f6', textDecoration: 'none', fontSize: '0.85rem', fontWeight: 500 },
-            details: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.4rem', marginBottom: '0.75rem', fontSize: '0.85rem', color: '#cbd5e1' },
-            whyNow: { background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '8px', padding: '0.85rem', marginBottom: '0.75rem' },
-            signals: { background: 'rgba(6,182,212,0.04)', border: '1px solid rgba(6,182,212,0.15)', borderRadius: '8px', padding: '0.85rem', marginBottom: '0.75rem' },
+            details: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.4rem', fontSize: '0.85rem', color: '#cbd5e1' },
+            whyNow: { background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '8px', padding: '0.85rem' },
+            signals: { background: 'rgba(6,182,212,0.04)', border: '1px solid rgba(6,182,212,0.15)', borderRadius: '8px', padding: '0.85rem' },
             signalList: { listStyle: 'none', marginTop: '0.35rem' },
             signalItem: { marginBottom: '0.35rem', fontSize: '0.85rem', color: '#94a3b8' },
-            cardActions: { display: 'flex', gap: '0.5rem', flexWrap: 'wrap', paddingTop: '0.5rem' },
+            cardActions: { display: 'flex', gap: '0.5rem', flexWrap: 'wrap', paddingTop: '0.5rem', borderTop: '1px solid #1e293b' },
             actionBtn: {
-                fontSize: '0.8rem',
-                padding: '0.4rem 0.85rem',
+                fontSize: '0.75rem',
+                padding: '0.35rem 0.75rem',
                 borderRadius: '6px',
                 border: '1px solid #475569',
                 background: 'transparent',
-                color: '#94a3b8',
+                color: '#cbd5e1',
                 cursor: 'pointer',
                 fontFamily: "'Inter', sans-serif",
                 fontWeight: 500,
             },
-            emailOptions: { background: 'rgba(16,185,129,0.04)', border: '1px solid rgba(16,185,129,0.15)', borderRadius: '8px', padding: '1rem', marginBottom: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' },
+            emailOptions: { background: 'rgba(16,185,129,0.04)', border: '1px solid rgba(16,185,129,0.15)', borderRadius: '8px', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' },
             emailOptionRow: { display: 'flex', alignItems: 'center', gap: '0.75rem' },
             emailOptionLabel: { fontWeight: 600, fontSize: '0.75rem', color: '#64748b', minWidth: '80px', textTransform: 'uppercase', letterSpacing: '0.03em' },
             modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
