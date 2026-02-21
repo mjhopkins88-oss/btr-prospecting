@@ -32,6 +32,7 @@ load_dotenv()
 SESSION_SECRET = os.getenv('SESSION_SECRET', secrets.token_hex(32))
 COOKIE_SECURE = os.getenv('COOKIE_SECURE', 'false').lower() == 'true'
 SESSION_DURATION_HOURS = 720  # 30 days
+SUPER_ADMIN_EMAIL = os.getenv('SUPER_ADMIN_EMAIL', 'mjhopkins88@gmail.com').strip().lower()
 
 app = Flask(__name__, static_folder='static')
 CORS(app, supports_credentials=True)
@@ -228,9 +229,20 @@ def init_db():
             email TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'producer',
+            is_super_admin BOOLEAN NOT NULL DEFAULT 0,
+            is_disabled BOOLEAN NOT NULL DEFAULT 0,
+            last_login_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    # Migration: add columns if missing on existing databases
+    for col, defn in [('is_super_admin', 'BOOLEAN NOT NULL DEFAULT 0'),
+                      ('is_disabled', 'BOOLEAN NOT NULL DEFAULT 0'),
+                      ('last_login_at', 'TIMESTAMP')]:
+        try:
+            c.execute(f'ALTER TABLE users ADD COLUMN {col} {defn}')
+        except sqlite3.OperationalError:
+            pass  # column already exists
     c.execute('''
         CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
@@ -241,6 +253,18 @@ def init_db():
             last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS admin_events (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            actor_user_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            target_user_id TEXT,
+            details TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_admin_events_ws ON admin_events(workspace_id, created_at DESC)')
     c.execute('''
         CREATE TABLE IF NOT EXISTS crm_companies (
             id TEXT PRIMARY KEY,
@@ -401,12 +425,18 @@ def _get_session_user(conn=None):
         close_conn = True
     c = conn.cursor()
     c.execute('''
-        SELECT s.id, s.user_id, s.expires_at, u.id, u.workspace_id, u.name, u.email, u.role
+        SELECT s.id, s.user_id, s.expires_at,
+               u.id, u.workspace_id, u.name, u.email, u.role, u.is_super_admin, u.is_disabled
         FROM sessions s JOIN users u ON s.user_id = u.id
         WHERE s.session_token = ? AND s.expires_at > ?
     ''', (token, datetime.utcnow().isoformat()))
     row = c.fetchone()
     if not row:
+        if close_conn:
+            conn.close()
+        return None, None
+    # Deny disabled users
+    if row[9]:
         if close_conn:
             conn.close()
         return None, None
@@ -419,6 +449,7 @@ def _get_session_user(conn=None):
         'name': row[5],
         'email': row[6],
         'role': row[7],
+        'is_super_admin': bool(row[8]),
     }
     if close_conn:
         conn.close()
@@ -460,6 +491,18 @@ def require_role(role):
             return f(*args, **kwargs)
         return decorated
     return decorator
+
+def require_super_admin(f):
+    """Decorator: require super admin (must be used after require_auth).
+    Checks BOTH is_super_admin flag AND email matches SUPER_ADMIN_EMAIL."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not g.user:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        if g.user.get('role') != 'admin' or not g.user.get('is_super_admin') or g.user.get('email') != SUPER_ADMIN_EMAIL:
+            return jsonify({'success': False, 'message': 'Super admin access required'}), 403
+        return f(*args, **kwargs)
+    return decorated
 
 def _check_login_rate(email):
     """Returns True if login is allowed, False if locked out."""
@@ -532,12 +575,16 @@ def api_auth_bootstrap():
     user_id = str(uuid.uuid4())
     password_hash = _hash_password(password)
 
+    is_super = 1 if email == SUPER_ADMIN_EMAIL else 0
+
     conn = sqlite3.connect('prospects.db')
     c = conn.cursor()
+    now = datetime.utcnow().isoformat()
     try:
         c.execute('INSERT INTO workspaces (id, name) VALUES (?, ?)', (workspace_id, workspace_name))
-        c.execute('INSERT INTO users (id, workspace_id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?, ?)',
-                  (user_id, workspace_id, name, email, password_hash, 'admin'))
+        c.execute('''INSERT INTO users (id, workspace_id, name, email, password_hash, role, is_super_admin, last_login_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (user_id, workspace_id, name, email, password_hash, 'admin', is_super, now))
         conn.commit()
     except sqlite3.IntegrityError:
         conn.close()
@@ -554,7 +601,8 @@ def api_auth_bootstrap():
 
     resp = make_response(jsonify({
         'success': True,
-        'user': {'id': user_id, 'name': name, 'email': email, 'role': 'admin', 'workspace_id': workspace_id}
+        'user': {'id': user_id, 'name': name, 'email': email, 'role': 'admin',
+                 'workspace_id': workspace_id, 'is_super_admin': bool(is_super)}
     }))
     resp.set_cookie('session_token', session_token, httponly=True, samesite='Lax',
                     secure=COOKIE_SECURE, path='/', max_age=SESSION_DURATION_HOURS * 3600)
@@ -578,7 +626,7 @@ def api_auth_login():
 
     conn = sqlite3.connect('prospects.db')
     c = conn.cursor()
-    c.execute('SELECT id, workspace_id, name, email, password_hash, role FROM users WHERE email = ?', (email,))
+    c.execute('SELECT id, workspace_id, name, email, password_hash, role, is_super_admin, is_disabled FROM users WHERE email = ?', (email,))
     row = c.fetchone()
 
     if not row or not _check_password(password, row[4]):
@@ -586,8 +634,17 @@ def api_auth_login():
         _record_login_failure(email)
         return jsonify({'success': False, 'message': 'Invalid email or password'}), 401
 
+    # Check if user is disabled
+    if row[7]:
+        conn.close()
+        return jsonify({'success': False, 'message': 'Account is disabled. Contact your administrator.'}), 403
+
     _clear_login_failures(email)
-    user_id, workspace_id, name, user_email, _, role = row
+    user_id, workspace_id, name, user_email, _, role, is_super, _ = row
+
+    # Update last_login_at
+    now = datetime.utcnow().isoformat()
+    c.execute('UPDATE users SET last_login_at = ? WHERE id = ?', (now, user_id))
 
     # Create session
     session_token = secrets.token_urlsafe(48)
@@ -600,7 +657,8 @@ def api_auth_login():
 
     resp = make_response(jsonify({
         'success': True,
-        'user': {'id': user_id, 'name': name, 'email': user_email, 'role': role, 'workspace_id': workspace_id}
+        'user': {'id': user_id, 'name': name, 'email': user_email, 'role': role,
+                 'workspace_id': workspace_id, 'is_super_admin': bool(is_super)}
     }))
     resp.set_cookie('session_token', session_token, httponly=True, samesite='Lax',
                     secure=COOKIE_SECURE, path='/', max_age=SESSION_DURATION_HOURS * 3600)
@@ -685,6 +743,161 @@ def api_auth_create_user():
         return jsonify({'success': False, 'message': 'Email already exists'}), 400
     conn.close()
     return jsonify({'success': True, 'user': {'id': user_id, 'name': name, 'email': email, 'role': role}})
+
+
+def _log_admin_event(conn, workspace_id, actor_id, action, target_id=None, details=None):
+    """Record an admin audit event."""
+    c = conn.cursor()
+    c.execute('''INSERT INTO admin_events (id, workspace_id, actor_user_id, action, target_user_id, details)
+                 VALUES (?, ?, ?, ?, ?, ?)''',
+              (str(uuid.uuid4()), workspace_id, actor_id, action, target_id, details))
+
+
+@app.route('/api/admin/users', methods=['GET'])
+@require_auth
+@require_super_admin
+def api_admin_list_users():
+    """Super admin: list all users in workspace with full details."""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('''SELECT id, name, email, role, is_super_admin, is_disabled, last_login_at, created_at
+                 FROM users WHERE workspace_id = ? ORDER BY created_at''', (g.workspace_id,))
+    users = []
+    for r in c.fetchall():
+        users.append({
+            'id': r[0], 'name': r[1], 'email': r[2], 'role': r[3],
+            'is_super_admin': bool(r[4]), 'is_disabled': bool(r[5]),
+            'last_login_at': r[6], 'created_at': r[7]
+        })
+    conn.close()
+    return jsonify({'success': True, 'users': users})
+
+
+@app.route('/api/admin/users', methods=['POST'])
+@require_auth
+@require_super_admin
+def api_admin_create_user():
+    """Super admin: create a new user in the workspace."""
+    data = request.json or {}
+    name = data.get('name', '').strip()
+    email = data.get('email', '').strip().lower()
+    password = data.get('password', '')
+    role = data.get('role', 'producer')
+
+    if not name or not email or not password:
+        return jsonify({'success': False, 'message': 'name, email, and password are required'}), 400
+    if len(password) < 8:
+        return jsonify({'success': False, 'message': 'Password must be at least 8 characters'}), 400
+    if role not in ('admin', 'producer'):
+        return jsonify({'success': False, 'message': 'Role must be admin or producer'}), 400
+
+    user_id = str(uuid.uuid4())
+    password_hash = _hash_password(password)
+
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    try:
+        c.execute('''INSERT INTO users (id, workspace_id, name, email, password_hash, role, is_super_admin)
+                     VALUES (?, ?, ?, ?, ?, ?, 0)''',
+                  (user_id, g.workspace_id, name, email, password_hash, role))
+        _log_admin_event(conn, g.workspace_id, g.user['id'], 'create_user', user_id,
+                         json.dumps({'name': name, 'email': email, 'role': role}))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'success': False, 'message': 'Email already exists'}), 400
+    conn.close()
+    return jsonify({'success': True, 'user': {'id': user_id, 'name': name, 'email': email, 'role': role}})
+
+
+@app.route('/api/admin/users/<user_id>/disable', methods=['POST'])
+@require_auth
+@require_super_admin
+def api_admin_disable_user(user_id):
+    """Super admin: disable or enable a user account."""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT id, email, is_super_admin, is_disabled FROM users WHERE id = ? AND workspace_id = ?',
+              (user_id, g.workspace_id))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'success': False, 'message': 'User not found'}), 404
+    if row[2]:  # is_super_admin
+        conn.close()
+        return jsonify({'success': False, 'message': 'Cannot disable the super admin account'}), 403
+    if user_id == g.user['id']:
+        conn.close()
+        return jsonify({'success': False, 'message': 'Cannot disable your own account'}), 403
+
+    new_state = not bool(row[3])
+    c.execute('UPDATE users SET is_disabled = ? WHERE id = ?', (1 if new_state else 0, user_id))
+    if new_state:
+        # Revoke all sessions for this user
+        c.execute('DELETE FROM sessions WHERE user_id = ?', (user_id,))
+    action = 'disable_user' if new_state else 'enable_user'
+    _log_admin_event(conn, g.workspace_id, g.user['id'], action, user_id)
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'is_disabled': new_state})
+
+
+@app.route('/api/admin/users/<user_id>', methods=['DELETE'])
+@require_auth
+@require_super_admin
+def api_admin_delete_user(user_id):
+    """Super admin: hard-delete a user account."""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT id, email, is_super_admin FROM users WHERE id = ? AND workspace_id = ?',
+              (user_id, g.workspace_id))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'success': False, 'message': 'User not found'}), 404
+    if row[2]:  # is_super_admin
+        conn.close()
+        return jsonify({'success': False, 'message': 'Cannot delete the super admin account'}), 403
+    if user_id == g.user['id']:
+        conn.close()
+        return jsonify({'success': False, 'message': 'Cannot delete your own account'}), 403
+
+    # Revoke sessions then delete user
+    c.execute('DELETE FROM sessions WHERE user_id = ?', (user_id,))
+    c.execute('DELETE FROM users WHERE id = ?', (user_id,))
+    _log_admin_event(conn, g.workspace_id, g.user['id'], 'delete_user', user_id,
+                     json.dumps({'email': row[1]}))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+
+@app.route('/api/admin/users/<user_id>/reset-password', methods=['POST'])
+@require_auth
+@require_super_admin
+def api_admin_reset_password(user_id):
+    """Super admin: reset a user's password."""
+    data = request.json or {}
+    new_password = data.get('password', '')
+    if len(new_password) < 8:
+        return jsonify({'success': False, 'message': 'Password must be at least 8 characters'}), 400
+
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT id, email FROM users WHERE id = ? AND workspace_id = ?', (user_id, g.workspace_id))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'success': False, 'message': 'User not found'}), 404
+
+    password_hash = _hash_password(new_password)
+    c.execute('UPDATE users SET password_hash = ? WHERE id = ?', (password_hash, user_id))
+    # Revoke all existing sessions so user must re-login with new password
+    c.execute('DELETE FROM sessions WHERE user_id = ?', (user_id,))
+    _log_admin_event(conn, g.workspace_id, g.user['id'], 'reset_password', user_id)
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
 
 
 # ===================================================================
