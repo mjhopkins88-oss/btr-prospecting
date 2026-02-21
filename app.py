@@ -307,6 +307,69 @@ def init_db():
             week_end TEXT NOT NULL
         )
     ''')
+    # --- Weighted Signals (materialized from discovery_runs + search_cache) ---
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS weighted_signals (
+            id TEXT PRIMARY KEY,
+            state TEXT NOT NULL,
+            city TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            signal_weight INTEGER NOT NULL DEFAULT 1,
+            entity_name TEXT,
+            title TEXT,
+            summary TEXT,
+            source TEXT,
+            source_type TEXT,
+            confidence TEXT,
+            published_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_weighted_signals_state ON weighted_signals(state, city)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_weighted_signals_date ON weighted_signals(published_at)')
+    # --- Market Momentum ---
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS market_momentum (
+            id TEXT PRIMARY KEY,
+            state TEXT NOT NULL,
+            city TEXT NOT NULL,
+            window_end_date TEXT NOT NULL,
+            signals_7d INTEGER DEFAULT 0,
+            signals_14d INTEGER DEFAULT 0,
+            signals_30d INTEGER DEFAULT 0,
+            weighted_signals_7d INTEGER DEFAULT 0,
+            weighted_signals_14d INTEGER DEFAULT 0,
+            weighted_signals_30d INTEGER DEFAULT 0,
+            momentum_score REAL DEFAULT 0,
+            momentum_label TEXT DEFAULT 'Stable',
+            computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(state, city, window_end_date)
+        )
+    ''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_state ON market_momentum(state, city, window_end_date)')
+    # --- Lead Timing Scores ---
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS lead_timing_scores (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT,
+            prospect_key TEXT NOT NULL,
+            company_name TEXT NOT NULL,
+            state TEXT,
+            city TEXT,
+            trigger_severity INTEGER DEFAULT 0,
+            swim_lane_fit INTEGER,
+            engagement_score INTEGER,
+            market_momentum_score REAL DEFAULT 50,
+            freshness_score INTEGER DEFAULT 30,
+            call_timing_score REAL DEFAULT 0,
+            timing_label TEXT DEFAULT 'Watch',
+            reasons TEXT,
+            computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(workspace_id, prospect_key)
+        )
+    ''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_lead_timing_key ON lead_timing_scores(workspace_id, prospect_key)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_lead_timing_score ON lead_timing_scores(call_timing_score DESC)')
     conn.commit()
     conn.close()
 
@@ -2326,6 +2389,407 @@ def api_state_rankings():
 
 
 # ===================================================================
+# SIGNAL WEIGHTING + MOMENTUM + CALL TIMING ENGINE
+# ===================================================================
+
+def get_signal_weight(topic_or_text):
+    """
+    Return signal weight 1-5 based on event/signal type.
+    Financing/capital events: 5, Acquisition/disposition: 4,
+    Construction: 3, Permits/rezoning: 2, Generic: 1.
+    """
+    t = (topic_or_text or '').lower()
+    # Weight 5: Financing / capital events
+    if any(k in t for k in ('financing', 'credit facility', 'recap', 'recapitalization',
+                             'jv', 'joint venture', 'preferred equity', 'capital',
+                             'institutional', 'fund', 'credit')):
+        return 5
+    # Weight 4: Acquisitions / dispositions
+    if any(k in t for k in ('acquisition', 'acquires', 'disposition', 'portfolio sale',
+                             'sale', 'sells', 'purchase', 'bought')):
+        return 4
+    # Weight 4: Refinance / debt renewal
+    if any(k in t for k in ('refinanc', 'debt facility', 'renewal', 'loan')):
+        return 4
+    # Weight 3: Construction activity
+    if any(k in t for k in ('groundbreaking', 'under construction', 'construction',
+                             'starts', 'new_build', 'new build', 'breaking ground',
+                             'delivered', 'completion')):
+        return 3
+    # Weight 2: Permits / entitlements
+    if any(k in t for k in ('permit', 'rezoning', 'entitlement', 'planning',
+                             'approval', 'zoning', 'permit_rezoning')):
+        return 2
+    # Weight 1: Generic BTR mention
+    return 1
+
+
+def materialize_weighted_signals(days=90):
+    """
+    Materialize weighted_signals table from discovery_runs + search_cache.
+    Idempotent: clears and rebuilds for the window. No SerpAPI calls.
+    """
+    print("[WeightedSignals] Materializing weighted signals...")
+    all_items = _gather_all_signals(days=days)
+    if not all_items:
+        print("[WeightedSignals] No signals to materialize.")
+        return 0
+
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    c.execute('DELETE FROM weighted_signals WHERE published_at < ? OR published_at IS NULL', (cutoff,))
+
+    inserted = 0
+    for item in all_items:
+        # Compute weight from both topic and textual content
+        topic_weight = get_signal_weight(item['topic'])
+        text_weight = get_signal_weight(item.get('summary', '') + ' ' + item.get('title', ''))
+        weight = max(topic_weight, text_weight)
+
+        sig_id = hashlib.md5(
+            f"{item['state']}:{item['city']}:{item['topic']}:{item.get('entity_name','')}:{item['date_str']}"
+            .encode()
+        ).hexdigest()
+
+        try:
+            c.execute('''
+                INSERT OR REPLACE INTO weighted_signals
+                (id, state, city, topic, signal_weight, entity_name, title, summary, source, source_type, confidence, published_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (sig_id, item['state'], item['city'], item['topic'], weight,
+                  item.get('entity_name', ''), item.get('title', ''), item.get('summary', ''),
+                  item.get('source', ''), item.get('source_type', ''), item.get('confidence', 'medium'),
+                  item['date_str']))
+            inserted += 1
+        except sqlite3.IntegrityError:
+            pass
+
+    conn.commit()
+    conn.close()
+    print(f"[WeightedSignals] Materialized {inserted} weighted signals from {len(all_items)} raw items.")
+    return inserted
+
+
+def compute_market_momentum():
+    """
+    Daily job: compute market_momentum for each state+city in the 5 Sunbelt states.
+    Reads from weighted_signals table. No SerpAPI calls.
+    """
+    print("[Momentum] Computing market momentum...")
+    now = datetime.utcnow()
+    window_end = now.strftime('%Y-%m-%d')
+    cutoff_7d = (now - timedelta(days=7)).isoformat()
+    cutoff_14d = (now - timedelta(days=14)).isoformat()
+    cutoff_30d = (now - timedelta(days=30)).isoformat()
+
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+
+    # Get all unique (state, city) pairs from weighted_signals in the 5 states
+    c.execute('''
+        SELECT DISTINCT state, city FROM weighted_signals
+        WHERE state IN ('TX','AZ','GA','NC','FL') AND published_at >= ?
+    ''', (cutoff_30d,))
+    markets = c.fetchall()
+
+    inserted = 0
+    for state, city in markets:
+        # Unweighted counts
+        c.execute('SELECT COUNT(*) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_7d))
+        sig_7d = c.fetchone()[0]
+        c.execute('SELECT COUNT(*) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_14d))
+        sig_14d = c.fetchone()[0]
+        c.execute('SELECT COUNT(*) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_30d))
+        sig_30d = c.fetchone()[0]
+
+        # Weighted counts
+        c.execute('SELECT COALESCE(SUM(signal_weight),0) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_7d))
+        wsig_7d = c.fetchone()[0]
+        c.execute('SELECT COALESCE(SUM(signal_weight),0) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_14d))
+        wsig_14d = c.fetchone()[0]
+        c.execute('SELECT COALESCE(SUM(signal_weight),0) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_30d))
+        wsig_30d = c.fetchone()[0]
+
+        # Momentum score
+        baseline = wsig_30d / 4.0
+        ratio_7d = wsig_7d / max(1, baseline)
+        ratio_14d = wsig_14d / max(1, baseline * 2)
+        momentum_score = max(0, min(100, ratio_7d * 60 + ratio_14d * 40))
+
+        if momentum_score >= 65:
+            momentum_label = 'Accelerating'
+        elif momentum_score >= 40:
+            momentum_label = 'Stable'
+        else:
+            momentum_label = 'Cooling'
+
+        mid = str(uuid.uuid4())
+        try:
+            c.execute('''
+                INSERT OR REPLACE INTO market_momentum
+                (id, state, city, window_end_date, signals_7d, signals_14d, signals_30d,
+                 weighted_signals_7d, weighted_signals_14d, weighted_signals_30d,
+                 momentum_score, momentum_label, computed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (mid, state, city, window_end, sig_7d, sig_14d, sig_30d,
+                  wsig_7d, wsig_14d, wsig_30d,
+                  round(momentum_score, 1), momentum_label))
+            inserted += 1
+        except sqlite3.IntegrityError:
+            pass
+
+    conn.commit()
+    conn.close()
+    print(f"[Momentum] Computed momentum for {inserted} markets.")
+    return inserted
+
+
+def _get_momentum_for_city(state, city):
+    """Lookup latest momentum_score for a city. Returns (score, label) or (50, 'Stable')."""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('''
+        SELECT momentum_score, momentum_label FROM market_momentum
+        WHERE state=? AND city=? ORDER BY window_end_date DESC LIMIT 1
+    ''', (state, city))
+    row = c.fetchone()
+    conn.close()
+    if row:
+        return row[0], row[1]
+    return 50.0, 'Stable'
+
+
+def _compute_freshness_score(state, city, company_name):
+    """Compute freshness (0-100) based on most recent signal for this entity/market."""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    # Look for signals matching entity or city
+    c.execute('''
+        SELECT MAX(published_at) FROM weighted_signals
+        WHERE state=? AND city=? AND (entity_name LIKE ? OR entity_name = '')
+    ''', (state, city, f'%{company_name[:20]}%' if company_name else '%'))
+    row = c.fetchone()
+    conn.close()
+
+    if not row or not row[0]:
+        return 30
+    try:
+        pub_date = datetime.fromisoformat(row[0].replace('Z', '+00:00')) if 'T' in row[0] else datetime.strptime(row[0][:10], '%Y-%m-%d')
+        days_ago = (datetime.utcnow() - pub_date.replace(tzinfo=None)).days
+    except (ValueError, TypeError):
+        return 30
+
+    if days_ago <= 14:
+        return 90
+    elif days_ago <= 30:
+        return 70
+    elif days_ago <= 90:
+        return 50
+    return 30
+
+
+def compute_lead_timing_scores(workspace_id=None):
+    """
+    Daily job: compute call timing scores for all prospects in run_prospects + CRM.
+    Reads precomputed market_momentum. No SerpAPI calls.
+    """
+    print("[CallTiming] Computing lead timing scores...")
+    conn = sqlite3.connect('prospects.db')
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+
+    # Gather all prospects from recent prospecting runs (last 90 days)
+    cutoff = (datetime.utcnow() - timedelta(days=90)).isoformat()
+    c.execute('''
+        SELECT rp.company_name, rp.city, rp.state, rp.score, rp.score_meta,
+               rp.run_id
+        FROM run_prospects rp
+        JOIN prospecting_runs pr ON rp.run_id = pr.id
+        WHERE pr.created_at >= ? AND rp.score > 0
+    ''', (cutoff,))
+    prospects = c.fetchall()
+
+    # Also gather from the main prospects table
+    c.execute('SELECT company, city, state, score FROM prospects WHERE score > 0')
+    main_prospects = c.fetchall()
+
+    conn.close()
+
+    # Build deduped prospect list
+    seen_keys = set()
+    prospect_list = []
+
+    for p in prospects:
+        company = p['company_name']
+        city = p['city'] or ''
+        state = p['state'] or ''
+        key = f"{company.lower().strip()}|{city.lower()}|{state.lower()}"
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+
+        score_meta = {}
+        if p['score_meta']:
+            try:
+                score_meta = json.loads(p['score_meta'])
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        prospect_list.append({
+            'company_name': company,
+            'city': city,
+            'state': state,
+            'score': p['score'],
+            'swim_lane_fit_score': score_meta.get('swim_lane_fit_score'),
+            'competitive_difficulty': score_meta.get('competitive_difficulty', 'Medium'),
+            'unit_band': score_meta.get('unit_band', ''),
+            'prospect_key': key,
+        })
+
+    for p in main_prospects:
+        company = p['company']
+        city = p['city'] or ''
+        state = p['state'] or ''
+        key = f"{company.lower().strip()}|{city.lower()}|{state.lower()}"
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        prospect_list.append({
+            'company_name': company,
+            'city': city,
+            'state': state,
+            'score': p['score'],
+            'swim_lane_fit_score': None,
+            'competitive_difficulty': 'Medium',
+            'unit_band': '',
+            'prospect_key': key,
+        })
+
+    if not prospect_list:
+        print("[CallTiming] No prospects to score.")
+        return 0
+
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    scored = 0
+
+    for p in prospect_list:
+        trigger_severity = p['score'] or 0
+
+        # Swim lane fit
+        swim_lane_fit = p.get('swim_lane_fit_score')
+        if swim_lane_fit is None:
+            # Estimate from unit_band
+            ub = (p.get('unit_band') or '').lower()
+            swim_lane_fit = 50
+            if '40-150' in ub:
+                swim_lane_fit = 75
+            elif '150-400' in ub:
+                swim_lane_fit = 70
+            elif '<40' in ub:
+                swim_lane_fit = 35
+            elif '400-1000' in ub:
+                swim_lane_fit = 40
+            elif '1000' in ub:
+                swim_lane_fit = 25
+
+        # Engagement score proxy
+        engagement = 60
+        cd = (p.get('competitive_difficulty') or 'Medium')
+        if cd == 'High':
+            engagement -= 15
+        elif cd == 'Low':
+            engagement += 10
+        ub = (p.get('unit_band') or '').lower()
+        if '40-150' in ub or '150-400' in ub:
+            engagement += 10
+        engagement = max(0, min(100, engagement))
+
+        # Market momentum
+        momentum, momentum_label = _get_momentum_for_city(p['state'], p['city'])
+
+        # Freshness
+        freshness = _compute_freshness_score(p['state'], p['city'], p['company_name'])
+
+        # Call timing formula
+        call_timing = (
+            0.35 * trigger_severity +
+            0.20 * swim_lane_fit +
+            0.20 * engagement +
+            0.15 * momentum +
+            0.10 * freshness
+        )
+        call_timing = max(0, min(100, round(call_timing, 1)))
+
+        if call_timing >= 75:
+            timing_label = 'Call Now'
+        elif call_timing >= 55:
+            timing_label = 'Work'
+        else:
+            timing_label = 'Watch'
+
+        # Generate reasons
+        reasons = []
+        if trigger_severity >= 80:
+            reasons.append(f"High trigger severity ({trigger_severity}/100)")
+        elif trigger_severity >= 60:
+            reasons.append(f"Moderate trigger severity ({trigger_severity}/100)")
+        if swim_lane_fit >= 70:
+            reasons.append(f"Strong swim-lane fit ({swim_lane_fit}/100)")
+        if momentum >= 65:
+            reasons.append(f"Accelerating market ({p['city']}, {p['state']})")
+        elif momentum < 40:
+            reasons.append(f"Cooling market conditions in {p['city']}")
+        if freshness >= 70:
+            reasons.append("Recent activity signals detected")
+        if cd == 'Low':
+            reasons.append("Low competitive difficulty - easier engagement")
+        elif cd == 'High':
+            reasons.append("High competitive difficulty - needs differentiated approach")
+        if not reasons:
+            reasons.append(f"Composite score: {call_timing}")
+
+        ws_id = workspace_id or 'default'
+        lid = str(uuid.uuid4())
+        try:
+            c.execute('''
+                INSERT OR REPLACE INTO lead_timing_scores
+                (id, workspace_id, prospect_key, company_name, state, city,
+                 trigger_severity, swim_lane_fit, engagement_score,
+                 market_momentum_score, freshness_score, call_timing_score,
+                 timing_label, reasons, computed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (lid, ws_id, p['prospect_key'], p['company_name'], p['state'], p['city'],
+                  trigger_severity, swim_lane_fit, engagement, momentum, freshness,
+                  call_timing, timing_label, json.dumps(reasons)))
+            scored += 1
+        except sqlite3.IntegrityError:
+            pass
+
+    conn.commit()
+    conn.close()
+    print(f"[CallTiming] Scored {scored} prospects.")
+    return scored
+
+
+def run_daily_optimization():
+    """
+    Master daily job: materialize signals → compute momentum → compute timing.
+    Runs after trend detection (8:00am PT). No SerpAPI calls.
+    """
+    print("[Optimization] Starting daily optimization pipeline...")
+    try:
+        materialize_weighted_signals(days=90)
+        compute_market_momentum()
+        compute_lead_timing_scores()
+        print("[Optimization] Daily optimization complete.")
+    except Exception as e:
+        print(f"[Optimization] Error: {e}")
+        traceback.print_exc()
+
+
+# ===================================================================
 # TREND DETECTION ENGINE + WEEKLY BRIEF
 # ===================================================================
 
@@ -2734,6 +3198,139 @@ def api_intelligence_state_rankings():
     return jsonify({'success': True, 'rankings': rankings})
 
 
+# --- Momentum & Call Timing API Endpoints ---
+
+@app.route('/api/intelligence/momentum', methods=['GET'])
+@require_auth
+def api_intelligence_momentum():
+    """Get market momentum data. Optional state filter."""
+    state = request.args.get('state', '').upper()
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    if state:
+        c.execute('''
+            SELECT state, city, momentum_score, momentum_label, signals_7d, signals_30d,
+                   weighted_signals_7d, weighted_signals_30d, window_end_date
+            FROM market_momentum WHERE state = ?
+            ORDER BY momentum_score DESC
+        ''', (state,))
+    else:
+        c.execute('''
+            SELECT state, city, momentum_score, momentum_label, signals_7d, signals_30d,
+                   weighted_signals_7d, weighted_signals_30d, window_end_date
+            FROM market_momentum
+            ORDER BY momentum_score DESC LIMIT 50
+        ''')
+    rows = c.fetchall()
+    conn.close()
+    markets = [{
+        'state': r[0], 'city': r[1], 'momentum_score': r[2], 'momentum_label': r[3],
+        'signals_7d': r[4], 'signals_30d': r[5],
+        'weighted_signals_7d': r[6], 'weighted_signals_30d': r[7],
+        'window_end_date': r[8]
+    } for r in rows]
+    return jsonify({'success': True, 'markets': markets})
+
+
+@app.route('/api/intelligence/momentum/top', methods=['GET'])
+@require_auth
+def api_intelligence_momentum_top():
+    """Get top 10 cities by momentum_score."""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('''
+        SELECT state, city, momentum_score, momentum_label, weighted_signals_7d, weighted_signals_30d
+        FROM market_momentum
+        ORDER BY momentum_score DESC LIMIT 10
+    ''')
+    rows = c.fetchall()
+    conn.close()
+    cities = [{
+        'state': r[0], 'city': r[1], 'momentum_score': r[2], 'momentum_label': r[3],
+        'weighted_signals_7d': r[4], 'weighted_signals_30d': r[5]
+    } for r in rows]
+    return jsonify({'success': True, 'cities': cities})
+
+
+@app.route('/api/intelligence/call-timing', methods=['GET'])
+@require_auth
+def api_intelligence_call_timing():
+    """Get call timing scores. Optional filters: label, state, limit."""
+    label = request.args.get('label', '')
+    state = request.args.get('state', '').upper()
+    limit = min(int(request.args.get('limit', 50)), 200)
+
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    query = 'SELECT * FROM lead_timing_scores WHERE 1=1'
+    params = []
+    if label:
+        query += ' AND timing_label = ?'
+        params.append(label)
+    if state:
+        query += ' AND state = ?'
+        params.append(state)
+    query += ' ORDER BY call_timing_score DESC LIMIT ?'
+    params.append(limit)
+
+    c.execute(query, params)
+    cols = [desc[0] for desc in c.description]
+    rows = c.fetchall()
+    conn.close()
+
+    scores = []
+    for r in rows:
+        d = dict(zip(cols, r))
+        d['reasons'] = json.loads(d['reasons']) if d.get('reasons') else []
+        scores.append(d)
+    return jsonify({'success': True, 'scores': scores})
+
+
+@app.route('/api/intelligence/call-timing/lookup', methods=['GET'])
+@require_auth
+def api_intelligence_call_timing_lookup():
+    """Lookup call timing for a specific prospect_key (or bulk via comma-separated keys)."""
+    keys = request.args.get('keys', '')
+    if not keys:
+        return jsonify({'success': True, 'scores': {}})
+
+    key_list = [k.strip() for k in keys.split(',') if k.strip()]
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    placeholders = ','.join('?' * len(key_list))
+    c.execute(f'''
+        SELECT prospect_key, call_timing_score, timing_label, reasons,
+               trigger_severity, swim_lane_fit, engagement_score,
+               market_momentum_score, freshness_score
+        FROM lead_timing_scores WHERE prospect_key IN ({placeholders})
+    ''', key_list)
+    rows = c.fetchall()
+    conn.close()
+
+    result = {}
+    for r in rows:
+        result[r[0]] = {
+            'call_timing_score': r[1], 'timing_label': r[2],
+            'reasons': json.loads(r[3]) if r[3] else [],
+            'trigger_severity': r[4], 'swim_lane_fit': r[5],
+            'engagement_score': r[6], 'market_momentum_score': r[7],
+            'freshness_score': r[8]
+        }
+    return jsonify({'success': True, 'scores': result})
+
+
+@app.route('/api/intelligence/optimization/run', methods=['POST'])
+@require_auth
+@require_role('admin')
+def api_intelligence_run_optimization():
+    """Admin: manually trigger the full optimization pipeline."""
+    try:
+        run_daily_optimization()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
 # --- Scheduler Setup ---
 def _scheduled_discovery():
     """Wrapper that enqueues the scheduled discovery job (runs ALL adapters including permits)."""
@@ -2754,6 +3351,13 @@ def _scheduled_weekly_brief():
         generate_weekly_brief()
     except Exception as e:
         print(f"[Scheduler] Weekly brief error: {e}")
+
+def _scheduled_optimization():
+    """Daily optimization: weighted signals → momentum → call timing (8:00am PT)."""
+    try:
+        run_daily_optimization()
+    except Exception as e:
+        print(f"[Scheduler] Optimization error: {e}")
 
 _scheduler = BackgroundScheduler(daemon=True)
 _scheduler.add_job(
@@ -2781,10 +3385,18 @@ _scheduler.add_job(
     name='Weekly Sunbelt Brief',
     replace_existing=True
 )
+_scheduler.add_job(
+    _scheduled_optimization,
+    CronTrigger(hour=8, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='daily_optimization',
+    name='Daily Signal Optimization',
+    replace_existing=True
+)
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
 print("[Scheduler] Daily trend detection at 7:30 AM PT")
 print("[Scheduler] Weekly Sunbelt Brief every Monday 7:00 AM PT")
+print("[Scheduler] Daily optimization (weights + momentum + timing) at 8:00 AM PT")
 
 
 if __name__ == '__main__':
