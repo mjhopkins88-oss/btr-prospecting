@@ -347,6 +347,8 @@ def init_db():
         )
     ''')
     c.execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_state ON market_momentum(state, city, window_end_date)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_date ON market_momentum(window_end_date)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_st ON market_momentum(state)')
     # --- Lead Timing Scores ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS lead_timing_scores (
@@ -2505,9 +2507,11 @@ def compute_market_momentum():
     c = conn.cursor()
 
     # Get all unique (state, city) pairs from weighted_signals in the 5 states
+    # Filter out NULL/empty/Unknown cities to keep rankings clean
     c.execute('''
         SELECT DISTINCT state, city FROM weighted_signals
         WHERE state IN ('TX','AZ','GA','NC','FL') AND published_at >= ?
+        AND city IS NOT NULL AND city != '' AND city != 'Unknown'
     ''', (cutoff_30d,))
     markets = c.fetchall()
 
@@ -3349,6 +3353,119 @@ def api_intelligence_run_optimization():
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
+@app.route('/api/intelligence/backfill-weights', methods=['POST'])
+@require_auth
+@require_role('admin')
+def api_intelligence_backfill_weights():
+    """Admin: one-time backfill of weighted_signals for last 90 days."""
+    try:
+        count = materialize_weighted_signals(days=90)
+        return jsonify({'success': True, 'materialized': count})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+# --- Scoped momentum API (spec: /api/intel/) ---
+
+@app.route('/api/intel/momentum/top-cities', methods=['GET'])
+@require_auth
+def api_intel_momentum_top_cities():
+    """
+    Top cities by momentum_score for the latest window_end_date.
+    Params: ?state=TX&limit=10
+    """
+    state = request.args.get('state', '').upper()
+    limit = min(int(request.args.get('limit', 10)), 50)
+
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+
+    # Get latest window_end_date
+    c.execute('SELECT MAX(window_end_date) FROM market_momentum')
+    row = c.fetchone()
+    latest_date = row[0] if row and row[0] else None
+
+    if not latest_date:
+        conn.close()
+        return jsonify({'success': True, 'cities': [], 'window_end_date': None})
+
+    query = '''
+        SELECT state, city, momentum_score, momentum_label,
+               signals_7d, signals_14d, signals_30d,
+               weighted_signals_7d, weighted_signals_14d, weighted_signals_30d,
+               window_end_date
+        FROM market_momentum
+        WHERE window_end_date = ?
+    '''
+    params = [latest_date]
+
+    if state:
+        query += ' AND state = ?'
+        params.append(state)
+
+    query += ' ORDER BY momentum_score DESC LIMIT ?'
+    params.append(limit)
+
+    c.execute(query, params)
+    rows = c.fetchall()
+    conn.close()
+
+    cities = [{
+        'state': r[0], 'city': r[1], 'momentum_score': r[2], 'momentum_label': r[3],
+        'signals_7d': r[4], 'signals_14d': r[5], 'signals_30d': r[6],
+        'weighted_signals_7d': r[7], 'weighted_signals_14d': r[8], 'weighted_signals_30d': r[9],
+        'window_end_date': r[10]
+    } for r in rows]
+    return jsonify({'success': True, 'cities': cities, 'window_end_date': latest_date})
+
+
+@app.route('/api/intel/momentum/state-summary', methods=['GET'])
+@require_auth
+def api_intel_momentum_state_summary():
+    """
+    Latest-day summary per state (TX/AZ/GA/NC/FL):
+    total weighted_signals_7d and avg momentum_score.
+    """
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+
+    # Get latest window_end_date
+    c.execute('SELECT MAX(window_end_date) FROM market_momentum')
+    row = c.fetchone()
+    latest_date = row[0] if row and row[0] else None
+
+    if not latest_date:
+        conn.close()
+        return jsonify({'success': True, 'states': [], 'window_end_date': None})
+
+    c.execute('''
+        SELECT state,
+               SUM(weighted_signals_7d) as total_weighted_7d,
+               SUM(weighted_signals_30d) as total_weighted_30d,
+               SUM(signals_7d) as total_signals_7d,
+               SUM(signals_30d) as total_signals_30d,
+               ROUND(AVG(momentum_score), 1) as avg_momentum,
+               COUNT(*) as city_count
+        FROM market_momentum
+        WHERE window_end_date = ? AND state IN ('TX','AZ','GA','NC','FL')
+        GROUP BY state
+        ORDER BY total_weighted_7d DESC
+    ''', (latest_date,))
+    rows = c.fetchall()
+    conn.close()
+
+    states = [{
+        'state': r[0],
+        'weighted_signals_7d': r[1],
+        'weighted_signals_30d': r[2],
+        'signals_7d': r[3],
+        'signals_30d': r[4],
+        'avg_momentum_score': r[5],
+        'city_count': r[6],
+    } for r in rows]
+    return jsonify({'success': True, 'states': states, 'window_end_date': latest_date})
+
+
 # --- Scheduler Setup ---
 def _scheduled_discovery():
     """Wrapper that enqueues the scheduled discovery job (runs ALL adapters including permits)."""
@@ -3405,16 +3522,16 @@ _scheduler.add_job(
 )
 _scheduler.add_job(
     _scheduled_optimization,
-    CronTrigger(hour=8, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    CronTrigger(hour=6, minute=45, timezone=pytz.timezone('America/Los_Angeles')),
     id='daily_optimization',
     name='Daily Signal Optimization',
     replace_existing=True
 )
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
+print("[Scheduler] Daily signal optimization at 6:45 AM PT")
 print("[Scheduler] Daily trend detection at 7:30 AM PT")
 print("[Scheduler] Weekly Sunbelt Brief every Monday 7:00 AM PT")
-print("[Scheduler] Daily optimization (weights + momentum + timing) at 8:00 AM PT")
 
 
 if __name__ == '__main__':
