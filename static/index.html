@@ -138,6 +138,16 @@
             ? 'http://localhost:5000'
             : window.location.origin;
 
+        // Wrap native fetch to always include credentials for API calls
+        // This ensures session cookies are sent with every request
+        const _origFetch = window.fetch.bind(window);
+        window.fetch = function(url, opts = {}) {
+            if (typeof url === 'string' && url.startsWith(API_BASE)) {
+                opts = { ...opts, credentials: 'include' };
+            }
+            return _origFetch(url, opts);
+        };
+
         // Trigger pill color mapping
         function getTriggerStyle(trigger) {
             const t = trigger.toLowerCase();
@@ -196,10 +206,24 @@
                 try {
                     const res = await fetch(`${API_BASE}/api/auth/me`);
                     const data = await res.json();
-                    if (data.needs_bootstrap) { setAuthState('bootstrap'); }
-                    else if (data.success && data.user) { setUser(data.user); setAuthState('authenticated'); }
-                    else { setAuthState('login'); }
-                } catch (e) { setAuthState('login'); }
+                    if (data.needs_bootstrap) {
+                        setAuthState('bootstrap');
+                    } else if (data.success && data.user) {
+                        setUser(data.user);
+                        setAuthState('authenticated');
+                    } else {
+                        // 401 or no user — check if bootstrap needed vs login
+                        try {
+                            const huRes = await fetch(`${API_BASE}/api/auth/has-users`);
+                            const huData = await huRes.json();
+                            setAuthState(huData.has_users ? 'login' : 'bootstrap');
+                        } catch (e2) {
+                            setAuthState('login');
+                        }
+                    }
+                } catch (e) {
+                    setAuthState('login');
+                }
             };
 
             const handleBootstrap = async (form) => {
@@ -352,6 +376,23 @@
                 } catch (e) { console.error('CRM bulk status error:', e); }
             }, [user]);
 
+            const loadCallTimingScores = useCallback(async (prospectsList) => {
+                if (!prospectsList || prospectsList.length === 0) return;
+                const keys = prospectsList.map(p => {
+                    const nc = (p.company || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                    const nci = (p.city || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                    const ns = (p.state || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                    return nc + '|' + nci + '|' + ns;
+                });
+                const uniqueKeys = [...new Set(keys)].slice(0, 200);
+                if (uniqueKeys.length === 0) return;
+                try {
+                    const res = await fetch(`${API_BASE}/api/intelligence/call-timing/lookup?keys=${encodeURIComponent(uniqueKeys.join(','))}`);
+                    const data = await res.json();
+                    if (data.success) setCallTimingScores(data.scores || {});
+                } catch (e) { console.error('Call timing lookup error:', e); }
+            }, []);
+
             const loadProspects = async () => {
                 try {
                     const response = await fetch(`${API_BASE}/api/prospects`);
@@ -359,6 +400,7 @@
                     if (data.success) {
                         setProspects(data.prospects);
                         loadCrmStatuses(data.prospects);
+                        loadCallTimingScores(data.prospects);
                     }
                 } catch (error) { console.error('Error loading prospects:', error); }
             };
@@ -514,6 +556,8 @@
             const [filterEightyPlus, setFilterEightyPlus] = useState(false);
             const [filterCapitalEvents, setFilterCapitalEvents] = useState(false);
             const [filterLowComp, setFilterLowComp] = useState(false);
+            const [filterCallNow, setFilterCallNow] = useState(false);
+            const [callTimingScores, setCallTimingScores] = useState({});
 
             const filteredProspects = prospects.filter(p => {
                 if (searchCity !== 'all' && searchCity !== 'Texas' && !p.city?.toLowerCase().includes(searchCity.toLowerCase())) return false;
@@ -536,8 +580,21 @@
                 if (filterLowComp) {
                     if ((p.competitive_difficulty || '') !== 'Low') return false;
                 }
+                if (filterCallNow) {
+                    const nc = (p.company || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                    const nci = (p.city || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                    const ns = (p.state || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                    const pk = nc + '|' + nci + '|' + ns;
+                    const timing = callTimingScores[pk];
+                    if (!timing || timing.timing_label !== 'Call Now') return false;
+                }
                 return true;
             }).sort((a, b) => {
+                if (sortBy === 'call_timing') {
+                    const aKey = (a.company||'').toLowerCase().replace(/[^a-z0-9]/g,'')+'|'+(a.city||'').toLowerCase().replace(/[^a-z0-9]/g,'')+'|'+(a.state||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+                    const bKey = (b.company||'').toLowerCase().replace(/[^a-z0-9]/g,'')+'|'+(b.city||'').toLowerCase().replace(/[^a-z0-9]/g,'')+'|'+(b.state||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+                    return ((callTimingScores[bKey]||{}).call_timing_score||0) - ((callTimingScores[aKey]||{}).call_timing_score||0);
+                }
                 if (sortBy === 'swim_lane') return (b.swim_lane_fit_score || 0) - (a.swim_lane_fit_score || 0);
                 return (b.score || 0) - (a.score || 0);
             });
@@ -589,6 +646,8 @@
                                 setFilterCapitalEvents={setFilterCapitalEvents}
                                 filterLowComp={filterLowComp}
                                 setFilterLowComp={setFilterLowComp}
+                                filterCallNow={filterCallNow}
+                                setFilterCallNow={setFilterCallNow}
                             />
                             {searchStatus && <SearchStatus message={searchStatus} />}
                             {loading && <Loading />}
@@ -600,6 +659,7 @@
                                 onSaveToPipeline={saveToPipeline}
                                 onLogTouchpoint={openTouchpoint}
                                 user={user}
+                                callTimingScores={callTimingScores}
                             />
                         </React.Fragment>
                     )}
@@ -699,7 +759,7 @@
             );
         }
 
-        function Controls({ searchCity, setSearchCity, filterScore, setFilterScore, filterTrigger, setFilterTrigger, filterSwimLane, setFilterSwimLane, sortBy, setSortBy, onSearch, onExport, loading, hasProspects, cooldown, filterEightyPlus, setFilterEightyPlus, filterCapitalEvents, setFilterCapitalEvents, filterLowComp, setFilterLowComp }) {
+        function Controls({ searchCity, setSearchCity, filterScore, setFilterScore, filterTrigger, setFilterTrigger, filterSwimLane, setFilterSwimLane, sortBy, setSortBy, onSearch, onExport, loading, hasProspects, cooldown, filterEightyPlus, setFilterEightyPlus, filterCapitalEvents, setFilterCapitalEvents, filterLowComp, setFilterLowComp, filterCallNow, setFilterCallNow }) {
             const isDisabled = loading || cooldown > 0;
             let btnLabel = 'Search Prospects';
             if (loading) btnLabel = 'Searching...';
@@ -753,6 +813,7 @@
                         <select style={styles.select} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
                             <option value="score">Sort: Severity Score</option>
                             <option value="swim_lane">Sort: Swim Lane Fit</option>
+                            <option value="call_timing">Sort: Call Timing</option>
                         </select>
                         {hasProspects && (
                             <button className="action-btn" style={styles.btn} onClick={onExport}>
@@ -773,6 +834,9 @@
                         </button>
                         <button className="filter-pill" style={pillStyle(filterLowComp)} onClick={() => setFilterLowComp(!filterLowComp)}>
                             {filterLowComp ? '✓ ' : ''}Low Competition
+                        </button>
+                        <button className="filter-pill" style={{...pillStyle(filterCallNow), borderColor: filterCallNow ? '#ef4444' : undefined, color: filterCallNow ? '#f87171' : undefined}} onClick={() => setFilterCallNow(!filterCallNow)}>
+                            {filterCallNow ? '✓ ' : ''}Call Now
                         </button>
                     </div>
                 </div>
@@ -795,7 +859,7 @@
             );
         }
 
-        function ProspectsList({ prospects, onGenerateEmail, onDelete, crmStatuses, onSaveToPipeline, onLogTouchpoint, user }) {
+        function ProspectsList({ prospects, onGenerateEmail, onDelete, crmStatuses, onSaveToPipeline, onLogTouchpoint, user, callTimingScores }) {
             if (prospects.length === 0) {
                 return (
                     <div style={styles.empty}>
@@ -810,6 +874,11 @@
                     {prospects.map((prospect) => {
                         const pk = makeProspectKey(prospect.company, null, prospect.city, prospect.state);
                         const crmInfo = (crmStatuses || {})[pk];
+                        const nc = (prospect.company || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                        const nci = (prospect.city || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                        const ns = (prospect.state || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                        const timingKey = nc + '|' + nci + '|' + ns;
+                        const timingInfo = (callTimingScores || {})[timingKey];
                         return (
                             <ProspectCard
                                 key={prospect.id}
@@ -820,6 +889,7 @@
                                 onSaveToPipeline={onSaveToPipeline}
                                 onLogTouchpoint={onLogTouchpoint}
                                 user={user}
+                                timingInfo={timingInfo}
                             />
                         );
                     })}
@@ -840,9 +910,10 @@
             );
         }
 
-        function ProspectCard({ prospect, onGenerateEmail, onDelete, crmInfo, onSaveToPipeline, onLogTouchpoint, user }) {
+        function ProspectCard({ prospect, onGenerateEmail, onDelete, crmInfo, onSaveToPipeline, onLogTouchpoint, user, timingInfo }) {
             const [showEmailOptions, setShowEmailOptions] = useState(false);
             const [whyNowExpanded, setWhyNowExpanded] = useState(false);
+            const [showTimingDetail, setShowTimingDetail] = useState(false);
             const [emailPurpose, setEmailPurpose] = useState('cold_outreach');
             const [tone, setTone] = useState('professional_direct');
             const [offer, setOffer] = useState('15_min_call');
@@ -850,6 +921,13 @@
             const foundDate = prospect.createdAt
                 ? new Date(prospect.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                 : null;
+
+            // Call timing badge colors
+            const timingColors = {
+                'Call Now': { bg: 'rgba(239,68,68,0.15)', color: '#f87171', border: '#ef4444' },
+                'Work': { bg: 'rgba(245,158,11,0.15)', color: '#fcd34d', border: '#f59e0b' },
+                'Watch': { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8', border: '#64748b' },
+            };
 
             const handleGenerate = () => {
                 onGenerateEmail(prospect, { emailPurpose, tone, offer });
@@ -901,6 +979,22 @@
                             <p style={styles.location}>{prospect.city}, {prospect.state}{foundDate ? ` · ${foundDate}` : ''}</p>
                         </div>
                         <div style={{display: 'flex', gap: '0.6rem', alignItems: 'center', flexShrink: 0}}>
+                            {timingInfo && (
+                                <div onClick={() => setShowTimingDetail(!showTimingDetail)} style={{
+                                    fontSize: '0.7rem',
+                                    padding: '0.2rem 0.55rem',
+                                    borderRadius: '6px',
+                                    background: (timingColors[timingInfo.timing_label] || timingColors.Watch).bg,
+                                    color: (timingColors[timingInfo.timing_label] || timingColors.Watch).color,
+                                    border: `1px solid ${(timingColors[timingInfo.timing_label] || timingColors.Watch).border}`,
+                                    fontWeight: 700,
+                                    letterSpacing: '0.03em',
+                                    textTransform: 'uppercase',
+                                    cursor: 'pointer',
+                                }}>
+                                    {timingInfo.timing_label} {Math.round(timingInfo.call_timing_score)}
+                                </div>
+                            )}
                             {swimLane > 0 && (
                                 <div style={{
                                     fontSize: '0.75rem',
@@ -960,6 +1054,28 @@
                             {explanation.map((line, idx) => (
                                 <div key={idx} style={{fontSize: '0.78rem', color: '#94a3b8', lineHeight: '1.4', marginBottom: '0.15rem'}}>• {line}</div>
                             ))}
+                        </div>
+                    )}
+
+                    {/* Call Timing Detail */}
+                    {showTimingDetail && timingInfo && (
+                        <div style={{padding: '0.75rem', background: 'rgba(239,68,68,0.04)', border: '1px solid rgba(239,68,68,0.15)', borderRadius: '8px'}}>
+                            <div style={{fontSize: '0.65rem', color: '#ef4444', fontWeight: 600, marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Call Timing Breakdown</div>
+                            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.3rem', fontSize: '0.78rem', color: '#94a3b8', marginBottom: '0.5rem'}}>
+                                <span>Trigger: <strong style={{color:'#f1f5f9'}}>{timingInfo.trigger_severity}</strong>/100</span>
+                                <span>Swim Fit: <strong style={{color:'#f1f5f9'}}>{timingInfo.swim_lane_fit}</strong>/100</span>
+                                <span>Engagement: <strong style={{color:'#f1f5f9'}}>{timingInfo.engagement_score}</strong>/100</span>
+                                <span>Momentum: <strong style={{color:'#f1f5f9'}}>{Math.round(timingInfo.market_momentum_score)}</strong>/100</span>
+                                <span>Freshness: <strong style={{color:'#f1f5f9'}}>{timingInfo.freshness_score}</strong>/100</span>
+                                <span>Total: <strong style={{color: (timingColors[timingInfo.timing_label]||timingColors.Watch).color}}>{Math.round(timingInfo.call_timing_score)}</strong>/100</span>
+                            </div>
+                            {timingInfo.reasons && timingInfo.reasons.length > 0 && (
+                                <div>
+                                    {timingInfo.reasons.map((r, i) => (
+                                        <div key={i} style={{fontSize: '0.75rem', color: '#cbd5e1', marginBottom: '0.15rem'}}>• {r}</div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -1721,8 +1837,10 @@
             const [latestBrief, setLatestBrief] = useState(null);
             const [trends, setTrends] = useState([]);
             const [rankings, setRankings] = useState([]);
+            const [momentumCities, setMomentumCities] = useState([]);
             const [loading, setLoading] = useState(false);
             const [genLoading, setGenLoading] = useState(false);
+            const [optLoading, setOptLoading] = useState(false);
             const [trendFilter, setTrendFilter] = useState({ state: '', topic: '' });
             const [error, setError] = useState('');
 
@@ -1730,6 +1848,7 @@
                 fetchLatestBrief();
                 fetchTrends();
                 fetchRankings();
+                fetchMomentum();
             }, []);
 
             const fetchLatestBrief = async () => {
@@ -1765,6 +1884,26 @@
                     const data = await res.json();
                     setRankings(data.rankings || []);
                 } catch (e) { console.error('Rankings fetch error:', e); }
+            };
+
+            const fetchMomentum = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/intelligence/momentum/top`);
+                    const data = await res.json();
+                    setMomentumCities(data.cities || []);
+                } catch (e) { console.error('Momentum fetch error:', e); }
+            };
+
+            const runOptimization = async () => {
+                setOptLoading(true);
+                setError('');
+                try {
+                    const res = await fetch(`${API_BASE}/api/intelligence/optimization/run`, { method: 'POST' });
+                    const data = await res.json();
+                    if (data.error) { setError(data.error); }
+                    else { await fetchMomentum(); await fetchRankings(); }
+                } catch (e) { setError('Failed to run optimization'); }
+                setOptLoading(false);
             };
 
             useEffect(() => { fetchTrends(); }, [trendFilter.state, trendFilter.topic]);
@@ -1809,6 +1948,7 @@
 
             const subTabs = [
                 { id: 'brief', label: 'Weekly Brief' },
+                { id: 'momentum', label: 'Momentum Index' },
                 { id: 'trends', label: 'Trend Signals' },
                 { id: 'rankings', label: 'State Rankings' },
             ];
@@ -1858,6 +1998,69 @@
                                 <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
                                     <p style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.1rem', marginBottom: '0.5rem' }}>No Briefs Yet</p>
                                     <p style={{ fontSize: '0.9rem' }}>Weekly briefs are generated every Monday at 7:00 AM PT, or generate one manually above.</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* MOMENTUM INDEX TAB */}
+                    {subTab === 'momentum' && (
+                        <div>
+                            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', alignItems: 'center' }}>
+                                {user?.role === 'admin' && (
+                                    <button onClick={runOptimization} disabled={optLoading} style={{
+                                        ...styles.btnPrimary, opacity: optLoading ? 0.6 : 1,
+                                        cursor: optLoading ? 'not-allowed' : 'pointer'
+                                    }}>{optLoading ? 'Running...' : 'Run Optimization'}</button>
+                                )}
+                                <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Top 10 cities by momentum</span>
+                            </div>
+
+                            {momentumCities.length > 0 ? (
+                                <div style={{ display: 'grid', gap: '0.75rem' }}>
+                                    {momentumCities.map((m, i) => {
+                                        const labelColor = m.momentum_label === 'Accelerating'
+                                            ? { bg: 'rgba(239,68,68,0.15)', color: '#f87171', border: '#ef4444' }
+                                            : m.momentum_label === 'Stable'
+                                            ? { bg: 'rgba(245,158,11,0.15)', color: '#fcd34d', border: '#f59e0b' }
+                                            : { bg: 'rgba(59,130,246,0.15)', color: '#93c5fd', border: '#3b82f6' };
+                                        return (
+                                            <div key={i} style={{
+                                                background: '#1e293b', border: '1px solid #334155', borderRadius: '12px',
+                                                padding: '1.25rem', display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: '1.25rem', alignItems: 'center'
+                                            }}>
+                                                <div style={{
+                                                    fontFamily: "'Orbitron', sans-serif", fontSize: '1.5rem', fontWeight: 900,
+                                                    color: i < 3 ? '#34d399' : '#64748b', width: '2.5rem', textAlign: 'center'
+                                                }}>#{i + 1}</div>
+                                                <div>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.3rem' }}>
+                                                        <span style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1rem', fontWeight: 700, color: '#f1f5f9' }}>
+                                                            {m.city}, {m.state}
+                                                        </span>
+                                                        <span style={{
+                                                            background: labelColor.bg, color: labelColor.color, border: `1px solid ${labelColor.border}`,
+                                                            borderRadius: '20px', padding: '0.15rem 0.6rem', fontSize: '0.65rem',
+                                                            fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em'
+                                                        }}>{m.momentum_label}</span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.8rem', color: '#94a3b8' }}>
+                                                        <span>7d weighted: <strong style={{ color: '#34d399' }}>{m.weighted_signals_7d}</strong></span>
+                                                        <span>30d weighted: <strong style={{ color: '#94a3b8' }}>{m.weighted_signals_30d}</strong></span>
+                                                    </div>
+                                                </div>
+                                                <div style={{
+                                                    fontFamily: "'JetBrains Mono', monospace", fontSize: '1.4rem', fontWeight: 700,
+                                                    color: labelColor.color
+                                                }}>{Math.round(m.momentum_score)}</div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
+                                    <p style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.1rem', marginBottom: '0.5rem' }}>No Momentum Data</p>
+                                    <p style={{ fontSize: '0.9rem' }}>Run the optimization pipeline to compute market momentum from weighted signals.</p>
                                 </div>
                             )}
                         </div>
