@@ -290,6 +290,8 @@
             };
 
             const [filterTrigger, setFilterTrigger] = useState('all');
+            const [filterSwimLane, setFilterSwimLane] = useState(false);
+            const [sortBy, setSortBy] = useState('score');
 
             const filteredProspects = prospects.filter(p => {
                 if (searchCity !== 'all' && searchCity !== 'Texas' && !p.city?.toLowerCase().includes(searchCity.toLowerCase())) return false;
@@ -300,7 +302,14 @@
                     const triggers = p.insurance_triggers || [];
                     if (!triggers.some(t => t.toLowerCase().includes(filterTrigger.toLowerCase()))) return false;
                 }
+                if (filterSwimLane) {
+                    const band = p.unit_band || '';
+                    if (band !== '40-150' && band !== '150-400') return false;
+                }
                 return true;
+            }).sort((a, b) => {
+                if (sortBy === 'swim_lane') return (b.swim_lane_fit_score || 0) - (a.swim_lane_fit_score || 0);
+                return (b.score || 0) - (a.score || 0);
             });
 
             return (
@@ -317,6 +326,10 @@
                                 setFilterScore={setFilterScore}
                                 filterTrigger={filterTrigger}
                                 setFilterTrigger={setFilterTrigger}
+                                filterSwimLane={filterSwimLane}
+                                setFilterSwimLane={setFilterSwimLane}
+                                sortBy={sortBy}
+                                setSortBy={setSortBy}
                                 onSearch={searchProspects}
                                 onExport={exportToCSV}
                                 loading={loading}
@@ -403,7 +416,7 @@
             );
         }
 
-        function Controls({ searchCity, setSearchCity, filterScore, setFilterScore, filterTrigger, setFilterTrigger, onSearch, onExport, loading, hasProspects, cooldown }) {
+        function Controls({ searchCity, setSearchCity, filterScore, setFilterScore, filterTrigger, setFilterTrigger, filterSwimLane, setFilterSwimLane, sortBy, setSortBy, onSearch, onExport, loading, hasProspects, cooldown }) {
             const isDisabled = loading || cooldown > 0;
             let btnLabel = '🚀 Search for Prospects';
             if (loading) btnLabel = '🔍 Searching...';
@@ -448,6 +461,25 @@
                         <option value="capital event">Capital Event</option>
                         <option value="Refinance">Refinance / Debt</option>
                         <option value="Lease-up">Lease-up Shift</option>
+                    </select>
+                    <button
+                        style={{
+                            ...styles.btn,
+                            background: filterSwimLane ? 'rgba(0,255,136,0.15)' : '#151b2e',
+                            borderColor: filterSwimLane ? '#00ff88' : '#1f2937',
+                            color: filterSwimLane ? '#00ff88' : '#e8eef7',
+                        }}
+                        onClick={() => setFilterSwimLane(!filterSwimLane)}
+                    >
+                        {filterSwimLane ? '✓ ' : ''}40–400 Units
+                    </button>
+                    <select
+                        style={styles.select}
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value)}
+                    >
+                        <option value="score">Sort: Severity Score</option>
+                        <option value="swim_lane">Sort: Swim Lane Fit</option>
                     </select>
                     {hasProspects && (
                         <button style={styles.btn} onClick={onExport}>
@@ -531,6 +563,9 @@
             const hasBreakdown = Object.keys(breakdown).length > 0;
             const explanation = prospect.score_explanation || [];
             const triggers = prospect.insurance_triggers || [];
+            const swimLane = prospect.swim_lane_fit_score || 0;
+            const unitBand = prospect.unit_band || '';
+            const competitiveDifficulty = prospect.competitive_difficulty || '';
 
             return (
                 <div style={styles.card}>
@@ -539,7 +574,23 @@
                             <h3 style={styles.companyName}>{prospect.company}</h3>
                             <p style={styles.location}>{prospect.city}, {prospect.state}{foundDate ? ` · Found ${foundDate}` : ''}</p>
                         </div>
-                        <div style={styles.scoreBadge}>{prospect.score}</div>
+                        <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center'}}>
+                            {swimLane > 0 && (
+                                <div style={{
+                                    background: swimLane >= 70 ? 'rgba(0,255,136,0.15)' : swimLane >= 40 ? 'rgba(255,217,61,0.15)' : 'rgba(139,149,171,0.15)',
+                                    border: `1px solid ${swimLane >= 70 ? '#00ff88' : swimLane >= 40 ? '#ffd93d' : '#8b95ab'}`,
+                                    color: swimLane >= 70 ? '#00ff88' : swimLane >= 40 ? '#ffd93d' : '#8b95ab',
+                                    padding: '0.3rem 0.6rem',
+                                    borderRadius: '12px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 600,
+                                    fontFamily: 'Orbitron, sans-serif',
+                                }}>
+                                    FIT {swimLane}
+                                </div>
+                            )}
+                            <div style={styles.scoreBadge}>{prospect.score}</div>
+                        </div>
                     </div>
                     <div style={styles.executive}>
                         <strong>{prospect.executive || 'Contact via company'}</strong> {prospect.title && `- ${prospect.title}`}
@@ -592,6 +643,32 @@
                                     }}>{trigger}</span>
                                 ))}
                             </div>
+                        </div>
+                    )}
+
+                    {/* Swim Lane Info */}
+                    {(unitBand || competitiveDifficulty) && (
+                        <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap', margin: '0.5rem 0', alignItems: 'center'}}>
+                            {unitBand && (
+                                <span style={{
+                                    fontSize: '0.75rem',
+                                    padding: '0.2rem 0.55rem',
+                                    borderRadius: '12px',
+                                    border: '1px solid rgba(0,212,255,0.4)',
+                                    color: '#00d4ff',
+                                    background: 'rgba(0,212,255,0.08)',
+                                }}>{unitBand} units</span>
+                            )}
+                            {competitiveDifficulty && (
+                                <span style={{
+                                    fontSize: '0.75rem',
+                                    padding: '0.2rem 0.55rem',
+                                    borderRadius: '12px',
+                                    border: `1px solid ${competitiveDifficulty === 'Low' ? 'rgba(0,255,136,0.4)' : competitiveDifficulty === 'Medium' ? 'rgba(255,217,61,0.4)' : 'rgba(255,71,87,0.4)'}`,
+                                    color: competitiveDifficulty === 'Low' ? '#00ff88' : competitiveDifficulty === 'Medium' ? '#ffd93d' : '#ff4757',
+                                    background: competitiveDifficulty === 'Low' ? 'rgba(0,255,136,0.08)' : competitiveDifficulty === 'Medium' ? 'rgba(255,217,61,0.08)' : 'rgba(255,71,87,0.08)',
+                                }}>Comp: {competitiveDifficulty}</span>
+                            )}
                         </div>
                     )}
 
