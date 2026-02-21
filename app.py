@@ -3,9 +3,12 @@ BTR Prospecting System - Backend Server
 Flask API with Claude AI integration for automated prospect discovery
 """
 
-from flask import Flask, request, jsonify, send_from_directory, send_file
+from flask import Flask, request, jsonify, send_from_directory, send_file, g, make_response
 from flask_cors import CORS
+from functools import wraps
 import os
+import secrets
+import hashlib
 from datetime import datetime, timedelta
 import json
 import time
@@ -21,12 +24,22 @@ import uuid
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
+import bcrypt
 
 # Load environment variables
 load_dotenv()
 
+SESSION_SECRET = os.getenv('SESSION_SECRET', secrets.token_hex(32))
+COOKIE_SECURE = os.getenv('COOKIE_SECURE', 'false').lower() == 'true'
+SESSION_DURATION_HOURS = 72  # 3 days
+
 app = Flask(__name__, static_folder='static')
-CORS(app)
+CORS(app, supports_credentials=True)
+
+# --- Login rate limiter (in-memory) ---
+_login_attempts = {}  # email -> { count, locked_until }
+_LOGIN_MAX_ATTEMPTS = 10
+_LOGIN_LOCKOUT_MINUTES = 10
 
 # Initialize Claude client
 client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
@@ -199,10 +212,623 @@ def init_db():
             items_found INTEGER DEFAULT 0
         )
     ''')
+    # --- Auth & CRM Tables ---
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS workspaces (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+            name TEXT NOT NULL,
+            email TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'producer',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id),
+            session_token TEXT NOT NULL UNIQUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP NOT NULL,
+            last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS crm_companies (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+            prospect_key TEXT NOT NULL,
+            company_name TEXT NOT NULL,
+            website TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(workspace_id, prospect_key)
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS crm_leads (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+            company_id TEXT NOT NULL REFERENCES crm_companies(id),
+            owner_user_id TEXT REFERENCES users(id),
+            status TEXT NOT NULL DEFAULT 'New',
+            last_touch_at TIMESTAMP,
+            next_followup_at TIMESTAMP,
+            priority INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS crm_touchpoints (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+            lead_id TEXT NOT NULL REFERENCES crm_leads(id),
+            user_id TEXT NOT NULL REFERENCES users(id),
+            type TEXT NOT NULL,
+            outcome TEXT,
+            notes TEXT,
+            occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            next_followup_at TIMESTAMP
+        )
+    ''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_crm_leads_owner ON crm_leads(workspace_id, owner_user_id, status)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_crm_leads_followup ON crm_leads(workspace_id, next_followup_at)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_crm_companies_key ON crm_companies(workspace_id, prospect_key)')
     conn.commit()
     conn.close()
 
 init_db()
+
+
+# ===================================================================
+# AUTH HELPERS & MIDDLEWARE
+# ===================================================================
+
+def _hash_password(password):
+    """Hash a password using bcrypt."""
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+def _check_password(password, password_hash):
+    """Verify a password against its bcrypt hash."""
+    return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
+
+def _get_session_user(conn=None):
+    """Look up the current user from the session cookie. Returns (user_dict, workspace_id) or (None, None)."""
+    token = request.cookies.get('session_token')
+    if not token:
+        return None, None
+    close_conn = False
+    if conn is None:
+        conn = sqlite3.connect('prospects.db')
+        close_conn = True
+    c = conn.cursor()
+    c.execute('''
+        SELECT s.id, s.user_id, s.expires_at, u.id, u.workspace_id, u.name, u.email, u.role
+        FROM sessions s JOIN users u ON s.user_id = u.id
+        WHERE s.session_token = ? AND s.expires_at > ?
+    ''', (token, datetime.utcnow().isoformat()))
+    row = c.fetchone()
+    if not row:
+        if close_conn:
+            conn.close()
+        return None, None
+    # Update last_seen_at
+    c.execute('UPDATE sessions SET last_seen_at = ? WHERE id = ?', (datetime.utcnow().isoformat(), row[0]))
+    conn.commit()
+    user = {
+        'id': row[3],
+        'workspace_id': row[4],
+        'name': row[5],
+        'email': row[6],
+        'role': row[7],
+    }
+    if close_conn:
+        conn.close()
+    return user, row[4]
+
+def _has_users():
+    """Check if any users exist in the database."""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT COUNT(*) FROM users')
+    count = c.fetchone()[0]
+    conn.close()
+    return count > 0
+
+def require_auth(f):
+    """Decorator: require a valid session. Sets g.user and g.workspace_id."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # If no users exist yet, allow unauthenticated access (bootstrap mode)
+        if not _has_users():
+            g.user = None
+            g.workspace_id = None
+            return f(*args, **kwargs)
+        user, workspace_id = _get_session_user()
+        if not user:
+            return jsonify({'success': False, 'message': 'Authentication required', 'auth_required': True}), 401
+        g.user = user
+        g.workspace_id = workspace_id
+        return f(*args, **kwargs)
+    return decorated
+
+def require_role(role):
+    """Decorator: require a specific role (must be used after require_auth)."""
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            if g.user and g.user.get('role') != role:
+                return jsonify({'success': False, 'message': 'Insufficient permissions'}), 403
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
+def _check_login_rate(email):
+    """Returns True if login is allowed, False if locked out."""
+    info = _login_attempts.get(email)
+    if not info:
+        return True
+    if info.get('locked_until') and datetime.utcnow() < info['locked_until']:
+        return False
+    if info.get('locked_until') and datetime.utcnow() >= info['locked_until']:
+        # Lockout expired, reset
+        _login_attempts.pop(email, None)
+        return True
+    return True
+
+def _record_login_failure(email):
+    """Record a failed login attempt."""
+    info = _login_attempts.get(email, {'count': 0})
+    info['count'] = info.get('count', 0) + 1
+    if info['count'] >= _LOGIN_MAX_ATTEMPTS:
+        info['locked_until'] = datetime.utcnow() + timedelta(minutes=_LOGIN_LOCKOUT_MINUTES)
+    _login_attempts[email] = info
+
+def _clear_login_failures(email):
+    """Clear login failure count on success."""
+    _login_attempts.pop(email, None)
+
+def _make_prospect_key(company_name, website=None, city=None, state=None):
+    """Generate a stable prospect_key for CRM matching."""
+    norm_company = re.sub(r'[^a-z0-9]', '', (company_name or '').lower())
+    if website:
+        norm_domain = re.sub(r'^https?://(www\.)?', '', (website or '').lower()).rstrip('/')
+        return f"{norm_company}|{norm_domain}"
+    norm_city = re.sub(r'[^a-z0-9]', '', (city or '').lower())
+    norm_state = re.sub(r'[^a-z0-9]', '', (state or '').lower())
+    return f"{norm_company}|{norm_city}|{norm_state}"
+
+
+# ===================================================================
+# AUTH API ROUTES
+# ===================================================================
+
+@app.route('/api/auth/bootstrap', methods=['POST'])
+def api_auth_bootstrap():
+    """Create the first admin user + workspace. Only works if zero users exist."""
+    if _has_users():
+        return jsonify({'success': False, 'message': 'Bootstrap not available. Users already exist.'}), 403
+    data = request.json or {}
+    workspace_name = data.get('workspace_name', '').strip()
+    name = data.get('name', '').strip()
+    email = data.get('email', '').strip().lower()
+    password = data.get('password', '')
+
+    if not workspace_name or not name or not email or not password:
+        return jsonify({'success': False, 'message': 'All fields are required: workspace_name, name, email, password'}), 400
+    if len(password) < 8:
+        return jsonify({'success': False, 'message': 'Password must be at least 8 characters'}), 400
+
+    workspace_id = str(uuid.uuid4())
+    user_id = str(uuid.uuid4())
+    password_hash = _hash_password(password)
+
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    try:
+        c.execute('INSERT INTO workspaces (id, name) VALUES (?, ?)', (workspace_id, workspace_name))
+        c.execute('INSERT INTO users (id, workspace_id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?, ?)',
+                  (user_id, workspace_id, name, email, password_hash, 'admin'))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'success': False, 'message': 'Email already exists'}), 400
+
+    # Auto-login: create session
+    session_token = secrets.token_urlsafe(48)
+    session_id = str(uuid.uuid4())
+    expires_at = (datetime.utcnow() + timedelta(hours=SESSION_DURATION_HOURS)).isoformat()
+    c.execute('INSERT INTO sessions (id, user_id, session_token, expires_at) VALUES (?, ?, ?, ?)',
+              (session_id, user_id, session_token, expires_at))
+    conn.commit()
+    conn.close()
+
+    resp = make_response(jsonify({
+        'success': True,
+        'user': {'id': user_id, 'name': name, 'email': email, 'role': 'admin', 'workspace_id': workspace_id}
+    }))
+    resp.set_cookie('session_token', session_token, httponly=True, samesite='Lax',
+                    secure=COOKIE_SECURE, max_age=SESSION_DURATION_HOURS * 3600)
+    return resp
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def api_auth_login():
+    """Login with email + password."""
+    data = request.json or {}
+    email = data.get('email', '').strip().lower()
+    password = data.get('password', '')
+
+    if not email or not password:
+        return jsonify({'success': False, 'message': 'Email and password are required'}), 400
+
+    # Rate limit check
+    if not _check_login_rate(email):
+        return jsonify({'success': False, 'message': 'Too many login attempts. Try again in 10 minutes.'}), 429
+
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT id, workspace_id, name, email, password_hash, role FROM users WHERE email = ?', (email,))
+    row = c.fetchone()
+
+    if not row or not _check_password(password, row[4]):
+        conn.close()
+        _record_login_failure(email)
+        return jsonify({'success': False, 'message': 'Invalid email or password'}), 401
+
+    _clear_login_failures(email)
+    user_id, workspace_id, name, user_email, _, role = row
+
+    # Create session
+    session_token = secrets.token_urlsafe(48)
+    session_id = str(uuid.uuid4())
+    expires_at = (datetime.utcnow() + timedelta(hours=SESSION_DURATION_HOURS)).isoformat()
+    c.execute('INSERT INTO sessions (id, user_id, session_token, expires_at) VALUES (?, ?, ?, ?)',
+              (session_id, user_id, session_token, expires_at))
+    conn.commit()
+    conn.close()
+
+    resp = make_response(jsonify({
+        'success': True,
+        'user': {'id': user_id, 'name': name, 'email': user_email, 'role': role, 'workspace_id': workspace_id}
+    }))
+    resp.set_cookie('session_token', session_token, httponly=True, samesite='Lax',
+                    secure=COOKIE_SECURE, max_age=SESSION_DURATION_HOURS * 3600)
+    return resp
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def api_auth_logout():
+    """Logout: invalidate session."""
+    token = request.cookies.get('session_token')
+    if token:
+        conn = sqlite3.connect('prospects.db')
+        c = conn.cursor()
+        c.execute('DELETE FROM sessions WHERE session_token = ?', (token,))
+        conn.commit()
+        conn.close()
+    resp = make_response(jsonify({'success': True}))
+    resp.delete_cookie('session_token')
+    return resp
+
+
+@app.route('/api/auth/me', methods=['GET'])
+def api_auth_me():
+    """Get current authenticated user."""
+    has_users = _has_users()
+    if not has_users:
+        return jsonify({'success': True, 'user': None, 'needs_bootstrap': True})
+    user, workspace_id = _get_session_user()
+    if not user:
+        return jsonify({'success': False, 'user': None, 'auth_required': True}), 401
+    return jsonify({'success': True, 'user': user})
+
+
+@app.route('/api/auth/users', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_auth_list_users():
+    """Admin: list all users in workspace."""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT id, name, email, role, created_at FROM users WHERE workspace_id = ?', (g.workspace_id,))
+    users = [{'id': r[0], 'name': r[1], 'email': r[2], 'role': r[3], 'created_at': r[4]} for r in c.fetchall()]
+    conn.close()
+    return jsonify({'success': True, 'users': users})
+
+
+@app.route('/api/auth/users', methods=['POST'])
+@require_auth
+@require_role('admin')
+def api_auth_create_user():
+    """Admin: create a new user in the workspace."""
+    data = request.json or {}
+    name = data.get('name', '').strip()
+    email = data.get('email', '').strip().lower()
+    password = data.get('password', '')
+    role = data.get('role', 'producer')
+
+    if not name or not email or not password:
+        return jsonify({'success': False, 'message': 'name, email, and password are required'}), 400
+    if len(password) < 8:
+        return jsonify({'success': False, 'message': 'Password must be at least 8 characters'}), 400
+    if role not in ('admin', 'producer'):
+        return jsonify({'success': False, 'message': 'Role must be admin or producer'}), 400
+
+    user_id = str(uuid.uuid4())
+    password_hash = _hash_password(password)
+
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    try:
+        c.execute('INSERT INTO users (id, workspace_id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?, ?)',
+                  (user_id, g.workspace_id, name, email, password_hash, role))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'success': False, 'message': 'Email already exists'}), 400
+    conn.close()
+    return jsonify({'success': True, 'user': {'id': user_id, 'name': name, 'email': email, 'role': role}})
+
+
+# ===================================================================
+# CRM API ROUTES
+# ===================================================================
+
+@app.route('/api/crm/lead/upsert', methods=['POST'])
+@require_auth
+def api_crm_upsert_lead():
+    """Create or find a CRM lead by prospect_key."""
+    if not g.user:
+        return jsonify({'success': False, 'message': 'Auth required for CRM'}), 401
+    data = request.json or {}
+    prospect_key = data.get('prospect_key', '').strip()
+    company_name = data.get('company_name', '').strip()
+    website = data.get('website', '').strip() or None
+
+    if not prospect_key or not company_name:
+        return jsonify({'success': False, 'message': 'prospect_key and company_name are required'}), 400
+
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    ws = g.workspace_id
+
+    # Find or create crm_company
+    c.execute('SELECT id FROM crm_companies WHERE workspace_id = ? AND prospect_key = ?', (ws, prospect_key))
+    row = c.fetchone()
+    if row:
+        company_id = row[0]
+    else:
+        company_id = str(uuid.uuid4())
+        c.execute('INSERT INTO crm_companies (id, workspace_id, prospect_key, company_name, website) VALUES (?, ?, ?, ?, ?)',
+                  (company_id, ws, prospect_key, company_name, website))
+
+    # Find or create crm_lead
+    c.execute('SELECT id, status, owner_user_id, next_followup_at, priority FROM crm_leads WHERE workspace_id = ? AND company_id = ?', (ws, company_id))
+    lead_row = c.fetchone()
+    if lead_row:
+        lead = {
+            'id': lead_row[0], 'status': lead_row[1], 'owner_user_id': lead_row[2],
+            'next_followup_at': lead_row[3], 'priority': lead_row[4], 'company_id': company_id,
+            'company_name': company_name, 'prospect_key': prospect_key,
+        }
+    else:
+        lead_id = str(uuid.uuid4())
+        c.execute('INSERT INTO crm_leads (id, workspace_id, company_id, status) VALUES (?, ?, ?, ?)',
+                  (lead_id, ws, company_id, 'New'))
+        lead = {
+            'id': lead_id, 'status': 'New', 'owner_user_id': None,
+            'next_followup_at': None, 'priority': None, 'company_id': company_id,
+            'company_name': company_name, 'prospect_key': prospect_key,
+        }
+
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'lead': lead})
+
+
+@app.route('/api/crm/leads', methods=['GET'])
+@require_auth
+def api_crm_list_leads():
+    """List CRM leads with optional filters: owner=me, status=, due=1"""
+    if not g.user:
+        return jsonify({'success': True, 'leads': []})
+    ws = g.workspace_id
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+
+    query = '''
+        SELECT l.id, l.status, l.owner_user_id, l.last_touch_at, l.next_followup_at, l.priority, l.created_at,
+               co.company_name, co.prospect_key, co.website,
+               u.name as owner_name
+        FROM crm_leads l
+        JOIN crm_companies co ON l.company_id = co.id
+        LEFT JOIN users u ON l.owner_user_id = u.id
+        WHERE l.workspace_id = ?
+    '''
+    params = [ws]
+
+    owner = request.args.get('owner')
+    if owner == 'me':
+        query += ' AND l.owner_user_id = ?'
+        params.append(g.user['id'])
+    elif owner == 'unassigned':
+        query += ' AND l.owner_user_id IS NULL'
+
+    status = request.args.get('status')
+    if status:
+        query += ' AND l.status = ?'
+        params.append(status)
+
+    due = request.args.get('due')
+    if due == '1':
+        query += ' AND l.next_followup_at IS NOT NULL AND l.next_followup_at <= ?'
+        params.append(datetime.utcnow().isoformat())
+
+    query += ' ORDER BY CASE WHEN l.next_followup_at IS NOT NULL THEN 0 ELSE 1 END, l.next_followup_at ASC, l.created_at DESC'
+
+    c.execute(query, params)
+    leads = []
+    for r in c.fetchall():
+        leads.append({
+            'id': r[0], 'status': r[1], 'owner_user_id': r[2],
+            'last_touch_at': r[3], 'next_followup_at': r[4], 'priority': r[5],
+            'created_at': r[6], 'company_name': r[7], 'prospect_key': r[8],
+            'website': r[9], 'owner_name': r[10],
+        })
+    conn.close()
+    return jsonify({'success': True, 'leads': leads})
+
+
+@app.route('/api/crm/leads/<lead_id>', methods=['PATCH'])
+@require_auth
+def api_crm_update_lead(lead_id):
+    """Update a CRM lead (status, owner, followup, priority)."""
+    if not g.user:
+        return jsonify({'success': False, 'message': 'Auth required'}), 401
+    data = request.json or {}
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+
+    # Verify lead belongs to workspace
+    c.execute('SELECT id, owner_user_id FROM crm_leads WHERE id = ? AND workspace_id = ?', (lead_id, g.workspace_id))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'success': False, 'message': 'Lead not found'}), 404
+
+    # Producers can only update their own leads; admins can update any
+    if g.user['role'] != 'admin' and row[1] and row[1] != g.user['id']:
+        conn.close()
+        return jsonify({'success': False, 'message': 'Cannot update another user\'s lead'}), 403
+
+    updates = []
+    params = []
+    for field in ('status', 'owner_user_id', 'next_followup_at', 'priority'):
+        if field in data:
+            updates.append(f'{field} = ?')
+            params.append(data[field])
+
+    if updates:
+        params.append(lead_id)
+        c.execute(f'UPDATE crm_leads SET {", ".join(updates)} WHERE id = ?', params)
+        conn.commit()
+
+    conn.close()
+    return jsonify({'success': True})
+
+
+@app.route('/api/crm/leads/<lead_id>/touchpoints', methods=['POST'])
+@require_auth
+def api_crm_add_touchpoint(lead_id):
+    """Log a CRM touchpoint."""
+    if not g.user:
+        return jsonify({'success': False, 'message': 'Auth required'}), 401
+    data = request.json or {}
+    touch_type = data.get('type', '').strip()
+    if not touch_type:
+        return jsonify({'success': False, 'message': 'type is required'}), 400
+
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+
+    # Verify lead belongs to workspace
+    c.execute('SELECT id FROM crm_leads WHERE id = ? AND workspace_id = ?', (lead_id, g.workspace_id))
+    if not c.fetchone():
+        conn.close()
+        return jsonify({'success': False, 'message': 'Lead not found'}), 404
+
+    tp_id = str(uuid.uuid4())
+    occurred_at = data.get('occurred_at', datetime.utcnow().isoformat())
+    next_followup = data.get('next_followup_at')
+
+    c.execute('''
+        INSERT INTO crm_touchpoints (id, workspace_id, lead_id, user_id, type, outcome, notes, occurred_at, next_followup_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (tp_id, g.workspace_id, lead_id, g.user['id'], touch_type,
+          data.get('outcome'), data.get('notes'), occurred_at, next_followup))
+
+    # Update lead timestamps
+    update_parts = ['last_touch_at = ?']
+    update_params = [occurred_at]
+    if next_followup:
+        update_parts.append('next_followup_at = ?')
+        update_params.append(next_followup)
+    update_params.append(lead_id)
+    c.execute(f'UPDATE crm_leads SET {", ".join(update_parts)} WHERE id = ?', update_params)
+
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'touchpoint_id': tp_id})
+
+
+@app.route('/api/crm/leads/<lead_id>/touchpoints', methods=['GET'])
+@require_auth
+def api_crm_list_touchpoints(lead_id):
+    """Get all touchpoints for a lead."""
+    if not g.user:
+        return jsonify({'success': True, 'touchpoints': []})
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+
+    c.execute('''
+        SELECT tp.id, tp.type, tp.outcome, tp.notes, tp.occurred_at, tp.next_followup_at, u.name
+        FROM crm_touchpoints tp
+        JOIN users u ON tp.user_id = u.id
+        WHERE tp.lead_id = ? AND tp.workspace_id = ?
+        ORDER BY tp.occurred_at DESC
+    ''', (lead_id, g.workspace_id))
+
+    touchpoints = []
+    for r in c.fetchall():
+        touchpoints.append({
+            'id': r[0], 'type': r[1], 'outcome': r[2], 'notes': r[3],
+            'occurred_at': r[4], 'next_followup_at': r[5], 'user_name': r[6],
+        })
+    conn.close()
+    return jsonify({'success': True, 'touchpoints': touchpoints})
+
+
+@app.route('/api/crm/leads/bulk-status', methods=['GET'])
+@require_auth
+def api_crm_bulk_status():
+    """Get CRM status for multiple prospect_keys at once (for card overlays)."""
+    if not g.user:
+        return jsonify({'success': True, 'statuses': {}})
+    keys_param = request.args.get('keys', '')
+    if not keys_param:
+        return jsonify({'success': True, 'statuses': {}})
+    keys = [k.strip() for k in keys_param.split(',') if k.strip()]
+    if not keys:
+        return jsonify({'success': True, 'statuses': {}})
+
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    placeholders = ','.join('?' * len(keys))
+    c.execute(f'''
+        SELECT co.prospect_key, l.id, l.status, l.owner_user_id, l.next_followup_at, u.name as owner_name
+        FROM crm_leads l
+        JOIN crm_companies co ON l.company_id = co.id
+        LEFT JOIN users u ON l.owner_user_id = u.id
+        WHERE l.workspace_id = ? AND co.prospect_key IN ({placeholders})
+    ''', [g.workspace_id] + keys)
+
+    statuses = {}
+    for r in c.fetchall():
+        statuses[r[0]] = {
+            'lead_id': r[1], 'status': r[2], 'owner_user_id': r[3],
+            'next_followup_at': r[4], 'owner_name': r[5],
+        }
+    conn.close()
+    return jsonify({'success': True, 'statuses': statuses})
+
 
 def search_btr_prospects(city="Texas", limit=10):
     """
@@ -779,6 +1405,7 @@ def api_health():
     }), 200
 
 @app.route('/api/search', methods=['POST'])
+@require_auth
 def api_search():
     """Search for new BTR prospects"""
     try:
@@ -831,6 +1458,7 @@ def api_search():
         }), 500
 
 @app.route('/api/prospects', methods=['GET'])
+@require_auth
 def api_get_prospects():
     """Get all prospects from database"""
     try:
@@ -847,6 +1475,7 @@ def api_get_prospects():
         }), 500
 
 @app.route('/api/prospects/<int:prospect_id>', methods=['DELETE'])
+@require_auth
 def api_delete_prospect(prospect_id):
     """Delete a prospect"""
     try:
@@ -867,6 +1496,7 @@ def api_delete_prospect(prospect_id):
         }), 500
 
 @app.route('/api/export', methods=['GET'])
+@require_auth
 def api_export_csv():
     """Download the master CSV spreadsheet with all prospects"""
     try:
@@ -891,6 +1521,7 @@ def api_export_csv():
         }), 500
 
 @app.route('/api/email/generate', methods=['POST'])
+@require_auth
 def api_generate_email():
     """Generate personalized email for a prospect using EMAIL GEN SPEC"""
     try:
@@ -1074,6 +1705,7 @@ QUALITY CHECKS before finalizing:
 # --- Async Prospecting Run Endpoints ---
 
 @app.route('/api/prospecting/run', methods=['POST'])
+@require_auth
 def api_start_prospecting_run():
     """Start an async prospecting run. Returns immediately with a run_id."""
     try:
@@ -1129,6 +1761,7 @@ def api_start_prospecting_run():
 
 
 @app.route('/api/prospecting/run/<run_id>/status', methods=['GET'])
+@require_auth
 def api_prospecting_run_status(run_id):
     """Poll the status of a prospecting run."""
     conn = sqlite3.connect('prospects.db')
@@ -1153,6 +1786,7 @@ def api_prospecting_run_status(run_id):
 
 
 @app.route('/api/prospecting/run/<run_id>/results', methods=['GET'])
+@require_auth
 def api_prospecting_run_results(run_id):
     """Get results for a prospecting run, sorted by score DESC, with pagination."""
     limit = min(int(request.args.get('limit', 50)), 200)
@@ -1233,12 +1867,15 @@ def api_prospecting_run_results(run_id):
 # --- Daily Discovery API Routes ---
 
 @app.route('/api/discovery/config', methods=['GET'])
+@require_auth
 def api_discovery_config():
     """Get current discovery configuration"""
     return jsonify({'success': True, 'config': DISCOVERY_CONFIG})
 
 
 @app.route('/api/discovery/config', methods=['PUT'])
+@require_auth
+@require_role('admin')
 def api_update_discovery_config():
     """Update discovery configuration (runtime only)"""
     data = request.json
@@ -1254,6 +1891,7 @@ def api_update_discovery_config():
 
 
 @app.route('/api/discovery/latest', methods=['GET'])
+@require_auth
 def api_discovery_latest():
     """Get the most recent discovery run"""
     conn = sqlite3.connect('prospects.db')
@@ -1281,6 +1919,7 @@ def api_discovery_latest():
 
 
 @app.route('/api/discovery/run', methods=['POST'])
+@require_auth
 def api_discovery_run():
     """Manually trigger a discovery run (background thread)"""
     global _discovery_running
@@ -1305,12 +1944,14 @@ def api_discovery_run():
 
 
 @app.route('/api/discovery/status', methods=['GET'])
+@require_auth
 def api_discovery_status():
     """Check if a discovery run is currently in progress"""
     return jsonify({'success': True, 'running': _discovery_running})
 
 
 @app.route('/api/discovery/history', methods=['GET'])
+@require_auth
 def api_discovery_history():
     """Get past discovery run summaries"""
     conn = sqlite3.connect('prospects.db')
@@ -1327,6 +1968,7 @@ def api_discovery_history():
 
 
 @app.route('/api/discovery/run/<int:run_id>', methods=['GET'])
+@require_auth
 def api_discovery_run_detail(run_id):
     """Get full results for a specific discovery run"""
     conn = sqlite3.connect('prospects.db')
@@ -1354,6 +1996,7 @@ def api_discovery_run_detail(run_id):
 
 
 @app.route('/api/discovery/source-refresh', methods=['GET'])
+@require_auth
 def api_discovery_source_refresh():
     """Get last-refreshed timestamps for each source type"""
     from discovery_engine import get_source_refresh_times
