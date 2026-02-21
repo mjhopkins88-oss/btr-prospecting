@@ -203,6 +203,15 @@ Extract up to {ask_count - len(all_prospects)} companies from these results. For
   "Builder's Risk → Property conversion", "New lender covenants / insurance requirements",
   "Portfolio scale / blanket limits", "New state expansion", "JV / institutional capital event",
   "Refinance window / debt facility", "Lease-up stabilization shift"
+- unit_band: classify the operator's typical project size as one of: "<40", "40-150", "150-400", "400-1000", "1000+"
+- active_project_count_estimate: estimated number of active projects (integer, best guess from context)
+- markets_active_estimate: estimated number of metros/markets they operate in (integer, best guess)
+- swim_lane_fit_score (0-100): Start at 50, then apply modifiers:
+  +25 if unit_band "40-150", +20 if "150-400", -15 if "<40", -10 if "400-1000", -25 if "1000+"
+  +15 if active_project_count 2-5, +5 if 1, -10 if >10
+  +10 if markets_active 2-4, +5 if 1, -5 if 5+
+  Clamp result to 0-100
+- competitive_difficulty: "Low" (niche/emerging operator), "Medium" (established regional), "High" (national/institutional)
 
 Return ONLY valid JSON:
 {{
@@ -231,6 +240,11 @@ Return ONLY valid JSON:
         "Builder's Risk → Property conversion",
         "JV / institutional capital event"
       ],
+      "unit_band": "40-150",
+      "active_project_count_estimate": 3,
+      "markets_active_estimate": 2,
+      "swim_lane_fit_score": 85,
+      "competitive_difficulty": "Low",
       "tiv": "$50M-200M",
       "units": "200-500 units",
       "projectName": "Project Name",
@@ -319,6 +333,11 @@ def _store_run_prospects(run_id, prospects):
                 'score_breakdown': p.get('score_breakdown', {}),
                 'score_explanation': p.get('score_explanation', []),
                 'insurance_triggers': p.get('insurance_triggers', []),
+                'unit_band': p.get('unit_band', ''),
+                'active_project_count_estimate': p.get('active_project_count_estimate', 0),
+                'markets_active_estimate': p.get('markets_active_estimate', 0),
+                'swim_lane_fit_score': p.get('swim_lane_fit_score', 0),
+                'competitive_difficulty': p.get('competitive_difficulty', ''),
             })
             c.execute('''
                 INSERT OR IGNORE INTO run_prospects

@@ -318,6 +318,15 @@ Find up to {ask_count} companies. For each extract:
   "Builder's Risk → Property conversion", "New lender covenants / insurance requirements",
   "Portfolio scale / blanket limits", "New state expansion", "JV / institutional capital event",
   "Refinance window / debt facility", "Lease-up stabilization shift"
+- unit_band: classify the operator's typical project size as one of: "<40", "40-150", "150-400", "400-1000", "1000+"
+- active_project_count_estimate: estimated number of active projects (integer, best guess from context)
+- markets_active_estimate: estimated number of metros/markets they operate in (integer, best guess)
+- swim_lane_fit_score (0-100): Start at 50, then apply modifiers:
+  +25 if unit_band "40-150", +20 if "150-400", -15 if "<40", -10 if "400-1000", -25 if "1000+"
+  +15 if active_project_count 2-5, +5 if 1, -10 if >10
+  +10 if markets_active 2-4, +5 if 1, -5 if 5+
+  Clamp result to 0-100
+- competitive_difficulty: "Low" (niche/emerging operator), "Medium" (established regional), "High" (national/institutional)
 
 Return ONLY valid JSON in this exact format:
 
@@ -347,6 +356,11 @@ Return ONLY valid JSON in this exact format:
         "Builder's Risk → Property conversion",
         "JV / institutional capital event"
       ],
+      "unit_band": "40-150",
+      "active_project_count_estimate": 3,
+      "markets_active_estimate": 2,
+      "swim_lane_fit_score": 85,
+      "competitive_difficulty": "Low",
       "tiv": "$50M-200M",
       "units": "200-500 units",
       "projectName": "Project Name",
@@ -402,6 +416,15 @@ Find up to {ask_count} companies actively developing BTR/SFR projects. For each 
   "Builder's Risk → Property conversion", "New lender covenants / insurance requirements",
   "Portfolio scale / blanket limits", "New state expansion", "JV / institutional capital event",
   "Refinance window / debt facility", "Lease-up stabilization shift"
+- unit_band: classify the operator's typical project size as one of: "<40", "40-150", "150-400", "400-1000", "1000+"
+- active_project_count_estimate: estimated number of active projects (integer, best guess from context)
+- markets_active_estimate: estimated number of metros/markets they operate in (integer, best guess)
+- swim_lane_fit_score (0-100): Start at 50, then apply modifiers:
+  +25 if unit_band "40-150", +20 if "150-400", -15 if "<40", -10 if "400-1000", -25 if "1000+"
+  +15 if active_project_count 2-5, +5 if 1, -10 if >10
+  +10 if markets_active 2-4, +5 if 1, -5 if 5+
+  Clamp result to 0-100
+- competitive_difficulty: "Low" (niche/emerging operator), "Medium" (established regional), "High" (national/institutional)
 
 Return ONLY valid JSON in this exact format:
 
@@ -431,6 +454,11 @@ Return ONLY valid JSON in this exact format:
         "Builder's Risk → Property conversion",
         "JV / institutional capital event"
       ],
+      "unit_band": "40-150",
+      "active_project_count_estimate": 3,
+      "markets_active_estimate": 2,
+      "swim_lane_fit_score": 85,
+      "competitive_difficulty": "Low",
       "tiv": "$50M-200M",
       "units": "200-500 units",
       "projectName": "Project Name",
@@ -1185,6 +1213,11 @@ def api_prospecting_run_results(run_id):
             prospect['score_breakdown'] = score_meta.get('score_breakdown', {})
             prospect['score_explanation'] = score_meta.get('score_explanation', [])
             prospect['insurance_triggers'] = score_meta.get('insurance_triggers', [])
+            prospect['unit_band'] = score_meta.get('unit_band', '')
+            prospect['active_project_count_estimate'] = score_meta.get('active_project_count_estimate', 0)
+            prospect['markets_active_estimate'] = score_meta.get('markets_active_estimate', 0)
+            prospect['swim_lane_fit_score'] = score_meta.get('swim_lane_fit_score', 0)
+            prospect['competitive_difficulty'] = score_meta.get('competitive_difficulty', '')
 
         prospects.append(prospect)
 
