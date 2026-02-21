@@ -168,9 +168,15 @@ def init_db():
             linkedin TEXT,
             units TEXT,
             project_name TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            score_meta TEXT
         )
     ''')
+    # Add score_meta column if missing (migration for existing DBs)
+    try:
+        c.execute("SELECT score_meta FROM run_prospects LIMIT 1")
+    except sqlite3.OperationalError:
+        c.execute("ALTER TABLE run_prospects ADD COLUMN score_meta TEXT")
     c.execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_score ON run_prospects(run_id, score DESC)')
     c.execute('''
         CREATE TABLE IF NOT EXISTS discovery_signal_seen (
@@ -301,7 +307,17 @@ Find up to {ask_count} companies. For each extract:
 - Active signals (financing, construction, sales, expansion)
 - Total Investment Value estimate (if mentioned)
 - Why to call them NOW (specific trigger from the search result)
-- Score 0-100 based on: recency of activity, deal size, expansion signals
+- Score 0-100 (the total of the four sub-scores below)
+- Score breakdown (must sum to the total score):
+  - capital_event (0-40): recapitalizations, credit facilities, JV capital, acquisitions, institutional partners
+  - construction_stage (0-25): under construction, groundbreaking, permitting, first deliveries
+  - expansion_velocity (0-20): multi-market growth, pipeline mentions, "expanding into", multiple projects
+  - freshness (0-15): activity within last 14 days=15, last 30 days=10, last 90 days=5
+- Score explanation: 2-4 bullet points explaining why it scored that way
+- Insurance triggers: 0-4 labels from this list that apply:
+  "Builder's Risk → Property conversion", "New lender covenants / insurance requirements",
+  "Portfolio scale / blanket limits", "New state expansion", "JV / institutional capital event",
+  "Refinance window / debt facility", "Lease-up stabilization shift"
 
 Return ONLY valid JSON in this exact format:
 
@@ -315,6 +331,22 @@ Return ONLY valid JSON in this exact format:
       "city": "City",
       "state": "TX",
       "score": 85,
+      "score_breakdown": {{
+        "capital_event": 35,
+        "construction_stage": 20,
+        "expansion_velocity": 18,
+        "freshness": 12
+      }},
+      "score_explanation": [
+        "Recent $200M credit facility with institutional lender",
+        "3 communities under construction across TX",
+        "Expanding into AZ and FL markets",
+        "Activity reported within last 2 weeks"
+      ],
+      "insurance_triggers": [
+        "Builder's Risk → Property conversion",
+        "JV / institutional capital event"
+      ],
       "tiv": "$50M-200M",
       "units": "200-500 units",
       "projectName": "Project Name",
@@ -359,7 +391,17 @@ Find up to {ask_count} companies actively developing BTR/SFR projects. For each 
 - Active signals (financing, construction, sales, expansion)
 - Total Investment Value estimate (if mentioned)
 - Why to call them NOW (specific trigger from the search result)
-- Score 0-100 based on: recency of activity, deal size, expansion signals
+- Score 0-100 (the total of the four sub-scores below)
+- Score breakdown (must sum to the total score):
+  - capital_event (0-40): recapitalizations, credit facilities, JV capital, acquisitions, institutional partners
+  - construction_stage (0-25): under construction, groundbreaking, permitting, first deliveries
+  - expansion_velocity (0-20): multi-market growth, pipeline mentions, "expanding into", multiple projects
+  - freshness (0-15): activity within last 14 days=15, last 30 days=10, last 90 days=5
+- Score explanation: 2-4 bullet points explaining why it scored that way
+- Insurance triggers: 0-4 labels from this list that apply:
+  "Builder's Risk → Property conversion", "New lender covenants / insurance requirements",
+  "Portfolio scale / blanket limits", "New state expansion", "JV / institutional capital event",
+  "Refinance window / debt facility", "Lease-up stabilization shift"
 
 Return ONLY valid JSON in this exact format:
 
@@ -373,6 +415,22 @@ Return ONLY valid JSON in this exact format:
       "city": "City",
       "state": "TX",
       "score": 85,
+      "score_breakdown": {{
+        "capital_event": 35,
+        "construction_stage": 20,
+        "expansion_velocity": 18,
+        "freshness": 12
+      }},
+      "score_explanation": [
+        "Recent $200M credit facility with institutional lender",
+        "3 communities under construction across TX",
+        "Expanding into AZ and FL markets",
+        "Activity reported within last 2 weeks"
+      ],
+      "insurance_triggers": [
+        "Builder's Risk → Property conversion",
+        "JV / institutional capital event"
+      ],
       "tiv": "$50M-200M",
       "units": "200-500 units",
       "projectName": "Project Name",
@@ -1082,7 +1140,7 @@ def api_prospecting_run_results(run_id):
     # Fetch page
     c.execute('''
         SELECT id, company_name, city, state, score, tiv_estimate, deal_status,
-               signals, why_call_now, executive, title, linkedin, units, project_name, created_at
+               signals, why_call_now, executive, title, linkedin, units, project_name, created_at, score_meta
         FROM run_prospects
         WHERE run_id = ?
         ORDER BY score DESC
@@ -1097,7 +1155,14 @@ def api_prospecting_run_results(run_id):
         except (json.JSONDecodeError, TypeError):
             signals = [signals_raw] if signals_raw else []
 
-        prospects.append({
+        # Unpack score_meta if present
+        score_meta = {}
+        try:
+            score_meta = json.loads(row[15]) if len(row) > 15 and row[15] else {}
+        except (json.JSONDecodeError, TypeError, IndexError):
+            pass
+
+        prospect = {
             'id': row[0],
             'company': row[1],
             'city': row[2],
@@ -1113,7 +1178,15 @@ def api_prospecting_run_results(run_id):
             'units': row[12],
             'projectName': row[13],
             'createdAt': row[14],
-        })
+        }
+
+        # Merge score_meta fields into prospect
+        if score_meta:
+            prospect['score_breakdown'] = score_meta.get('score_breakdown', {})
+            prospect['score_explanation'] = score_meta.get('score_explanation', [])
+            prospect['insurance_triggers'] = score_meta.get('insurance_triggers', [])
+
+        prospects.append(prospect)
 
     conn.close()
 

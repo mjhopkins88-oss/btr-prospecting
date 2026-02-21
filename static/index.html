@@ -289,10 +289,17 @@
                 }
             };
 
+            const [filterTrigger, setFilterTrigger] = useState('all');
+
             const filteredProspects = prospects.filter(p => {
                 if (searchCity !== 'all' && searchCity !== 'Texas' && !p.city?.toLowerCase().includes(searchCity.toLowerCase())) return false;
                 if (filterScore === '90+' && p.score < 90) return false;
+                if (filterScore === '80+' && p.score < 80) return false;
                 if (filterScore === '80-89' && (p.score < 80 || p.score >= 90)) return false;
+                if (filterTrigger !== 'all') {
+                    const triggers = p.insurance_triggers || [];
+                    if (!triggers.some(t => t.toLowerCase().includes(filterTrigger.toLowerCase()))) return false;
+                }
                 return true;
             });
 
@@ -308,6 +315,8 @@
                                 setSearchCity={setSearchCity}
                                 filterScore={filterScore}
                                 setFilterScore={setFilterScore}
+                                filterTrigger={filterTrigger}
+                                setFilterTrigger={setFilterTrigger}
                                 onSearch={searchProspects}
                                 onExport={exportToCSV}
                                 loading={loading}
@@ -394,7 +403,7 @@
             );
         }
 
-        function Controls({ searchCity, setSearchCity, filterScore, setFilterScore, onSearch, onExport, loading, hasProspects, cooldown }) {
+        function Controls({ searchCity, setSearchCity, filterScore, setFilterScore, filterTrigger, setFilterTrigger, onSearch, onExport, loading, hasProspects, cooldown }) {
             const isDisabled = loading || cooldown > 0;
             let btnLabel = '🚀 Search for Prospects';
             if (loading) btnLabel = '🔍 Searching...';
@@ -416,14 +425,29 @@
                         onChange={(e) => setSearchCity(e.target.value)}
                         placeholder="City or State (e.g., Dallas, Texas, Arizona)"
                     />
-                    <select 
+                    <select
                         style={styles.select}
                         value={filterScore}
                         onChange={(e) => setFilterScore(e.target.value)}
                     >
                         <option value="all">All Scores</option>
                         <option value="90+">90+ (Urgent)</option>
+                        <option value="80+">80+ (High Priority)</option>
                         <option value="80-89">80-89 (High)</option>
+                    </select>
+                    <select
+                        style={styles.select}
+                        value={filterTrigger}
+                        onChange={(e) => setFilterTrigger(e.target.value)}
+                    >
+                        <option value="all">All Triggers</option>
+                        <option value="Builder's Risk">Builder's Risk</option>
+                        <option value="lender covenants">Lender Covenants</option>
+                        <option value="Portfolio scale">Portfolio Scale</option>
+                        <option value="state expansion">State Expansion</option>
+                        <option value="capital event">Capital Event</option>
+                        <option value="Refinance">Refinance / Debt</option>
+                        <option value="Lease-up">Lease-up Shift</option>
                     </select>
                     {hasProspects && (
                         <button style={styles.btn} onClick={onExport}>
@@ -475,6 +499,19 @@
             );
         }
 
+        function ScoreBar({ label, value, max, color }) {
+            const pct = max > 0 ? Math.round((value / max) * 100) : 0;
+            return (
+                <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.3rem'}}>
+                    <span style={{fontSize: '0.7rem', color: '#8b95ab', width: '90px', textAlign: 'right', flexShrink: 0}}>{label}</span>
+                    <div style={{flex: 1, height: '6px', background: '#1f2937', borderRadius: '3px', overflow: 'hidden'}}>
+                        <div style={{width: `${pct}%`, height: '100%', background: color, borderRadius: '3px', transition: 'width 0.3s'}} />
+                    </div>
+                    <span style={{fontSize: '0.7rem', color: color, width: '30px', flexShrink: 0}}>{value}/{max}</span>
+                </div>
+            );
+        }
+
         function ProspectCard({ prospect, onGenerateEmail, onDelete }) {
             const [showEmailOptions, setShowEmailOptions] = useState(false);
             const [emailPurpose, setEmailPurpose] = useState('cold_outreach');
@@ -489,6 +526,11 @@
                 onGenerateEmail(prospect, { emailPurpose, tone, offer });
                 setShowEmailOptions(false);
             };
+
+            const breakdown = prospect.score_breakdown || {};
+            const hasBreakdown = Object.keys(breakdown).length > 0;
+            const explanation = prospect.score_explanation || [];
+            const triggers = prospect.insurance_triggers || [];
 
             return (
                 <div style={styles.card}>
@@ -511,6 +553,48 @@
                             </a>
                         )}
                     </div>
+
+                    {/* Score Breakdown */}
+                    {hasBreakdown && (
+                        <div style={{margin: '0.75rem 0', padding: '0.75rem', background: '#0a0e1a', borderRadius: '8px', border: '1px solid #1f2937'}}>
+                            <div style={{fontSize: '0.75rem', color: '#8b95ab', fontWeight: 600, marginBottom: '0.5rem'}}>TRIGGER SEVERITY</div>
+                            <ScoreBar label="Capital Event" value={breakdown.capital_event || 0} max={40} color="#ff4757" />
+                            <ScoreBar label="Construction" value={breakdown.construction_stage || 0} max={25} color="#00d4ff" />
+                            <ScoreBar label="Expansion" value={breakdown.expansion_velocity || 0} max={20} color="#ffd93d" />
+                            <ScoreBar label="Freshness" value={breakdown.freshness || 0} max={15} color="#00ff88" />
+                        </div>
+                    )}
+
+                    {/* Score Explanation */}
+                    {explanation.length > 0 && (
+                        <div style={{margin: '0.5rem 0', padding: '0.5rem 0.75rem', background: 'rgba(0,212,255,0.05)', borderLeft: '2px solid #00d4ff', borderRadius: '0 6px 6px 0'}}>
+                            <div style={{fontSize: '0.7rem', color: '#00d4ff', fontWeight: 600, marginBottom: '0.3rem'}}>SCORE RATIONALE</div>
+                            {explanation.map((line, idx) => (
+                                <div key={idx} style={{fontSize: '0.78rem', color: '#c0c8d8', lineHeight: '1.4', marginBottom: '0.15rem'}}>• {line}</div>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Insurance Trigger Badges */}
+                    {triggers.length > 0 && (
+                        <div style={{margin: '0.5rem 0'}}>
+                            <div style={{fontSize: '0.7rem', color: '#8b95ab', fontWeight: 600, marginBottom: '0.35rem'}}>INSURANCE TRIGGERS</div>
+                            <div style={{display: 'flex', flexWrap: 'wrap', gap: '0.35rem'}}>
+                                {triggers.map((trigger, idx) => (
+                                    <span key={idx} style={{
+                                        fontSize: '0.72rem',
+                                        padding: '0.2rem 0.55rem',
+                                        borderRadius: '12px',
+                                        border: '1px solid rgba(255,71,87,0.4)',
+                                        color: '#ff6b81',
+                                        background: 'rgba(255,71,87,0.08)',
+                                        whiteSpace: 'nowrap',
+                                    }}>{trigger}</span>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
                     <div style={styles.details}>
                         <div><strong>Project:</strong> {prospect.projectName}</div>
                         <div><strong>Status:</strong> {prospect.projectStatus}</div>
