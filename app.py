@@ -281,6 +281,32 @@ def init_db():
     c.execute('CREATE INDEX IF NOT EXISTS idx_crm_leads_owner ON crm_leads(workspace_id, owner_user_id, status)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_crm_leads_followup ON crm_leads(workspace_id, next_followup_at)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_crm_companies_key ON crm_companies(workspace_id, prospect_key)')
+    # --- Trend Detection & Weekly Briefs Tables ---
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS trend_signals (
+            id TEXT PRIMARY KEY,
+            state TEXT NOT NULL,
+            city TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            count_7d INTEGER NOT NULL,
+            count_30d INTEGER NOT NULL,
+            trend_ratio REAL NOT NULL,
+            classification TEXT NOT NULL,
+            computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(state, city, topic, computed_at)
+        )
+    ''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_trend_signals_date ON trend_signals(computed_at)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_trend_signals_state ON trend_signals(state, computed_at)')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS weekly_briefs (
+            id TEXT PRIMARY KEY,
+            brief_json TEXT NOT NULL,
+            generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            week_start TEXT NOT NULL,
+            week_end TEXT NOT NULL
+        )
+    ''')
     conn.commit()
     conn.close()
 
@@ -2299,11 +2325,435 @@ def api_state_rankings():
     return jsonify({'success': True, 'rankings': rankings})
 
 
+# ===================================================================
+# TREND DETECTION ENGINE + WEEKLY BRIEF
+# ===================================================================
+
+def _gather_all_signals(days=30):
+    """
+    Gather all signals from discovery_runs and statewide search_cache.
+    Returns list of normalized items: {state, city, topic, date_str, source}
+    No SerpAPI calls — reads only existing cached/stored data.
+    """
+    from serpapi_client import get_cached
+    cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    all_items = []
+
+    # Source 1: discovery_runs.results_json (daily discovery signals)
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT results_json, run_at FROM discovery_runs WHERE run_at >= ? AND status = ?', (cutoff, 'completed'))
+    for row in c.fetchall():
+        try:
+            results = json.loads(row[0]) if row[0] else {}
+            run_date = row[1]
+            for location, data in results.items():
+                for sig in (data.get('signals') or []):
+                    topic = sig.get('signal_type', 'other')
+                    if topic == 'not_relevant':
+                        continue
+                    all_items.append({
+                        'state': sig.get('state', ''),
+                        'city': sig.get('city', 'Unknown'),
+                        'topic': topic,
+                        'date_str': run_date,
+                        'source': 'discovery',
+                        'title': sig.get('title', ''),
+                        'url': sig.get('url', ''),
+                        'summary': sig.get('summary', ''),
+                        'entity_name': sig.get('entity_name', ''),
+                        'confidence': sig.get('confidence', 'medium'),
+                        'source_type': sig.get('source_type', 'news'),
+                    })
+        except (json.JSONDecodeError, TypeError):
+            continue
+    conn.close()
+
+    # Source 2: statewide search_cache (statewide_result:* keys)
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute("SELECT cache_key, payload_json, created_at FROM search_cache WHERE cache_key LIKE 'statewide_result:%'")
+    for row in c.fetchall():
+        try:
+            items = json.loads(row[1]) if row[1] else []
+            cache_date = row[2]
+            for item in items:
+                topic = item.get('event_type', 'other')
+                all_items.append({
+                    'state': item.get('state', ''),
+                    'city': item.get('city', 'Unknown'),
+                    'topic': topic,
+                    'date_str': cache_date,
+                    'source': 'statewide',
+                    'title': item.get('title', ''),
+                    'url': item.get('url', ''),
+                    'summary': item.get('summary', ''),
+                    'entity_name': item.get('company', ''),
+                    'confidence': item.get('confidence', 'medium'),
+                    'source_type': 'news',
+                })
+        except (json.JSONDecodeError, TypeError):
+            continue
+    conn.close()
+
+    return all_items
+
+
+def run_trend_detection():
+    """
+    Daily trend detection job. Aggregates signals, computes trends, stores results.
+    No SerpAPI calls. Operates only on existing data.
+    """
+    print("[TrendDetection] Starting trend detection...")
+    all_items = _gather_all_signals(days=30)
+    if not all_items:
+        print("[TrendDetection] No signals to analyze.")
+        return
+
+    now = datetime.utcnow()
+    cutoff_7d = (now - timedelta(days=7)).isoformat()
+
+    # Group by (state, city, topic)
+    from collections import defaultdict
+    groups = defaultdict(lambda: {'items_7d': 0, 'items_30d': 0})
+    for item in all_items:
+        key = (item['state'], item['city'], item['topic'])
+        groups[key]['items_30d'] += 1
+        if item['date_str'] and item['date_str'] >= cutoff_7d:
+            groups[key]['items_7d'] += 1
+
+    # Compute trends and insert
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    computed_at = now.strftime('%Y-%m-%d')
+    inserted = 0
+
+    for (state, city, topic), counts in groups.items():
+        count_7d = counts['items_7d']
+        count_30d = counts['items_30d']
+        baseline_avg = count_30d / 4.0 if count_30d > 0 else 0
+        trend_ratio = count_7d / baseline_avg if baseline_avg > 0 else 0
+
+        if count_7d >= 3 and trend_ratio >= 1.8:
+            # Classify
+            if trend_ratio >= 2.5:
+                classification = 'Accelerating'
+            elif count_7d > count_30d / 2:
+                classification = 'Peaking'
+            else:
+                classification = 'Emerging'
+
+            trend_id = str(uuid.uuid4())
+            try:
+                c.execute('''
+                    INSERT OR REPLACE INTO trend_signals (id, state, city, topic, count_7d, count_30d, trend_ratio, classification, computed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (trend_id, state, city, topic, count_7d, count_30d, round(trend_ratio, 2), classification, computed_at))
+                inserted += 1
+            except sqlite3.IntegrityError:
+                pass
+
+    conn.commit()
+    conn.close()
+    print(f"[TrendDetection] Completed. {inserted} trend signals detected from {len(all_items)} total items.")
+
+
+def generate_weekly_brief():
+    """
+    Weekly Sunbelt Intelligence Brief generation.
+    Pulls trend_signals + recent signals, generates report via Claude.
+    No SerpAPI calls.
+    """
+    print("[WeeklyBrief] Generating Sunbelt Intelligence Brief...")
+    now = datetime.utcnow()
+    week_end = now.strftime('%Y-%m-%d')
+    week_start = (now - timedelta(days=7)).strftime('%Y-%m-%d')
+
+    # 1. Get trend signals from last 7 days
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT state, city, topic, count_7d, count_30d, trend_ratio, classification FROM trend_signals WHERE computed_at >= ? ORDER BY trend_ratio DESC', (week_start,))
+    trends = [{'state': r[0], 'city': r[1], 'topic': r[2], 'count_7d': r[3], 'count_30d': r[4], 'trend_ratio': r[5], 'classification': r[6]} for r in c.fetchall()]
+    conn.close()
+
+    # 2. Get recent signal summaries
+    all_items = _gather_all_signals(days=7)
+    # State activity counts
+    from collections import Counter
+    state_counts = Counter(item['state'] for item in all_items if item['state'])
+    capital_events = [i for i in all_items if i['topic'] in ('acquisition', 'sale', 'financing', 'JV', 'recapitalization')]
+    construction_events = [i for i in all_items if i['topic'] in ('groundbreaking', 'construction', 'permit', 'rezoning', 'new_build', 'under_construction', 'permit_rezoning')]
+    refinancing_events = [i for i in all_items if i['topic'] in ('financing', 'recapitalization', 'refinancing')]
+
+    # Build context for Claude
+    context = {
+        'week': f"{week_start} to {week_end}",
+        'states': ['TX', 'AZ', 'GA', 'NC', 'FL'],
+        'state_signal_counts': dict(state_counts),
+        'total_signals': len(all_items),
+        'trend_signals': trends[:20],
+        'capital_events_sample': [{'company': e.get('entity_name', ''), 'city': e['city'], 'state': e['state'], 'topic': e['topic'], 'summary': e.get('summary', e.get('title', ''))} for e in capital_events[:15]],
+        'construction_sample': [{'entity': e.get('entity_name', ''), 'city': e['city'], 'state': e['state'], 'topic': e['topic'], 'summary': e.get('summary', e.get('title', ''))} for e in construction_events[:15]],
+        'refinancing_sample': [{'entity': e.get('entity_name', ''), 'city': e['city'], 'state': e['state'], 'summary': e.get('summary', e.get('title', ''))} for e in refinancing_events[:10]],
+    }
+
+    prompt = f"""You are a senior market analyst for a Build-to-Rent (BTR) and Single-Family Rental (SFR) insurance brokerage covering the Sunbelt states.
+
+Generate the Weekly Sunbelt Risk Intelligence Brief for {context['week']}.
+
+DATA:
+{json.dumps(context, indent=2)}
+
+Write a structured report with these EXACT sections (use markdown headers):
+
+## Most Active State
+Identify the most active state by signal volume and explain why (specific deals, permits, trends).
+
+## Top 3 Cities by Capital Movement
+Rank the top 3 cities seeing the most acquisition/financing/JV activity. Include company names and deal details where available.
+
+## Financing Themes Emerging
+What financing patterns are emerging? (credit facilities, institutional capital, JV formations, etc.)
+
+## Construction Acceleration Signals
+Where is construction activity accelerating? (groundbreakings, permits, rezoning approvals)
+
+## Refinancing Signals
+Note any refinancing or recapitalization signals that indicate portfolio repositioning.
+
+## Insurance Inflection Implications
+Tie findings to insurance opportunities for 40-400 unit BTR operators. What coverage needs are emerging? (Builder's Risk transitions, portfolio scale triggers, new state expansions)
+
+## 3 Strategic Conversation Angles
+Provide 3 specific, actionable conversation starters a producer could use this week when calling BTR operators.
+
+TONE: Professional, analytical, data-driven. Not salesy. Reference specific companies, cities, and deal details from the data.
+If the data is sparse, note that and provide analysis based on what's available.
+
+Return the brief as markdown text."""
+
+    try:
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        brief_text = message.content[0].text if message.content else ''
+    except Exception as e:
+        print(f"[WeeklyBrief] Claude error: {e}")
+        brief_text = f"Brief generation failed: {str(e)}"
+
+    # Store
+    brief_id = str(uuid.uuid4())
+    brief_data = {
+        'text': brief_text,
+        'stats': {
+            'total_signals': context['total_signals'],
+            'state_counts': context['state_signal_counts'],
+            'trend_count': len(trends),
+            'capital_events': len(capital_events),
+            'construction_events': len(construction_events),
+        }
+    }
+
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('INSERT INTO weekly_briefs (id, brief_json, week_start, week_end) VALUES (?, ?, ?, ?)',
+              (brief_id, json.dumps(brief_data), week_start, week_end))
+    conn.commit()
+    conn.close()
+    print(f"[WeeklyBrief] Brief generated and stored (id={brief_id})")
+    return brief_id
+
+
+# --- Intelligence API Endpoints ---
+
+@app.route('/api/intelligence/trends', methods=['GET'])
+@require_auth
+def api_intelligence_trends():
+    """Get trend signals with optional state filter."""
+    state = request.args.get('state', '').upper()
+    topic = request.args.get('topic', '')
+    days = min(int(request.args.get('days', 7)), 90)
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%d')
+
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    query = 'SELECT id, state, city, topic, count_7d, count_30d, trend_ratio, classification, computed_at FROM trend_signals WHERE computed_at >= ?'
+    params = [cutoff]
+
+    if state:
+        query += ' AND state = ?'
+        params.append(state)
+    if topic:
+        query += ' AND topic = ?'
+        params.append(topic)
+
+    query += ' ORDER BY trend_ratio DESC'
+    c.execute(query, params)
+
+    trends = []
+    for r in c.fetchall():
+        trends.append({
+            'id': r[0], 'state': r[1], 'city': r[2], 'topic': r[3],
+            'count_7d': r[4], 'count_30d': r[5], 'trend_ratio': r[6],
+            'classification': r[7], 'computed_at': r[8],
+        })
+    conn.close()
+    return jsonify({'success': True, 'trends': trends})
+
+
+@app.route('/api/intelligence/briefs', methods=['GET'])
+@require_auth
+def api_intelligence_briefs():
+    """List weekly briefs (latest first)."""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT id, generated_at, week_start, week_end FROM weekly_briefs ORDER BY generated_at DESC LIMIT 20')
+    briefs = [{'id': r[0], 'generated_at': r[1], 'week_start': r[2], 'week_end': r[3]} for r in c.fetchall()]
+    conn.close()
+    return jsonify({'success': True, 'briefs': briefs})
+
+
+@app.route('/api/intelligence/briefs/latest', methods=['GET'])
+@require_auth
+def api_intelligence_briefs_latest():
+    """Get the latest weekly brief with full content."""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT id, brief_json, generated_at, week_start, week_end FROM weekly_briefs ORDER BY generated_at DESC LIMIT 1')
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'success': True, 'brief': None})
+    return jsonify({
+        'success': True,
+        'brief': {
+            'id': row[0],
+            'content': json.loads(row[1]) if row[1] else {},
+            'generated_at': row[2],
+            'week_start': row[3],
+            'week_end': row[4],
+        }
+    })
+
+
+@app.route('/api/intelligence/briefs/<brief_id>', methods=['GET'])
+@require_auth
+def api_intelligence_brief_detail(brief_id):
+    """Get a specific weekly brief."""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT id, brief_json, generated_at, week_start, week_end FROM weekly_briefs WHERE id = ?', (brief_id,))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'success': False, 'message': 'Brief not found'}), 404
+    return jsonify({
+        'success': True,
+        'brief': {
+            'id': row[0],
+            'content': json.loads(row[1]) if row[1] else {},
+            'generated_at': row[2],
+            'week_start': row[3],
+            'week_end': row[4],
+        }
+    })
+
+
+@app.route('/api/intelligence/briefs/generate', methods=['POST'])
+@require_auth
+@require_role('admin')
+def api_intelligence_generate_brief():
+    """Admin: manually trigger weekly brief generation."""
+    try:
+        # Run trend detection first
+        run_trend_detection()
+        brief_id = generate_weekly_brief()
+        return jsonify({'success': True, 'brief_id': brief_id})
+    except Exception as e:
+        print(f"[Intelligence] Brief generation error: {e}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/intelligence/trends/run', methods=['POST'])
+@require_auth
+@require_role('admin')
+def api_intelligence_run_trends():
+    """Admin: manually trigger trend detection."""
+    try:
+        run_trend_detection()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/intelligence/state-rankings', methods=['GET'])
+@require_auth
+def api_intelligence_state_rankings():
+    """Enhanced state rankings with trend strength included."""
+    from serpapi_client import get_cached
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+
+    # Get trend counts per state
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    cutoff_7d = (datetime.utcnow() - timedelta(days=7)).strftime('%Y-%m-%d')
+    c.execute('SELECT state, COUNT(*), MAX(trend_ratio) FROM trend_signals WHERE computed_at >= ? GROUP BY state', (cutoff_7d,))
+    trend_data = {r[0]: {'trend_count': r[1], 'max_trend_ratio': r[2]} for r in c.fetchall()}
+    conn.close()
+
+    rankings = []
+    for state_abbr in STATEWIDE_STATES:
+        result_cache_key = f"statewide_result:{state_abbr.lower()}:{today}"
+        items = get_cached(result_cache_key) or []
+
+        capital_count = sum(1 for i in items if i.get('event_type') in ('acquisition', 'sale', 'financing', 'JV'))
+        construction_count = sum(1 for i in items if i.get('event_type') in ('groundbreaking', 'construction', 'permit', 'rezoning'))
+
+        scores = _compute_activity_scores(items, days=7)
+        total_score = sum(s['activity_score'] for s in scores.values())
+        top_cities = sorted(scores.values(), key=lambda x: x['activity_score'], reverse=True)[:3]
+
+        td = trend_data.get(state_abbr, {})
+        rankings.append({
+            'state': state_abbr,
+            'state_name': STATEWIDE_STATES[state_abbr],
+            'state_activity_score': round(total_score, 1),
+            'total_signals': len(items),
+            'capital_events_count': capital_count,
+            'construction_signals_count': construction_count,
+            'top_cities': top_cities,
+            'trend_count': td.get('trend_count', 0),
+            'max_trend_ratio': td.get('max_trend_ratio', 0),
+            'last_updated': today if items else None,
+        })
+
+    rankings.sort(key=lambda x: x['state_activity_score'], reverse=True)
+    return jsonify({'success': True, 'rankings': rankings})
+
+
 # --- Scheduler Setup ---
 def _scheduled_discovery():
     """Wrapper that enqueues the scheduled discovery job (runs ALL adapters including permits)."""
     from queue_config import enqueue
     enqueue(run_daily_discovery, True, job_timeout=600)  # is_scheduled=True
+
+def _scheduled_trend_detection():
+    """Daily trend detection (runs after discovery, at 7:30am PT)."""
+    try:
+        run_trend_detection()
+    except Exception as e:
+        print(f"[Scheduler] Trend detection error: {e}")
+
+def _scheduled_weekly_brief():
+    """Monday weekly brief generation (7:00am PT)."""
+    try:
+        run_trend_detection()  # Refresh trends first
+        generate_weekly_brief()
+    except Exception as e:
+        print(f"[Scheduler] Weekly brief error: {e}")
 
 _scheduler = BackgroundScheduler(daemon=True)
 _scheduler.add_job(
@@ -2317,8 +2767,24 @@ _scheduler.add_job(
     name='Daily BTR Discovery',
     replace_existing=True
 )
+_scheduler.add_job(
+    _scheduled_trend_detection,
+    CronTrigger(hour=7, minute=30, timezone=pytz.timezone('America/Los_Angeles')),
+    id='daily_trends',
+    name='Daily Trend Detection',
+    replace_existing=True
+)
+_scheduler.add_job(
+    _scheduled_weekly_brief,
+    CronTrigger(day_of_week='mon', hour=7, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='weekly_brief',
+    name='Weekly Sunbelt Brief',
+    replace_existing=True
+)
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
+print("[Scheduler] Daily trend detection at 7:30 AM PT")
+print("[Scheduler] Weekly Sunbelt Brief every Monday 7:00 AM PT")
 
 
 if __name__ == '__main__':

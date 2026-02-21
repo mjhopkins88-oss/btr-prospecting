@@ -607,6 +607,7 @@
                     {activeTab === 'pipeline' && <PipelinePage user={user} />}
                     {activeTab === 'followups' && <FollowUpsPage user={user} />}
                     {activeTab === 'statewide' && <StatewideDiscovery />}
+                    {activeTab === 'intelligence' && <SunbeltIntelligence user={user} />}
                     {showEmailModal && (
                         <EmailModal
                             email={emailTemplate}
@@ -651,6 +652,7 @@
                 { id: 'search', label: 'Prospect Search' },
                 { id: 'discovery', label: 'Daily Discovery' },
                 { id: 'statewide', label: 'Statewide' },
+                { id: 'intelligence', label: 'Sunbelt Intelligence' },
                 { id: 'pipeline', label: 'My Pipeline' },
                 { id: 'followups', label: 'Follow-ups Due' },
             ];
@@ -1708,6 +1710,386 @@
                             <p style={styles.emptyText}>Click "Scan All States" or select a state to begin scanning</p>
                         </div>
                     )}
+                </div>
+            );
+        }
+
+        // ======= SUNBELT INTELLIGENCE =======
+        function SunbeltIntelligence({ user }) {
+            const [subTab, setSubTab] = useState('brief');
+            const [briefs, setBriefs] = useState([]);
+            const [latestBrief, setLatestBrief] = useState(null);
+            const [trends, setTrends] = useState([]);
+            const [rankings, setRankings] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [genLoading, setGenLoading] = useState(false);
+            const [trendFilter, setTrendFilter] = useState({ state: '', topic: '' });
+            const [error, setError] = useState('');
+
+            useEffect(() => {
+                fetchLatestBrief();
+                fetchTrends();
+                fetchRankings();
+            }, []);
+
+            const fetchLatestBrief = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/intelligence/briefs/latest`);
+                    const data = await res.json();
+                    if (data.brief) setLatestBrief(data.brief);
+                } catch (e) { console.error('Brief fetch error:', e); }
+            };
+
+            const fetchBriefs = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/intelligence/briefs`);
+                    const data = await res.json();
+                    setBriefs(data.briefs || []);
+                } catch (e) { console.error('Briefs list error:', e); }
+            };
+
+            const fetchTrends = async () => {
+                try {
+                    let url = `${API_BASE}/api/intelligence/trends?days=30`;
+                    if (trendFilter.state) url += `&state=${trendFilter.state}`;
+                    if (trendFilter.topic) url += `&topic=${encodeURIComponent(trendFilter.topic)}`;
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    setTrends(data.trends || []);
+                } catch (e) { console.error('Trends fetch error:', e); }
+            };
+
+            const fetchRankings = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/intelligence/state-rankings`);
+                    const data = await res.json();
+                    setRankings(data.rankings || []);
+                } catch (e) { console.error('Rankings fetch error:', e); }
+            };
+
+            useEffect(() => { fetchTrends(); }, [trendFilter.state, trendFilter.topic]);
+
+            const generateBrief = async () => {
+                setGenLoading(true);
+                setError('');
+                try {
+                    const res = await fetch(`${API_BASE}/api/intelligence/briefs/generate`, { method: 'POST' });
+                    const data = await res.json();
+                    if (data.error) { setError(data.error); }
+                    else { await fetchLatestBrief(); await fetchBriefs(); }
+                } catch (e) { setError('Failed to generate brief'); }
+                setGenLoading(false);
+            };
+
+            const runTrends = async () => {
+                setLoading(true);
+                setError('');
+                try {
+                    const res = await fetch(`${API_BASE}/api/intelligence/trends/run`, { method: 'POST' });
+                    const data = await res.json();
+                    if (data.error) { setError(data.error); }
+                    else { await fetchTrends(); }
+                } catch (e) { setError('Failed to run trend detection'); }
+                setLoading(false);
+            };
+
+            const copyBrief = () => {
+                if (!latestBrief) return;
+                const text = typeof latestBrief.brief_json === 'string'
+                    ? latestBrief.brief_json : JSON.stringify(latestBrief.brief_json, null, 2);
+                navigator.clipboard.writeText(text);
+            };
+
+            const classColor = (cls) => {
+                if (cls === 'Accelerating') return { bg: 'rgba(239,68,68,0.15)', color: '#f87171', border: '#ef4444' };
+                if (cls === 'Emerging') return { bg: 'rgba(245,158,11,0.15)', color: '#fcd34d', border: '#f59e0b' };
+                if (cls === 'Peaking') return { bg: 'rgba(168,85,247,0.15)', color: '#c4b5fd', border: '#a855f7' };
+                return { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8', border: '#64748b' };
+            };
+
+            const subTabs = [
+                { id: 'brief', label: 'Weekly Brief' },
+                { id: 'trends', label: 'Trend Signals' },
+                { id: 'rankings', label: 'State Rankings' },
+            ];
+
+            const states = ['TX', 'AZ', 'GA', 'NC', 'FL'];
+
+            return (
+                <div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+                        <h2 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.4rem', fontWeight: 700, color: '#22d3ee' }}>
+                            SUNBELT INTELLIGENCE
+                        </h2>
+                    </div>
+
+                    {/* Sub-tabs */}
+                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '1px solid #334155', paddingBottom: '0.75rem' }}>
+                        {subTabs.map(t => (
+                            <button key={t.id} onClick={() => setSubTab(t.id)} style={{
+                                background: subTab === t.id ? 'rgba(16,185,129,0.15)' : 'transparent',
+                                border: subTab === t.id ? '1px solid #34d399' : '1px solid #334155',
+                                color: subTab === t.id ? '#34d399' : '#94a3b8',
+                                padding: '0.5rem 1.2rem', borderRadius: '8px', fontSize: '0.85rem',
+                                cursor: 'pointer', fontFamily: "'Inter', sans-serif", fontWeight: 500,
+                                transition: 'all 0.2s'
+                            }}>{t.label}</button>
+                        ))}
+                    </div>
+
+                    {error && <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', padding: '0.75rem', marginBottom: '1rem', color: '#f87171', fontSize: '0.85rem' }}>{error}</div>}
+
+                    {/* WEEKLY BRIEF TAB */}
+                    {subTab === 'brief' && (
+                        <div>
+                            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', alignItems: 'center' }}>
+                                {user?.role === 'admin' && (
+                                    <button onClick={generateBrief} disabled={genLoading} style={{
+                                        ...styles.btnPrimary, opacity: genLoading ? 0.6 : 1,
+                                        cursor: genLoading ? 'not-allowed' : 'pointer'
+                                    }}>{genLoading ? 'Generating...' : 'Generate Brief Now'}</button>
+                                )}
+                                <button onClick={copyBrief} style={styles.btn} disabled={!latestBrief}>Copy to Clipboard</button>
+                            </div>
+
+                            {latestBrief ? (
+                                <BriefDisplay brief={latestBrief} />
+                            ) : (
+                                <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
+                                    <p style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.1rem', marginBottom: '0.5rem' }}>No Briefs Yet</p>
+                                    <p style={{ fontSize: '0.9rem' }}>Weekly briefs are generated every Monday at 7:00 AM PT, or generate one manually above.</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* TREND SIGNALS TAB */}
+                    {subTab === 'trends' && (
+                        <div>
+                            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                <select value={trendFilter.state} onChange={e => setTrendFilter(f => ({...f, state: e.target.value}))} style={styles.select}>
+                                    <option value="">All States</option>
+                                    {states.map(s => <option key={s} value={s}>{s}</option>)}
+                                </select>
+                                <input
+                                    type="text" placeholder="Filter by topic..."
+                                    value={trendFilter.topic}
+                                    onChange={e => setTrendFilter(f => ({...f, topic: e.target.value}))}
+                                    style={{...styles.input, minWidth: '180px'}}
+                                />
+                                {user?.role === 'admin' && (
+                                    <button onClick={runTrends} disabled={loading} style={{
+                                        ...styles.btnPrimary, opacity: loading ? 0.6 : 1,
+                                        cursor: loading ? 'not-allowed' : 'pointer'
+                                    }}>{loading ? 'Running...' : 'Run Trend Detection'}</button>
+                                )}
+                                <span style={{ fontSize: '0.8rem', color: '#64748b' }}>{trends.length} signals</span>
+                            </div>
+
+                            {trends.length > 0 ? (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '1rem' }}>
+                                    {trends.map((t, i) => {
+                                        const cc = classColor(t.classification);
+                                        return (
+                                            <div key={t.id || i} style={{
+                                                background: '#1e293b', border: '1px solid #334155',
+                                                borderRadius: '12px', padding: '1.25rem',
+                                                borderLeft: `3px solid ${cc.border}`
+                                            }}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+                                                    <div>
+                                                        <span style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '0.95rem', fontWeight: 700, color: '#f1f5f9' }}>
+                                                            {t.city}, {t.state}
+                                                        </span>
+                                                    </div>
+                                                    <span style={{
+                                                        background: cc.bg, color: cc.color, border: `1px solid ${cc.border}`,
+                                                        borderRadius: '20px', padding: '0.2rem 0.7rem', fontSize: '0.7rem',
+                                                        fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em'
+                                                    }}>{t.classification}</span>
+                                                </div>
+                                                <div style={{ fontSize: '0.9rem', color: '#f1f5f9', marginBottom: '0.5rem', fontWeight: 500 }}>
+                                                    {t.topic}
+                                                </div>
+                                                <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.8rem', color: '#94a3b8' }}>
+                                                    <span>7d: <strong style={{ color: '#34d399' }}>{t.count_7d}</strong></span>
+                                                    <span>30d: <strong style={{ color: '#94a3b8' }}>{t.count_30d}</strong></span>
+                                                    <span>Ratio: <strong style={{ color: cc.color }}>{t.trend_ratio?.toFixed(1)}x</strong></span>
+                                                </div>
+                                                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.5rem' }}>
+                                                    {t.computed_at ? new Date(t.computed_at).toLocaleDateString() : ''}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
+                                    <p style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.1rem', marginBottom: '0.5rem' }}>No Trend Signals</p>
+                                    <p style={{ fontSize: '0.9rem' }}>Trend detection runs daily at 7:30 AM PT. Run it manually to populate signals.</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* STATE RANKINGS TAB */}
+                    {subTab === 'rankings' && (
+                        <div>
+                            {rankings.length > 0 ? (
+                                <div style={{ display: 'grid', gap: '1rem' }}>
+                                    {rankings.map((r, i) => (
+                                        <div key={r.state} style={{
+                                            background: '#1e293b', border: '1px solid #334155',
+                                            borderRadius: '12px', padding: '1.5rem',
+                                            display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: '1.5rem', alignItems: 'center'
+                                        }}>
+                                            <div style={{
+                                                fontFamily: "'Orbitron', sans-serif", fontSize: '2rem', fontWeight: 900,
+                                                color: i === 0 ? '#fbbf24' : i === 1 ? '#94a3b8' : i === 2 ? '#cd7f32' : '#64748b',
+                                                width: '3rem', textAlign: 'center'
+                                            }}>#{i + 1}</div>
+                                            <div>
+                                                <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.2rem', fontWeight: 700, color: '#f1f5f9', marginBottom: '0.5rem' }}>
+                                                    {r.state}
+                                                </div>
+                                                <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap', fontSize: '0.85rem', color: '#94a3b8' }}>
+                                                    <span>Signals: <strong style={{ color: '#34d399' }}>{r.signal_count ?? r.total_signals ?? 0}</strong></span>
+                                                    <span>Capital Events: <strong style={{ color: '#a78bfa' }}>{r.capital_events ?? 0}</strong></span>
+                                                    <span>Construction: <strong style={{ color: '#67e8f9' }}>{r.construction_signals ?? 0}</strong></span>
+                                                    <span>Trend Strength: <strong style={{ color: '#fcd34d' }}>{(r.trend_strength ?? 0).toFixed(1)}</strong></span>
+                                                </div>
+                                                {r.top_cities && r.top_cities.length > 0 && (
+                                                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                                                        {r.top_cities.map(c => (
+                                                            <span key={c} style={{
+                                                                background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)',
+                                                                borderRadius: '20px', padding: '0.2rem 0.6rem', fontSize: '0.75rem', color: '#34d399'
+                                                            }}>{c}</span>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div style={{
+                                                fontFamily: "'JetBrains Mono', monospace", fontSize: '1.6rem', fontWeight: 700,
+                                                color: '#34d399', textAlign: 'right'
+                                            }}>{(r.composite_score ?? r.total_signals ?? 0).toFixed ? (r.composite_score ?? 0).toFixed(0) : r.total_signals ?? 0}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
+                                    <p style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.1rem', marginBottom: '0.5rem' }}>No Rankings Data</p>
+                                    <p style={{ fontSize: '0.9rem' }}>Run statewide discovery first to populate state rankings.</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function BriefDisplay({ brief }) {
+            let content = brief.brief_json;
+            if (typeof content === 'string') {
+                try { content = JSON.parse(content); } catch(e) { /* use as string */ }
+            }
+
+            if (typeof content === 'object' && content !== null) {
+                return (
+                    <div style={{ display: 'grid', gap: '1.25rem' }}>
+                        <div style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.5rem' }}>
+                            Week of {brief.week_start} to {brief.week_end} &middot; Generated {new Date(brief.generated_at).toLocaleString()}
+                        </div>
+
+                        {content.executive_summary && (
+                            <BriefSection title="Executive Summary" color="#34d399">
+                                <p style={{ fontSize: '0.9rem', color: '#cbd5e1', lineHeight: '1.7' }}>{content.executive_summary}</p>
+                            </BriefSection>
+                        )}
+
+                        {content.top_emerging_markets && content.top_emerging_markets.length > 0 && (
+                            <BriefSection title="Top Emerging Markets" color="#22d3ee">
+                                {content.top_emerging_markets.map((m, i) => (
+                                    <div key={i} style={{ marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: i < content.top_emerging_markets.length - 1 ? '1px solid #334155' : 'none' }}>
+                                        <div style={{ fontWeight: 600, color: '#f1f5f9', marginBottom: '0.25rem' }}>{m.market || m.city}</div>
+                                        <p style={{ fontSize: '0.85rem', color: '#94a3b8', lineHeight: '1.5' }}>{m.summary || m.reason || m.description}</p>
+                                    </div>
+                                ))}
+                            </BriefSection>
+                        )}
+
+                        {content.capital_flow_highlights && content.capital_flow_highlights.length > 0 && (
+                            <BriefSection title="Capital Flow Highlights" color="#a78bfa">
+                                {content.capital_flow_highlights.map((h, i) => (
+                                    <div key={i} style={{ marginBottom: '0.5rem', fontSize: '0.85rem', color: '#cbd5e1' }}>
+                                        &bull; {typeof h === 'string' ? h : h.description || h.summary || JSON.stringify(h)}
+                                    </div>
+                                ))}
+                            </BriefSection>
+                        )}
+
+                        {content.construction_pipeline && content.construction_pipeline.length > 0 && (
+                            <BriefSection title="Construction Pipeline" color="#67e8f9">
+                                {content.construction_pipeline.map((p, i) => (
+                                    <div key={i} style={{ marginBottom: '0.5rem', fontSize: '0.85rem', color: '#cbd5e1' }}>
+                                        &bull; {typeof p === 'string' ? p : p.description || p.summary || JSON.stringify(p)}
+                                    </div>
+                                ))}
+                            </BriefSection>
+                        )}
+
+                        {content.operator_movements && content.operator_movements.length > 0 && (
+                            <BriefSection title="Operator Movements" color="#fbbf24">
+                                {content.operator_movements.map((o, i) => (
+                                    <div key={i} style={{ marginBottom: '0.5rem', fontSize: '0.85rem', color: '#cbd5e1' }}>
+                                        &bull; {typeof o === 'string' ? o : o.description || o.summary || JSON.stringify(o)}
+                                    </div>
+                                ))}
+                            </BriefSection>
+                        )}
+
+                        {content.risk_watchlist && content.risk_watchlist.length > 0 && (
+                            <BriefSection title="Risk Watchlist" color="#f87171">
+                                {content.risk_watchlist.map((r, i) => (
+                                    <div key={i} style={{ marginBottom: '0.5rem', fontSize: '0.85rem', color: '#cbd5e1' }}>
+                                        &bull; {typeof r === 'string' ? r : r.description || r.summary || JSON.stringify(r)}
+                                    </div>
+                                ))}
+                            </BriefSection>
+                        )}
+
+                        {content.recommended_actions && content.recommended_actions.length > 0 && (
+                            <BriefSection title="Recommended Actions" color="#10b981">
+                                {content.recommended_actions.map((a, i) => (
+                                    <div key={i} style={{ marginBottom: '0.5rem', fontSize: '0.85rem', color: '#cbd5e1' }}>
+                                        {i + 1}. {typeof a === 'string' ? a : a.action || a.description || JSON.stringify(a)}
+                                    </div>
+                                ))}
+                            </BriefSection>
+                        )}
+                    </div>
+                );
+            }
+
+            // Fallback: plain text
+            return (
+                <div style={{ background: '#0f172a', border: '1px solid #334155', borderRadius: '12px', padding: '1.5rem' }}>
+                    <pre style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.85rem', color: '#f1f5f9', whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>
+                        {typeof content === 'string' ? content : JSON.stringify(content, null, 2)}
+                    </pre>
+                </div>
+            );
+        }
+
+        function BriefSection({ title, color, children }) {
+            return (
+                <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '1.25rem' }}>
+                    <h3 style={{
+                        fontFamily: "'Orbitron', sans-serif", fontSize: '0.85rem', fontWeight: 700,
+                        color: color, textTransform: 'uppercase', letterSpacing: '0.05em',
+                        marginBottom: '0.75rem', paddingBottom: '0.5rem', borderBottom: `1px solid ${color}33`
+                    }}>{title}</h3>
+                    {children}
                 </div>
             );
         }
