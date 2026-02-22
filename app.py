@@ -305,6 +305,22 @@ def init_db():
     c.execute('CREATE INDEX IF NOT EXISTS idx_crm_leads_owner ON crm_leads(workspace_id, owner_user_id, status)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_crm_leads_followup ON crm_leads(workspace_id, next_followup_at)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_crm_companies_key ON crm_companies(workspace_id, prospect_key)')
+
+    # --- Lead Activity Log ---
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS lead_activity (
+            id TEXT PRIMARY KEY,
+            lead_id TEXT NOT NULL REFERENCES crm_leads(id),
+            actor_user_id TEXT NOT NULL REFERENCES users(id),
+            action_type TEXT NOT NULL,
+            old_value TEXT,
+            new_value TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_lead_activity_lead ON lead_activity(lead_id, created_at DESC)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_lead_activity_actor ON lead_activity(actor_user_id, created_at DESC)')
+
     # --- Trend Detection & Weekly Briefs Tables ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS trend_signals (
@@ -1484,6 +1500,15 @@ def api_admin_county_mapping_delete(mapping_id):
 # CRM API ROUTES
 # ===================================================================
 
+def _log_lead_activity(cursor, lead_id, actor_user_id, action_type, old_value=None, new_value=None):
+    """Write an activity log entry. Must be called within an open transaction."""
+    cursor.execute(
+        'INSERT INTO lead_activity (id, lead_id, actor_user_id, action_type, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?)',
+        (str(uuid.uuid4()), lead_id, actor_user_id, action_type,
+         json.dumps(old_value) if old_value is not None else None,
+         json.dumps(new_value) if new_value is not None else None)
+    )
+
 @app.route('/api/crm/lead/upsert', methods=['POST'])
 @require_auth
 def api_crm_upsert_lead():
@@ -1525,6 +1550,7 @@ def api_crm_upsert_lead():
         if not lead_row[2]:
             c.execute('UPDATE crm_leads SET owner_user_id = ? WHERE id = ?', (g.user['id'], lead_row[0]))
             lead['owner_user_id'] = g.user['id']
+            _log_lead_activity(c, lead_row[0], g.user['id'], 'OWNER_ASSIGNED', None, g.user['id'])
     else:
         lead_id = str(uuid.uuid4())
         # Auto-assign owner to current user on create
@@ -1535,6 +1561,8 @@ def api_crm_upsert_lead():
             'next_followup_at': None, 'priority': None, 'company_id': company_id,
             'company_name': company_name, 'prospect_key': prospect_key,
         }
+        _log_lead_activity(c, lead_id, g.user['id'], 'SAVED')
+        _log_lead_activity(c, lead_id, g.user['id'], 'OWNER_ASSIGNED', None, g.user['id'])
 
     conn.commit()
     conn.close()
@@ -1554,10 +1582,14 @@ def api_crm_list_leads():
     query = '''
         SELECT l.id, l.status, l.owner_user_id, l.last_touch_at, l.next_followup_at, l.priority, l.created_at,
                co.company_name, co.prospect_key, co.website,
-               u.name as owner_name
+               u.name as owner_name,
+               la.action_type as last_action_type, la.created_at as last_activity_at
         FROM crm_leads l
         JOIN crm_companies co ON l.company_id = co.id
         LEFT JOIN users u ON l.owner_user_id = u.id
+        LEFT JOIN lead_activity la ON la.id = (
+            SELECT la2.id FROM lead_activity la2 WHERE la2.lead_id = l.id ORDER BY la2.created_at DESC LIMIT 1
+        )
         WHERE l.workspace_id = ?
     '''
     params = [ws]
@@ -1589,6 +1621,7 @@ def api_crm_list_leads():
             'last_touch_at': r[3], 'next_followup_at': r[4], 'priority': r[5],
             'created_at': r[6], 'company_name': r[7], 'prospect_key': r[8],
             'website': r[9], 'owner_name': r[10],
+            'last_action_type': r[11], 'last_activity_at': r[12],
         })
     conn.close()
     return jsonify({'success': True, 'leads': leads})
@@ -1604,15 +1637,20 @@ def api_crm_update_lead(lead_id):
     conn = sqlite3.connect('prospects.db')
     c = conn.cursor()
 
-    # Verify lead belongs to workspace
-    c.execute('SELECT id, owner_user_id FROM crm_leads WHERE id = ? AND workspace_id = ?', (lead_id, g.workspace_id))
+    # Verify lead belongs to workspace — fetch current values for activity log
+    c.execute('SELECT id, owner_user_id, status, next_followup_at, priority FROM crm_leads WHERE id = ? AND workspace_id = ?',
+              (lead_id, g.workspace_id))
     row = c.fetchone()
     if not row:
         conn.close()
         return jsonify({'success': False, 'message': 'Lead not found'}), 404
 
+    old_owner = row[1]
+    old_status = row[2]
+    old_followup = row[3]
+
     # Producers can only update their own leads; admins can update any
-    if g.user['role'] != 'admin' and row[1] and row[1] != g.user['id']:
+    if g.user['role'] != 'admin' and old_owner and old_owner != g.user['id']:
         conn.close()
         return jsonify({'success': False, 'message': 'Cannot update another user\'s lead'}), 403
 
@@ -1631,6 +1669,22 @@ def api_crm_update_lead(lead_id):
     if updates:
         params.append(lead_id)
         c.execute(f'UPDATE crm_leads SET {", ".join(updates)} WHERE id = ?', params)
+
+        # Log activity for each changed field
+        if 'status' in data and data['status'] != old_status:
+            _log_lead_activity(c, lead_id, g.user['id'], 'STATUS_CHANGED', old_status, data['status'])
+        if 'next_followup_at' in data:
+            new_followup = data['next_followup_at']
+            if new_followup and new_followup != old_followup:
+                _log_lead_activity(c, lead_id, g.user['id'], 'FOLLOWUP_SET', old_followup, new_followup)
+            elif not new_followup and old_followup:
+                _log_lead_activity(c, lead_id, g.user['id'], 'FOLLOWUP_CLEARED', old_followup, None)
+        if 'owner_user_id' in data and data['owner_user_id'] != old_owner:
+            if data['owner_user_id']:
+                _log_lead_activity(c, lead_id, g.user['id'], 'OWNER_ASSIGNED', old_owner, data['owner_user_id'])
+            else:
+                _log_lead_activity(c, lead_id, g.user['id'], 'OWNER_CLEARED', old_owner, None)
+
         conn.commit()
 
     conn.close()
@@ -1682,6 +1736,12 @@ def api_crm_add_touchpoint(lead_id):
     update_params.append(lead_id)
     c.execute(f'UPDATE crm_leads SET {", ".join(update_parts)} WHERE id = ?', update_params)
 
+    # Log activity
+    _log_lead_activity(c, lead_id, g.user['id'], 'NOTE_ADDED', None,
+                       {'type': touch_type, 'outcome': data.get('outcome'), 'notes': data.get('notes')})
+    if next_followup:
+        _log_lead_activity(c, lead_id, g.user['id'], 'FOLLOWUP_SET', None, next_followup)
+
     conn.commit()
     conn.close()
     return jsonify({'success': True, 'touchpoint_id': tp_id})
@@ -1727,11 +1787,13 @@ def api_crm_assign_lead(lead_id):
     conn = sqlite3.connect('prospects.db')
     c = conn.cursor()
 
-    # Verify lead belongs to workspace
-    c.execute('SELECT id FROM crm_leads WHERE id = ? AND workspace_id = ?', (lead_id, g.workspace_id))
-    if not c.fetchone():
+    # Verify lead belongs to workspace and get current owner
+    c.execute('SELECT id, owner_user_id FROM crm_leads WHERE id = ? AND workspace_id = ?', (lead_id, g.workspace_id))
+    lead_row = c.fetchone()
+    if not lead_row:
         conn.close()
         return jsonify({'success': False, 'message': 'Lead not found'}), 404
+    old_owner_id = lead_row[1]
 
     # If assigning to a user, verify that user exists in workspace
     if new_owner_id:
@@ -1745,6 +1807,12 @@ def api_crm_assign_lead(lead_id):
         owner_name = None
 
     c.execute('UPDATE crm_leads SET owner_user_id = ? WHERE id = ?', (new_owner_id, lead_id))
+
+    # Log activity
+    if new_owner_id != old_owner_id:
+        action = 'OWNER_ASSIGNED' if new_owner_id else 'OWNER_CLEARED'
+        _log_lead_activity(c, lead_id, g.user['id'], action, old_owner_id, new_owner_id)
+
     conn.commit()
     conn.close()
     return jsonify({'success': True, 'owner_user_id': new_owner_id, 'owner_name': owner_name})
@@ -1763,6 +1831,107 @@ def api_crm_workspace_users():
     users = [{'id': r[0], 'name': r[1], 'role': r[2]} for r in c.fetchall()]
     conn.close()
     return jsonify({'success': True, 'users': users})
+
+
+@app.route('/api/crm/leads/<lead_id>/activity', methods=['GET'])
+@require_auth
+def api_crm_lead_activity(lead_id):
+    """Get activity timeline for a lead. Admin sees any; producer only own leads."""
+    if not g.user:
+        return jsonify({'success': False, 'message': 'Auth required'}), 401
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+
+    # Verify lead exists in workspace and check ownership
+    c.execute('SELECT id, owner_user_id FROM crm_leads WHERE id = ? AND workspace_id = ?', (lead_id, g.workspace_id))
+    lead_row = c.fetchone()
+    if not lead_row:
+        conn.close()
+        return jsonify({'success': False, 'message': 'Lead not found'}), 404
+    if g.user['role'] != 'admin' and lead_row[1] and lead_row[1] != g.user['id']:
+        conn.close()
+        return jsonify({'success': False, 'message': 'Access denied'}), 403
+
+    c.execute('''
+        SELECT a.id, a.action_type, a.old_value, a.new_value, a.created_at,
+               u.id, u.name, u.email, u.role
+        FROM lead_activity a
+        JOIN users u ON a.actor_user_id = u.id
+        WHERE a.lead_id = ?
+        ORDER BY a.created_at DESC
+    ''', (lead_id,))
+
+    activities = []
+    for r in c.fetchall():
+        old_val = json.loads(r[2]) if r[2] else None
+        new_val = json.loads(r[3]) if r[3] else None
+        activities.append({
+            'id': r[0], 'action_type': r[1], 'old_value': old_val,
+            'new_value': new_val, 'created_at': r[4],
+            'actor': {'id': r[5], 'name': r[6], 'email': r[7], 'role': r[8]},
+        })
+    conn.close()
+    return jsonify({'success': True, 'activities': activities})
+
+
+@app.route('/api/activity', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_admin_activity_overview():
+    """Admin only: query activity logs across all leads with filters."""
+    if not g.user:
+        return jsonify({'success': False, 'message': 'Auth required'}), 401
+
+    owner_id = request.args.get('owner_id')
+    actor_id = request.args.get('actor_id')
+    date_from = request.args.get('date_from')
+    date_to = request.args.get('date_to')
+    limit_val = min(int(request.args.get('limit', 50)), 200)
+
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+
+    query = '''
+        SELECT a.id, a.lead_id, a.action_type, a.old_value, a.new_value, a.created_at,
+               u.id, u.name, u.email, u.role,
+               co.company_name, co.prospect_key
+        FROM lead_activity a
+        JOIN users u ON a.actor_user_id = u.id
+        JOIN crm_leads l ON a.lead_id = l.id
+        JOIN crm_companies co ON l.company_id = co.id
+        WHERE l.workspace_id = ?
+    '''
+    params = [g.workspace_id]
+
+    if owner_id:
+        query += ' AND l.owner_user_id = ?'
+        params.append(owner_id)
+    if actor_id:
+        query += ' AND a.actor_user_id = ?'
+        params.append(actor_id)
+    if date_from:
+        query += ' AND a.created_at >= ?'
+        params.append(date_from)
+    if date_to:
+        query += ' AND a.created_at <= ?'
+        params.append(date_to)
+
+    query += ' ORDER BY a.created_at DESC LIMIT ?'
+    params.append(limit_val)
+
+    c.execute(query, params)
+    activities = []
+    for r in c.fetchall():
+        old_val = json.loads(r[3]) if r[3] else None
+        new_val = json.loads(r[4]) if r[4] else None
+        activities.append({
+            'id': r[0], 'lead_id': r[1], 'action_type': r[2],
+            'old_value': old_val, 'new_value': new_val, 'created_at': r[5],
+            'actor': {'id': r[6], 'name': r[7], 'email': r[8], 'role': r[9]},
+            'company_name': r[10], 'prospect_key': r[11],
+        })
+    conn.close()
+    return jsonify({'success': True, 'activities': activities})
 
 
 @app.route('/api/crm/leads/bulk-status', methods=['GET'])

@@ -3088,6 +3088,104 @@
             );
         }
 
+        // ======= ACTIVITY TIMELINE MODAL =======
+        function ActivityModal({ leadId, companyName, onClose, user }) {
+            const [activities, setActivities] = useState([]);
+            const [loading, setLoading] = useState(true);
+
+            useEffect(() => {
+                fetch(`${API_BASE}/api/crm/leads/${leadId}/activity`)
+                    .then(r => r.json())
+                    .then(d => { if (d.success) setActivities(d.activities || []); })
+                    .catch(() => {})
+                    .finally(() => setLoading(false));
+            }, [leadId]);
+
+            const ACTION_LABELS = {
+                'SAVED': 'saved this lead',
+                'STATUS_CHANGED': (a) => `changed status from "${a.old_value || '—'}" to "${a.new_value || '—'}"`,
+                'NOTE_ADDED': (a) => {
+                    const nv = a.new_value || {};
+                    return `logged ${nv.type || 'touchpoint'}${nv.outcome ? ` (${nv.outcome})` : ''}${nv.notes ? `: "${nv.notes.length > 80 ? nv.notes.slice(0,80)+'...' : nv.notes}"` : ''}`;
+                },
+                'FOLLOWUP_SET': (a) => `set follow-up to ${a.new_value ? new Date(a.new_value).toLocaleDateString() : '—'}`,
+                'FOLLOWUP_CLEARED': 'cleared follow-up date',
+                'OWNER_ASSIGNED': (a) => `assigned ownership`,
+                'OWNER_CLEARED': 'removed ownership (unassigned)',
+            };
+
+            const describeAction = (a) => {
+                const label = ACTION_LABELS[a.action_type];
+                if (!label) return a.action_type.toLowerCase().replace(/_/g, ' ');
+                return typeof label === 'function' ? label(a) : label;
+            };
+
+            const timeAgo = (ts) => {
+                if (!ts) return '';
+                const diff = Date.now() - new Date(ts).getTime();
+                const mins = Math.floor(diff / 60000);
+                if (mins < 1) return 'just now';
+                if (mins < 60) return `${mins}m ago`;
+                const hrs = Math.floor(mins / 60);
+                if (hrs < 24) return `${hrs}h ago`;
+                const days = Math.floor(hrs / 24);
+                if (days < 30) return `${days}d ago`;
+                return new Date(ts).toLocaleDateString();
+            };
+
+            const ACTION_COLORS = {
+                'SAVED': '#34d399', 'STATUS_CHANGED': '#22d3ee', 'NOTE_ADDED': '#a5b4fc',
+                'FOLLOWUP_SET': '#fbbf24', 'FOLLOWUP_CLEARED': '#94a3b8',
+                'OWNER_ASSIGNED': '#c4b5fd', 'OWNER_CLEARED': '#f87171',
+            };
+
+            return (
+                <div style={styles.modalOverlay} onClick={onClose}>
+                    <div style={{...styles.modal, maxWidth:'560px', maxHeight:'80vh'}} onClick={e => e.stopPropagation()}>
+                        <div style={styles.modalHeader}>
+                            <h2 style={{fontSize:'1.1rem',margin:0}}>Activity: {companyName}</h2>
+                            <button style={styles.closeBtn} onClick={onClose}>&#10005;</button>
+                        </div>
+                        <div style={{overflowY:'auto',maxHeight:'60vh',padding:'1rem'}}>
+                            {loading && <div style={{color:'#64748b',textAlign:'center',padding:'2rem'}}>Loading...</div>}
+                            {!loading && activities.length === 0 && (
+                                <div style={{color:'#475569',textAlign:'center',padding:'2rem',fontStyle:'italic'}}>No activity recorded yet.</div>
+                            )}
+                            {!loading && activities.length > 0 && (
+                                <div style={{position:'relative',paddingLeft:'1.5rem'}}>
+                                    {/* Timeline line */}
+                                    <div style={{position:'absolute',left:'6px',top:'8px',bottom:'8px',width:'2px',background:'#334155'}} />
+                                    {activities.map((a, i) => (
+                                        <div key={a.id} style={{position:'relative',marginBottom:'1rem',paddingLeft:'1rem'}}>
+                                            {/* Timeline dot */}
+                                            <div style={{
+                                                position:'absolute', left:'-1.5rem', top:'6px',
+                                                width:'12px', height:'12px', borderRadius:'50%',
+                                                background: ACTION_COLORS[a.action_type] || '#64748b',
+                                                border:'2px solid #0f172a', zIndex:1
+                                            }} />
+                                            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:'0.5rem'}}>
+                                                <div>
+                                                    <span style={{color:'#f1f5f9',fontSize:'0.85rem',fontWeight:600}}>
+                                                        {a.actor.id === user?.id ? 'You' : a.actor.name}
+                                                    </span>
+                                                    <span style={{color:'#94a3b8',fontSize:'0.85rem'}}> {describeAction(a)}</span>
+                                                </div>
+                                                <span style={{color:'#475569',fontSize:'0.7rem',whiteSpace:'nowrap',flexShrink:0}}>{timeAgo(a.created_at)}</span>
+                                            </div>
+                                            {a.actor.role === 'admin' && a.actor.id !== user?.id && (
+                                                <span style={{fontSize:'0.65rem',color:'#64748b',fontStyle:'italic'}}>({a.actor.role})</span>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
         // ======= PIPELINE PAGE =======
         function PipelinePage({ user }) {
             const [leads, setLeads] = useState([]);
@@ -3095,6 +3193,7 @@
             const [filter, setFilter] = useState('all'); // status filter
             const [ownerFilter, setOwnerFilter] = useState('me');
             const [touchpointTarget, setTouchpointTarget] = useState(null);
+            const [activityTarget, setActivityTarget] = useState(null);
             const [workspaceUsers, setWorkspaceUsers] = useState([]);
 
             useEffect(() => {
@@ -3204,9 +3303,21 @@
                                             value={lead.next_followup_at ? lead.next_followup_at.split('T')[0] : ''}
                                             onChange={e => updateLead(lead.id, 'next_followup_at', e.target.value ? new Date(e.target.value).toISOString() : null)} />
                                     </div>
-                                    {lead.last_touch_at && <span style={{fontSize:'0.7rem',color:'#475569'}}>Last touch: {new Date(lead.last_touch_at).toLocaleDateString()}</span>}
+                                    {lead.last_activity_at && (
+                                        <span style={{fontSize:'0.7rem',color:'#475569'}}>
+                                            {(() => {
+                                                const diff = Date.now() - new Date(lead.last_activity_at).getTime();
+                                                const d = Math.floor(diff / 86400000);
+                                                const label = (lead.last_action_type || '').replace(/_/g,' ').toLowerCase();
+                                                return `${d === 0 ? 'Today' : d + 'd ago'} · ${label}`;
+                                            })()}
+                                        </span>
+                                    )}
                                     <button className="action-btn" style={styles.actionBtn} onClick={() => setTouchpointTarget({lead_id:lead.id,company_name:lead.company_name})}>
                                         Log Touchpoint
+                                    </button>
+                                    <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.75rem'}} onClick={() => setActivityTarget({lead_id:lead.id,company_name:lead.company_name})}>
+                                        View Activity
                                     </button>
                                 </div>
                             ))}
@@ -3215,6 +3326,10 @@
 
                     {touchpointTarget && (
                         <TouchpointModal target={touchpointTarget} onClose={() => setTouchpointTarget(null)} onSaved={loadLeads} />
+                    )}
+                    {activityTarget && (
+                        <ActivityModal leadId={activityTarget.lead_id} companyName={activityTarget.company_name}
+                            onClose={() => setActivityTarget(null)} user={user} />
                     )}
                 </div>
             );
@@ -3225,6 +3340,7 @@
             const [leads, setLeads] = useState([]);
             const [loading, setLoading] = useState(true);
             const [touchpointTarget, setTouchpointTarget] = useState(null);
+            const [activityTarget, setActivityTarget] = useState(null);
 
             useEffect(() => { loadDueLeads(); }, []);
 
@@ -3294,6 +3410,9 @@
                                         <button className="action-btn" style={styles.actionBtn} onClick={() => setTouchpointTarget({lead_id:lead.id,company_name:lead.company_name})}>
                                             Log Touchpoint
                                         </button>
+                                        <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.75rem'}} onClick={() => setActivityTarget({lead_id:lead.id,company_name:lead.company_name})}>
+                                            View Activity
+                                        </button>
                                     </div>
                                 );
                             })}
@@ -3302,6 +3421,10 @@
 
                     {touchpointTarget && (
                         <TouchpointModal target={touchpointTarget} onClose={() => setTouchpointTarget(null)} onSaved={loadDueLeads} />
+                    )}
+                    {activityTarget && (
+                        <ActivityModal leadId={activityTarget.lead_id} companyName={activityTarget.company_name}
+                            onClose={() => setActivityTarget(null)} user={user} />
                     )}
                 </div>
             );
