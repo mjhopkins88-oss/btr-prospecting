@@ -472,6 +472,66 @@ def init_db():
             c.execute('INSERT INTO rate_groups (id, name, rate, rate_x100) VALUES (?, ?, ?, ?)',
                       (str(uuid.uuid4()), name, rate, rate_x100))
 
+    # Seed county_group_map if empty
+    c.execute('SELECT COUNT(*) FROM county_group_map')
+    if c.fetchone()[0] == 0:
+        _county_seeds = {
+            'Florida Group 1': {
+                'FL': ['Monroe', 'Miami-Dade', 'Broward', 'Palm Beach'],
+            },
+            'Florida Group 2': {
+                'FL': ['Hillsborough', 'Pinellas'],
+            },
+            'Florida Group 3': {
+                'FL': ['Escambia', 'Santa Rosa', 'Okaloosa', 'Walton', 'Bay', 'Gulf', 'Franklin',
+                       'Wakulla', 'Jefferson', 'Taylor', 'Dixie', 'Levy', 'Citrus', 'Hernando',
+                       'Pasco', 'Manatee', 'Sarasota', 'Charlotte', 'Lee', 'Collier', 'Martin',
+                       'St. Lucie', 'Indian River', 'Brevard', 'Volusia', 'Flagler', 'St. Johns',
+                       'Duval', 'Nassau'],
+            },
+            'Florida Group 4': {
+                'FL': ['Washington', 'Holmes', 'Jackson', 'Calhoun', 'Liberty', 'Gadsden', 'Leon',
+                       'Madison', 'Hamilton', 'Lafayette', 'Suwannee', 'Columbia', 'Gilchrist',
+                       'Baker', 'Union', 'Bradford', 'Clay', 'Alachua', 'Putnam', 'Marion', 'Lake',
+                       'Seminole', 'Sumter', 'Polk', 'Orange', 'Osceola', 'Okeechobee', 'Hardee',
+                       'Desoto', 'Highlands', 'Glades', 'Hendry'],
+            },
+            'Tier 1 Louisiana': {
+                'LA': ['Assumption', 'Calcasieu', 'Cameron', 'Iberia', 'Jefferson', 'Lafourche',
+                       'Livingston', 'Orleans', 'Plaquemines', 'St. Bernard', 'St. Charles',
+                       'St. James', 'St. John The Baptist', 'St. Martin (South)', 'St. Mary',
+                       'St. Tammany', 'Tangipahoa', 'Terrebonne', 'Vermilion'],
+            },
+            'Tier 1 Atlantic (GA, SC, NC, VA)': {
+                'GA': ['Bryan', 'Camden', 'Chatham', 'Glynn', 'Liberty', 'Mcintosh'],
+                'SC': ['Beaufort', 'Berkeley', 'Charleston', 'Colleton', 'Dorchester',
+                       'Georgetown', 'Hampton', 'Horry', 'Jasper'],
+                'NC': ['Beaufort', 'Bertie', 'Brunswick', 'Camden', 'Carteret', 'Chowan',
+                       'Columbus', 'Craven', 'Currituck', 'Dare', 'Hyde', 'Jones',
+                       'New Hanover', 'Onslow', 'Pamlico', 'Pasquotank', 'Pender',
+                       'Perquimans', 'Tyrrell', 'Washington'],
+            },
+            'All Other Tier 1': {
+                'AL': ['Baldwin', 'Mobile'],
+                'TX': ['Aransas', 'Brazoria', 'Calhoun', 'Cameron', 'Chambers', 'Galveston',
+                       'Harris', 'Jackson', 'Jefferson', 'Kenedy', 'Kleberg', 'Liberty',
+                       'Matagorda', 'Newton', 'Nueces', 'Orange', 'Refugio', 'San Patricio',
+                       'Victoria', 'Willacy'],
+                'MS': ['Hancock', 'Harrison', 'Jackson'],
+            },
+            'Texas - Southern Non-Coastal': {
+                'TX': ['Atascosa', 'Bee', 'Brooks', 'Dewitt', 'Dimmit', 'Duval', 'Frio',
+                       'Goliad', 'Hidalgo', 'Jim Hogg', 'Jim Wells', 'Karnes', 'La Salle',
+                       'Live Oak', 'Maverick', 'Mcmullen', 'Starr', 'Webb', 'Wilson',
+                       'Zapata', 'Zavala'],
+            },
+        }
+        for group_name, states in _county_seeds.items():
+            for st, counties in states.items():
+                for county in counties:
+                    c.execute('INSERT INTO county_group_map (id, state, county_name, group_name) VALUES (?, ?, ?, ?)',
+                              (str(uuid.uuid4()), st, county, group_name))
+
     conn.commit()
     conn.close()
 
@@ -991,6 +1051,8 @@ _STATE_FALLBACK_GROUPS = {
     'NC': 'Tier 1 Atlantic (GA, SC, NC, VA)',
     'VA': 'Tier 1 Atlantic (GA, SC, NC, VA)',
     'LA': 'Tier 1 Louisiana',
+    'TX': 'Texas North',       # Counties not mapped to Tier 1 or Southern default to North
+    'FL': 'Florida Group 4',   # Unmapped FL counties fallback to Group 4
 }
 
 
