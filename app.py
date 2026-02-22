@@ -1226,6 +1226,7 @@ def calculate_quote(sqft, rc_per_sf, loss_rents, group_rate_x100, aop_buydown):
 
 @app.route('/api/quotes/rates', methods=['GET'])
 @require_auth
+@require_role('admin')
 def api_quotes_rates():
     """Return all rate groups."""
     conn = sqlite3.connect('prospects.db')
@@ -1238,6 +1239,7 @@ def api_quotes_rates():
 
 @app.route('/api/quotes/property', methods=['POST'])
 @require_auth
+@require_role('admin')
 def api_quotes_property():
     """Generate a property insurance quote."""
     data = request.json or {}
@@ -1336,6 +1338,7 @@ def api_quotes_property():
 
 @app.route('/api/quotes/history', methods=['GET'])
 @require_auth
+@require_role('admin')
 def api_quotes_history():
     """Return recent quotes for the current user."""
     conn = sqlite3.connect('prospects.db')
