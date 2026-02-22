@@ -1521,12 +1521,17 @@ def api_crm_upsert_lead():
             'next_followup_at': lead_row[3], 'priority': lead_row[4], 'company_id': company_id,
             'company_name': company_name, 'prospect_key': prospect_key,
         }
+        # If lead exists but unowned, auto-assign to current user (producer self-assignment)
+        if not lead_row[2]:
+            c.execute('UPDATE crm_leads SET owner_user_id = ? WHERE id = ?', (g.user['id'], lead_row[0]))
+            lead['owner_user_id'] = g.user['id']
     else:
         lead_id = str(uuid.uuid4())
-        c.execute('INSERT INTO crm_leads (id, workspace_id, company_id, status) VALUES (?, ?, ?, ?)',
-                  (lead_id, ws, company_id, 'New'))
+        # Auto-assign owner to current user on create
+        c.execute('INSERT INTO crm_leads (id, workspace_id, company_id, owner_user_id, status) VALUES (?, ?, ?, ?, ?)',
+                  (lead_id, ws, company_id, g.user['id'], 'New'))
         lead = {
-            'id': lead_id, 'status': 'New', 'owner_user_id': None,
+            'id': lead_id, 'status': 'New', 'owner_user_id': g.user['id'],
             'next_followup_at': None, 'priority': None, 'company_id': company_id,
             'company_name': company_name, 'prospect_key': prospect_key,
         }
@@ -1611,6 +1616,11 @@ def api_crm_update_lead(lead_id):
         conn.close()
         return jsonify({'success': False, 'message': 'Cannot update another user\'s lead'}), 403
 
+    # Non-admins cannot change owner_user_id (server-side enforced)
+    if 'owner_user_id' in data and g.user['role'] != 'admin':
+        conn.close()
+        return jsonify({'success': False, 'message': 'Only admins can reassign leads'}), 403
+
     updates = []
     params = []
     for field in ('status', 'owner_user_id', 'next_followup_at', 'priority'):
@@ -1641,11 +1651,17 @@ def api_crm_add_touchpoint(lead_id):
     conn = sqlite3.connect('prospects.db')
     c = conn.cursor()
 
-    # Verify lead belongs to workspace
-    c.execute('SELECT id FROM crm_leads WHERE id = ? AND workspace_id = ?', (lead_id, g.workspace_id))
-    if not c.fetchone():
+    # Verify lead belongs to workspace and check ownership
+    c.execute('SELECT id, owner_user_id FROM crm_leads WHERE id = ? AND workspace_id = ?', (lead_id, g.workspace_id))
+    lead_row = c.fetchone()
+    if not lead_row:
         conn.close()
         return jsonify({'success': False, 'message': 'Lead not found'}), 404
+
+    # Non-admins can only log touchpoints on their own leads
+    if g.user['role'] != 'admin' and lead_row[1] and lead_row[1] != g.user['id']:
+        conn.close()
+        return jsonify({'success': False, 'message': 'Cannot modify another user\'s lead'}), 403
 
     tp_id = str(uuid.uuid4())
     occurred_at = data.get('occurred_at', datetime.utcnow().isoformat())
@@ -1696,6 +1712,57 @@ def api_crm_list_touchpoints(lead_id):
         })
     conn.close()
     return jsonify({'success': True, 'touchpoints': touchpoints})
+
+
+@app.route('/api/crm/leads/<lead_id>/assign', methods=['PATCH'])
+@require_auth
+@require_role('admin')
+def api_crm_assign_lead(lead_id):
+    """Admin only: reassign a lead to a different user or unassign."""
+    if not g.user:
+        return jsonify({'success': False, 'message': 'Auth required'}), 401
+    data = request.json or {}
+    new_owner_id = data.get('owner_id')  # null = unassign
+
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+
+    # Verify lead belongs to workspace
+    c.execute('SELECT id FROM crm_leads WHERE id = ? AND workspace_id = ?', (lead_id, g.workspace_id))
+    if not c.fetchone():
+        conn.close()
+        return jsonify({'success': False, 'message': 'Lead not found'}), 404
+
+    # If assigning to a user, verify that user exists in workspace
+    if new_owner_id:
+        c.execute('SELECT id, name FROM users WHERE id = ? AND workspace_id = ?', (new_owner_id, g.workspace_id))
+        target = c.fetchone()
+        if not target:
+            conn.close()
+            return jsonify({'success': False, 'message': 'Target user not found'}), 400
+        owner_name = target[1]
+    else:
+        owner_name = None
+
+    c.execute('UPDATE crm_leads SET owner_user_id = ? WHERE id = ?', (new_owner_id, lead_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'owner_user_id': new_owner_id, 'owner_name': owner_name})
+
+
+@app.route('/api/crm/workspace-users', methods=['GET'])
+@require_auth
+def api_crm_workspace_users():
+    """List users in the current workspace (for assignment dropdowns)."""
+    if not g.user:
+        return jsonify({'success': True, 'users': []})
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT id, name, role FROM users WHERE workspace_id = ? AND is_disabled = 0 ORDER BY name',
+              (g.workspace_id,))
+    users = [{'id': r[0], 'name': r[1], 'role': r[2]} for r in c.fetchall()]
+    conn.close()
+    return jsonify({'success': True, 'users': users})
 
 
 @app.route('/api/crm/leads/bulk-status', methods=['GET'])

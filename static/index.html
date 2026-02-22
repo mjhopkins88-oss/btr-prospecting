@@ -978,8 +978,10 @@
                                         color:(CRM_STATUS_COLORS[crmInfo.status]||CRM_STATUS_COLORS.New).color,
                                         textTransform:'uppercase',letterSpacing:'0.03em'}}>{crmInfo.status}</span>
                                 )}
-                                {crmInfo && crmInfo.owner_name && (
-                                    <span style={{fontSize:'0.65rem',color:'#64748b'}}>{crmInfo.owner_name}</span>
+                                {crmInfo && crmInfo.owner_user_id && (
+                                    <span style={{fontSize:'0.65rem',color:'#64748b'}}>
+                                        {crmInfo.owner_user_id === user?.id ? 'Owned by: Me' : crmInfo.owner_name ? `Owned by: ${crmInfo.owner_name}` : ''}
+                                    </span>
                                 )}
                             </div>
                             <p style={styles.location}>{prospect.city}, {prospect.state}{foundDate ? ` · ${foundDate}` : ''}</p>
@@ -1213,7 +1215,7 @@
                     <div style={{...styles.cardActions, justifyContent: 'flex-end'}}>
                         {!crmInfo ? (
                             <button className="action-btn" style={{...styles.actionBtn,borderColor:'#10b981',color:'#34d399'}} onClick={() => onSaveToPipeline(prospect)}>
-                                Save to Pipeline
+                                {user?.role === 'admin' ? 'Save to Pipeline' : 'Save to My Leads'}
                             </button>
                         ) : (
                             <button className="action-btn" style={styles.actionBtn} onClick={() => onLogTouchpoint(crmInfo.lead_id, prospect.company)}>
@@ -3093,8 +3095,17 @@
             const [filter, setFilter] = useState('all'); // status filter
             const [ownerFilter, setOwnerFilter] = useState('me');
             const [touchpointTarget, setTouchpointTarget] = useState(null);
+            const [workspaceUsers, setWorkspaceUsers] = useState([]);
 
-            useEffect(() => { loadLeads(); }, [filter, ownerFilter]);
+            useEffect(() => {
+                loadLeads();
+                if (user?.role === 'admin') {
+                    fetch(`${API_BASE}/api/crm/workspace-users`)
+                        .then(r => r.json())
+                        .then(d => { if (d.success) setWorkspaceUsers(d.users || []); })
+                        .catch(() => {});
+                }
+            }, [filter, ownerFilter]);
 
             const loadLeads = async () => {
                 setLoading(true);
@@ -3159,12 +3170,34 @@
                                 <div key={lead.id} style={{background:'#1e293b',border:'1px solid #334155',borderRadius:'12px',padding:'1rem',display:'flex',alignItems:'center',gap:'1rem',flexWrap:'wrap'}}>
                                     <div style={{flex:1,minWidth:'200px'}}>
                                         <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:'1rem',fontWeight:700,color:'#f1f5f9',marginBottom:'0.2rem'}}>{lead.company_name}</div>
-                                        {lead.owner_name && <span style={{fontSize:'0.75rem',color:'#64748b'}}>Owner: {lead.owner_name}</span>}
+                                        <span style={{fontSize:'0.75rem',color:'#64748b'}}>
+                                            {lead.owner_user_id === user?.id ? 'Owned by: Me' : lead.owner_name ? `Owned by: ${lead.owner_name}` : 'Unassigned'}
+                                        </span>
                                     </div>
                                     <select style={{...styles.select,fontSize:'0.8rem',padding:'0.35rem 0.5rem'}} value={lead.status}
                                         onChange={e => updateLead(lead.id, 'status', e.target.value)}>
                                         {CRM_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                                     </select>
+                                    {user?.role === 'admin' && (
+                                        <div style={{display:'flex',alignItems:'center',gap:'0.5rem'}}>
+                                            <label style={{fontSize:'0.7rem',color:'#64748b'}}>Assign:</label>
+                                            <select style={{...styles.select,fontSize:'0.8rem',padding:'0.35rem 0.5rem',minWidth:'120px'}}
+                                                value={lead.owner_user_id || ''}
+                                                onChange={async e => {
+                                                    const newOwnerId = e.target.value || null;
+                                                    try {
+                                                        await fetch(`${API_BASE}/api/crm/leads/${lead.id}/assign`, {
+                                                            method: 'PATCH', headers: {'Content-Type': 'application/json'},
+                                                            body: JSON.stringify({ owner_id: newOwnerId })
+                                                        });
+                                                        loadLeads();
+                                                    } catch (err) { console.error('Reassign error:', err); }
+                                                }}>
+                                                <option value="">Unassigned</option>
+                                                {workspaceUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                                            </select>
+                                        </div>
+                                    )}
                                     <div style={{display:'flex',alignItems:'center',gap:'0.5rem'}}>
                                         <label style={{fontSize:'0.7rem',color:'#64748b'}}>Follow-up:</label>
                                         <input type="date" style={{...styles.input,minWidth:'130px',fontSize:'0.8rem',padding:'0.3rem 0.5rem'}}
@@ -3247,7 +3280,9 @@
                                                 <span style={{fontSize:'0.75rem',padding:'0.15rem 0.45rem',borderRadius:'4px',fontWeight:600,
                                                     background:(CRM_STATUS_COLORS[lead.status]||CRM_STATUS_COLORS.New).bg,
                                                     color:(CRM_STATUS_COLORS[lead.status]||CRM_STATUS_COLORS.New).color}}>{lead.status}</span>
-                                                {lead.owner_name && <span style={{fontSize:'0.75rem',color:'#64748b'}}>{lead.owner_name}</span>}
+                                                <span style={{fontSize:'0.75rem',color:'#64748b'}}>
+                                                    {lead.owner_user_id === user?.id ? 'Owned by: Me' : lead.owner_name ? `Owned by: ${lead.owner_name}` : 'Unassigned'}
+                                                </span>
                                             </div>
                                         </div>
                                         <div style={{fontSize:'0.85rem',color: isOverdue ? '#f87171' : '#fbbf24',fontWeight:600}}>
