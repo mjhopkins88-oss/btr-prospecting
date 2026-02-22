@@ -669,7 +669,8 @@
                     {activeTab === 'statewide' && <StatewideDiscovery />}
                     {activeTab === 'intelligence' && <SunbeltIntelligence user={user} />}
                     {activeTab === 'admin' && user && user.is_super_admin && <AdminPage user={user} />}
-                    {activeTab === 'quoting' && <QuotingPage user={user} />}
+                    {activeTab === 'quoting' && user && user.role === 'admin' && <QuotingPage user={user} />}
+                    {activeTab === 'quoting' && (!user || user.role !== 'admin') && (() => { setActiveTab('pipeline'); return null; })()}
                     {showEmailModal && (
                         <EmailModal
                             email={emailTemplate}
@@ -717,8 +718,10 @@
                 { id: 'intelligence', label: 'Sunbelt Intelligence' },
                 { id: 'pipeline', label: 'My Pipeline' },
                 { id: 'followups', label: 'Follow-ups Due' },
-                { id: 'quoting', label: 'Quoting' },
             ];
+            if (user && user.role === 'admin') {
+                tabs.push({ id: 'quoting', label: 'Quoting' });
+            }
             if (user && user.is_super_admin) {
                 tabs.push({ id: 'admin', label: 'Admin' });
             }
