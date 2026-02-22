@@ -4498,6 +4498,384 @@ def api_intel_momentum_state_summary():
     return jsonify({'success': True, 'states': states, 'window_end_date': latest_date})
 
 
+# ===================================================================
+# SUNBELT INTELLIGENCE — Phase 1 (Discovery-only endpoints)
+# All metrics computed live from _gather_all_signals() — no joins to
+# prospect search, pipeline, or pre-materialized tables.
+# ===================================================================
+
+def _sunbelt_meta(params, counts, generated_at=None):
+    """Standard meta block for sunbelt responses."""
+    return {
+        'generated_at': generated_at or datetime.utcnow().isoformat(),
+        'params': params,
+        'source': 'discovery_only',
+        'counts': counts,
+    }
+
+
+@app.route('/api/sunbelt/weekly', methods=['GET'])
+@require_auth
+def api_sunbelt_weekly():
+    """Weekly brief computed live from discovery signals."""
+    import time
+    t0 = time.time()
+    try:
+        window_days = min(int(request.args.get('windowDays', 7)), 90)
+    except (ValueError, TypeError):
+        window_days = 7
+
+    try:
+        signals = _gather_all_signals(days=window_days)
+        elapsed = round(time.time() - t0, 3)
+        app.logger.info(f'[sunbelt/weekly] {len(signals)} signals gathered in {elapsed}s (window={window_days}d)')
+
+        if not signals:
+            return jsonify({
+                'ok': True,
+                'data': {
+                    'top_markets': [], 'top_topics': [], 'highlights': [],
+                    'brief_text': 'No discovery signals in selected window.',
+                },
+                'meta': _sunbelt_meta({'windowDays': window_days}, {'total_signals': 0}),
+            })
+
+        # Top markets by weighted signal count
+        market_counts = {}
+        topic_counts = {}
+        for s in signals:
+            city = s.get('city') or None
+            state = s.get('state') or None
+            key = f"{city or 'Unknown'}, {state or '??'}"
+            w = get_signal_weight(s.get('topic', '') + ' ' + s.get('title', ''))
+            market_counts[key] = market_counts.get(key, 0) + w
+            topic = s.get('topic', 'other')
+            topic_counts[topic] = topic_counts.get(topic, 0) + 1
+
+        top_markets = sorted(market_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+        top_topics = sorted(topic_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+
+        # Highlights: top 10 signals by weight
+        scored = []
+        for s in signals:
+            w = get_signal_weight(s.get('topic', '') + ' ' + s.get('title', ''))
+            scored.append((w, s))
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        highlights = []
+        for w, s in scored[:10]:
+            highlights.append({
+                'title': s.get('title') or s.get('summary', '')[:80] or 'Untitled',
+                'url': s.get('url') or None,
+                'city': s.get('city') or None,
+                'state': s.get('state') or None,
+                'topic': s.get('topic', 'other'),
+                'date': s.get('date_str', ''),
+                'weight': w,
+            })
+
+        # Brief text summary
+        top_mkt_names = [m[0] for m in top_markets[:5]]
+        top_topic_names = [t[0] for t in top_topics[:5]]
+        brief_text = (
+            f"Weekly Sunbelt Intelligence ({window_days}-day window): "
+            f"{len(signals)} discovery signals across {len(market_counts)} markets. "
+            f"Top markets: {', '.join(top_mkt_names)}. "
+            f"Dominant topics: {', '.join(top_topic_names)}."
+        )
+
+        return jsonify({
+            'ok': True,
+            'data': {
+                'top_markets': [{'market': m[0], 'weighted_signals': m[1]} for m in top_markets],
+                'top_topics': [{'topic': t[0], 'count': t[1]} for t in top_topics],
+                'highlights': highlights,
+                'brief_text': brief_text,
+            },
+            'meta': _sunbelt_meta({'windowDays': window_days},
+                                  {'total_signals': len(signals), 'markets': len(market_counts), 'topics': len(topic_counts)}),
+        })
+    except Exception as e:
+        app.logger.error(f'[sunbelt/weekly] Error: {e}')
+        return jsonify({'ok': False, 'error': 'Failed to generate weekly brief', 'details': str(e)}), 500
+
+
+@app.route('/api/sunbelt/momentum', methods=['GET'])
+@require_auth
+def api_sunbelt_momentum():
+    """Momentum index computed live from discovery signals with defensive normalization."""
+    import time
+    t0 = time.time()
+    try:
+        window_days = min(int(request.args.get('windowDays', 7)), 90)
+        baseline_days = min(int(request.args.get('baselineDays', 30)), 180)
+    except (ValueError, TypeError):
+        window_days, baseline_days = 7, 30
+
+    try:
+        signals = _gather_all_signals(days=baseline_days)
+        elapsed = round(time.time() - t0, 3)
+        app.logger.info(f'[sunbelt/momentum] {len(signals)} signals gathered in {elapsed}s (window={window_days}d, baseline={baseline_days}d)')
+
+        if not signals:
+            return jsonify({
+                'ok': True,
+                'data': {'markets': [], 'message': 'No discovery signals in selected window.'},
+                'meta': _sunbelt_meta({'windowDays': window_days, 'baselineDays': baseline_days}, {'total_signals': 0}),
+            })
+
+        window_cutoff = (datetime.utcnow() - timedelta(days=window_days)).isoformat()
+
+        # Aggregate by city
+        city_data = {}  # key: "city|state" -> {count_window, count_baseline, weighted_window, weighted_baseline}
+        for s in signals:
+            city = s.get('city') or None
+            state = s.get('state') or None
+            if not city or not state:
+                continue
+            key = f"{city}|{state}"
+            if key not in city_data:
+                city_data[key] = {'city': city, 'state': state, 'count_window': 0, 'count_baseline': 0,
+                                  'weighted_window': 0, 'weighted_baseline': 0}
+            w = get_signal_weight(s.get('topic', '') + ' ' + s.get('title', ''))
+            d = city_data[key]
+            d['count_baseline'] += 1
+            d['weighted_baseline'] += w
+            if s.get('date_str', '') >= window_cutoff:
+                d['count_window'] += 1
+                d['weighted_window'] += w
+
+        # Compute raw scores with defensive math
+        raw_scores = []
+        for key, d in city_data.items():
+            ratio = d['count_window'] / max(1, d['count_baseline'])
+            raw = (d['count_window'] * 2) + (ratio * 10)
+            raw_scores.append((key, d, raw, ratio))
+
+        # Normalize 0-100 across all cities
+        if not raw_scores:
+            return jsonify({
+                'ok': True,
+                'data': {'markets': [], 'message': 'No city-level signals found.'},
+                'meta': _sunbelt_meta({'windowDays': window_days, 'baselineDays': baseline_days},
+                                      {'total_signals': len(signals)}),
+            })
+
+        max_raw = max(r[2] for r in raw_scores)
+        min_raw = min(r[2] for r in raw_scores)
+
+        markets = []
+        for key, d, raw, ratio in raw_scores:
+            if max_raw == min_raw:
+                score = 50.0
+            else:
+                score = round(((raw - min_raw) / (max_raw - min_raw)) * 100, 1)
+
+            if ratio >= 0.5:
+                label = 'accelerating'
+            elif ratio >= 0.2:
+                label = 'steady'
+            else:
+                label = 'cooling'
+
+            markets.append({
+                'city': d['city'],
+                'state': d['state'],
+                'momentum_score': score,
+                'momentum_label': label,
+                'signals_window': d['count_window'],
+                'signals_baseline': d['count_baseline'],
+                'weighted_window': d['weighted_window'],
+                'weighted_baseline': d['weighted_baseline'],
+                'ratio': round(ratio, 4),
+            })
+
+        markets.sort(key=lambda x: x['momentum_score'], reverse=True)
+        markets = markets[:50]
+
+        return jsonify({
+            'ok': True,
+            'data': {'markets': markets},
+            'meta': _sunbelt_meta({'windowDays': window_days, 'baselineDays': baseline_days},
+                                  {'total_signals': len(signals), 'cities_scored': len(raw_scores)}),
+        })
+    except Exception as e:
+        app.logger.error(f'[sunbelt/momentum] Error: {e}')
+        return jsonify({'ok': False, 'error': 'Failed to compute momentum', 'details': str(e)}), 500
+
+
+@app.route('/api/sunbelt/trends', methods=['GET'])
+@require_auth
+def api_sunbelt_trends():
+    """Trend signals computed live from discovery data with example items."""
+    import time
+    t0 = time.time()
+    try:
+        window_days = min(int(request.args.get('windowDays', 7)), 90)
+        baseline_days = min(int(request.args.get('baselineDays', 30)), 180)
+    except (ValueError, TypeError):
+        window_days, baseline_days = 7, 30
+    topic_filter = request.args.get('topic', '').strip().lower()
+
+    try:
+        signals = _gather_all_signals(days=baseline_days)
+        elapsed = round(time.time() - t0, 3)
+        app.logger.info(f'[sunbelt/trends] {len(signals)} signals gathered in {elapsed}s (window={window_days}d, baseline={baseline_days}d)')
+
+        if not signals:
+            return jsonify({
+                'ok': True,
+                'data': {'trends': [], 'message': 'No discovery signals in selected window.'},
+                'meta': _sunbelt_meta({'windowDays': window_days, 'baselineDays': baseline_days, 'topic': topic_filter or None},
+                                      {'total_signals': 0}),
+            })
+
+        window_cutoff = (datetime.utcnow() - timedelta(days=window_days)).isoformat()
+
+        # Group by (state, city, topic)
+        groups = {}  # key -> {count_window, count_baseline, items_window}
+        for s in signals:
+            state = s.get('state') or None
+            city = s.get('city') or None
+            topic = s.get('topic', 'other')
+            if topic_filter and topic.lower() != topic_filter:
+                continue
+            key = f"{state or ''}|{city or ''}|{topic}"
+            if key not in groups:
+                groups[key] = {'state': state, 'city': city, 'topic': topic,
+                               'count_window': 0, 'count_baseline': 0, 'items_window': []}
+            g = groups[key]
+            g['count_baseline'] += 1
+            if s.get('date_str', '') >= window_cutoff:
+                g['count_window'] += 1
+                if len(g['items_window']) < 5:
+                    g['items_window'].append({
+                        'title': s.get('title') or s.get('summary', '')[:80] or 'Untitled',
+                        'source_url': s.get('url') or None,
+                        'city': city,
+                        'state': state,
+                        'date': s.get('date_str', ''),
+                    })
+
+        # Compute trend ratio and classify
+        trends = []
+        for key, g in groups.items():
+            if g['count_window'] < 2:
+                continue
+            baseline_weekly = g['count_baseline'] / max(1, baseline_days / 7.0)
+            trend_ratio = g['count_window'] / max(1, baseline_weekly) if baseline_weekly > 0 else g['count_window']
+
+            if trend_ratio >= 2.5:
+                classification = 'Accelerating'
+            elif trend_ratio >= 1.5:
+                classification = 'Emerging'
+            elif g['count_window'] > g['count_baseline'] / 2:
+                classification = 'Peaking'
+            else:
+                classification = 'Cooling'
+
+            trends.append({
+                'state': g['state'],
+                'city': g['city'],
+                'topic': g['topic'],
+                'count_window': g['count_window'],
+                'count_baseline': g['count_baseline'],
+                'trend_ratio': round(trend_ratio, 2),
+                'classification': classification,
+                'examples': g['items_window'],
+            })
+
+        trends.sort(key=lambda x: x['trend_ratio'], reverse=True)
+
+        return jsonify({
+            'ok': True,
+            'data': {'trends': trends},
+            'meta': _sunbelt_meta({'windowDays': window_days, 'baselineDays': baseline_days, 'topic': topic_filter or None},
+                                  {'total_signals': len(signals), 'trends_found': len(trends)}),
+        })
+    except Exception as e:
+        app.logger.error(f'[sunbelt/trends] Error: {e}')
+        return jsonify({'ok': False, 'error': 'Failed to compute trends', 'details': str(e)}), 500
+
+
+@app.route('/api/sunbelt/state-rankings', methods=['GET'])
+@require_auth
+def api_sunbelt_state_rankings():
+    """State rankings computed live from discovery signals. Caps: 50 states, 10 cities, 10 topics."""
+    import time
+    t0 = time.time()
+    try:
+        window_days = min(int(request.args.get('windowDays', 30)), 180)
+    except (ValueError, TypeError):
+        window_days = 30
+
+    try:
+        signals = _gather_all_signals(days=window_days)
+        elapsed = round(time.time() - t0, 3)
+        app.logger.info(f'[sunbelt/state-rankings] {len(signals)} signals gathered in {elapsed}s (window={window_days}d)')
+
+        if not signals:
+            return jsonify({
+                'ok': True,
+                'data': {'rankings': [], 'message': 'No discovery signals in selected window.'},
+                'meta': _sunbelt_meta({'windowDays': window_days}, {'total_signals': 0}),
+            })
+
+        # Aggregate by state
+        state_data = {}  # state -> {signals, cities, topics, capital_count, construction_count}
+        for s in signals:
+            state = s.get('state') or None
+            if not state:
+                continue
+            if state not in state_data:
+                state_data[state] = {'state': state, 'total': 0, 'weighted': 0,
+                                     'cities': {}, 'topics': {}, 'capital': 0, 'construction': 0}
+            sd = state_data[state]
+            w = get_signal_weight(s.get('topic', '') + ' ' + s.get('title', ''))
+            sd['total'] += 1
+            sd['weighted'] += w
+
+            city = s.get('city') or 'Unknown'
+            sd['cities'][city] = sd['cities'].get(city, 0) + w
+
+            topic = s.get('topic', 'other')
+            sd['topics'][topic] = sd['topics'].get(topic, 0) + 1
+
+            if topic in ('acquisition', 'sale', 'financing', 'jv', 'joint_venture', 'capital'):
+                sd['capital'] += 1
+            if topic in ('groundbreaking', 'construction', 'permit', 'rezoning', 'new_build', 'permit_rezoning'):
+                sd['construction'] += 1
+
+        # Build rankings
+        rankings = []
+        for state, sd in state_data.items():
+            top_cities = sorted(sd['cities'].items(), key=lambda x: x[1], reverse=True)[:10]
+            top_topics = sorted(sd['topics'].items(), key=lambda x: x[1], reverse=True)[:10]
+            rankings.append({
+                'state': state,
+                'state_name': STATEWIDE_STATES.get(state, state),
+                'total_signals': sd['total'],
+                'weighted_signals': sd['weighted'],
+                'capital_events': sd['capital'],
+                'construction_signals': sd['construction'],
+                'top_cities': [{'city': c[0], 'weighted_score': c[1]} for c in top_cities],
+                'top_topics': [{'topic': t[0], 'count': t[1]} for t in top_topics],
+            })
+
+        rankings.sort(key=lambda x: x['weighted_signals'], reverse=True)
+        rankings = rankings[:50]
+
+        return jsonify({
+            'ok': True,
+            'data': {'rankings': rankings},
+            'meta': _sunbelt_meta({'windowDays': window_days},
+                                  {'total_signals': len(signals), 'states_ranked': len(rankings)}),
+        })
+    except Exception as e:
+        app.logger.error(f'[sunbelt/state-rankings] Error: {e}')
+        return jsonify({'ok': False, 'error': 'Failed to compute state rankings', 'details': str(e)}), 500
+
+
 # --- Scheduler Setup ---
 def _scheduled_discovery():
     """Wrapper that enqueues the scheduled discovery job (runs ALL adapters including permits)."""

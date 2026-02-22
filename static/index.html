@@ -1844,130 +1844,117 @@
         // ======= SUNBELT INTELLIGENCE =======
         function SunbeltIntelligence({ user }) {
             const [subTab, setSubTab] = useState('brief');
-            const [briefs, setBriefs] = useState([]);
+            const [weeklyData, setWeeklyData] = useState(null);
+            const [momentumData, setMomentumData] = useState(null);
+            const [trendsData, setTrendsData] = useState(null);
+            const [rankingsData, setRankingsData] = useState(null);
+            const [loading, setLoading] = useState({});
+            const [errors, setErrors] = useState({});
+            const [trendFilter, setTrendFilter] = useState({ state: '', topic: '' });
+
+            // Also keep the existing brief/optimization flows for admin actions
             const [latestBrief, setLatestBrief] = useState(null);
-            const [trends, setTrends] = useState([]);
-            const [rankings, setRankings] = useState([]);
-            const [momentumCities, setMomentumCities] = useState([]);
-            const [stateSummary, setStateSummary] = useState([]);
-            const [momentumStateFilter, setMomentumStateFilter] = useState('');
-            const [loading, setLoading] = useState(false);
             const [genLoading, setGenLoading] = useState(false);
             const [optLoading, setOptLoading] = useState(false);
-            const [trendFilter, setTrendFilter] = useState({ state: '', topic: '' });
-            const [error, setError] = useState('');
+            const [actionError, setActionError] = useState('');
 
-            useEffect(() => {
-                fetchLatestBrief();
-                fetchTrends();
-                fetchRankings();
-                fetchMomentum();
-                fetchStateSummary();
-            }, []);
+            const setTabLoading = (tab, val) => setLoading(prev => ({...prev, [tab]: val}));
+            const setTabError = (tab, val) => setErrors(prev => ({...prev, [tab]: val}));
+
+            const fetchWeekly = async () => {
+                setTabLoading('brief', true);
+                setTabError('brief', '');
+                try {
+                    const res = await fetch(`${API_BASE}/api/sunbelt/weekly?windowDays=7`);
+                    const d = await res.json();
+                    if (d.ok === false) { setTabError('brief', d.error || 'Failed to load weekly brief'); }
+                    else { setWeeklyData(d.data); }
+                } catch (e) { setTabError('brief', 'Network error loading weekly brief'); }
+                setTabLoading('brief', false);
+            };
+
+            const fetchMomentum = async () => {
+                setTabLoading('momentum', true);
+                setTabError('momentum', '');
+                try {
+                    const res = await fetch(`${API_BASE}/api/sunbelt/momentum?windowDays=7&baselineDays=30`);
+                    const d = await res.json();
+                    if (d.ok === false) { setTabError('momentum', d.error || 'Failed to load momentum'); }
+                    else { setMomentumData(d.data); }
+                } catch (e) { setTabError('momentum', 'Network error loading momentum'); }
+                setTabLoading('momentum', false);
+            };
+
+            const fetchTrends = async () => {
+                setTabLoading('trends', true);
+                setTabError('trends', '');
+                try {
+                    let url = `${API_BASE}/api/sunbelt/trends?windowDays=7&baselineDays=30`;
+                    if (trendFilter.topic) url += `&topic=${encodeURIComponent(trendFilter.topic)}`;
+                    const res = await fetch(url);
+                    const d = await res.json();
+                    if (d.ok === false) { setTabError('trends', d.error || 'Failed to load trends'); }
+                    else { setTrendsData(d.data); }
+                } catch (e) { setTabError('trends', 'Network error loading trends'); }
+                setTabLoading('trends', false);
+            };
+
+            const fetchRankings = async () => {
+                setTabLoading('rankings', true);
+                setTabError('rankings', '');
+                try {
+                    const res = await fetch(`${API_BASE}/api/sunbelt/state-rankings?windowDays=30`);
+                    const d = await res.json();
+                    if (d.ok === false) { setTabError('rankings', d.error || 'Failed to load rankings'); }
+                    else { setRankingsData(d.data); }
+                } catch (e) { setTabError('rankings', 'Network error loading rankings'); }
+                setTabLoading('rankings', false);
+            };
 
             const fetchLatestBrief = async () => {
                 try {
                     const res = await fetch(`${API_BASE}/api/intelligence/briefs/latest`);
                     const data = await res.json();
                     if (data.brief) setLatestBrief(data.brief);
-                } catch (e) { console.error('Brief fetch error:', e); }
+                } catch (e) { /* optional */ }
             };
 
-            const fetchBriefs = async () => {
-                try {
-                    const res = await fetch(`${API_BASE}/api/intelligence/briefs`);
-                    const data = await res.json();
-                    setBriefs(data.briefs || []);
-                } catch (e) { console.error('Briefs list error:', e); }
-            };
-
-            const fetchTrends = async () => {
-                try {
-                    let url = `${API_BASE}/api/intelligence/trends?days=30`;
-                    if (trendFilter.state) url += `&state=${trendFilter.state}`;
-                    if (trendFilter.topic) url += `&topic=${encodeURIComponent(trendFilter.topic)}`;
-                    const res = await fetch(url);
-                    const data = await res.json();
-                    setTrends(data.trends || []);
-                } catch (e) { console.error('Trends fetch error:', e); }
-            };
-
-            const fetchRankings = async () => {
-                try {
-                    const res = await fetch(`${API_BASE}/api/intelligence/state-rankings`);
-                    const data = await res.json();
-                    setRankings(data.rankings || []);
-                } catch (e) { console.error('Rankings fetch error:', e); }
-            };
-
-            const fetchMomentum = async (stateFilter) => {
-                try {
-                    let url = `${API_BASE}/api/intel/momentum/top-cities?limit=10`;
-                    const sf = stateFilter !== undefined ? stateFilter : momentumStateFilter;
-                    if (sf) url += `&state=${sf}`;
-                    const res = await fetch(url);
-                    const data = await res.json();
-                    setMomentumCities(data.cities || []);
-                } catch (e) { console.error('Momentum fetch error:', e); }
-            };
-
-            const fetchStateSummary = async () => {
-                try {
-                    const res = await fetch(`${API_BASE}/api/intel/momentum/state-summary`);
-                    const data = await res.json();
-                    setStateSummary(data.states || []);
-                } catch (e) { console.error('State summary fetch error:', e); }
-            };
-
-            const runOptimization = async () => {
-                setOptLoading(true);
-                setError('');
-                try {
-                    const res = await fetch(`${API_BASE}/api/intelligence/optimization/run`, { method: 'POST' });
-                    const data = await res.json();
-                    if (data.error) { setError(data.error); }
-                    else { await fetchMomentum(); await fetchStateSummary(); await fetchRankings(); }
-                } catch (e) { setError('Failed to run optimization'); }
-                setOptLoading(false);
-            };
-
-            useEffect(() => { fetchTrends(); }, [trendFilter.state, trendFilter.topic]);
+            useEffect(() => { fetchWeekly(); fetchMomentum(); fetchTrends(); fetchRankings(); fetchLatestBrief(); }, []);
+            useEffect(() => { fetchTrends(); }, [trendFilter.topic]);
 
             const generateBrief = async () => {
-                setGenLoading(true);
-                setError('');
+                setGenLoading(true); setActionError('');
                 try {
                     const res = await fetch(`${API_BASE}/api/intelligence/briefs/generate`, { method: 'POST' });
                     const data = await res.json();
-                    if (data.error) { setError(data.error); }
-                    else { await fetchLatestBrief(); await fetchBriefs(); }
-                } catch (e) { setError('Failed to generate brief'); }
+                    if (data.error) setActionError(data.error);
+                    else { await fetchLatestBrief(); }
+                } catch (e) { setActionError('Failed to generate brief'); }
                 setGenLoading(false);
             };
 
-            const runTrends = async () => {
-                setLoading(true);
-                setError('');
+            const runOptimization = async () => {
+                setOptLoading(true); setActionError('');
                 try {
-                    const res = await fetch(`${API_BASE}/api/intelligence/trends/run`, { method: 'POST' });
+                    const res = await fetch(`${API_BASE}/api/intelligence/optimization/run`, { method: 'POST' });
                     const data = await res.json();
-                    if (data.error) { setError(data.error); }
-                    else { await fetchTrends(); }
-                } catch (e) { setError('Failed to run trend detection'); }
-                setLoading(false);
+                    if (data.error) setActionError(data.error);
+                    else { await fetchMomentum(); await fetchRankings(); }
+                } catch (e) { setActionError('Failed to run optimization'); }
+                setOptLoading(false);
             };
 
             const copyBrief = () => {
-                if (!latestBrief) return;
-                const text = typeof latestBrief.brief_json === 'string'
-                    ? latestBrief.brief_json : JSON.stringify(latestBrief.brief_json, null, 2);
-                navigator.clipboard.writeText(text);
+                const text = weeklyData?.brief_text || '';
+                if (text) navigator.clipboard.writeText(text);
             };
 
             const classColor = (cls) => {
-                if (cls === 'Accelerating') return { bg: 'rgba(239,68,68,0.15)', color: '#f87171', border: '#ef4444' };
-                if (cls === 'Emerging') return { bg: 'rgba(245,158,11,0.15)', color: '#fcd34d', border: '#f59e0b' };
-                if (cls === 'Peaking') return { bg: 'rgba(168,85,247,0.15)', color: '#c4b5fd', border: '#a855f7' };
+                const c = (cls || '').toLowerCase();
+                if (c === 'accelerating') return { bg: 'rgba(239,68,68,0.15)', color: '#f87171', border: '#ef4444' };
+                if (c === 'emerging' || c === 'steady') return { bg: 'rgba(245,158,11,0.15)', color: '#fcd34d', border: '#f59e0b' };
+                if (c === 'peaking') return { bg: 'rgba(168,85,247,0.15)', color: '#c4b5fd', border: '#a855f7' };
+                if (c === 'cooling') return { bg: 'rgba(59,130,246,0.15)', color: '#93c5fd', border: '#3b82f6' };
                 return { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8', border: '#64748b' };
             };
 
@@ -1977,8 +1964,24 @@
                 { id: 'trends', label: 'Trend Signals' },
                 { id: 'rankings', label: 'State Rankings' },
             ];
-
             const states = ['TX', 'AZ', 'GA', 'NC', 'FL'];
+
+            const ErrorPanel = ({ msg }) => (
+                <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', padding: '1rem', color: '#f87171', fontSize: '0.9rem' }}>
+                    {msg}
+                </div>
+            );
+            const EmptyPanel = ({ title, desc }) => (
+                <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
+                    <p style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.1rem', marginBottom: '0.5rem' }}>{title}</p>
+                    <p style={{ fontSize: '0.9rem' }}>{desc}</p>
+                </div>
+            );
+            const LoadingPanel = () => (
+                <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
+                    <div style={{ fontSize: '1rem' }}>Loading...</div>
+                </div>
+            );
 
             return (
                 <div>
@@ -2002,7 +2005,7 @@
                         ))}
                     </div>
 
-                    {error && <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', padding: '0.75rem', marginBottom: '1rem', color: '#f87171', fontSize: '0.85rem' }}>{error}</div>}
+                    {actionError && <ErrorPanel msg={actionError} />}
 
                     {/* WEEKLY BRIEF TAB */}
                     {subTab === 'brief' && (
@@ -2014,16 +2017,79 @@
                                         cursor: genLoading ? 'not-allowed' : 'pointer'
                                     }}>{genLoading ? 'Generating...' : 'Generate Brief Now'}</button>
                                 )}
-                                <button onClick={copyBrief} style={styles.btn} disabled={!latestBrief}>Copy to Clipboard</button>
+                                <button onClick={copyBrief} style={styles.btn} disabled={!weeklyData?.brief_text}>Copy to Clipboard</button>
+                                <button onClick={fetchWeekly} style={styles.btn}>Refresh</button>
                             </div>
 
-                            {latestBrief ? (
-                                <BriefDisplay brief={latestBrief} />
-                            ) : (
-                                <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
-                                    <p style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.1rem', marginBottom: '0.5rem' }}>No Briefs Yet</p>
-                                    <p style={{ fontSize: '0.9rem' }}>Weekly briefs are generated every Monday at 7:00 AM PT, or generate one manually above.</p>
+                            {loading.brief && <LoadingPanel />}
+                            {errors.brief && <ErrorPanel msg={errors.brief} />}
+
+                            {!loading.brief && !errors.brief && weeklyData && (
+                                <div>
+                                    {/* Brief text */}
+                                    <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '1.25rem', marginBottom: '1.5rem' }}>
+                                        <p style={{ fontSize: '0.95rem', color: '#cbd5e1', lineHeight: '1.7' }}>{weeklyData.brief_text}</p>
+                                    </div>
+
+                                    {/* Top Markets + Topics */}
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
+                                        {weeklyData.top_markets && weeklyData.top_markets.length > 0 && (
+                                            <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '1.25rem' }}>
+                                                <h3 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '0.8rem', fontWeight: 700, color: '#22d3ee', textTransform: 'uppercase', marginBottom: '0.75rem', marginTop: 0 }}>Top Markets</h3>
+                                                {weeklyData.top_markets.map((m, i) => (
+                                                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.3rem 0', borderBottom: '1px solid #0f172a' }}>
+                                                        <span style={{ color: '#f1f5f9', fontSize: '0.85rem' }}>{m.market}</span>
+                                                        <span style={{ color: '#34d399', fontFamily: "'JetBrains Mono', monospace", fontSize: '0.85rem' }}>{m.weighted_signals}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                        {weeklyData.top_topics && weeklyData.top_topics.length > 0 && (
+                                            <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '1.25rem' }}>
+                                                <h3 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '0.8rem', fontWeight: 700, color: '#a78bfa', textTransform: 'uppercase', marginBottom: '0.75rem', marginTop: 0 }}>Top Topics</h3>
+                                                {weeklyData.top_topics.map((t, i) => (
+                                                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.3rem 0', borderBottom: '1px solid #0f172a' }}>
+                                                        <span style={{ color: '#f1f5f9', fontSize: '0.85rem' }}>{t.topic}</span>
+                                                        <span style={{ color: '#94a3b8', fontFamily: "'JetBrains Mono', monospace", fontSize: '0.85rem' }}>{t.count}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Highlights */}
+                                    {weeklyData.highlights && weeklyData.highlights.length > 0 && (
+                                        <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '1.25rem' }}>
+                                            <h3 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '0.8rem', fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', marginBottom: '0.75rem', marginTop: 0 }}>Top Highlights</h3>
+                                            {weeklyData.highlights.map((h, i) => (
+                                                <div key={i} style={{ marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: i < weeklyData.highlights.length - 1 ? '1px solid #0f172a' : 'none' }}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+                                                        <span style={{ color: '#f1f5f9', fontSize: '0.85rem', fontWeight: 600 }}>
+                                                            {h.url ? <a href={h.url} target="_blank" rel="noopener noreferrer" style={{ color: '#f1f5f9', textDecoration: 'underline' }}>{h.title}</a> : h.title}
+                                                        </span>
+                                                        <span style={{ fontSize: '0.7rem', color: '#64748b', whiteSpace: 'nowrap' }}>{h.city ? `${h.city}, ${h.state}` : ''}</span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.2rem' }}>
+                                                        <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{h.topic}</span>
+                                                        <span style={{ fontSize: '0.7rem', color: '#475569' }}>{h.date ? new Date(h.date).toLocaleDateString() : ''}</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {/* Also show AI-generated brief if available */}
+                                    {latestBrief && (
+                                        <div style={{ marginTop: '1.5rem' }}>
+                                            <h3 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '0.85rem', fontWeight: 700, color: '#34d399', marginBottom: '0.75rem' }}>AI-GENERATED BRIEF</h3>
+                                            <BriefDisplay brief={latestBrief} />
+                                        </div>
+                                    )}
                                 </div>
+                            )}
+
+                            {!loading.brief && !errors.brief && !weeklyData && (
+                                <EmptyPanel title="No Weekly Data" desc="No discovery signals found. Run daily discovery first." />
                             )}
                         </div>
                     )}
@@ -2031,29 +2097,6 @@
                     {/* MOMENTUM INDEX TAB */}
                     {subTab === 'momentum' && (
                         <div>
-                            {/* State tiles row */}
-                            {stateSummary.length > 0 && (
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem', marginBottom: '1.5rem' }}>
-                                    {stateSummary.map(s => (
-                                        <div key={s.state} onClick={() => {
-                                            const newSt = momentumStateFilter === s.state ? '' : s.state;
-                                            setMomentumStateFilter(newSt);
-                                            fetchMomentum(newSt);
-                                        }} style={{
-                                            background: momentumStateFilter === s.state ? 'rgba(16,185,129,0.12)' : '#1e293b',
-                                            border: momentumStateFilter === s.state ? '1px solid #34d399' : '1px solid #334155',
-                                            borderRadius: '10px', padding: '1rem', cursor: 'pointer', textAlign: 'center',
-                                            transition: 'all 0.2s'
-                                        }}>
-                                            <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '0.9rem', fontWeight: 700, color: '#f1f5f9', marginBottom: '0.3rem' }}>{s.state}</div>
-                                            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '1.4rem', fontWeight: 700, color: '#34d399' }}>{s.weighted_signals_7d}</div>
-                                            <div style={{ fontSize: '0.65rem', color: '#64748b', marginTop: '0.2rem' }}>weighted 7d</div>
-                                            <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '0.15rem' }}>avg {s.avg_momentum_score}</div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-
                             <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', alignItems: 'center' }}>
                                 {user?.role === 'admin' && (
                                     <button onClick={runOptimization} disabled={optLoading} style={{
@@ -2061,19 +2104,19 @@
                                         cursor: optLoading ? 'not-allowed' : 'pointer'
                                     }}>{optLoading ? 'Running...' : 'Run Optimization'}</button>
                                 )}
+                                <button onClick={fetchMomentum} style={styles.btn}>Refresh</button>
                                 <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                                    Top {momentumStateFilter ? momentumStateFilter : 'all'} cities by momentum (7d)
+                                    Top cities by momentum (7d vs 30d baseline)
                                 </span>
                             </div>
 
-                            {momentumCities.length > 0 ? (
+                            {loading.momentum && <LoadingPanel />}
+                            {errors.momentum && <ErrorPanel msg={errors.momentum} />}
+
+                            {!loading.momentum && !errors.momentum && momentumData && (momentumData.markets || []).length > 0 ? (
                                 <div style={{ display: 'grid', gap: '0.75rem' }}>
-                                    {momentumCities.map((m, i) => {
-                                        const labelColor = m.momentum_label === 'Accelerating'
-                                            ? { bg: 'rgba(239,68,68,0.15)', color: '#f87171', border: '#ef4444' }
-                                            : m.momentum_label === 'Stable'
-                                            ? { bg: 'rgba(245,158,11,0.15)', color: '#fcd34d', border: '#f59e0b' }
-                                            : { bg: 'rgba(59,130,246,0.15)', color: '#93c5fd', border: '#3b82f6' };
+                                    {momentumData.markets.map((m, i) => {
+                                        const lc = classColor(m.momentum_label);
                                         return (
                                             <div key={i} style={{
                                                 background: '#1e293b', border: '1px solid #334155', borderRadius: '12px',
@@ -2086,33 +2129,31 @@
                                                 <div>
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.3rem' }}>
                                                         <span style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1rem', fontWeight: 700, color: '#f1f5f9' }}>
-                                                            {m.city}, {m.state}
+                                                            {m.city || 'Unknown'}, {m.state || '??'}
                                                         </span>
                                                         <span style={{
-                                                            background: labelColor.bg, color: labelColor.color, border: `1px solid ${labelColor.border}`,
+                                                            background: lc.bg, color: lc.color, border: `1px solid ${lc.border}`,
                                                             borderRadius: '20px', padding: '0.15rem 0.6rem', fontSize: '0.65rem',
                                                             fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em'
                                                         }}>{m.momentum_label}</span>
                                                     </div>
                                                     <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.8rem', color: '#94a3b8' }}>
-                                                        <span>7d weighted: <strong style={{ color: '#34d399' }}>{m.weighted_signals_7d}</strong></span>
-                                                        <span>30d weighted: <strong style={{ color: '#94a3b8' }}>{m.weighted_signals_30d}</strong></span>
+                                                        <span>7d signals: <strong style={{ color: '#34d399' }}>{m.signals_window}</strong></span>
+                                                        <span>30d signals: <strong style={{ color: '#94a3b8' }}>{m.signals_baseline}</strong></span>
+                                                        <span>ratio: <strong style={{ color: lc.color }}>{(m.ratio || 0).toFixed(2)}</strong></span>
                                                     </div>
                                                 </div>
                                                 <div style={{
                                                     fontFamily: "'JetBrains Mono', monospace", fontSize: '1.4rem', fontWeight: 700,
-                                                    color: labelColor.color
+                                                    color: lc.color
                                                 }}>{Math.round(m.momentum_score)}</div>
                                             </div>
                                         );
                                     })}
                                 </div>
-                            ) : (
-                                <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
-                                    <p style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.1rem', marginBottom: '0.5rem' }}>No Momentum Data</p>
-                                    <p style={{ fontSize: '0.9rem' }}>Run the optimization pipeline to compute market momentum from weighted signals.</p>
-                                </div>
-                            )}
+                            ) : !loading.momentum && !errors.momentum ? (
+                                <EmptyPanel title="No Momentum Data" desc={momentumData?.message || 'No discovery signals found for momentum calculation.'} />
+                            ) : null}
                         </div>
                     )}
 
@@ -2120,77 +2161,83 @@
                     {subTab === 'trends' && (
                         <div>
                             <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                                <select value={trendFilter.state} onChange={e => setTrendFilter(f => ({...f, state: e.target.value}))} style={styles.select}>
-                                    <option value="">All States</option>
-                                    {states.map(s => <option key={s} value={s}>{s}</option>)}
-                                </select>
                                 <input
                                     type="text" placeholder="Filter by topic..."
                                     value={trendFilter.topic}
                                     onChange={e => setTrendFilter(f => ({...f, topic: e.target.value}))}
                                     style={{...styles.input, minWidth: '180px'}}
                                 />
-                                {user?.role === 'admin' && (
-                                    <button onClick={runTrends} disabled={loading} style={{
-                                        ...styles.btnPrimary, opacity: loading ? 0.6 : 1,
-                                        cursor: loading ? 'not-allowed' : 'pointer'
-                                    }}>{loading ? 'Running...' : 'Run Trend Detection'}</button>
-                                )}
-                                <span style={{ fontSize: '0.8rem', color: '#64748b' }}>{trends.length} signals</span>
+                                <button onClick={fetchTrends} style={styles.btn}>Refresh</button>
+                                <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                                    {(trendsData?.trends || []).length} trends found
+                                </span>
                             </div>
 
-                            {trends.length > 0 ? (
+                            {loading.trends && <LoadingPanel />}
+                            {errors.trends && <ErrorPanel msg={errors.trends} />}
+
+                            {!loading.trends && !errors.trends && (trendsData?.trends || []).length > 0 ? (
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '1rem' }}>
-                                    {trends.map((t, i) => {
+                                    {trendsData.trends.map((t, i) => {
                                         const cc = classColor(t.classification);
                                         return (
-                                            <div key={t.id || i} style={{
+                                            <div key={i} style={{
                                                 background: '#1e293b', border: '1px solid #334155',
                                                 borderRadius: '12px', padding: '1.25rem',
                                                 borderLeft: `3px solid ${cc.border}`
                                             }}>
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
-                                                    <div>
-                                                        <span style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '0.95rem', fontWeight: 700, color: '#f1f5f9' }}>
-                                                            {t.city}, {t.state}
-                                                        </span>
-                                                    </div>
+                                                    <span style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '0.95rem', fontWeight: 700, color: '#f1f5f9' }}>
+                                                        {t.city || 'Unknown'}, {t.state || '??'}
+                                                    </span>
                                                     <span style={{
                                                         background: cc.bg, color: cc.color, border: `1px solid ${cc.border}`,
                                                         borderRadius: '20px', padding: '0.2rem 0.7rem', fontSize: '0.7rem',
                                                         fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em'
                                                     }}>{t.classification}</span>
                                                 </div>
-                                                <div style={{ fontSize: '0.9rem', color: '#f1f5f9', marginBottom: '0.5rem', fontWeight: 500 }}>
-                                                    {t.topic}
+                                                <div style={{ fontSize: '0.9rem', color: '#f1f5f9', marginBottom: '0.5rem', fontWeight: 500 }}>{t.topic}</div>
+                                                <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.75rem' }}>
+                                                    <span>7d: <strong style={{ color: '#34d399' }}>{t.count_window}</strong></span>
+                                                    <span>30d: <strong style={{ color: '#94a3b8' }}>{t.count_baseline}</strong></span>
+                                                    <span>Ratio: <strong style={{ color: cc.color }}>{(t.trend_ratio || 0).toFixed(1)}x</strong></span>
                                                 </div>
-                                                <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.8rem', color: '#94a3b8' }}>
-                                                    <span>7d: <strong style={{ color: '#34d399' }}>{t.count_7d}</strong></span>
-                                                    <span>30d: <strong style={{ color: '#94a3b8' }}>{t.count_30d}</strong></span>
-                                                    <span>Ratio: <strong style={{ color: cc.color }}>{t.trend_ratio?.toFixed(1)}x</strong></span>
-                                                </div>
-                                                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.5rem' }}>
-                                                    {t.computed_at ? new Date(t.computed_at).toLocaleDateString() : ''}
-                                                </div>
+                                                {/* Examples */}
+                                                {t.examples && t.examples.length > 0 && (
+                                                    <div style={{ borderTop: '1px solid #334155', paddingTop: '0.5rem' }}>
+                                                        {t.examples.map((ex, j) => (
+                                                            <div key={j} style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.3rem', display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+                                                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                                    {ex.source_url ? <a href={ex.source_url} target="_blank" rel="noopener noreferrer" style={{ color: '#94a3b8' }}>{ex.title}</a> : ex.title}
+                                                                </span>
+                                                                <span style={{ color: '#475569', whiteSpace: 'nowrap', flexShrink: 0 }}>{ex.date ? new Date(ex.date).toLocaleDateString() : ''}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
                                             </div>
                                         );
                                     })}
                                 </div>
-                            ) : (
-                                <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
-                                    <p style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.1rem', marginBottom: '0.5rem' }}>No Trend Signals</p>
-                                    <p style={{ fontSize: '0.9rem' }}>Trend detection runs daily at 7:30 AM PT. Run it manually to populate signals.</p>
-                                </div>
-                            )}
+                            ) : !loading.trends && !errors.trends ? (
+                                <EmptyPanel title="No Trend Signals" desc={trendsData?.message || 'No discovery signals found matching your filters.'} />
+                            ) : null}
                         </div>
                     )}
 
                     {/* STATE RANKINGS TAB */}
                     {subTab === 'rankings' && (
                         <div>
-                            {rankings.length > 0 ? (
+                            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', alignItems: 'center' }}>
+                                <button onClick={fetchRankings} style={styles.btn}>Refresh</button>
+                            </div>
+
+                            {loading.rankings && <LoadingPanel />}
+                            {errors.rankings && <ErrorPanel msg={errors.rankings} />}
+
+                            {!loading.rankings && !errors.rankings && (rankingsData?.rankings || []).length > 0 ? (
                                 <div style={{ display: 'grid', gap: '1rem' }}>
-                                    {rankings.map((r, i) => (
+                                    {rankingsData.rankings.map((r, i) => (
                                         <div key={r.state} style={{
                                             background: '#1e293b', border: '1px solid #334155',
                                             borderRadius: '12px', padding: '1.5rem',
@@ -2203,21 +2250,27 @@
                                             }}>#{i + 1}</div>
                                             <div>
                                                 <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.2rem', fontWeight: 700, color: '#f1f5f9', marginBottom: '0.5rem' }}>
-                                                    {r.state}
+                                                    {r.state_name || r.state}
                                                 </div>
                                                 <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap', fontSize: '0.85rem', color: '#94a3b8' }}>
-                                                    <span>Signals: <strong style={{ color: '#34d399' }}>{r.signal_count ?? r.total_signals ?? 0}</strong></span>
-                                                    <span>Capital Events: <strong style={{ color: '#a78bfa' }}>{r.capital_events ?? 0}</strong></span>
-                                                    <span>Construction: <strong style={{ color: '#67e8f9' }}>{r.construction_signals ?? 0}</strong></span>
-                                                    <span>Trend Strength: <strong style={{ color: '#fcd34d' }}>{(r.trend_strength ?? 0).toFixed(1)}</strong></span>
+                                                    <span>Signals: <strong style={{ color: '#34d399' }}>{r.total_signals || 0}</strong></span>
+                                                    <span>Capital: <strong style={{ color: '#a78bfa' }}>{r.capital_events || 0}</strong></span>
+                                                    <span>Construction: <strong style={{ color: '#67e8f9' }}>{r.construction_signals || 0}</strong></span>
                                                 </div>
                                                 {r.top_cities && r.top_cities.length > 0 && (
                                                     <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
-                                                        {r.top_cities.map(c => (
-                                                            <span key={c} style={{
+                                                        {r.top_cities.map((c, j) => (
+                                                            <span key={j} style={{
                                                                 background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)',
                                                                 borderRadius: '20px', padding: '0.2rem 0.6rem', fontSize: '0.75rem', color: '#34d399'
-                                                            }}>{c}</span>
+                                                            }}>{c.city} ({c.weighted_score})</span>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                                {r.top_topics && r.top_topics.length > 0 && (
+                                                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.4rem', flexWrap: 'wrap' }}>
+                                                        {r.top_topics.slice(0, 5).map((t, j) => (
+                                                            <span key={j} style={{ fontSize: '0.7rem', color: '#64748b' }}>{t.topic}: {t.count}</span>
                                                         ))}
                                                     </div>
                                                 )}
@@ -2225,16 +2278,13 @@
                                             <div style={{
                                                 fontFamily: "'JetBrains Mono', monospace", fontSize: '1.6rem', fontWeight: 700,
                                                 color: '#34d399', textAlign: 'right'
-                                            }}>{(r.composite_score ?? r.total_signals ?? 0).toFixed ? (r.composite_score ?? 0).toFixed(0) : r.total_signals ?? 0}</div>
+                                            }}>{r.weighted_signals || 0}</div>
                                         </div>
                                     ))}
                                 </div>
-                            ) : (
-                                <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
-                                    <p style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.1rem', marginBottom: '0.5rem' }}>No Rankings Data</p>
-                                    <p style={{ fontSize: '0.9rem' }}>Run statewide discovery first to populate state rankings.</p>
-                                </div>
-                            )}
+                            ) : !loading.rankings && !errors.rankings ? (
+                                <EmptyPanel title="No Rankings Data" desc={rankingsData?.message || 'No discovery signals found for ranking.'} />
+                            ) : null}
                         </div>
                     )}
                 </div>
