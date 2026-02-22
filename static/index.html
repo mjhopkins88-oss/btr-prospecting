@@ -669,6 +669,7 @@
                     {activeTab === 'statewide' && <StatewideDiscovery />}
                     {activeTab === 'intelligence' && <SunbeltIntelligence user={user} />}
                     {activeTab === 'admin' && user && user.is_super_admin && <AdminPage user={user} />}
+                    {activeTab === 'quoting' && <QuotingPage user={user} />}
                     {showEmailModal && (
                         <EmailModal
                             email={emailTemplate}
@@ -716,6 +717,7 @@
                 { id: 'intelligence', label: 'Sunbelt Intelligence' },
                 { id: 'pipeline', label: 'My Pipeline' },
                 { id: 'followups', label: 'Follow-ups Due' },
+                { id: 'quoting', label: 'Quoting' },
             ];
             if (user && user.is_super_admin) {
                 tabs.push({ id: 'admin', label: 'Admin' });
@@ -2336,6 +2338,407 @@
                         marginBottom: '0.75rem', paddingBottom: '0.5rem', borderBottom: `1px solid ${color}33`
                     }}>{title}</h3>
                     {children}
+                </div>
+            );
+        }
+
+        // ======= QUOTING PAGE =======
+        function QuotingPage({ user }) {
+            const US_STATES = ['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
+
+            const [form, setForm] = useState({
+                sqft: '', loss_rents: '', city: '', state: 'TX',
+                rc_per_sf: '120', aop_buydown: false, street: '', zip: ''
+            });
+            const [result, setResult] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+            const [candidates, setCandidates] = useState([]);
+            const [needsCounty, setNeedsCounty] = useState(false);
+            const [countyOverride, setCountyOverride] = useState('');
+            const [history, setHistory] = useState([]);
+            const [showHistory, setShowHistory] = useState(false);
+            // Admin: rate groups & county mapping editors
+            const isSuperAdmin = user && user.is_super_admin;
+            const [adminTab, setAdminTab] = useState(null); // 'rates' | 'counties' | null
+            const [rateGroups, setRateGroups] = useState([]);
+            const [countyMappings, setCountyMappings] = useState([]);
+            const [countyMapState, setCountyMapState] = useState('TX');
+            const [newMapping, setNewMapping] = useState({ state: 'TX', county_name: '', group_name: '' });
+
+            const fetchHistory = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/quotes/history`);
+                    const data = await res.json();
+                    if (data.success) setHistory(data.quotes || []);
+                } catch (e) { console.error(e); }
+            };
+
+            const fetchRateGroups = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/admin/rate-groups`);
+                    const data = await res.json();
+                    if (data.success) setRateGroups(data.groups || []);
+                } catch (e) { console.error(e); }
+            };
+
+            const fetchCountyMappings = async (st) => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/admin/county-mapping?state=${st || countyMapState}`);
+                    const data = await res.json();
+                    if (data.success) setCountyMappings(data.mappings || []);
+                } catch (e) { console.error(e); }
+            };
+
+            const submitQuote = async (override) => {
+                setLoading(true);
+                setError('');
+                setResult(null);
+                setNeedsCounty(false);
+                setCandidates([]);
+                try {
+                    const body = {
+                        sqft: parseInt(form.sqft),
+                        loss_rents: parseFloat(form.loss_rents),
+                        city: form.city,
+                        state: form.state,
+                        rc_per_sf: parseFloat(form.rc_per_sf || '120'),
+                        aop_buydown: form.aop_buydown,
+                    };
+                    if (form.street) body.street = form.street;
+                    if (form.zip) body.zip = form.zip;
+                    if (override) body.county_override = override;
+
+                    const res = await fetch(`${API_BASE}/api/quotes/property`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
+                    });
+                    const data = await res.json();
+
+                    if (data.needs_county) {
+                        setNeedsCounty(true);
+                        setCandidates(data.candidates || []);
+                        setError(data.message || 'Could not determine county.');
+                    } else if (data.needs_county_selection) {
+                        setNeedsCounty(true);
+                        setCandidates(data.candidates || []);
+                        setCountyOverride(data.county || '');
+                        setError(data.message || 'Please confirm county.');
+                    } else if (data.success) {
+                        setResult(data);
+                        fetchHistory();
+                    } else {
+                        setError(data.message || 'Quote failed');
+                    }
+                } catch (e) { setError('Network error'); }
+                setLoading(false);
+            };
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if (!form.sqft || !form.loss_rents || !form.city || !form.state) {
+                    setError('All required fields must be filled');
+                    return;
+                }
+                submitQuote(null);
+            };
+
+            const handleCountySelect = () => {
+                if (countyOverride) submitQuote(countyOverride);
+            };
+
+            const fmt = (n) => {
+                if (n == null) return '-';
+                return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            };
+
+            const addCountyMapping = async () => {
+                if (!newMapping.state || !newMapping.county_name || !newMapping.group_name) return;
+                try {
+                    await fetch(`${API_BASE}/api/admin/county-mapping`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(newMapping)
+                    });
+                    fetchCountyMappings(newMapping.state);
+                    setNewMapping({ ...newMapping, county_name: '' });
+                } catch (e) { console.error(e); }
+            };
+
+            const deleteMapping = async (id) => {
+                try {
+                    await fetch(`${API_BASE}/api/admin/county-mapping/${id}`, { method: 'DELETE' });
+                    fetchCountyMappings();
+                } catch (e) { console.error(e); }
+            };
+
+            const groupNames = rateGroups.filter(g => g.name !== 'AOP Buydown').map(g => g.name);
+
+            return (
+                <div>
+                    <h2 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.5rem', fontWeight: 700, color: '#34d399', marginBottom: '1.5rem' }}>
+                        Property Quote Calculator
+                    </h2>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+                        {/* LEFT: Form */}
+                        <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '1.5rem' }}>
+                            <form onSubmit={handleSubmit}>
+                                <div style={{ display: 'grid', gap: '1rem' }}>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: '0.4rem' }}>Total Square Feet *</label>
+                                        <input style={{ ...styles.input, width: '100%', boxSizing: 'border-box' }} type="number" required min="1" placeholder="e.g. 250000"
+                                            value={form.sqft} onChange={e => setForm({ ...form, sqft: e.target.value })} />
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: '0.4rem' }}>Loss of Rents ($) *</label>
+                                        <input style={{ ...styles.input, width: '100%', boxSizing: 'border-box' }} type="number" required min="0" step="0.01" placeholder="e.g. 500000"
+                                            value={form.loss_rents} onChange={e => setForm({ ...form, loss_rents: e.target.value })} />
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '0.75rem' }}>
+                                        <div>
+                                            <label style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: '0.4rem' }}>City *</label>
+                                            <input style={{ ...styles.input, width: '100%', boxSizing: 'border-box' }} required placeholder="e.g. Dallas"
+                                                value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} />
+                                        </div>
+                                        <div>
+                                            <label style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: '0.4rem' }}>State *</label>
+                                            <select style={{ ...styles.select, width: '100%', boxSizing: 'border-box' }} value={form.state}
+                                                onChange={e => setForm({ ...form, state: e.target.value })}>
+                                                {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: '0.4rem' }}>Replacement Cost / SF</label>
+                                        <input style={{ ...styles.input, width: '100%', boxSizing: 'border-box' }} type="number" min="1" step="0.01"
+                                            value={form.rc_per_sf} onChange={e => setForm({ ...form, rc_per_sf: e.target.value })} />
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                        <label style={{ fontSize: '0.85rem', color: '#f1f5f9', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                            <input type="checkbox" checked={form.aop_buydown}
+                                                onChange={e => setForm({ ...form, aop_buydown: e.target.checked })}
+                                                style={{ width: '18px', height: '18px', accentColor: '#34d399' }} />
+                                            AOP Buydown (+0.0345 to rate)
+                                        </label>
+                                    </div>
+                                    <div style={{ borderTop: '1px solid #334155', paddingTop: '1rem', marginTop: '0.25rem' }}>
+                                        <label style={{ display: 'block', fontSize: '0.7rem', color: '#475569', textTransform: 'uppercase', fontWeight: 600, marginBottom: '0.75rem' }}>Optional: Improve county accuracy</label>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '0.75rem' }}>
+                                            <input style={{ ...styles.input, width: '100%', boxSizing: 'border-box' }} placeholder="Street address"
+                                                value={form.street} onChange={e => setForm({ ...form, street: e.target.value })} />
+                                            <input style={{ ...styles.input, width: '100%', boxSizing: 'border-box' }} placeholder="ZIP"
+                                                value={form.zip} onChange={e => setForm({ ...form, zip: e.target.value })} />
+                                        </div>
+                                    </div>
+                                    <button type="submit" style={{ ...styles.btnPrimary, width: '100%', padding: '0.85rem', fontSize: '1rem' }}
+                                        disabled={loading}>
+                                        {loading ? 'Calculating...' : 'Get Quote'}
+                                    </button>
+                                </div>
+                            </form>
+
+                            {/* County disambiguation */}
+                            {needsCounty && (
+                                <div style={{ marginTop: '1rem', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: '8px', padding: '1rem' }}>
+                                    <div style={{ color: '#fbbf24', fontSize: '0.9rem', fontWeight: 600, marginBottom: '0.5rem' }}>
+                                        {candidates.length > 0 ? 'Select County' : 'County Required'}
+                                    </div>
+                                    {candidates.length > 0 ? (
+                                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+                                            {candidates.map(c => (
+                                                <button key={c} style={{
+                                                    ...styles.btn, fontSize: '0.85rem',
+                                                    ...(countyOverride === c ? { borderColor: '#34d399', color: '#34d399' } : {})
+                                                }} onClick={() => setCountyOverride(c)}>{c}</button>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <input style={{ ...styles.input, width: '100%', boxSizing: 'border-box', marginBottom: '0.75rem' }}
+                                            placeholder="Type county name"
+                                            value={countyOverride} onChange={e => setCountyOverride(e.target.value)} />
+                                    )}
+                                    <button style={styles.btnPrimary} onClick={handleCountySelect}
+                                        disabled={!countyOverride}>Use This County</button>
+                                </div>
+                            )}
+
+                            {error && !needsCounty && (
+                                <div style={{ marginTop: '1rem', color: '#ef4444', fontSize: '0.9rem' }}>{error}</div>
+                            )}
+                        </div>
+
+                        {/* RIGHT: Results */}
+                        <div>
+                            {result ? (
+                                <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '1.5rem' }}>
+                                    <h3 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.1rem', color: '#34d399', marginTop: 0, marginBottom: '1.25rem' }}>
+                                        Quote Breakdown
+                                    </h3>
+                                    {result.warnings && result.warnings.length > 0 && (
+                                        <div style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: '8px', padding: '0.75rem', marginBottom: '1rem' }}>
+                                            {result.warnings.map((w, i) => <div key={i} style={{ color: '#fbbf24', fontSize: '0.85rem' }}>{w}</div>)}
+                                        </div>
+                                    )}
+                                    <div style={{ display: 'grid', gap: '0.6rem' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid #0f172a' }}>
+                                            <span style={{ color: '#94a3b8', fontSize: '0.9rem' }}>County</span>
+                                            <span style={{ color: '#f1f5f9', fontSize: '0.9rem', fontWeight: 600 }}>{result.county}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid #0f172a' }}>
+                                            <span style={{ color: '#94a3b8', fontSize: '0.9rem' }}>Grouping</span>
+                                            <span style={{ color: '#22d3ee', fontSize: '0.9rem', fontWeight: 600 }}>{result.grouping}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid #0f172a' }}>
+                                            <span style={{ color: '#94a3b8', fontSize: '0.9rem' }}>Rate x100</span>
+                                            <span style={{ color: '#f1f5f9', fontSize: '0.9rem', fontFamily: "'JetBrains Mono', monospace" }}>
+                                                {result.group_rate_x100}{result.aop_buydown ? ` + 0.0345 AOP` : ''} = {result.effective_rate_x100}
+                                            </span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid #0f172a' }}>
+                                            <span style={{ color: '#94a3b8', fontSize: '0.9rem' }}>Replacement Cost</span>
+                                            <span style={{ color: '#f1f5f9', fontSize: '0.9rem', fontFamily: "'JetBrains Mono', monospace" }}>{fmt(result.replacement_cost)}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid #0f172a' }}>
+                                            <span style={{ color: '#94a3b8', fontSize: '0.9rem' }}>Total TIV</span>
+                                            <span style={{ color: '#f1f5f9', fontSize: '0.9rem', fontFamily: "'JetBrains Mono', monospace" }}>{fmt(result.total_tiv)}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid #334155' }}>
+                                            <span style={{ color: '#94a3b8', fontSize: '0.9rem' }}>Base Premium</span>
+                                            <span style={{ color: '#f1f5f9', fontSize: '0.9rem', fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>{fmt(result.base_premium)}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid #334155' }}>
+                                            <span style={{ color: '#94a3b8', fontSize: '0.9rem' }}>Taxes (6%)</span>
+                                            <span style={{ color: '#f1f5f9', fontSize: '0.9rem', fontFamily: "'JetBrains Mono', monospace" }}>{fmt(result.taxes)}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem 0', background: 'rgba(16,185,129,0.08)', borderRadius: '8px', paddingLeft: '0.75rem', paddingRight: '0.75rem', marginTop: '0.25rem' }}>
+                                            <span style={{ color: '#34d399', fontSize: '1.05rem', fontWeight: 700 }}>Total Premium</span>
+                                            <span style={{ color: '#34d399', fontSize: '1.2rem', fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{fmt(result.total_premium)}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '3rem', textAlign: 'center' }}>
+                                    <div style={{ color: '#475569', fontSize: '0.95rem' }}>Fill in the form and click "Get Quote" to see the premium breakdown.</div>
+                                </div>
+                            )}
+
+                            {/* Recent Quotes toggle */}
+                            <div style={{ marginTop: '1rem' }}>
+                                <button style={{ ...styles.btn, fontSize: '0.85rem' }} onClick={() => { setShowHistory(!showHistory); if (!showHistory) fetchHistory(); }}>
+                                    {showHistory ? 'Hide' : 'Show'} Recent Quotes
+                                </button>
+                                {showHistory && history.length > 0 && (
+                                    <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                        {history.map(q => (
+                                            <div key={q.id} style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', padding: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                                <div>
+                                                    <span style={{ color: '#f1f5f9', fontSize: '0.85rem', fontWeight: 600 }}>{q.city}, {q.state}</span>
+                                                    <span style={{ color: '#64748b', fontSize: '0.8rem', marginLeft: '0.75rem' }}>{q.sqft.toLocaleString()} SF</span>
+                                                    <span style={{ color: '#64748b', fontSize: '0.8rem', marginLeft: '0.5rem' }}>{q.grouping}</span>
+                                                </div>
+                                                <span style={{ color: '#34d399', fontFamily: "'JetBrains Mono', monospace", fontSize: '0.9rem', fontWeight: 600 }}>{fmt(q.total_premium)}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Admin: Rate Groups & County Mapping editors */}
+                    {isSuperAdmin && (
+                        <div style={{ marginTop: '2rem', borderTop: '2px solid #334155', paddingTop: '1.5rem' }}>
+                            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
+                                <button style={{ ...styles.btn, ...(adminTab === 'rates' ? { borderColor: '#34d399', color: '#34d399' } : {}) }}
+                                    onClick={() => { setAdminTab(adminTab === 'rates' ? null : 'rates'); fetchRateGroups(); }}>
+                                    Rate Groups
+                                </button>
+                                <button style={{ ...styles.btn, ...(adminTab === 'counties' ? { borderColor: '#34d399', color: '#34d399' } : {}) }}
+                                    onClick={() => { setAdminTab(adminTab === 'counties' ? null : 'counties'); fetchCountyMappings(); }}>
+                                    County Mappings
+                                </button>
+                            </div>
+
+                            {adminTab === 'rates' && (
+                                <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', overflow: 'hidden' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                                        <thead>
+                                            <tr>
+                                                <th style={{ textAlign: 'left', padding: '0.6rem 1rem', borderBottom: '2px solid #334155', color: '#64748b', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>Group Name</th>
+                                                <th style={{ textAlign: 'right', padding: '0.6rem 1rem', borderBottom: '2px solid #334155', color: '#64748b', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>Rate</th>
+                                                <th style={{ textAlign: 'right', padding: '0.6rem 1rem', borderBottom: '2px solid #334155', color: '#64748b', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>Rate x100</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {rateGroups.map(g => (
+                                                <tr key={g.id}>
+                                                    <td style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #0f172a', color: '#f1f5f9' }}>{g.name}</td>
+                                                    <td style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #0f172a', color: '#94a3b8', textAlign: 'right', fontFamily: "'JetBrains Mono', monospace" }}>{g.rate}</td>
+                                                    <td style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #0f172a', color: '#34d399', textAlign: 'right', fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>{g.rate_x100}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+
+                            {adminTab === 'counties' && (
+                                <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '1.25rem' }}>
+                                    <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                                        <div>
+                                            <label style={{ display: 'block', fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: '0.3rem' }}>State</label>
+                                            <select style={styles.select} value={countyMapState}
+                                                onChange={e => { setCountyMapState(e.target.value); fetchCountyMappings(e.target.value); }}>
+                                                {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                                            </select>
+                                        </div>
+                                        <div style={{ flex: 1 }}>
+                                            <label style={{ display: 'block', fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: '0.3rem' }}>County Name</label>
+                                            <input style={{ ...styles.input, width: '100%', boxSizing: 'border-box' }} placeholder="e.g. Harris"
+                                                value={newMapping.county_name}
+                                                onChange={e => setNewMapping({ ...newMapping, state: countyMapState, county_name: e.target.value })} />
+                                        </div>
+                                        <div>
+                                            <label style={{ display: 'block', fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: '0.3rem' }}>Group</label>
+                                            <select style={styles.select} value={newMapping.group_name}
+                                                onChange={e => setNewMapping({ ...newMapping, group_name: e.target.value })}>
+                                                <option value="">Select group...</option>
+                                                {groupNames.map(n => <option key={n} value={n}>{n}</option>)}
+                                            </select>
+                                        </div>
+                                        <button style={styles.btnPrimary} onClick={addCountyMapping}>Add</button>
+                                    </div>
+                                    {countyMappings.length > 0 ? (
+                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                                            <thead>
+                                                <tr>
+                                                    <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', borderBottom: '1px solid #334155', color: '#64748b', fontSize: '0.7rem', textTransform: 'uppercase' }}>County</th>
+                                                    <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', borderBottom: '1px solid #334155', color: '#64748b', fontSize: '0.7rem', textTransform: 'uppercase' }}>Group</th>
+                                                    <th style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid #334155', width: '60px' }}></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {countyMappings.map(m => (
+                                                    <tr key={m.id}>
+                                                        <td style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid #0f172a', color: '#f1f5f9' }}>{m.county_name}</td>
+                                                        <td style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid #0f172a', color: '#22d3ee' }}>{m.group_name}</td>
+                                                        <td style={{ padding: '0.5rem 0.75rem', borderBottom: '1px solid #0f172a' }}>
+                                                            <button style={{ ...styles.btn, fontSize: '0.75rem', padding: '0.2rem 0.5rem', color: '#ef4444', borderColor: '#ef4444' }}
+                                                                onClick={() => deleteMapping(m.id)}>X</button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    ) : (
+                                        <div style={{ color: '#475569', fontSize: '0.85rem', fontStyle: 'italic' }}>No county mappings for {countyMapState}. Fallback grouping will be used.</div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             );
         }

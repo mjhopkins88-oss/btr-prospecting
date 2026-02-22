@@ -396,6 +396,82 @@ def init_db():
     ''')
     c.execute('CREATE INDEX IF NOT EXISTS idx_lead_timing_key ON lead_timing_scores(workspace_id, prospect_key)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_lead_timing_score ON lead_timing_scores(call_timing_score DESC)')
+
+    # ---- Quoting tables ----
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS rate_groups (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            rate REAL NOT NULL,
+            rate_x100 REAL NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS county_group_map (
+            id TEXT PRIMARY KEY,
+            state TEXT NOT NULL,
+            county_name TEXT NOT NULL,
+            group_name TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(state, county_name)
+        )
+    ''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_county_map_lookup ON county_group_map(state, county_name)')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS quote_requests (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT,
+            created_by_user_id TEXT,
+            sqft INTEGER NOT NULL,
+            rc_per_sf REAL NOT NULL,
+            loss_rents REAL NOT NULL,
+            city TEXT,
+            state TEXT,
+            county TEXT,
+            grouping_name TEXT,
+            rate_x100 REAL,
+            aop_buydown BOOLEAN DEFAULT 0,
+            replacement_cost REAL,
+            total_tiv REAL,
+            base_premium REAL,
+            taxes REAL,
+            total_premium REAL,
+            warnings TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS county_cache (
+            id TEXT PRIMARY KEY,
+            cache_key TEXT NOT NULL UNIQUE,
+            county TEXT,
+            candidates TEXT,
+            confidence TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Seed rate_groups if empty
+    c.execute('SELECT COUNT(*) FROM rate_groups')
+    if c.fetchone()[0] == 0:
+        _seed_rates = [
+            ('AOP Buydown',                          0.000345, 0.0345),
+            ('All Other Locations',                   0.001739, 0.1739),
+            ('All Other Tier 1',                      0.003659, 0.3659),
+            ('Florida Group 1',                       0.007592, 0.7592),
+            ('Florida Group 2',                       0.005827, 0.5827),
+            ('Florida Group 3',                       0.005141, 0.5141),
+            ('Florida Group 4',                       0.004841, 0.4841),
+            ('Tier 1 Louisiana',                      0.004113, 0.4113),
+            ('Tier 1 Atlantic (GA, SC, NC, VA)',      0.003108, 0.3108),
+            ('Texas North',                           0.003337, 0.3337),
+            ('Texas - Southern Non-Coastal',          0.002096, 0.2096),
+        ]
+        for name, rate, rate_x100 in _seed_rates:
+            c.execute('INSERT INTO rate_groups (id, name, rate, rate_x100) VALUES (?, ?, ?, ?)',
+                      (str(uuid.uuid4()), name, rate, rate_x100))
+
     conn.commit()
     conn.close()
 
@@ -897,6 +973,448 @@ def api_admin_reset_password(user_id):
     _log_admin_event(conn, g.workspace_id, g.user['id'], 'reset_password', user_id)
     conn.commit()
     conn.close()
+    return jsonify({'success': True})
+
+
+# ===================================================================
+# QUOTING: County Lookup, Grouping, Calculation, and API
+# ===================================================================
+
+QUOTE_TAX_RATE = 0.06
+AOP_BUYDOWN_RATE_X100 = 0.0345
+_COUNTY_CACHE_DAYS = 30
+
+# State fallback mapping for grouping resolution
+_STATE_FALLBACK_GROUPS = {
+    'GA': 'Tier 1 Atlantic (GA, SC, NC, VA)',
+    'SC': 'Tier 1 Atlantic (GA, SC, NC, VA)',
+    'NC': 'Tier 1 Atlantic (GA, SC, NC, VA)',
+    'VA': 'Tier 1 Atlantic (GA, SC, NC, VA)',
+    'LA': 'Tier 1 Louisiana',
+}
+
+
+def _normalize_county(name):
+    """Normalize county name: strip ' County', titlecase."""
+    if not name:
+        return name
+    n = name.strip()
+    for suffix in (' County', ' Parish', ' Borough', ' Census Area', ' Municipality'):
+        if n.lower().endswith(suffix.lower()):
+            n = n[:len(n) - len(suffix)]
+    return n.strip().title()
+
+
+def resolve_county(city, state, street=None, zip_code=None):
+    """Resolve county from city/state via Nominatim + FCC Area API. Returns dict with county, confidence, candidates."""
+    import requests as req
+
+    # Build cache key
+    parts = [
+        (street or '').strip().lower(),
+        city.strip().lower(),
+        state.strip().upper(),
+        (zip_code or '').strip(),
+    ]
+    cache_key = '|'.join(parts)
+
+    # Check cache
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    cutoff = (datetime.utcnow() - timedelta(days=_COUNTY_CACHE_DAYS)).isoformat()
+    c.execute('SELECT county, candidates, confidence FROM county_cache WHERE cache_key = ? AND created_at > ?',
+              (cache_key, cutoff))
+    cached = c.fetchone()
+    if cached:
+        conn.close()
+        candidates = json.loads(cached[1]) if cached[1] else []
+        return {'county': cached[0], 'confidence': cached[2], 'candidates': candidates}
+
+    # Build geocode query
+    query_parts = []
+    if street:
+        query_parts.append(street.strip())
+    query_parts.append(city.strip())
+    query_parts.append(state.strip())
+    if zip_code:
+        query_parts.append(zip_code.strip())
+    query_parts.append('USA')
+    query = ', '.join(query_parts)
+
+    county = None
+    confidence = 'low'
+    candidates = []
+
+    try:
+        # Step 1: Geocode with Nominatim
+        geo_resp = req.get('https://nominatim.openstreetmap.org/search', params={
+            'q': query, 'format': 'json', 'limit': 3, 'addressdetails': 1, 'countrycodes': 'us'
+        }, headers={'User-Agent': 'BTR-Prospecting/1.0'}, timeout=8)
+
+        if geo_resp.status_code == 200:
+            results = geo_resp.json()
+            if results:
+                # Try to get county directly from address details first
+                for r in results:
+                    addr = r.get('address', {})
+                    c_name = addr.get('county', '')
+                    if c_name:
+                        norm = _normalize_county(c_name)
+                        if norm and norm not in candidates:
+                            candidates.append(norm)
+
+                # Also try FCC API with lat/lon from first result
+                lat, lon = results[0].get('lat'), results[0].get('lon')
+                if lat and lon:
+                    try:
+                        fcc_resp = req.get('https://geo.fcc.gov/api/census/area', params={
+                            'lat': lat, 'lon': lon, 'format': 'json'
+                        }, timeout=8)
+                        if fcc_resp.status_code == 200:
+                            fcc_data = fcc_resp.json()
+                            fcc_results = fcc_data.get('results', [])
+                            if fcc_results:
+                                fcc_county = fcc_results[0].get('county_name', '')
+                                if fcc_county:
+                                    norm_fcc = _normalize_county(fcc_county)
+                                    if norm_fcc and norm_fcc not in candidates:
+                                        candidates.insert(0, norm_fcc)
+                    except Exception:
+                        pass
+
+        # Determine best county and confidence
+        if candidates:
+            county = candidates[0]
+            if len(candidates) == 1:
+                confidence = 'high' if street else 'medium'
+            else:
+                # Multiple candidates — check if they agree
+                if all(c == candidates[0] for c in candidates):
+                    confidence = 'high'
+                else:
+                    confidence = 'low'
+    except Exception as e:
+        app.logger.warning(f'County lookup failed: {e}')
+
+    # Cache result
+    try:
+        c2 = conn.cursor()
+        c2.execute('INSERT OR REPLACE INTO county_cache (id, cache_key, county, candidates, confidence) VALUES (?, ?, ?, ?, ?)',
+                   (str(uuid.uuid4()), cache_key, county, json.dumps(candidates), confidence))
+        conn.commit()
+    except Exception:
+        pass
+    conn.close()
+
+    return {'county': county, 'confidence': confidence, 'candidates': candidates}
+
+
+def resolve_grouping(state, county):
+    """Map state+county to a rate group name. Returns (group_name, is_fallback)."""
+    st = (state or '').strip().upper()
+    cn = _normalize_county(county) if county else None
+
+    if cn:
+        conn = sqlite3.connect('prospects.db')
+        c = conn.cursor()
+        c.execute('SELECT group_name FROM county_group_map WHERE state = ? AND county_name = ?', (st, cn))
+        row = c.fetchone()
+        conn.close()
+        if row:
+            return row[0], False
+
+    # Fallback
+    fallback = _STATE_FALLBACK_GROUPS.get(st, 'All Other Locations')
+    return fallback, True
+
+
+def calculate_quote(sqft, rc_per_sf, loss_rents, group_rate_x100, aop_buydown):
+    """Pure function: compute quote breakdown. Returns dict."""
+    replacement_cost = sqft * rc_per_sf
+    total_tiv = replacement_cost + loss_rents
+    effective_rate_x100 = group_rate_x100 + (AOP_BUYDOWN_RATE_X100 if aop_buydown else 0)
+    base_premium = total_tiv * (effective_rate_x100 / 100)
+    taxes = base_premium * QUOTE_TAX_RATE
+    total_premium = base_premium + taxes
+    return {
+        'replacement_cost': round(replacement_cost, 2),
+        'total_tiv': round(total_tiv, 2),
+        'effective_rate_x100': round(effective_rate_x100, 4),
+        'base_premium': round(base_premium, 2),
+        'taxes': round(taxes, 2),
+        'total_premium': round(total_premium, 2),
+    }
+
+
+@app.route('/api/quotes/rates', methods=['GET'])
+@require_auth
+def api_quotes_rates():
+    """Return all rate groups."""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT id, name, rate, rate_x100 FROM rate_groups ORDER BY name')
+    groups = [{'id': r[0], 'name': r[1], 'rate': r[2], 'rate_x100': r[3]} for r in c.fetchall()]
+    conn.close()
+    return jsonify({'success': True, 'groups': groups})
+
+
+@app.route('/api/quotes/property', methods=['POST'])
+@require_auth
+def api_quotes_property():
+    """Generate a property insurance quote."""
+    data = request.json or {}
+    sqft = data.get('sqft')
+    loss_rents = data.get('loss_rents')
+    city = (data.get('city') or '').strip()
+    state = (data.get('state') or '').strip().upper()
+
+    if not sqft or not loss_rents or not city or not state:
+        return jsonify({'success': False, 'message': 'sqft, loss_rents, city, and state are required'}), 400
+    try:
+        sqft = int(sqft)
+        loss_rents = float(loss_rents)
+    except (ValueError, TypeError):
+        return jsonify({'success': False, 'message': 'sqft must be integer, loss_rents must be numeric'}), 400
+
+    rc_per_sf = float(data.get('rc_per_sf', 120))
+    aop_buydown = bool(data.get('aop_buydown', False))
+    street = data.get('street')
+    zip_code = data.get('zip')
+    county_override = data.get('county_override')
+
+    warnings = []
+
+    # Resolve county
+    if county_override:
+        county = _normalize_county(county_override)
+        confidence = 'override'
+        candidates = []
+    else:
+        result = resolve_county(city, state, street, zip_code)
+        county = result['county']
+        confidence = result['confidence']
+        candidates = result['candidates']
+        if not county:
+            return jsonify({
+                'success': False,
+                'message': 'Could not determine county. Please provide a street address or select a county.',
+                'candidates': candidates,
+                'needs_county': True,
+            }), 200
+        if confidence == 'low' and len(candidates) > 1:
+            return jsonify({
+                'success': True,
+                'needs_county_selection': True,
+                'county': county,
+                'candidates': candidates,
+                'message': 'Multiple counties possible. Please confirm or select the correct county.',
+            }), 200
+
+    # Resolve grouping
+    group_name, is_fallback = resolve_grouping(state, county)
+    if is_fallback:
+        warnings.append(f'No county mapping found for {county}, {state}. Using fallback: {group_name}')
+
+    # Look up rate
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT rate_x100 FROM rate_groups WHERE name = ?', (group_name,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'success': False, 'message': f'Rate group "{group_name}" not found in database'}), 500
+    group_rate_x100 = row[0]
+
+    # Calculate
+    quote = calculate_quote(sqft, rc_per_sf, loss_rents, group_rate_x100, aop_buydown)
+
+    # Store
+    quote_id = str(uuid.uuid4())
+    ws = g.workspace_id if g.user else None
+    uid = g.user['id'] if g.user else None
+    c.execute('''INSERT INTO quote_requests
+                 (id, workspace_id, created_by_user_id, sqft, rc_per_sf, loss_rents, city, state, county,
+                  grouping_name, rate_x100, aop_buydown, replacement_cost, total_tiv, base_premium, taxes, total_premium, warnings)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+              (quote_id, ws, uid, sqft, rc_per_sf, loss_rents, city, state, county,
+               group_name, quote['effective_rate_x100'], 1 if aop_buydown else 0,
+               quote['replacement_cost'], quote['total_tiv'], quote['base_premium'],
+               quote['taxes'], quote['total_premium'], json.dumps(warnings)))
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'quote_id': quote_id,
+        'county': county,
+        'county_confidence': confidence,
+        'grouping': group_name,
+        'group_rate_x100': group_rate_x100,
+        **quote,
+        'aop_buydown': aop_buydown,
+        'warnings': warnings,
+    })
+
+
+@app.route('/api/quotes/history', methods=['GET'])
+@require_auth
+def api_quotes_history():
+    """Return recent quotes for the current user."""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    uid = g.user['id'] if g.user else None
+    c.execute('''SELECT id, sqft, rc_per_sf, loss_rents, city, state, county, grouping_name,
+                        rate_x100, aop_buydown, replacement_cost, total_tiv, base_premium, taxes,
+                        total_premium, warnings, created_at
+                 FROM quote_requests WHERE created_by_user_id = ? ORDER BY created_at DESC LIMIT 20''', (uid,))
+    quotes = []
+    for r in c.fetchall():
+        quotes.append({
+            'id': r[0], 'sqft': r[1], 'rc_per_sf': r[2], 'loss_rents': r[3],
+            'city': r[4], 'state': r[5], 'county': r[6], 'grouping': r[7],
+            'rate_x100': r[8], 'aop_buydown': bool(r[9]),
+            'replacement_cost': r[10], 'total_tiv': r[11],
+            'base_premium': r[12], 'taxes': r[13], 'total_premium': r[14],
+            'warnings': json.loads(r[15]) if r[15] else [], 'created_at': r[16],
+        })
+    conn.close()
+    return jsonify({'success': True, 'quotes': quotes})
+
+
+# ---- Admin: Rate Groups management ----
+@app.route('/api/admin/rate-groups', methods=['GET'])
+@require_auth
+@require_super_admin
+def api_admin_rate_groups_list():
+    """Super admin: list all rate groups."""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT id, name, rate, rate_x100, created_at FROM rate_groups ORDER BY name')
+    groups = [{'id': r[0], 'name': r[1], 'rate': r[2], 'rate_x100': r[3], 'created_at': r[4]} for r in c.fetchall()]
+    conn.close()
+    return jsonify({'success': True, 'groups': groups})
+
+
+@app.route('/api/admin/rate-groups', methods=['POST'])
+@require_auth
+@require_super_admin
+def api_admin_rate_groups_create():
+    """Super admin: create a rate group."""
+    data = request.json or {}
+    name = (data.get('name') or '').strip()
+    rate = data.get('rate')
+    rate_x100 = data.get('rate_x100')
+    if not name or rate is None or rate_x100 is None:
+        return jsonify({'success': False, 'message': 'name, rate, and rate_x100 are required'}), 400
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    gid = str(uuid.uuid4())
+    try:
+        c.execute('INSERT INTO rate_groups (id, name, rate, rate_x100) VALUES (?, ?, ?, ?)',
+                  (gid, name, float(rate), float(rate_x100)))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'success': False, 'message': 'Rate group name already exists'}), 400
+    conn.close()
+    return jsonify({'success': True, 'id': gid})
+
+
+@app.route('/api/admin/rate-groups/<group_id>', methods=['PATCH'])
+@require_auth
+@require_super_admin
+def api_admin_rate_groups_update(group_id):
+    """Super admin: update a rate group."""
+    data = request.json or {}
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('SELECT id FROM rate_groups WHERE id = ?', (group_id,))
+    if not c.fetchone():
+        conn.close()
+        return jsonify({'success': False, 'message': 'Rate group not found'}), 404
+    updates = []
+    params = []
+    for field in ('name', 'rate', 'rate_x100'):
+        if field in data:
+            updates.append(f'{field} = ?')
+            params.append(data[field])
+    if not updates:
+        conn.close()
+        return jsonify({'success': False, 'message': 'No fields to update'}), 400
+    params.append(group_id)
+    try:
+        c.execute(f'UPDATE rate_groups SET {", ".join(updates)} WHERE id = ?', params)
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'success': False, 'message': 'Name conflict'}), 400
+    conn.close()
+    return jsonify({'success': True})
+
+
+# ---- Admin: County mapping management ----
+@app.route('/api/admin/county-mapping', methods=['GET'])
+@require_auth
+@require_super_admin
+def api_admin_county_mapping_list():
+    """Super admin: list county-to-group mappings."""
+    state_filter = request.args.get('state', '').strip().upper()
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    if state_filter:
+        c.execute('SELECT id, state, county_name, group_name, created_at FROM county_group_map WHERE state = ? ORDER BY county_name', (state_filter,))
+    else:
+        c.execute('SELECT id, state, county_name, group_name, created_at FROM county_group_map ORDER BY state, county_name')
+    mappings = [{'id': r[0], 'state': r[1], 'county_name': r[2], 'group_name': r[3], 'created_at': r[4]} for r in c.fetchall()]
+    conn.close()
+    return jsonify({'success': True, 'mappings': mappings})
+
+
+@app.route('/api/admin/county-mapping', methods=['POST'])
+@require_auth
+@require_super_admin
+def api_admin_county_mapping_create():
+    """Super admin: create or update a county mapping."""
+    data = request.json or {}
+    state = (data.get('state') or '').strip().upper()
+    county_name = _normalize_county(data.get('county_name') or '')
+    group_name = (data.get('group_name') or '').strip()
+    if not state or not county_name or not group_name:
+        return jsonify({'success': False, 'message': 'state, county_name, and group_name are required'}), 400
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    # Verify group exists
+    c.execute('SELECT id FROM rate_groups WHERE name = ?', (group_name,))
+    if not c.fetchone():
+        conn.close()
+        return jsonify({'success': False, 'message': f'Rate group "{group_name}" not found'}), 400
+    mid = str(uuid.uuid4())
+    try:
+        c.execute('INSERT INTO county_group_map (id, state, county_name, group_name) VALUES (?, ?, ?, ?)',
+                  (mid, state, county_name, group_name))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        # Update existing
+        c.execute('UPDATE county_group_map SET group_name = ? WHERE state = ? AND county_name = ?',
+                  (group_name, state, county_name))
+        conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+
+@app.route('/api/admin/county-mapping/<mapping_id>', methods=['DELETE'])
+@require_auth
+@require_super_admin
+def api_admin_county_mapping_delete(mapping_id):
+    """Super admin: delete a county mapping."""
+    conn = sqlite3.connect('prospects.db')
+    c = conn.cursor()
+    c.execute('DELETE FROM county_group_map WHERE id = ?', (mapping_id,))
+    conn.commit()
+    deleted = c.rowcount > 0
+    conn.close()
+    if not deleted:
+        return jsonify({'success': False, 'message': 'Mapping not found'}), 404
     return jsonify({'success': True})
 
 
