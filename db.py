@@ -5,10 +5,10 @@ If DATABASE_URL is set (Railway Postgres), uses psycopg2.
 Otherwise falls back to local SQLite for development.
 
 Usage:
-    from db import get_db, is_postgres
+    from db import get_db, is_postgres, IntegrityError
 
 Every caller gets a connection object that supports:
-    conn.cursor(), conn.commit(), conn.close()
+    conn.cursor(), conn.commit(), conn.close(), conn.rollback()
     cursor.execute(sql, params), cursor.fetchone(), cursor.fetchall()
 
 The module automatically translates SQLite-style '?' placeholders to
@@ -25,6 +25,23 @@ _use_postgres = bool(DATABASE_URL and DATABASE_URL.startswith('postgres'))
 def is_postgres():
     """Return True if connected to PostgreSQL via DATABASE_URL."""
     return _use_postgres
+
+
+# --- Cross-engine IntegrityError ---
+# This is a tuple of exception classes so `except IntegrityError` works
+# regardless of whether we're on SQLite or PostgreSQL.
+def _build_integrity_errors():
+    """Build a tuple of IntegrityError classes for both engines."""
+    errors = [sqlite3.IntegrityError]
+    if _use_postgres:
+        try:
+            import psycopg2
+            errors.append(psycopg2.IntegrityError)
+        except ImportError:
+            pass
+    return tuple(errors)
+
+IntegrityError = _build_integrity_errors()
 
 
 def _log_db_info():
@@ -46,6 +63,7 @@ def _log_db_info():
 # --- SQL translation ---
 
 _INSERT_OR_IGNORE_RE = re.compile(r'INSERT\s+OR\s+IGNORE\s+INTO', re.IGNORECASE)
+_INSERT_OR_REPLACE_RE = re.compile(r'INSERT\s+OR\s+REPLACE\s+INTO', re.IGNORECASE)
 
 
 def _translate_sql(sql):
@@ -53,6 +71,7 @@ def _translate_sql(sql):
     Translate SQLite SQL to PostgreSQL SQL:
     - '?' placeholders -> '%s'
     - INSERT OR IGNORE INTO -> INSERT INTO ... ON CONFLICT DO NOTHING
+    - INSERT OR REPLACE INTO -> INSERT INTO ... (caller must append ON CONFLICT clause)
     - Skip PRAGMA statements
     """
     if not _use_postgres:
@@ -62,6 +81,11 @@ def _translate_sql(sql):
     had_or_ignore = bool(_INSERT_OR_IGNORE_RE.search(sql))
     if had_or_ignore:
         sql = _INSERT_OR_IGNORE_RE.sub('INSERT INTO', sql)
+
+    # Handle INSERT OR REPLACE -> plain INSERT (caller handles ON CONFLICT)
+    had_or_replace = bool(_INSERT_OR_REPLACE_RE.search(sql))
+    if had_or_replace:
+        sql = _INSERT_OR_REPLACE_RE.sub('INSERT INTO', sql)
 
     # Replace ? with %s, but not inside quoted strings
     result = []
@@ -137,6 +161,9 @@ class _PgConnectionWrapper:
 
     def commit(self):
         self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
 
     def close(self):
         self._conn.close()
