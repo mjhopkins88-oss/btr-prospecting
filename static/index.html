@@ -17,7 +17,19 @@
                         orbitron: ['Orbitron', 'sans-serif'],
                         jetbrains: ['JetBrains Mono', 'monospace'],
                         inter: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
-                    }
+                    },
+                    borderRadius: {
+                        '2xl': '1rem',
+                    },
+                    keyframes: {
+                        'glow-pulse': {
+                            '0%, 100%': { boxShadow: '0 0 12px rgba(16,185,129,0.35)' },
+                            '50%':      { boxShadow: '0 0 22px rgba(16,185,129,0.55)' },
+                        },
+                    },
+                    animation: {
+                        'glow-pulse': 'glow-pulse 2.5s ease-in-out infinite',
+                    },
                 }
             }
         }
@@ -56,15 +68,15 @@
             overflow-x: hidden;
         }
 
+        /* Item 8 — global noise/grid overlay */
         body::before {
             content: '';
             position: fixed;
             top: 0; left: 0;
             width: 100%; height: 100%;
             background:
-                linear-gradient(90deg, rgba(16,185,129,0.015) 1px, transparent 1px),
-                linear-gradient(rgba(16,185,129,0.015) 1px, transparent 1px);
-            background-size: 60px 60px;
+                radial-gradient(circle at 1px 1px, rgba(148,163,184,0.06) 1px, transparent 0);
+            background-size: 24px 24px;
             pointer-events: none;
             z-index: 0;
         }
@@ -79,6 +91,11 @@
             50% { box-shadow: 0 0 22px rgba(16,185,129,0.7); }
         }
 
+        @keyframes subtleGlow {
+            0%, 100% { box-shadow: 0 0 14px rgba(16,185,129,0.35); }
+            50% { box-shadow: 0 0 20px rgba(16,185,129,0.5); }
+        }
+
         #root { position: relative; z-index: 1; }
 
         ::-webkit-scrollbar { width: 6px; }
@@ -86,13 +103,23 @@
         ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
+        /* Item 3 — micro hover elevation */
         .prospect-card {
             transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
         .prospect-card:hover {
             transform: scale(1.01);
-            box-shadow: 0 8px 30px rgba(0,0,0,0.2), 0 0 20px rgba(16,185,129,0.1);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.3), 0 0 20px rgba(16,185,129,0.08);
         }
+        .prospect-card.card-high-priority:hover {
+            box-shadow: 0 12px 40px rgba(0,0,0,0.3), 0 0 24px rgba(16,185,129,0.12);
+        }
+        /* Item 13 — high score glow ring */
+        .card-score-glow {
+            box-shadow: 0 0 14px rgba(16,185,129,0.35);
+            animation: subtleGlow 2.5s ease-in-out infinite;
+        }
+
         .action-btn {
             transition: all 0.2s ease;
         }
@@ -125,6 +152,20 @@
             opacity: 0.6;
             cursor: not-allowed !important;
         }
+
+        /* Item 6 — gradient divider */
+        .gradient-divider {
+            height: 1px;
+            background: linear-gradient(to right, transparent, rgba(51,65,85,0.6), transparent);
+            border: none;
+            margin: 1.5rem 0;
+        }
+
+        /* Dense mode spacing overrides */
+        .density-dense .ui-card { padding: 0.75rem; gap: 0.5rem; }
+        .density-dense .ui-panel { padding: 1rem; }
+        .density-dense .ui-section { gap: 1.5rem; margin-bottom: 1rem; }
+        .density-dense .prospect-card { padding: 0.75rem; gap: 0.5rem; }
     </style>
 </head>
 <body>
@@ -193,6 +234,258 @@
             'Nurture': { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' },
         };
         const CRM_STATUSES = ['New', 'Contacted', 'InDiscussion', 'Quoted', 'Won', 'Lost', 'Nurture'];
+
+        // ============================================================
+        // SHARED UI COMPONENTS (BTR Command aesthetic upgrade pack)
+        // ============================================================
+
+        // cn() helper — joins className strings, filters falsy
+        const cn = (...args) => args.filter(Boolean).join(' ');
+
+        // Item 11 — Density context (localStorage-persisted)
+        const DensityContext = React.createContext({ density: 'comfortable', toggle: () => {} });
+        function DensityProvider({ children }) {
+            const [density, setDensity] = useState(() => {
+                try { return localStorage.getItem('btr_density') || 'comfortable'; } catch { return 'comfortable'; }
+            });
+            const toggle = () => {
+                const next = density === 'comfortable' ? 'dense' : 'comfortable';
+                setDensity(next);
+                try { localStorage.setItem('btr_density', next); } catch {}
+            };
+            return React.createElement(DensityContext.Provider, { value: { density, toggle } },
+                React.createElement('div', { className: density === 'dense' ? 'density-dense' : '' }, children)
+            );
+        }
+        function useDensity() { return React.useContext(DensityContext); }
+
+        // Item 11 — DensityToggle button
+        function DensityToggle() {
+            const { density, toggle } = useDensity();
+            return (
+                <button onClick={toggle} className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors px-2 py-1 rounded-lg border border-slate-700/50 hover:border-slate-600" title={density === 'comfortable' ? 'Switch to dense' : 'Switch to comfortable'}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+                    {density === 'comfortable' ? 'Dense' : 'Comfy'}
+                </button>
+            );
+        }
+
+        // Item 4 — Panel wrapper (outer container with standardized spacing/radius)
+        function Panel({ children, className, style }) {
+            const { density } = useDensity();
+            const pad = density === 'dense' ? 'p-3' : 'p-4';
+            return (
+                <div className={cn('ui-panel bg-slate-800/80 border border-slate-700/50 rounded-2xl', pad, className)} style={style}>
+                    {children}
+                </div>
+            );
+        }
+
+        // Item 4 — Section wrapper (consistent vertical spacing)
+        function Section({ children, className }) {
+            const { density } = useDensity();
+            const gap = density === 'dense' ? 'gap-4 mb-4' : 'gap-6 mb-6';
+            return (
+                <div className={cn('ui-section flex flex-col', gap, className)}>
+                    {children}
+                </div>
+            );
+        }
+
+        // Item 4 — Card wrapper (inner elements)
+        function Card({ children, className, style, hover, highPriority }) {
+            const { density } = useDensity();
+            const pad = density === 'dense' ? 'p-3 gap-2' : 'p-4 gap-3';
+            return (
+                <div className={cn(
+                    'ui-card bg-slate-800/80 border border-slate-700/50 rounded-2xl grid transition-all duration-200',
+                    pad,
+                    hover && 'hover:scale-[1.01] hover:shadow-xl hover:shadow-black/30',
+                    highPriority && 'hover:shadow-emerald-500/10',
+                    className
+                )} style={style}>
+                    {children}
+                </div>
+            );
+        }
+
+        // Item 2 — SectionHeader (consistent typography hierarchy)
+        // Item 14 — adds optional icon
+        const SECTION_ICONS = {
+            momentum: React.createElement('svg', { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
+                React.createElement('polyline', { points: '22,7 13.5,15.5 8.5,10.5 2,17' }),
+                React.createElement('polyline', { points: '16,7 22,7 22,13' })
+            ),
+            signals: React.createElement('svg', { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
+                React.createElement('circle', { cx: 12, cy: 12, r: 2 }),
+                React.createElement('path', { d: 'M16.24 7.76a6 6 0 010 8.49' }),
+                React.createElement('path', { d: 'M19.07 4.93a10 10 0 010 14.14' }),
+                React.createElement('path', { d: 'M7.76 16.24a6 6 0 010-8.49' }),
+                React.createElement('path', { d: 'M4.93 19.07a10 10 0 010-14.14' })
+            ),
+            rankings: React.createElement('svg', { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
+                React.createElement('polygon', { points: '1,6 1,22 8,18 16,22 23,18 23,2 16,6 8,2 1,6' }),
+                React.createElement('line', { x1: 8, y1: 2, x2: 8, y2: 18 }),
+                React.createElement('line', { x1: 16, y1: 6, x2: 16, y2: 22 })
+            ),
+            discovery: React.createElement('svg', { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
+                React.createElement('polygon', { points: '13,2 3,14 12,14 11,22 21,10 12,10 13,2' })
+            ),
+            search: React.createElement('svg', { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
+                React.createElement('circle', { cx: 11, cy: 11, r: 8 }),
+                React.createElement('line', { x1: 21, y1: 21, x2: 16.65, y2: 16.65 })
+            ),
+            pipeline: React.createElement('svg', { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
+                React.createElement('rect', { x: 3, y: 3, width: 7, height: 7 }),
+                React.createElement('rect', { x: 14, y: 3, width: 7, height: 7 }),
+                React.createElement('rect', { x: 14, y: 14, width: 7, height: 7 }),
+                React.createElement('rect', { x: 3, y: 14, width: 7, height: 7 })
+            ),
+            followups: React.createElement('svg', { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
+                React.createElement('circle', { cx: 12, cy: 12, r: 10 }),
+                React.createElement('polyline', { points: '12,6 12,12 16,14' })
+            ),
+        };
+
+        function SectionHeader({ title, subtitle, icon, updatedAt, children }) {
+            const iconEl = icon && SECTION_ICONS[icon] ? (
+                <span className="text-slate-400 flex-shrink-0">{SECTION_ICONS[icon]}</span>
+            ) : null;
+            const timeLabel = updatedAt ? timeAgo(updatedAt) : null;
+            return (
+                <div className="flex items-start justify-between gap-4 mb-4">
+                    <div className="flex items-center gap-2">
+                        {iconEl}
+                        <div>
+                            <h2 className="text-xl font-semibold text-slate-100 font-orbitron">{title}</h2>
+                            {subtitle && <p className="text-sm text-slate-400 mt-0.5">{subtitle}</p>}
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                        {timeLabel && <span className="text-xs text-slate-500">Updated {timeLabel}</span>}
+                        {children}
+                    </div>
+                </div>
+            );
+        }
+
+        // Item 2 — SectionLabel (small uppercase labels)
+        function SectionLabel({ children, className }) {
+            return <div className={cn('text-[11px] tracking-[0.22em] uppercase text-slate-500 font-semibold', className)}>{children}</div>;
+        }
+
+        // Item 6 — Gradient Divider
+        function Divider({ className }) {
+            return <div className={cn('gradient-divider', className)} />;
+        }
+
+        // Item 7 + Item 5 — SignalPill with controlled accent colors
+        const SIGNAL_COLORS = {
+            capital:      { bg: 'bg-purple-500/15', text: 'text-purple-300', border: 'border-purple-400/20' },
+            construction: { bg: 'bg-cyan-500/15',   text: 'text-cyan-300',   border: 'border-cyan-400/20' },
+            expansion:    { bg: 'bg-teal-500/15',   text: 'text-teal-300',   border: 'border-teal-400/20' },
+            refinance:    { bg: 'bg-amber-500/15',  text: 'text-amber-300',  border: 'border-amber-400/20' },
+            jv:           { bg: 'bg-pink-500/15',   text: 'text-pink-300',   border: 'border-pink-400/20' },
+            permit:       { bg: 'bg-orange-500/15', text: 'text-orange-300', border: 'border-orange-400/20' },
+            filing:       { bg: 'bg-blue-500/15',   text: 'text-blue-300',   border: 'border-blue-400/20' },
+            news:         { bg: 'bg-emerald-500/15',text: 'text-emerald-300',border: 'border-emerald-400/20' },
+            press_release:{ bg: 'bg-violet-500/15', text: 'text-violet-300', border: 'border-violet-400/20' },
+            default:      { bg: 'bg-slate-500/15',  text: 'text-slate-300',  border: 'border-slate-400/20' },
+        };
+
+        function getSignalCategory(label) {
+            const l = (label || '').toLowerCase();
+            if (l.includes('capital') || l.includes('jv') || l.includes('institutional')) return 'capital';
+            if (l.includes('builder') || l.includes('construction') || l.includes('property')) return 'construction';
+            if (l.includes('expansion') || l.includes('state')) return 'expansion';
+            if (l.includes('refinanc') || l.includes('debt') || l.includes('lender')) return 'refinance';
+            if (l.includes('jv') || l.includes('joint')) return 'jv';
+            if (l.includes('permit')) return 'permit';
+            if (l.includes('filing')) return 'filing';
+            if (l.includes('news')) return 'news';
+            if (l.includes('press')) return 'press_release';
+            return 'default';
+        }
+
+        function SignalPill({ label, category, glow }) {
+            const cat = category || getSignalCategory(label);
+            const c = SIGNAL_COLORS[cat] || SIGNAL_COLORS.default;
+            return (
+                <span className={cn(
+                    'text-xs font-medium px-3 py-1 rounded-full border whitespace-nowrap',
+                    c.bg, c.text, c.border,
+                    glow && 'shadow-[0_0_10px_rgba(168,85,247,0.2)]'
+                )}>
+                    {label}
+                </span>
+            );
+        }
+
+        // Item 12 — Elevated Empty State
+        function EmptyState({ icon, title, subtitle, children }) {
+            const defaultIcon = (
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-slate-600">
+                    <circle cx="12" cy="12" r="10" /><path d="M8 12h8" /><path d="M12 8v8" />
+                </svg>
+            );
+            return (
+                <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-8 flex flex-col items-center justify-center text-center">
+                    <div className="mb-3 text-slate-600">{icon || defaultIcon}</div>
+                    <h3 className="text-lg font-semibold text-slate-400 font-orbitron mb-1">{title || 'No data found'}</h3>
+                    {subtitle && <p className="text-sm text-slate-500">{subtitle}</p>}
+                    {children}
+                </div>
+            );
+        }
+
+        // Item 10 — Micro Sparkline
+        function Sparkline({ values, width, height, color }) {
+            const w = width || 60;
+            const h = height || 20;
+            const clr = color || '#34d399';
+            if (!values || !Array.isArray(values) || values.length < 2) {
+                // Placeholder: faint dashed line
+                return (
+                    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
+                        <line x1="2" y1={h/2} x2={w-2} y2={h/2} stroke="#334155" strokeWidth="1" strokeDasharray="3 3" />
+                    </svg>
+                );
+            }
+            const max = Math.max(...values);
+            const min = Math.min(...values);
+            const range = max - min || 1;
+            const points = values.map((v, i) => {
+                const x = (i / (values.length - 1)) * (w - 4) + 2;
+                const y = h - 2 - ((v - min) / range) * (h - 4);
+                return `${x},${y}`;
+            }).join(' ');
+            return (
+                <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
+                    <polyline points={points} fill="none" stroke={clr} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" />
+                </svg>
+            );
+        }
+
+        // timeAgo helper (also used by SectionHeader)
+        function timeAgo(ts) {
+            if (!ts) return null;
+            try {
+                const d = new Date(ts);
+                const now = new Date();
+                const diffMs = now - d;
+                const mins = Math.floor(diffMs / 60000);
+                if (mins < 1) return 'just now';
+                if (mins < 60) return `${mins}m ago`;
+                const hrs = Math.floor(mins / 60);
+                if (hrs < 24) return `${hrs}h ago`;
+                const days = Math.floor(hrs / 24);
+                return `${days}d ago`;
+            } catch { return null; }
+        }
+
+        // ============================================================
+        // END SHARED UI COMPONENTS
+        // ============================================================
 
         // ======= ROOT: Auth Gate =======
         function Root() {
@@ -693,16 +986,18 @@
             return (
                 <div style={{...styles.header, display:'flex', justifyContent:'space-between', alignItems:'center', textAlign:'left'}}>
                     <div>
-                        <h1 style={{...styles.title, fontSize:'1.8rem'}}>BTR INTELLIGENCE TERMINAL</h1>
-                        <p style={styles.subtitle}>AI-Powered Lead Intelligence System</p>
+                        <h1 style={{...styles.title, fontSize:'1.8rem'}}>BTR COMMAND</h1>
+                        <p className="text-sm text-slate-400 mt-0.5">Real&#x2011;Time Operator &amp; Capital Intelligence</p>
+                        <div className="h-[2px] mt-2 w-48 bg-gradient-to-r from-emerald-400/90 via-emerald-400/30 to-transparent rounded-full" />
                     </div>
                     {user && (
-                        <div style={{display:'flex',alignItems:'center',gap:'0.75rem',flexShrink:0}}>
-                            <span style={{fontSize:'0.85rem',color:'#94a3b8'}}>{user.name}</span>
-                            <span style={{fontSize:'0.65rem',padding:'0.15rem 0.5rem',borderRadius:'4px',
-                                background: user.role==='admin' ? 'rgba(168,85,247,0.15)' : 'rgba(6,182,212,0.15)',
-                                color: user.role==='admin' ? '#c4b5fd' : '#67e8f9',
-                                textTransform:'uppercase',fontWeight:600}}>{user.role}</span>
+                        <div className="flex items-center gap-3 flex-shrink-0">
+                            <DensityToggle />
+                            <span className="text-sm text-slate-400">{user.name}</span>
+                            <span className={cn(
+                                'text-[0.65rem] px-2 py-0.5 rounded-lg font-semibold uppercase',
+                                user.role==='admin' ? 'bg-purple-500/15 text-purple-300' : 'bg-cyan-500/15 text-cyan-300'
+                            )}>{user.role}</span>
                             <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.75rem'}} onClick={onLogout}>Logout</button>
                         </div>
                     )}
@@ -761,9 +1056,12 @@
 
         function StatCard({ label, value, pulse }) {
             return (
-                <div style={styles.statCard}>
+                <div style={{...styles.statCard, borderRadius: '1rem'}}>
                     <div style={styles.statLabel}>{label}</div>
-                    <div style={{...styles.statValue, ...(pulse ? styles.pulse : {})}}>{String(value)}</div>
+                    <div className="flex items-end gap-2">
+                        <div style={{...styles.statValue, ...(pulse ? styles.pulse : {})}}>{String(value)}</div>
+                        <Sparkline />
+                    </div>
                 </div>
             );
         }
@@ -869,13 +1167,13 @@
         }
 
         function ProspectsList({ prospects, onGenerateEmail, onDelete, crmStatuses, onSaveToPipeline, onLogTouchpoint, user, callTimingScores }) {
-            if (prospects.length === 0) {
+            if (!Array.isArray(prospects) || prospects.length === 0) {
                 return (
-                    <div style={styles.empty}>
-                        <h2 style={styles.emptyTitle}>No prospects yet</h2>
-                        <p style={styles.emptyText}>Click "Search Prospects" to find BTR developers using AI</p>
-                        <p style={styles.emptySubtext}>The AI will search the web for active BTR developers, executives, and project details</p>
-                    </div>
+                    <EmptyState
+                        title="No prospects yet"
+                        subtitle='Click "Search Prospects" to find BTR developers using AI'
+                        icon={<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-slate-600"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>}
+                    />
                 );
             }
             return (
@@ -971,7 +1269,7 @@
             const compDotColor = competitiveDifficulty === 'Low' ? '#34d399' : competitiveDifficulty === 'Medium' ? '#fbbf24' : '#ef4444';
 
             return (
-                <div className="prospect-card" style={{...styles.card, ...cardAccent}}>
+                <div className={cn('prospect-card', score >= 90 && 'card-score-glow card-high-priority')} style={{...styles.card, ...cardAccent, borderRadius: '1rem'}}>
                     {/* Header: Company + Score */}
                     <div style={styles.cardHeader}>
                         <div style={{flex: 1, minWidth: 0}}>
@@ -1111,22 +1409,11 @@
                     {/* Insurance Trigger Pills */}
                     {triggers.length > 0 && (
                         <div>
-                            <div style={{fontSize: '0.65rem', color: '#64748b', fontWeight: 600, marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Insurance Triggers</div>
-                            <div style={{display: 'flex', flexWrap: 'wrap', gap: '0.4rem'}}>
-                                {triggers.map((trigger, idx) => {
-                                    const ts = getTriggerStyle(trigger);
-                                    return (
-                                        <span key={idx} style={{
-                                            fontSize: '0.75rem',
-                                            padding: '0.25rem 0.7rem',
-                                            borderRadius: '9999px',
-                                            background: ts.bg,
-                                            color: ts.color,
-                                            fontWeight: 500,
-                                            whiteSpace: 'nowrap',
-                                        }}>{trigger}</span>
-                                    );
-                                })}
+                            <SectionLabel className="mb-1.5">Insurance Triggers</SectionLabel>
+                            <div className="flex flex-wrap gap-1.5">
+                                {triggers.map((trigger, idx) => (
+                                    <SignalPill key={idx} label={trigger} glow={score >= 90} />
+                                ))}
                             </div>
                         </div>
                     )}
@@ -1437,9 +1724,12 @@
 
             return (
                 <div>
-                    <div style={ds.configPanel}>
+                    <div style={{...ds.configPanel, borderRadius: '1rem'}}>
                         <div style={ds.configHeader}>
-                            <h2 style={ds.sectionTitle}>Daily Discovery</h2>
+                            <div className="flex items-center gap-2">
+                                <span className="text-slate-400">{SECTION_ICONS.discovery}</span>
+                                <h2 style={ds.sectionTitle}>Daily Discovery</h2>
+                            </div>
                             <div style={ds.schedule}>
                                 Runs daily at {config.schedule_hour}:{String(config.schedule_minute).padStart(2, '0')} AM PT
                             </div>
@@ -1745,11 +2035,7 @@
 
             return (
                 <div>
-                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.5rem',flexWrap:'wrap',gap:'0.75rem'}}>
-                        <div>
-                            <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:'1.3rem',fontWeight:700,color:'#34d399',marginBottom:'0.3rem'}}>Statewide Intelligence</h2>
-                            <p style={{fontSize:'0.85rem',color:'#64748b'}}>BTR activity scanning across TX, AZ, GA, NC, FL</p>
-                        </div>
+                    <SectionHeader title="Statewide Intelligence" subtitle="BTR activity scanning across TX, AZ, GA, NC, FL" icon="rankings">
                         <button
                             className="action-btn"
                             style={{...styles.btnPrimary,fontSize:'0.9rem',padding:'0.65rem 1.5rem',...(scanningState?{opacity:0.5,cursor:'not-allowed'}:{})}}
@@ -1758,7 +2044,8 @@
                         >
                             {scanningState ? `Scanning ${scanningState}...` : 'Scan All States'}
                         </button>
-                    </div>
+                    </SectionHeader>
+                    <Divider />
 
                     {status && <div style={styles.searchStatus}><p>{status}</p></div>}
 
@@ -2028,10 +2315,7 @@
                 </div>
             );
             const EmptyPanel = ({ title, desc }) => (
-                <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
-                    <p style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.1rem', marginBottom: '0.5rem' }}>{title}</p>
-                    <p style={{ fontSize: '0.9rem' }}>{desc}</p>
-                </div>
+                <EmptyState title={title} subtitle={desc} />
             );
             const LoadingPanel = () => (
                 <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
@@ -2041,11 +2325,8 @@
 
             return (
                 <div>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
-                        <h2 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.4rem', fontWeight: 700, color: '#22d3ee' }}>
-                            SUNBELT INTELLIGENCE
-                        </h2>
-                    </div>
+                    <SectionHeader title="SUNBELT INTELLIGENCE" icon="signals" />
+                    <Divider />
 
                     {/* Sub-tabs */}
                     <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '1px solid #334155', paddingBottom: '0.75rem' }}>
@@ -3366,10 +3647,11 @@
                     {loading && <div style={styles.loading}><div style={styles.loadingText}>Loading pipeline...</div></div>}
 
                     {!loading && leads.length === 0 && (
-                        <div style={styles.empty}>
-                            <h2 style={styles.emptyTitle}>No leads in pipeline</h2>
-                            <p style={styles.emptyText}>Save prospects to your pipeline from the search tab</p>
-                        </div>
+                        <EmptyState
+                            title="No leads in pipeline"
+                            subtitle="Save prospects to your pipeline from the search tab"
+                            icon={<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-slate-600"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>}
+                        />
                     )}
 
                     {!loading && leads.length > 0 && (
@@ -3475,18 +3757,17 @@
 
             return (
                 <div>
-                    <div style={{marginBottom:'1.5rem'}}>
-                        <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:'1.3rem',fontWeight:700,color:'#ef4444',marginBottom:'0.3rem'}}>Follow-ups Due</h2>
-                        <p style={{fontSize:'0.85rem',color:'#64748b'}}>Leads with follow-up dates at or before today</p>
-                    </div>
+                    <SectionHeader title="Follow-ups Due" subtitle="Leads with follow-up dates at or before today" icon="followups" />
+                    <Divider />
 
                     {loading && <div style={styles.loading}><div style={styles.loadingText}>Loading...</div></div>}
 
                     {!loading && leads.length === 0 && (
-                        <div style={styles.empty}>
-                            <h2 style={styles.emptyTitle}>No follow-ups due</h2>
-                            <p style={styles.emptyText}>All caught up! Set follow-up dates on your pipeline leads.</p>
-                        </div>
+                        <EmptyState
+                            title="No follow-ups due"
+                            subtitle="All caught up! Set follow-up dates on your pipeline leads."
+                            icon={<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-slate-600"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>}
+                        />
                     )}
 
                     {!loading && leads.length > 0 && (
@@ -3545,7 +3826,7 @@
             tab: { background: 'transparent', border: 'none', color: '#64748b', padding: '0.75rem 1.5rem', fontSize: '0.95rem', fontWeight: 600, cursor: 'pointer', borderBottom: '2px solid transparent', marginBottom: '-2px', fontFamily: "'Orbitron', sans-serif", transition: 'color 0.2s, border-color 0.2s' },
             tabActive: { color: '#34d399', borderBottomColor: '#34d399' },
             loadingMsg: { textAlign: 'center', padding: '3rem', color: '#94a3b8' },
-            configPanel: { background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '1.5rem', marginBottom: '2rem' },
+            configPanel: { background: '#1e293b', border: '1px solid rgba(51,65,85,0.5)', borderRadius: '1rem', padding: '1.5rem', marginBottom: '2rem' },
             configHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' },
             sectionTitle: { fontFamily: "'Orbitron', sans-serif", fontSize: '1.3rem', fontWeight: 700, color: '#34d399' },
             schedule: { color: '#94a3b8', fontSize: '0.9rem' },
@@ -3560,7 +3841,7 @@
             filterItem: { color: '#f1f5f9', fontSize: '0.9rem' },
             actionBar: { display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '2rem', flexWrap: 'wrap' },
             lastRun: { color: '#94a3b8', fontSize: '0.85rem' },
-            digestBox: { background: '#0f172a', border: '1px solid #334155', borderRadius: '12px', padding: '1.5rem', marginBottom: '2rem', overflow: 'auto', maxHeight: '600px' },
+            digestBox: { background: '#0f172a', border: '1px solid #334155', borderRadius: '1rem', padding: '1.5rem', marginBottom: '2rem', overflow: 'auto', maxHeight: '600px' },
             digestText: { fontFamily: "'JetBrains Mono', monospace", fontSize: '0.85rem', color: '#f1f5f9', whiteSpace: 'pre-wrap', lineHeight: '1.5', margin: 0 },
             citySection: { marginBottom: '2rem' },
             cityHeader: { display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem', paddingBottom: '0.5rem', borderBottom: '1px solid #334155' },
@@ -3569,7 +3850,7 @@
             errorText: { color: '#ef4444', fontSize: '0.9rem' },
             noResults: { color: '#94a3b8', fontSize: '0.9rem', fontStyle: 'italic' },
             signalGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '1rem' },
-            signalCard: { background: '#1e293b', border: '1px solid #334155', borderRadius: '10px', padding: '1.25rem', transition: 'all 0.2s' },
+            signalCard: { background: '#1e293b', border: '1px solid rgba(51,65,85,0.5)', borderRadius: '1rem', padding: '1.25rem', transition: 'all 0.2s' },
             signalCardHeader: { display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem', flexWrap: 'wrap' },
             signalTypeBadge: { border: '1px solid', borderRadius: '20px', padding: '0.2rem 0.7rem', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' },
             entityName: { fontFamily: "'Orbitron', sans-serif", fontSize: '0.95rem', fontWeight: 600, color: '#f1f5f9' },
@@ -3579,14 +3860,14 @@
             signalSource: { fontSize: '0.8rem', color: '#fbbf24' },
             signalDate: { fontSize: '0.8rem', color: '#94a3b8' },
             signalLink: { color: '#22d3ee', textDecoration: 'none', fontSize: '0.85rem', display: 'inline-block', marginTop: '0.25rem' },
-            historySection: { marginTop: '2rem', background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '1.5rem' },
+            historySection: { marginTop: '2rem', background: '#1e293b', border: '1px solid #334155', borderRadius: '1rem', padding: '1.5rem' },
             historyList: { display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1rem' },
             historyItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderRadius: '8px', cursor: 'pointer', background: '#0f172a', border: '1px solid transparent', transition: 'all 0.2s' },
             historyItemActive: { border: '1px solid #34d399', background: 'rgba(16,185,129,0.05)' },
             historyDate: { fontSize: '0.85rem', color: '#f1f5f9' },
             historyStats: { fontSize: '0.85rem', color: '#94a3b8' },
             historyStatus: { fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase' },
-            sourceRefreshBar: { background: '#1e293b', border: '1px solid #334155', borderRadius: '10px', padding: '1rem 1.25rem', marginBottom: '1.5rem' },
+            sourceRefreshBar: { background: '#1e293b', border: '1px solid #334155', borderRadius: '1rem', padding: '1rem 1.25rem', marginBottom: '1.5rem' },
             filterBar: { display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem', flexWrap: 'wrap' },
             filterToggle: { background: 'transparent', border: '1px solid #334155', borderRadius: '20px', padding: '0.3rem 0.8rem', fontSize: '0.8rem', cursor: 'pointer', fontFamily: "'Inter', sans-serif", transition: 'all 0.2s' },
             sourceTypeBadge: { border: '1px solid', borderRadius: '20px', padding: '0.15rem 0.55rem', fontSize: '0.7rem', fontWeight: 600 },
@@ -3601,7 +3882,7 @@
             title: { fontFamily: "'Orbitron', sans-serif", fontSize: '2.5rem', fontWeight: 900, background: 'linear-gradient(135deg, #34d399 0%, #22d3ee 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '0.5rem', letterSpacing: '0.05em' },
             subtitle: { fontSize: '1rem', color: '#64748b', fontWeight: 400 },
             statsBar: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '2rem' },
-            statCard: { background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '1.25rem' },
+            statCard: { background: '#1e293b', border: '1px solid rgba(51,65,85,0.5)', borderRadius: '1rem', padding: '1.25rem' },
             statLabel: { fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 600, letterSpacing: '0.05em' },
             statValue: { fontFamily: "'JetBrains Mono', monospace", fontSize: '1.8rem', fontWeight: 700, color: '#34d399', lineHeight: '1.2', display: 'block', minHeight: '2.2rem' },
             pulse: { animation: 'pulse 2s ease-in-out infinite' },
@@ -3615,11 +3896,11 @@
                 marginBottom: '2rem',
                 display: 'flex', flexDirection: 'column', gap: '0.65rem',
             },
-            btn: { background: 'transparent', border: '1px solid #334155', color: '#94a3b8', padding: '0.6rem 1.2rem', borderRadius: '8px', fontSize: '0.85rem', cursor: 'pointer', fontFamily: "'Inter', sans-serif", transition: 'all 0.2s' },
-            btnPrimary: { background: '#10b981', border: 'none', color: '#0f172a', padding: '0.6rem 1.5rem', borderRadius: '8px', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter', sans-serif", transition: 'all 0.2s' },
-            input: { background: '#1e293b', border: '1px solid #334155', color: '#f1f5f9', padding: '0.6rem 1rem', borderRadius: '8px', fontSize: '0.85rem', minWidth: '220px', fontFamily: "'Inter', sans-serif", outline: 'none' },
-            select: { background: '#1e293b', border: '1px solid #334155', color: '#f1f5f9', padding: '0.6rem 0.75rem', borderRadius: '8px', fontSize: '0.85rem', cursor: 'pointer', fontFamily: "'Inter', sans-serif", outline: 'none' },
-            searchStatus: { background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '8px', padding: '0.85rem', marginBottom: '1.5rem', textAlign: 'center', fontWeight: 500, color: '#34d399', fontSize: '0.9rem' },
+            btn: { background: 'transparent', border: '1px solid #334155', color: '#94a3b8', padding: '0.6rem 1.2rem', borderRadius: '0.5rem', fontSize: '0.85rem', cursor: 'pointer', fontFamily: "'Inter', sans-serif", transition: 'all 0.2s' },
+            btnPrimary: { background: '#10b981', border: 'none', color: '#0f172a', padding: '0.6rem 1.5rem', borderRadius: '0.5rem', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter', sans-serif", transition: 'all 0.2s' },
+            input: { background: '#1e293b', border: '1px solid #334155', color: '#f1f5f9', padding: '0.6rem 1rem', borderRadius: '0.5rem', fontSize: '0.85rem', minWidth: '220px', fontFamily: "'Inter', sans-serif", outline: 'none' },
+            select: { background: '#1e293b', border: '1px solid #334155', color: '#f1f5f9', padding: '0.6rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.85rem', cursor: 'pointer', fontFamily: "'Inter', sans-serif", outline: 'none' },
+            searchStatus: { background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '0.5rem', padding: '0.85rem', marginBottom: '1.5rem', textAlign: 'center', fontWeight: 500, color: '#34d399', fontSize: '0.9rem' },
             loading: { textAlign: 'center', padding: '2rem' },
             loadingText: { fontFamily: "'Orbitron', sans-serif", fontSize: '1rem', color: '#34d399', animation: 'pulse 1.5s ease-in-out infinite' },
             empty: { textAlign: 'center', padding: '4rem 2rem' },
@@ -3629,8 +3910,8 @@
             grid: { display: 'grid', gap: '1.25rem' },
             card: {
                 background: '#1e293b',
-                border: '1px solid #334155',
-                borderRadius: '16px',
+                border: '1px solid rgba(51,65,85,0.5)',
+                borderRadius: '1rem',
                 padding: '1rem',
                 boxShadow: '0 10px 15px -3px rgba(0,0,0,0.2), 0 4px 6px -4px rgba(0,0,0,0.2)',
                 display: 'grid',
@@ -3662,7 +3943,7 @@
             emailOptionRow: { display: 'flex', alignItems: 'center', gap: '0.75rem' },
             emailOptionLabel: { fontWeight: 600, fontSize: '0.75rem', color: '#64748b', minWidth: '80px', textTransform: 'uppercase', letterSpacing: '0.03em' },
             modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
-            modal: { background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '2rem', maxWidth: '600px', width: '90%', maxHeight: '80vh', overflow: 'auto' },
+            modal: { background: '#1e293b', border: '1px solid #334155', borderRadius: '1rem', padding: '2rem', maxWidth: '600px', width: '90%', maxHeight: '80vh', overflow: 'auto' },
             modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' },
             closeBtn: { background: 'none', border: 'none', color: '#94a3b8', fontSize: '1.3rem', cursor: 'pointer' },
             subjectRow: { display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.2)', borderRadius: '8px', padding: '0.75rem 1rem', marginBottom: '1rem' },
@@ -3673,7 +3954,7 @@
             modalActions: { display: 'flex', gap: '1rem' },
         };
 
-        ReactDOM.render(<Root />, document.getElementById('root'));
+        ReactDOM.render(<DensityProvider><Root /></DensityProvider>, document.getElementById('root'));
     </script>
 </body>
 </html>
