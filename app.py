@@ -548,6 +548,34 @@ def init_db():
                     c.execute('INSERT INTO county_group_map (id, state, county_name, group_name) VALUES (?, ?, ?, ?)',
                               (str(uuid.uuid4()), st, county, group_name))
 
+    # government_signals table for Phase 1 gov enrichment
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS government_signals (
+            id TEXT PRIMARY KEY,
+            city TEXT NOT NULL,
+            state TEXT NOT NULL,
+            signal_type TEXT NOT NULL,
+            operator_name TEXT,
+            operator_aliases TEXT,
+            project_name TEXT,
+            amount REAL,
+            filing_date TEXT NOT NULL,
+            source_url TEXT NOT NULL,
+            source_name TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            raw_payload TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_gov_signals_city_date ON government_signals (state, city, filing_date DESC)')
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_gov_signals_type_date ON government_signals (signal_type, filing_date DESC)')
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -2998,6 +3026,9 @@ def api_prospecting_run_results(run_id):
 
     conn.close()
 
+    # Enrich with government signals (no scoring changes, no latency penalty on failure)
+    prospects = enrich_prospects_with_gov_signals(prospects)
+
     return jsonify({
         'success': True,
         'total': total,
@@ -4876,6 +4907,392 @@ def api_sunbelt_state_rankings():
         return jsonify({'ok': False, 'error': 'Failed to compute state rankings', 'details': str(e)}), 500
 
 
+# --- Government Signal Enrichment (Phase 1) ---
+
+# City-specific gov data source configs: what to search per city
+_GOV_SIGNAL_CITIES = [
+    {'city': 'Phoenix', 'state': 'AZ'},
+    {'city': 'Dallas', 'state': 'TX'},
+    {'city': 'Atlanta', 'state': 'GA'},
+    {'city': 'Charlotte', 'state': 'NC'},
+]
+
+_GOV_SIGNAL_QUERIES = {
+    'permit': '{city} {state} building permit multifamily residential',
+    'zoning': '{city} {state} rezoning multifamily residential development',
+    'deed': '{city} {state} deed transfer multifamily apartment',
+    'mortgage': '{city} {state} commercial mortgage multifamily',
+    'llc': '{city} {state} LLC formation real estate development',
+    'ucc': '{city} {state} UCC filing real estate construction',
+}
+
+
+def refresh_government_signals():
+    """
+    Background job: populate government_signals from public data.
+    Searches for gov-related signals per configured city using existing search cache / SerpAPI.
+    Rate-limited, deduplicates by source_url, caps at 50 items per city per signal_type.
+    Runs daily. Stubbed sources that fail return 0 without crashing.
+    """
+    import time as _time
+    import requests as _req
+    from datetime import date
+
+    app.logger.info('[gov-signals] Starting refresh_government_signals()')
+    total_inserted = 0
+    total_skipped = 0
+    city_stats = {}
+
+    for city_conf in _GOV_SIGNAL_CITIES:
+        city = city_conf['city']
+        state = city_conf['state']
+        city_key = f"{city}, {state}"
+        city_count = 0
+
+        for sig_type, query_tmpl in _GOV_SIGNAL_QUERIES.items():
+            try:
+                query = query_tmpl.format(city=city, state=state)
+
+                # Use SerpAPI if available, otherwise skip
+                serpapi_key = os.getenv('SERPAPI_API_KEY', '')
+                if not serpapi_key:
+                    app.logger.debug(f'[gov-signals] No SERPAPI_API_KEY, skipping {sig_type} for {city_key}')
+                    continue
+
+                # Rate limit: 1 second between SerpAPI calls
+                _time.sleep(1.0)
+
+                resp = _req.get('https://serpapi.com/search.json', params={
+                    'api_key': serpapi_key,
+                    'engine': 'google',
+                    'q': query,
+                    'num': 10,
+                    'tbs': 'qdr:m',  # past month
+                }, timeout=15)
+
+                if resp.status_code != 200:
+                    app.logger.warning(f'[gov-signals] SerpAPI {resp.status_code} for {sig_type}/{city_key}')
+                    continue
+
+                data = resp.json()
+                organic = data.get('organic_results', [])
+
+                conn = sqlite3.connect('prospects.db')
+                c = conn.cursor()
+
+                # Count existing for this city+type to enforce cap of 50
+                c.execute('SELECT COUNT(*) FROM government_signals WHERE city = ? AND state = ? AND signal_type = ?',
+                          (city, state, sig_type))
+                existing_count = c.fetchone()[0]
+                remaining_cap = max(0, 50 - existing_count)
+
+                inserted_this_batch = 0
+                for item in organic[:remaining_cap]:
+                    source_url = item.get('link', '')
+                    if not source_url:
+                        continue
+
+                    # Deduplicate by source_url
+                    c.execute('SELECT 1 FROM government_signals WHERE source_url = ?', (source_url,))
+                    if c.fetchone():
+                        total_skipped += 1
+                        continue
+
+                    title = item.get('title', '')
+                    snippet = item.get('snippet', '')
+                    source_name = item.get('source', item.get('displayed_link', 'web'))
+
+                    # Extract operator name heuristic: look for known patterns
+                    operator_name = None
+                    for kw in ('LLC', 'Inc', 'Corp', 'LP', 'Trust', 'Partners', 'Group', 'Holdings', 'Development', 'Homes', 'Properties'):
+                        for word_chunk in (title + ' ' + snippet).split(','):
+                            if kw.lower() in word_chunk.lower() and len(word_chunk.strip()) < 80:
+                                candidate = word_chunk.strip()
+                                if len(candidate) > 3 and len(candidate) < 80:
+                                    operator_name = candidate
+                                    break
+                        if operator_name:
+                            break
+
+                    # Extract amount heuristic: look for $X patterns
+                    amount = None
+                    import re as _re
+                    amt_match = _re.search(r'\$[\d,.]+\s*(?:million|M|billion|B|K)?', title + ' ' + snippet, _re.IGNORECASE)
+                    if amt_match:
+                        amt_str = amt_match.group(0).replace('$', '').replace(',', '').strip()
+                        multiplier = 1
+                        if 'billion' in amt_str.lower() or amt_str.upper().endswith('B'):
+                            multiplier = 1_000_000_000
+                        elif 'million' in amt_str.lower() or amt_str.upper().endswith('M'):
+                            multiplier = 1_000_000
+                        elif amt_str.upper().endswith('K'):
+                            multiplier = 1_000
+                        num_str = _re.sub(r'[a-zA-Z\s]', '', amt_str)
+                        try:
+                            amount = float(num_str) * multiplier
+                        except (ValueError, TypeError):
+                            amount = None
+
+                    filing_date = date.today().isoformat()
+                    sig_id = str(uuid.uuid4())
+
+                    c.execute('''INSERT INTO government_signals
+                                 (id, city, state, signal_type, operator_name, operator_aliases,
+                                  project_name, amount, filing_date, source_url, source_name,
+                                  summary, raw_payload)
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                              (sig_id, city, state, sig_type, operator_name, None,
+                               None, amount, filing_date, source_url, source_name,
+                               (snippet or title)[:500], json.dumps(item)))
+
+                    inserted_this_batch += 1
+                    city_count += 1
+                    total_inserted += 1
+
+                conn.commit()
+                conn.close()
+
+                app.logger.info(f'[gov-signals] {sig_type}/{city_key}: inserted {inserted_this_batch}, skipped dupes')
+
+            except Exception as e:
+                app.logger.error(f'[gov-signals] Error fetching {sig_type} for {city_key}: {e}')
+                continue
+
+        city_stats[city_key] = city_count
+
+    app.logger.info(f'[gov-signals] Refresh complete: {total_inserted} inserted, {total_skipped} skipped. Per-city: {city_stats}')
+    return {'inserted': total_inserted, 'skipped': total_skipped, 'city_stats': city_stats}
+
+
+def _scheduled_gov_signals():
+    """Wrapper for scheduled government signal refresh."""
+    try:
+        from queue_config import enqueue
+        enqueue(refresh_government_signals, job_timeout=600)
+    except Exception as e:
+        print(f"[Scheduler] Gov signals refresh error: {e}")
+
+
+@app.route('/api/government-signals', methods=['GET'])
+@require_auth
+def api_government_signals():
+    """Query government signals for a city/state. Returns strict ok/error shape."""
+    city = request.args.get('city', '').strip()
+    state = request.args.get('state', '').strip().upper()
+    try:
+        days = min(int(request.args.get('days', 90)), 365)
+    except (ValueError, TypeError):
+        days = 90
+
+    if not city or not state:
+        return jsonify({'ok': False, 'error': 'city and state parameters are required'}), 400
+
+    try:
+        cutoff = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%d')
+        conn = sqlite3.connect('prospects.db')
+        c = conn.cursor()
+        c.execute('''SELECT id, city, state, signal_type, operator_name, operator_aliases,
+                            project_name, amount, filing_date, source_url, source_name,
+                            summary, created_at
+                     FROM government_signals
+                     WHERE LOWER(city) = LOWER(?) AND state = ? AND filing_date >= ?
+                     ORDER BY filing_date DESC
+                     LIMIT 200''',
+                  (city, state, cutoff))
+
+        signals = []
+        for row in c.fetchall():
+            aliases = []
+            try:
+                aliases = json.loads(row[5]) if row[5] else []
+            except (json.JSONDecodeError, TypeError):
+                pass
+            signals.append({
+                'id': row[0],
+                'city': row[1],
+                'state': row[2],
+                'signal_type': row[3],
+                'operator_name': row[4],
+                'operator_aliases': aliases,
+                'project_name': row[6],
+                'amount': row[7],
+                'filing_date': row[8],
+                'source_url': row[9],
+                'source_name': row[10],
+                'summary': row[11],
+                'created_at': row[12],
+            })
+        conn.close()
+
+        app.logger.info(f'[gov-signals-api] city={city}, state={state}, days={days}, count={len(signals)}')
+
+        return jsonify({
+            'ok': True,
+            'data': signals,
+            'meta': {'count': len(signals), 'generated_at': datetime.utcnow().isoformat(),
+                     'params': {'city': city, 'state': state, 'days': days}},
+        })
+    except Exception as e:
+        app.logger.error(f'[gov-signals-api] Error: {e}')
+        return jsonify({'ok': False, 'error': 'Failed to query government signals', 'details': str(e)}), 500
+
+
+def _normalize_name(name):
+    """Normalize a company name for fuzzy matching: lowercase, strip punctuation, common suffixes."""
+    import re as _re
+    if not name:
+        return ''
+    n = name.lower().strip()
+    n = _re.sub(r'[^a-z0-9\s]', '', n)
+    for suffix in ('llc', 'inc', 'corp', 'lp', 'ltd', 'co', 'company', 'group', 'holdings', 'properties', 'development', 'homes', 'partners'):
+        n = _re.sub(r'\b' + suffix + r'\b', '', n)
+    return ' '.join(n.split())
+
+
+def _token_overlap_score(a, b):
+    """Simple token overlap ratio between two normalized strings."""
+    tokens_a = set(a.split())
+    tokens_b = set(b.split())
+    if not tokens_a or not tokens_b:
+        return 0.0
+    overlap = tokens_a & tokens_b
+    return len(overlap) / min(len(tokens_a), len(tokens_b))
+
+
+def enrich_prospects_with_gov_signals(prospects):
+    """
+    Given a list of prospect dicts (with 'company', 'city', 'state'),
+    attach 'government_activity' array to each. Single DB query + in-memory matching.
+    Never fails the caller — returns prospects unchanged on error.
+    """
+    import time as _time
+    t0 = _time.time()
+
+    try:
+        # Collect unique (city, state) pairs
+        city_state_pairs = set()
+        for p in prospects:
+            city = (p.get('city') or '').strip()
+            state = (p.get('state') or '').strip().upper()
+            if city and state:
+                city_state_pairs.add((city.lower(), state))
+
+        if not city_state_pairs:
+            for p in prospects:
+                p['government_activity'] = []
+            return prospects
+
+        # Single DB query for all relevant signals (last 90 days)
+        cutoff = (datetime.utcnow() - timedelta(days=90)).strftime('%Y-%m-%d')
+        conn = sqlite3.connect('prospects.db')
+        c = conn.cursor()
+
+        # Build OR clauses for each city/state pair
+        clauses = []
+        params = []
+        for city_lower, state in city_state_pairs:
+            clauses.append('(LOWER(city) = ? AND state = ?)')
+            params.extend([city_lower, state])
+        params.append(cutoff)
+
+        query = f'''SELECT city, state, signal_type, operator_name, operator_aliases,
+                           filing_date, summary, amount, source_url, source_name
+                    FROM government_signals
+                    WHERE ({' OR '.join(clauses)}) AND filing_date >= ?
+                    ORDER BY filing_date DESC'''
+        c.execute(query, params)
+
+        # Index signals by (city_lower, state)
+        signals_by_location = {}
+        for row in c.fetchall():
+            key = (row[0].lower(), row[1])
+            if key not in signals_by_location:
+                signals_by_location[key] = []
+            aliases = []
+            try:
+                aliases = json.loads(row[4]) if row[4] else []
+            except (json.JSONDecodeError, TypeError):
+                pass
+            signals_by_location[key].append({
+                'signal_type': row[2],
+                'operator_name': row[3],
+                'operator_aliases': aliases,
+                'filing_date': row[5],
+                'summary': row[6],
+                'amount': row[7],
+                'source_url': row[8],
+                'source_name': row[9],
+            })
+        conn.close()
+
+        enriched_count = 0
+        for p in prospects:
+            city = (p.get('city') or '').strip()
+            state = (p.get('state') or '').strip().upper()
+            company = p.get('company', '')
+            key = (city.lower(), state)
+
+            gov_activity = []
+            location_signals = signals_by_location.get(key, [])
+
+            if location_signals and company:
+                norm_company = _normalize_name(company)
+                for sig in location_signals:
+                    matched = False
+                    # Exact match on operator_name
+                    if sig['operator_name'] and _normalize_name(sig['operator_name']) == norm_company:
+                        matched = True
+                    # Match any alias
+                    if not matched and sig['operator_aliases']:
+                        for alias in sig['operator_aliases']:
+                            if _normalize_name(alias) == norm_company:
+                                matched = True
+                                break
+                    # Conservative fuzzy: token overlap >= 0.6
+                    if not matched and sig['operator_name']:
+                        if _token_overlap_score(norm_company, _normalize_name(sig['operator_name'])) >= 0.6:
+                            matched = True
+
+                    if matched:
+                        gov_activity.append({
+                            'signal_type': sig['signal_type'],
+                            'filing_date': sig['filing_date'],
+                            'summary': sig['summary'],
+                            'amount': sig['amount'],
+                            'source_url': sig['source_url'],
+                            'source_name': sig['source_name'],
+                        })
+
+            # Also attach unmatched location signals as location-level context
+            # if no operator match found, still show location signals (capped at 5)
+            if not gov_activity and location_signals:
+                for sig in location_signals[:5]:
+                    gov_activity.append({
+                        'signal_type': sig['signal_type'],
+                        'filing_date': sig['filing_date'],
+                        'summary': sig['summary'],
+                        'amount': sig['amount'],
+                        'source_url': sig['source_url'],
+                        'source_name': sig['source_name'],
+                    })
+
+            p['government_activity'] = gov_activity
+            if gov_activity:
+                enriched_count += 1
+
+        elapsed = round(_time.time() - t0, 3)
+        app.logger.info(f'[gov-enrich] {enriched_count}/{len(prospects)} prospects enriched with gov signals in {elapsed}s')
+
+    except Exception as e:
+        app.logger.error(f'[gov-enrich] Error enriching prospects: {e}')
+        # Never fail — return prospects without gov data
+        for p in prospects:
+            if 'government_activity' not in p:
+                p['government_activity'] = []
+
+    return prospects
+
+
 # --- Scheduler Setup ---
 def _scheduled_discovery():
     """Wrapper that enqueues the scheduled discovery job (runs ALL adapters including permits)."""
@@ -4937,11 +5354,19 @@ _scheduler.add_job(
     name='Daily Signal Optimization',
     replace_existing=True
 )
+_scheduler.add_job(
+    _scheduled_gov_signals,
+    CronTrigger(hour=5, minute=30, timezone=pytz.timezone('America/Los_Angeles')),
+    id='daily_gov_signals',
+    name='Daily Government Signals Refresh',
+    replace_existing=True
+)
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
 print("[Scheduler] Daily signal optimization at 6:45 AM PT")
 print("[Scheduler] Daily trend detection at 7:30 AM PT")
 print("[Scheduler] Weekly Sunbelt Brief every Monday 7:00 AM PT")
+print("[Scheduler] Daily government signals refresh at 5:30 AM PT")
 
 
 if __name__ == '__main__':
