@@ -923,6 +923,7 @@
             const [showEmailOptions, setShowEmailOptions] = useState(false);
             const [whyNowExpanded, setWhyNowExpanded] = useState(false);
             const [showTimingDetail, setShowTimingDetail] = useState(false);
+            const [showGovSignals, setShowGovSignals] = useState(false);
             const [emailPurpose, setEmailPurpose] = useState('cold_outreach');
             const [tone, setTone] = useState('professional_direct');
             const [offer, setOffer] = useState('15_min_call');
@@ -951,6 +952,7 @@
             const swimLane = prospect.swim_lane_fit_score || 0;
             const unitBand = prospect.unit_band || '';
             const competitiveDifficulty = prospect.competitive_difficulty || '';
+            const govActivity = prospect.government_activity || [];
 
             // Score badge border + glow
             let scoreBorderColor = '#475569';
@@ -1017,6 +1019,22 @@
                                     letterSpacing: '0.02em',
                                 }}>
                                     Swim Fit {swimLane}
+                                </div>
+                            )}
+                            {govActivity.length > 0 && (
+                                <div onClick={() => setShowGovSignals(!showGovSignals)} style={{
+                                    fontSize: '0.7rem',
+                                    padding: '0.2rem 0.55rem',
+                                    borderRadius: '6px',
+                                    background: 'rgba(245,158,11,0.15)',
+                                    color: '#fcd34d',
+                                    border: '1px solid rgba(245,158,11,0.3)',
+                                    fontWeight: 700,
+                                    letterSpacing: '0.03em',
+                                    textTransform: 'uppercase',
+                                    cursor: 'pointer',
+                                }}>
+                                    Gov Signals {govActivity.length}
                                 </div>
                             )}
                             <div style={{
@@ -1173,6 +1191,44 @@
                                     <li key={idx} style={styles.signalItem}>&#9656; {signal}</li>
                                 ))}
                             </ul>
+                        </div>
+                    )}
+
+                    {/* Government Signals */}
+                    {showGovSignals && govActivity.length > 0 && (
+                        <div style={{padding: '0.75rem', background: 'rgba(245,158,11,0.04)', border: '1px solid rgba(245,158,11,0.15)', borderRadius: '8px'}}>
+                            <div style={{fontSize: '0.65rem', color: '#f59e0b', fontWeight: 600, marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Government Activity ({govActivity.length})</div>
+                            {govActivity.map((sig, idx) => (
+                                <div key={idx} style={{marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: idx < govActivity.length - 1 ? '1px solid rgba(245,158,11,0.1)' : 'none'}}>
+                                    <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem'}}>
+                                        <span style={{
+                                            fontSize: '0.65rem',
+                                            padding: '0.1rem 0.4rem',
+                                            borderRadius: '4px',
+                                            background: sig.signal_type === 'permit' ? 'rgba(6,182,212,0.15)' :
+                                                         sig.signal_type === 'zoning' ? 'rgba(139,92,246,0.15)' :
+                                                         sig.signal_type === 'deed' ? 'rgba(16,185,129,0.15)' :
+                                                         sig.signal_type === 'mortgage' ? 'rgba(239,68,68,0.15)' :
+                                                         'rgba(148,163,184,0.15)',
+                                            color: sig.signal_type === 'permit' ? '#67e8f9' :
+                                                   sig.signal_type === 'zoning' ? '#c4b5fd' :
+                                                   sig.signal_type === 'deed' ? '#6ee7b7' :
+                                                   sig.signal_type === 'mortgage' ? '#fca5a5' :
+                                                   '#94a3b8',
+                                            fontWeight: 600,
+                                            textTransform: 'uppercase',
+                                        }}>{sig.signal_type}</span>
+                                        <span style={{fontSize: '0.7rem', color: '#64748b'}}>{sig.filing_date}</span>
+                                        {sig.amount && <span style={{fontSize: '0.7rem', color: '#fcd34d'}}>${typeof sig.amount === 'number' ? sig.amount.toLocaleString() : sig.amount}</span>}
+                                    </div>
+                                    <div style={{fontSize: '0.78rem', color: '#cbd5e1', lineHeight: '1.4'}}>{sig.summary}</div>
+                                    {sig.source_url && (
+                                        <a href={sig.source_url} target="_blank" rel="noopener noreferrer" style={{fontSize: '0.7rem', color: '#60a5fa', textDecoration: 'none'}}>
+                                            {sig.source_name || 'Source'} &#8599;
+                                        </a>
+                                    )}
+                                </div>
+                            ))}
                         </div>
                     )}
 
