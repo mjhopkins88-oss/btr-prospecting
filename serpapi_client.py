@@ -13,8 +13,7 @@ from datetime import datetime, timedelta
 import requests
 
 from rate_limit import serp_limiter
-
-DB_PATH = 'prospects.db'
+from db import get_db as _get_db_central
 SERPAPI_KEY = os.getenv('SERPAPI_API_KEY', '')
 SERPAPI_URL = 'https://serpapi.com/search.json'
 
@@ -82,9 +81,7 @@ def serpapi_search(query, num=10):
 # ---------------------------------------------------------------------------
 
 def _get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    return _get_db_central()
 
 
 def get_cached(cache_key):

@@ -20,8 +20,9 @@ import os
 
 from discovery_config import ADAPTER_CONFIG, MAX_ITEMS_PER_DAY
 from discovery_rate_limiter import discovery_limiter
+from db import get_db as _get_db_central
 
-DB_PATH = 'prospects.db'
+# DB_PATH removed — all DB access via db.get_db()
 
 # Legacy news query patterns per city
 DISCOVERY_QUERIES = [
@@ -34,9 +35,7 @@ def _serpapi_available():
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    return _get_db_central()
 
 
 def compute_fingerprint(title, url, city, state):

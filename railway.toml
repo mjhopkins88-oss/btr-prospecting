@@ -2,7 +2,7 @@
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120"
+startCommand = "python -c 'from app import init_db; init_db(); print(\"[Deploy] Schema migration complete\")' && gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120"
 healthcheckPath = "/health"
 healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"

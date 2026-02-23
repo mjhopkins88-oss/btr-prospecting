@@ -17,6 +17,7 @@ import io
 import anthropic
 from dotenv import load_dotenv
 import sqlite3
+from db import get_db as _get_db_conn, is_postgres as _is_postgres
 import re
 import threading
 import traceback
@@ -93,10 +94,51 @@ DISCOVERY_CONFIG = {
 _discovery_running = False
 
 # Database setup
+_IS_PRODUCTION = os.getenv('RAILWAY_ENVIRONMENT', '') != '' or os.getenv('RAILWAY_PROJECT_ID', '') != ''
+
+def _adapt_schema_sql(sql):
+    """Adapt CREATE TABLE SQL for PostgreSQL when needed."""
+    if not _is_postgres():
+        return sql
+    # INTEGER PRIMARY KEY AUTOINCREMENT -> SERIAL PRIMARY KEY
+    sql = sql.replace('INTEGER PRIMARY KEY AUTOINCREMENT', 'SERIAL PRIMARY KEY')
+    # BOOLEAN DEFAULT 0/1 -> BOOLEAN DEFAULT FALSE/TRUE (only for BOOLEAN columns)
+    sql = re.sub(r'BOOLEAN\s+(NOT\s+NULL\s+)?DEFAULT\s+0', r'BOOLEAN \1DEFAULT FALSE', sql)
+    sql = re.sub(r'BOOLEAN\s+(NOT\s+NULL\s+)?DEFAULT\s+1', r'BOOLEAN \1DEFAULT TRUE', sql)
+    return sql
+
+def _safe_add_column(cursor, table, column, definition):
+    """Add a column if it doesn't exist. Works on both SQLite and PostgreSQL."""
+    try:
+        if _is_postgres():
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}")
+        else:
+            cursor.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
+    except Exception:
+        pass  # column already exists
+
 def init_db():
-    """Initialize SQLite database"""
-    conn = sqlite3.connect('prospects.db')
-    c = conn.cursor()
+    """Initialize database schema (non-destructive, additive only).
+    All CREATE TABLE statements are automatically adapted for PostgreSQL.
+    Uses IF NOT EXISTS to be safely re-runnable (migration-safe).
+    """
+    conn = _get_db_conn()
+    _real_cursor = conn.cursor()
+
+    class _SchemaExecProxy:
+        """Proxy that auto-adapts schema SQL for the target database engine."""
+        def execute(self, sql, params=None):
+            adapted = _adapt_schema_sql(sql)
+            if params:
+                _real_cursor.execute(adapted, params)
+            else:
+                _real_cursor.execute(adapted)
+        def fetchone(self):
+            return _real_cursor.fetchone()
+        def fetchall(self):
+            return _real_cursor.fetchall()
+    c = _SchemaExecProxy()
+
     c.execute('''
         CREATE TABLE IF NOT EXISTS prospects (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -149,10 +191,7 @@ def init_db():
         )
     ''')
     # Add adapter_stats column if missing (migration for existing DBs)
-    try:
-        c.execute("SELECT adapter_stats FROM discovery_runs LIMIT 1")
-    except sqlite3.OperationalError:
-        c.execute("ALTER TABLE discovery_runs ADD COLUMN adapter_stats TEXT")
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'discovery_runs', 'adapter_stats', 'TEXT')
     c.execute('''
         CREATE TABLE IF NOT EXISTS prospecting_runs (
             id TEXT PRIMARY KEY,
@@ -187,10 +226,7 @@ def init_db():
         )
     ''')
     # Add score_meta column if missing (migration for existing DBs)
-    try:
-        c.execute("SELECT score_meta FROM run_prospects LIMIT 1")
-    except sqlite3.OperationalError:
-        c.execute("ALTER TABLE run_prospects ADD COLUMN score_meta TEXT")
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'run_prospects', 'score_meta', 'TEXT')
     c.execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_score ON run_prospects(run_id, score DESC)')
     c.execute('''
         CREATE TABLE IF NOT EXISTS discovery_signal_seen (
@@ -236,13 +272,11 @@ def init_db():
         )
     ''')
     # Migration: add columns if missing on existing databases
-    for col, defn in [('is_super_admin', 'BOOLEAN NOT NULL DEFAULT 0'),
-                      ('is_disabled', 'BOOLEAN NOT NULL DEFAULT 0'),
+    _col_target = _real_cursor if _is_postgres() else c
+    for col, defn in [('is_super_admin', 'BOOLEAN NOT NULL DEFAULT FALSE' if _is_postgres() else 'BOOLEAN NOT NULL DEFAULT 0'),
+                      ('is_disabled', 'BOOLEAN NOT NULL DEFAULT FALSE' if _is_postgres() else 'BOOLEAN NOT NULL DEFAULT 0'),
                       ('last_login_at', 'TIMESTAMP')]:
-        try:
-            c.execute(f'ALTER TABLE users ADD COLUMN {col} {defn}')
-        except sqlite3.OperationalError:
-            pass  # column already exists
+        _safe_add_column(_col_target, 'users', col, defn)
     c.execute('''
         CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
@@ -569,11 +603,11 @@ def init_db():
     ''')
     try:
         c.execute('CREATE INDEX IF NOT EXISTS idx_gov_signals_city_date ON government_signals (state, city, filing_date DESC)')
-    except sqlite3.OperationalError:
+    except Exception:
         pass
     try:
         c.execute('CREATE INDEX IF NOT EXISTS idx_gov_signals_type_date ON government_signals (signal_type, filing_date DESC)')
-    except sqlite3.OperationalError:
+    except Exception:
         pass
 
     conn.commit()
@@ -601,7 +635,7 @@ def _get_session_user(conn=None):
         return None, None
     close_conn = False
     if conn is None:
-        conn = sqlite3.connect('prospects.db')
+        conn = _get_db_conn()
         close_conn = True
     c = conn.cursor()
     c.execute('''
@@ -637,7 +671,7 @@ def _get_session_user(conn=None):
 
 def _has_users():
     """Check if any users exist in the database."""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT COUNT(*) FROM users')
     count = c.fetchone()[0]
@@ -727,7 +761,7 @@ def _make_prospect_key(company_name, website=None, city=None, state=None):
 def _cleanup_expired_sessions():
     """Remove expired sessions to prevent DB bloat. Called during login."""
     try:
-        conn = sqlite3.connect('prospects.db')
+        conn = _get_db_conn()
         c = conn.cursor()
         c.execute('DELETE FROM sessions WHERE expires_at < ?', (datetime.utcnow().isoformat(),))
         conn.commit()
@@ -757,7 +791,7 @@ def api_auth_bootstrap():
 
     is_super = 1 if email == SUPER_ADMIN_EMAIL else 0
 
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     now = datetime.utcnow().isoformat()
     try:
@@ -804,7 +838,7 @@ def api_auth_login():
     if not _check_login_rate(email):
         return jsonify({'success': False, 'message': 'Too many login attempts. Try again in 10 minutes.'}), 429
 
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id, workspace_id, name, email, password_hash, role, is_super_admin, is_disabled FROM users WHERE email = ?', (email,))
     row = c.fetchone()
@@ -850,7 +884,7 @@ def api_auth_logout():
     """Logout: invalidate session."""
     token = request.cookies.get('session_token')
     if token:
-        conn = sqlite3.connect('prospects.db')
+        conn = _get_db_conn()
         c = conn.cursor()
         c.execute('DELETE FROM sessions WHERE session_token = ?', (token,))
         conn.commit()
@@ -883,7 +917,7 @@ def api_auth_has_users():
 @require_role('admin')
 def api_auth_list_users():
     """Admin: list all users in workspace."""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id, name, email, role, created_at FROM users WHERE workspace_id = ?', (g.workspace_id,))
     users = [{'id': r[0], 'name': r[1], 'email': r[2], 'role': r[3], 'created_at': r[4]} for r in c.fetchall()]
@@ -912,7 +946,7 @@ def api_auth_create_user():
     user_id = str(uuid.uuid4())
     password_hash = _hash_password(password)
 
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     try:
         c.execute('INSERT INTO users (id, workspace_id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?, ?)',
@@ -938,7 +972,7 @@ def _log_admin_event(conn, workspace_id, actor_id, action, target_id=None, detai
 @require_super_admin
 def api_admin_list_users():
     """Super admin: list all users in workspace with full details."""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('''SELECT id, name, email, role, is_super_admin, is_disabled, last_login_at, created_at
                  FROM users WHERE workspace_id = ? ORDER BY created_at''', (g.workspace_id,))
@@ -974,7 +1008,7 @@ def api_admin_create_user():
     user_id = str(uuid.uuid4())
     password_hash = _hash_password(password)
 
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     try:
         c.execute('''INSERT INTO users (id, workspace_id, name, email, password_hash, role, is_super_admin)
@@ -995,7 +1029,7 @@ def api_admin_create_user():
 @require_super_admin
 def api_admin_disable_user(user_id):
     """Super admin: disable or enable a user account."""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id, email, is_super_admin, is_disabled FROM users WHERE id = ? AND workspace_id = ?',
               (user_id, g.workspace_id))
@@ -1027,7 +1061,7 @@ def api_admin_disable_user(user_id):
 @require_super_admin
 def api_admin_delete_user(user_id):
     """Super admin: hard-delete a user account."""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id, email, is_super_admin FROM users WHERE id = ? AND workspace_id = ?',
               (user_id, g.workspace_id))
@@ -1062,7 +1096,7 @@ def api_admin_reset_password(user_id):
     if len(new_password) < 8:
         return jsonify({'success': False, 'message': 'Password must be at least 8 characters'}), 400
 
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id, email FROM users WHERE id = ? AND workspace_id = ?', (user_id, g.workspace_id))
     row = c.fetchone()
@@ -1125,7 +1159,7 @@ def resolve_county(city, state, street=None, zip_code=None):
     cache_key = '|'.join(parts)
 
     # Check cache
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     cutoff = (datetime.utcnow() - timedelta(days=_COUNTY_CACHE_DAYS)).isoformat()
     c.execute('SELECT county, candidates, confidence FROM county_cache WHERE cache_key = ? AND created_at > ?',
@@ -1221,7 +1255,7 @@ def resolve_grouping(state, county):
     cn = _normalize_county(county) if county else None
 
     if cn:
-        conn = sqlite3.connect('prospects.db')
+        conn = _get_db_conn()
         c = conn.cursor()
         c.execute('SELECT group_name FROM county_group_map WHERE state = ? AND county_name = ?', (st, cn))
         row = c.fetchone()
@@ -1257,7 +1291,7 @@ def calculate_quote(sqft, rc_per_sf, loss_rents, group_rate_x100, aop_buydown):
 @require_role('admin')
 def api_quotes_rates():
     """Return all rate groups."""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id, name, rate, rate_x100 FROM rate_groups ORDER BY name')
     groups = [{'id': r[0], 'name': r[1], 'rate': r[2], 'rate_x100': r[3]} for r in c.fetchall()]
@@ -1324,7 +1358,7 @@ def api_quotes_property():
         warnings.append(f'No county mapping found for {county}, {state}. Using fallback: {group_name}')
 
     # Look up rate
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT rate_x100 FROM rate_groups WHERE name = ?', (group_name,))
     row = c.fetchone()
@@ -1369,7 +1403,7 @@ def api_quotes_property():
 @require_role('admin')
 def api_quotes_history():
     """Return recent quotes for the current user."""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     uid = g.user['id'] if g.user else None
     c.execute('''SELECT id, sqft, rc_per_sf, loss_rents, city, state, county, grouping_name,
@@ -1396,7 +1430,7 @@ def api_quotes_history():
 @require_super_admin
 def api_admin_rate_groups_list():
     """Super admin: list all rate groups."""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id, name, rate, rate_x100, created_at FROM rate_groups ORDER BY name')
     groups = [{'id': r[0], 'name': r[1], 'rate': r[2], 'rate_x100': r[3], 'created_at': r[4]} for r in c.fetchall()]
@@ -1415,7 +1449,7 @@ def api_admin_rate_groups_create():
     rate_x100 = data.get('rate_x100')
     if not name or rate is None or rate_x100 is None:
         return jsonify({'success': False, 'message': 'name, rate, and rate_x100 are required'}), 400
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     gid = str(uuid.uuid4())
     try:
@@ -1435,7 +1469,7 @@ def api_admin_rate_groups_create():
 def api_admin_rate_groups_update(group_id):
     """Super admin: update a rate group."""
     data = request.json or {}
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id FROM rate_groups WHERE id = ?', (group_id,))
     if not c.fetchone():
@@ -1468,7 +1502,7 @@ def api_admin_rate_groups_update(group_id):
 def api_admin_county_mapping_list():
     """Super admin: list county-to-group mappings."""
     state_filter = request.args.get('state', '').strip().upper()
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     if state_filter:
         c.execute('SELECT id, state, county_name, group_name, created_at FROM county_group_map WHERE state = ? ORDER BY county_name', (state_filter,))
@@ -1490,7 +1524,7 @@ def api_admin_county_mapping_create():
     group_name = (data.get('group_name') or '').strip()
     if not state or not county_name or not group_name:
         return jsonify({'success': False, 'message': 'state, county_name, and group_name are required'}), 400
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     # Verify group exists
     c.execute('SELECT id FROM rate_groups WHERE name = ?', (group_name,))
@@ -1516,7 +1550,7 @@ def api_admin_county_mapping_create():
 @require_super_admin
 def api_admin_county_mapping_delete(mapping_id):
     """Super admin: delete a county mapping."""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('DELETE FROM county_group_map WHERE id = ?', (mapping_id,))
     conn.commit()
@@ -1554,7 +1588,7 @@ def api_crm_upsert_lead():
     if not prospect_key or not company_name:
         return jsonify({'success': False, 'message': 'prospect_key and company_name are required'}), 400
 
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     ws = g.workspace_id
 
@@ -1607,7 +1641,7 @@ def api_crm_list_leads():
     if not g.user:
         return jsonify({'success': True, 'leads': []})
     ws = g.workspace_id
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
 
     query = '''
@@ -1665,7 +1699,7 @@ def api_crm_update_lead(lead_id):
     if not g.user:
         return jsonify({'success': False, 'message': 'Auth required'}), 401
     data = request.json or {}
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
 
     # Verify lead belongs to workspace — fetch current values for activity log
@@ -1733,7 +1767,7 @@ def api_crm_add_touchpoint(lead_id):
     if not touch_type:
         return jsonify({'success': False, 'message': 'type is required'}), 400
 
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
 
     # Verify lead belongs to workspace and check ownership
@@ -1784,7 +1818,7 @@ def api_crm_list_touchpoints(lead_id):
     """Get all touchpoints for a lead."""
     if not g.user:
         return jsonify({'success': True, 'touchpoints': []})
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
 
     c.execute('''
@@ -1815,7 +1849,7 @@ def api_crm_assign_lead(lead_id):
     data = request.json or {}
     new_owner_id = data.get('owner_id')  # null = unassign
 
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
 
     # Verify lead belongs to workspace and get current owner
@@ -1855,7 +1889,7 @@ def api_crm_workspace_users():
     """List users in the current workspace (for assignment dropdowns)."""
     if not g.user:
         return jsonify({'success': True, 'users': []})
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id, name, role FROM users WHERE workspace_id = ? AND is_disabled = 0 ORDER BY name',
               (g.workspace_id,))
@@ -1870,7 +1904,7 @@ def api_crm_lead_activity(lead_id):
     """Get activity timeline for a lead. Admin sees any; producer only own leads."""
     if not g.user:
         return jsonify({'success': False, 'message': 'Auth required'}), 401
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
 
     # Verify lead exists in workspace and check ownership
@@ -1919,7 +1953,7 @@ def api_admin_activity_overview():
     date_to = request.args.get('date_to')
     limit_val = min(int(request.args.get('limit', 50)), 200)
 
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
 
     query = '''
@@ -1978,7 +2012,7 @@ def api_crm_bulk_status():
     if not keys:
         return jsonify({'success': True, 'statuses': {}})
 
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     placeholders = ','.join('?' * len(keys))
     c.execute(f'''
@@ -2359,7 +2393,7 @@ CRITICAL: Return ONLY the JSON object, no other text. Only include companies cle
 
 def get_existing_companies(city=None):
     """Get list of company names already in the database, optionally filtered by city"""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     if city:
         c.execute('SELECT DISTINCT company FROM prospects WHERE LOWER(city) LIKE ? OR LOWER(state) LIKE ?',
@@ -2372,7 +2406,7 @@ def get_existing_companies(city=None):
 
 def save_prospects_to_db(prospects):
     """Save prospects to SQLite database"""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     
     saved_count = 0
@@ -2410,7 +2444,7 @@ def save_prospects_to_db(prospects):
 
 def get_all_prospects_from_db():
     """Retrieve all prospects from database"""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT * FROM prospects ORDER BY score DESC, created_at DESC')
     
@@ -2495,7 +2529,7 @@ def run_daily_discovery(is_scheduled=False):
         results, digest, total_new, adapter_stats = run_discovery_job(config, is_scheduled=is_scheduled)
 
         # Save run record
-        conn = sqlite3.connect('prospects.db')
+        conn = _get_db_conn()
         c = conn.cursor()
         c.execute('''
             INSERT INTO discovery_runs (results_json, digest_text, city_count, total_new, status, adapter_stats)
@@ -2562,15 +2596,36 @@ def health():
 
 @app.route('/api/health')
 def api_health():
-    """API health check endpoint"""
+    """API health check endpoint with DB persistence verification."""
     api_key = os.getenv('ANTHROPIC_API_KEY')
     key_status = 'not set'
     if api_key and api_key != 'your_anthropic_api_key_here':
         key_status = f'configured (ends in ...{api_key[-4:]})'
+
+    # DB type and table counts for persistence verification
+    db_type = 'postgres' if _is_postgres() else 'sqlite'
+    table_counts = {}
+    try:
+        conn = _get_db_conn()
+        c = conn.cursor()
+        for table in ['users', 'crm_leads', 'crm_companies', 'prospecting_runs',
+                      'run_prospects', 'discovery_runs', 'government_signals']:
+            try:
+                c.execute(f'SELECT COUNT(*) FROM {table}')
+                table_counts[table] = c.fetchone()[0]
+            except Exception:
+                table_counts[table] = -1
+        conn.close()
+    except Exception as e:
+        table_counts = {'error': str(e)}
+
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
-        'api_key_status': key_status
+        'api_key_status': key_status,
+        'db_type': db_type,
+        'db_table_counts': table_counts,
+        'railway': bool(os.getenv('RAILWAY_ENVIRONMENT', '')),
     }), 200
 
 @app.route('/api/search', methods=['POST'])
@@ -2648,7 +2703,7 @@ def api_get_prospects():
 def api_delete_prospect(prospect_id):
     """Delete a prospect"""
     try:
-        conn = sqlite3.connect('prospects.db')
+        conn = _get_db_conn()
         c = conn.cursor()
         c.execute('DELETE FROM prospects WHERE id = ?', (prospect_id,))
         conn.commit()
@@ -2902,7 +2957,7 @@ def api_start_prospecting_run():
         }
 
         # Create run record
-        conn = sqlite3.connect('prospects.db')
+        conn = _get_db_conn()
         c = conn.cursor()
         c.execute('''
             INSERT INTO prospecting_runs (id, status, search_params, created_at, updated_at)
@@ -2933,7 +2988,7 @@ def api_start_prospecting_run():
 @require_auth
 def api_prospecting_run_status(run_id):
     """Poll the status of a prospecting run."""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT status, total_prospects, error, created_at, completed_at FROM prospecting_runs WHERE id = ?',
               (run_id,))
@@ -2961,7 +3016,7 @@ def api_prospecting_run_results(run_id):
     limit = min(int(request.args.get('limit', 50)), 200)
     offset = int(request.args.get('offset', 0))
 
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
 
     # Total count
@@ -3066,7 +3121,7 @@ def api_update_discovery_config():
 @require_auth
 def api_discovery_latest():
     """Get the most recent discovery run"""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT * FROM discovery_runs ORDER BY run_at DESC LIMIT 1')
     row = c.fetchone()
@@ -3126,7 +3181,7 @@ def api_discovery_status():
 @require_auth
 def api_discovery_history():
     """Get past discovery run summaries"""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id, run_at, city_count, total_new, status FROM discovery_runs ORDER BY run_at DESC LIMIT 20')
     runs = []
@@ -3143,7 +3198,7 @@ def api_discovery_history():
 @require_auth
 def api_discovery_run_detail(run_id):
     """Get full results for a specific discovery run"""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT * FROM discovery_runs WHERE id = ?', (run_id,))
     row = c.fetchone()
@@ -3518,7 +3573,7 @@ def materialize_weighted_signals(days=90):
         print("[WeightedSignals] No signals to materialize.")
         return 0
 
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
     c.execute('DELETE FROM weighted_signals WHERE published_at < ? OR published_at IS NULL', (cutoff,))
@@ -3566,7 +3621,7 @@ def compute_market_momentum():
     cutoff_14d = (now - timedelta(days=14)).isoformat()
     cutoff_30d = (now - timedelta(days=30)).isoformat()
 
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
 
     # Get all unique (state, city) pairs from weighted_signals in the 5 states
@@ -3632,7 +3687,7 @@ def compute_market_momentum():
 
 def _get_momentum_for_city(state, city):
     """Lookup latest momentum_score for a city. Returns (score, label) or (50, 'Stable')."""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('''
         SELECT momentum_score, momentum_label FROM market_momentum
@@ -3647,7 +3702,7 @@ def _get_momentum_for_city(state, city):
 
 def _compute_freshness_score(state, city, company_name):
     """Compute freshness (0-100) based on most recent signal for this entity/market."""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     # Look for signals matching entity or city
     c.execute('''
@@ -3680,7 +3735,7 @@ def compute_lead_timing_scores(workspace_id=None):
     Reads precomputed market_momentum. No SerpAPI calls.
     """
     print("[CallTiming] Computing lead timing scores...")
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
@@ -3755,7 +3810,7 @@ def compute_lead_timing_scores(workspace_id=None):
         print("[CallTiming] No prospects to score.")
         return 0
 
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     scored = 0
 
@@ -3889,7 +3944,7 @@ def _gather_all_signals(days=30):
     all_items = []
 
     # Source 1: discovery_runs.results_json (daily discovery signals)
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT results_json, run_at FROM discovery_runs WHERE run_at >= ? AND status = ?', (cutoff, 'completed'))
     for row in c.fetchall():
@@ -3919,7 +3974,7 @@ def _gather_all_signals(days=30):
     conn.close()
 
     # Source 2: statewide search_cache (statewide_result:* keys)
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute("SELECT cache_key, payload_json, created_at FROM search_cache WHERE cache_key LIKE 'statewide_result:%'")
     for row in c.fetchall():
@@ -3972,7 +4027,7 @@ def run_trend_detection():
             groups[key]['items_7d'] += 1
 
     # Compute trends and insert
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     computed_at = now.strftime('%Y-%m-%d')
     inserted = 0
@@ -4019,7 +4074,7 @@ def generate_weekly_brief():
     week_start = (now - timedelta(days=7)).strftime('%Y-%m-%d')
 
     # 1. Get trend signals from last 7 days
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT state, city, topic, count_7d, count_30d, trend_ratio, classification FROM trend_signals WHERE computed_at >= ? ORDER BY trend_ratio DESC', (week_start,))
     trends = [{'state': r[0], 'city': r[1], 'topic': r[2], 'count_7d': r[3], 'count_30d': r[4], 'trend_ratio': r[5], 'classification': r[6]} for r in c.fetchall()]
@@ -4105,7 +4160,7 @@ Return the brief as markdown text."""
         }
     }
 
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('INSERT INTO weekly_briefs (id, brief_json, week_start, week_end) VALUES (?, ?, ?, ?)',
               (brief_id, json.dumps(brief_data), week_start, week_end))
@@ -4126,7 +4181,7 @@ def api_intelligence_trends():
     days = min(int(request.args.get('days', 7)), 90)
     cutoff = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%d')
 
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     query = 'SELECT id, state, city, topic, count_7d, count_30d, trend_ratio, classification, computed_at FROM trend_signals WHERE computed_at >= ?'
     params = [cutoff]
@@ -4156,7 +4211,7 @@ def api_intelligence_trends():
 @require_auth
 def api_intelligence_briefs():
     """List weekly briefs (latest first)."""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id, generated_at, week_start, week_end FROM weekly_briefs ORDER BY generated_at DESC LIMIT 20')
     briefs = [{'id': r[0], 'generated_at': r[1], 'week_start': r[2], 'week_end': r[3]} for r in c.fetchall()]
@@ -4168,7 +4223,7 @@ def api_intelligence_briefs():
 @require_auth
 def api_intelligence_briefs_latest():
     """Get the latest weekly brief with full content."""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id, brief_json, generated_at, week_start, week_end FROM weekly_briefs ORDER BY generated_at DESC LIMIT 1')
     row = c.fetchone()
@@ -4191,7 +4246,7 @@ def api_intelligence_briefs_latest():
 @require_auth
 def api_intelligence_brief_detail(brief_id):
     """Get a specific weekly brief."""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id, brief_json, generated_at, week_start, week_end FROM weekly_briefs WHERE id = ?', (brief_id,))
     row = c.fetchone()
@@ -4246,7 +4301,7 @@ def api_intelligence_state_rankings():
     today = datetime.utcnow().strftime('%Y-%m-%d')
 
     # Get trend counts per state
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     cutoff_7d = (datetime.utcnow() - timedelta(days=7)).strftime('%Y-%m-%d')
     c.execute('SELECT state, COUNT(*), MAX(trend_ratio) FROM trend_signals WHERE computed_at >= ? GROUP BY state', (cutoff_7d,))
@@ -4290,7 +4345,7 @@ def api_intelligence_state_rankings():
 def api_intelligence_momentum():
     """Get market momentum data. Optional state filter."""
     state = request.args.get('state', '').upper()
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     if state:
         c.execute('''
@@ -4321,7 +4376,7 @@ def api_intelligence_momentum():
 @require_auth
 def api_intelligence_momentum_top():
     """Get top 10 cities by momentum_score."""
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     c.execute('''
         SELECT state, city, momentum_score, momentum_label, weighted_signals_7d, weighted_signals_30d
@@ -4345,7 +4400,7 @@ def api_intelligence_call_timing():
     state = request.args.get('state', '').upper()
     limit = min(int(request.args.get('limit', 50)), 200)
 
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     query = 'SELECT * FROM lead_timing_scores WHERE 1=1'
     params = []
@@ -4380,7 +4435,7 @@ def api_intelligence_call_timing_lookup():
         return jsonify({'success': True, 'scores': {}})
 
     key_list = [k.strip() for k in keys.split(',') if k.strip()]
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
     placeholders = ','.join('?' * len(key_list))
     c.execute(f'''
@@ -4440,7 +4495,7 @@ def api_intel_momentum_top_cities():
     state = request.args.get('state', '').upper()
     limit = min(int(request.args.get('limit', 10)), 50)
 
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
 
     # Get latest window_end_date
@@ -4489,7 +4544,7 @@ def api_intel_momentum_state_summary():
     Latest-day summary per state (TX/AZ/GA/NC/FL):
     total weighted_signals_7d and avg momentum_score.
     """
-    conn = sqlite3.connect('prospects.db')
+    conn = _get_db_conn()
     c = conn.cursor()
 
     # Get latest window_end_date
@@ -4977,7 +5032,7 @@ def refresh_government_signals():
                 data = resp.json()
                 organic = data.get('organic_results', [])
 
-                conn = sqlite3.connect('prospects.db')
+                conn = _get_db_conn()
                 c = conn.cursor()
 
                 # Count existing for this city+type to enforce cap of 50
@@ -5089,7 +5144,7 @@ def api_government_signals():
 
     try:
         cutoff = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%d')
-        conn = sqlite3.connect('prospects.db')
+        conn = _get_db_conn()
         c = conn.cursor()
         c.execute('''SELECT id, city, state, signal_type, operator_name, operator_aliases,
                             project_name, amount, filing_date, source_url, source_name,
@@ -5184,7 +5239,7 @@ def enrich_prospects_with_gov_signals(prospects):
 
         # Single DB query for all relevant signals (last 90 days)
         cutoff = (datetime.utcnow() - timedelta(days=90)).strftime('%Y-%m-%d')
-        conn = sqlite3.connect('prospects.db')
+        conn = _get_db_conn()
         c = conn.cursor()
 
         # Build OR clauses for each city/state pair
