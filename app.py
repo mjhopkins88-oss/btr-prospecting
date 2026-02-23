@@ -789,7 +789,7 @@ def api_auth_bootstrap():
     user_id = str(uuid.uuid4())
     password_hash = _hash_password(password)
 
-    is_super = 1 if email == SUPER_ADMIN_EMAIL else 0
+    is_super = (email == SUPER_ADMIN_EMAIL)
 
     conn = _get_db_conn()
     c = conn.cursor()
@@ -1025,8 +1025,8 @@ def api_admin_create_user():
     c = conn.cursor()
     try:
         c.execute('''INSERT INTO users (id, workspace_id, name, email, password_hash, role, is_super_admin)
-                     VALUES (?, ?, ?, ?, ?, ?, 0)''',
-                  (user_id, g.workspace_id, name, email, password_hash, role))
+                     VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                  (user_id, g.workspace_id, name, email, password_hash, role, False))
         _log_admin_event(conn, g.workspace_id, g.user['id'], 'create_user', user_id,
                          json.dumps({'name': name, 'email': email, 'role': role}))
         conn.commit()
@@ -1059,7 +1059,7 @@ def api_admin_disable_user(user_id):
         return jsonify({'success': False, 'message': 'Cannot disable your own account'}), 403
 
     new_state = not bool(row[3])
-    c.execute('UPDATE users SET is_disabled = ? WHERE id = ?', (1 if new_state else 0, user_id))
+    c.execute('UPDATE users SET is_disabled = ? WHERE id = ?', (new_state, user_id))
     if new_state:
         # Revoke all sessions for this user
         c.execute('DELETE FROM sessions WHERE user_id = ?', (user_id,))
@@ -1903,7 +1903,7 @@ def api_crm_workspace_users():
         return jsonify({'success': True, 'users': []})
     conn = _get_db_conn()
     c = conn.cursor()
-    c.execute('SELECT id, name, role FROM users WHERE workspace_id = ? AND is_disabled = 0 ORDER BY name',
+    c.execute('SELECT id, name, role FROM users WHERE workspace_id = ? AND is_disabled = FALSE ORDER BY name',
               (g.workspace_id,))
     users = [{'id': r[0], 'name': r[1], 'role': r[2]} for r in c.fetchall()]
     conn.close()
