@@ -17,7 +17,7 @@ import io
 import anthropic
 from dotenv import load_dotenv
 import sqlite3
-from db import get_db as _get_db_conn, is_postgres as _is_postgres
+from db import get_db as _get_db_conn, is_postgres as _is_postgres, IntegrityError as _IntegrityError
 import re
 import threading
 import traceback
@@ -800,17 +800,29 @@ def api_auth_bootstrap():
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
                   (user_id, workspace_id, name, email, password_hash, 'admin', is_super, now))
         conn.commit()
-    except sqlite3.IntegrityError:
+    except _IntegrityError:
+        conn.rollback()
         conn.close()
         return jsonify({'success': False, 'message': 'Email already exists'}), 400
+    except Exception as e:
+        app.logger.error(f'[Bootstrap] DB error creating workspace/user: {e}')
+        conn.rollback()
+        conn.close()
+        return jsonify({'success': False, 'message': f'Database error: {e}'}), 500
 
     # Auto-login: create session
-    session_token = secrets.token_urlsafe(48)
-    session_id = str(uuid.uuid4())
-    expires_at = (datetime.utcnow() + timedelta(hours=SESSION_DURATION_HOURS)).isoformat()
-    c.execute('INSERT INTO sessions (id, user_id, session_token, expires_at) VALUES (?, ?, ?, ?)',
-              (session_id, user_id, session_token, expires_at))
-    conn.commit()
+    try:
+        session_token = secrets.token_urlsafe(48)
+        session_id = str(uuid.uuid4())
+        expires_at = (datetime.utcnow() + timedelta(hours=SESSION_DURATION_HOURS)).isoformat()
+        c.execute('INSERT INTO sessions (id, user_id, session_token, expires_at) VALUES (?, ?, ?, ?)',
+                  (session_id, user_id, session_token, expires_at))
+        conn.commit()
+    except Exception as e:
+        app.logger.error(f'[Bootstrap] DB error creating session: {e}')
+        conn.rollback()
+        conn.close()
+        return jsonify({'success': False, 'message': f'User created but session failed: {e}'}), 500
     conn.close()
 
     resp = make_response(jsonify({
@@ -952,7 +964,8 @@ def api_auth_create_user():
         c.execute('INSERT INTO users (id, workspace_id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?, ?)',
                   (user_id, g.workspace_id, name, email, password_hash, role))
         conn.commit()
-    except sqlite3.IntegrityError:
+    except _IntegrityError:
+        conn.rollback()
         conn.close()
         return jsonify({'success': False, 'message': 'Email already exists'}), 400
     conn.close()
@@ -1017,7 +1030,8 @@ def api_admin_create_user():
         _log_admin_event(conn, g.workspace_id, g.user['id'], 'create_user', user_id,
                          json.dumps({'name': name, 'email': email, 'role': role}))
         conn.commit()
-    except sqlite3.IntegrityError:
+    except _IntegrityError:
+        conn.rollback()
         conn.close()
         return jsonify({'success': False, 'message': 'Email already exists'}), 400
     conn.close()
@@ -1239,7 +1253,8 @@ def resolve_county(city, state, street=None, zip_code=None):
     # Cache result
     try:
         c2 = conn.cursor()
-        c2.execute('INSERT OR REPLACE INTO county_cache (id, cache_key, county, candidates, confidence) VALUES (?, ?, ?, ?, ?)',
+        c2.execute('''INSERT INTO county_cache (id, cache_key, county, candidates, confidence) VALUES (?, ?, ?, ?, ?)
+                      ON CONFLICT (cache_key) DO UPDATE SET id = EXCLUDED.id, county = EXCLUDED.county, candidates = EXCLUDED.candidates, confidence = EXCLUDED.confidence''',
                    (str(uuid.uuid4()), cache_key, county, json.dumps(candidates), confidence))
         conn.commit()
     except Exception:
@@ -1456,7 +1471,8 @@ def api_admin_rate_groups_create():
         c.execute('INSERT INTO rate_groups (id, name, rate, rate_x100) VALUES (?, ?, ?, ?)',
                   (gid, name, float(rate), float(rate_x100)))
         conn.commit()
-    except sqlite3.IntegrityError:
+    except _IntegrityError:
+        conn.rollback()
         conn.close()
         return jsonify({'success': False, 'message': 'Rate group name already exists'}), 400
     conn.close()
@@ -1488,7 +1504,8 @@ def api_admin_rate_groups_update(group_id):
     try:
         c.execute(f'UPDATE rate_groups SET {", ".join(updates)} WHERE id = ?', params)
         conn.commit()
-    except sqlite3.IntegrityError:
+    except _IntegrityError:
+        conn.rollback()
         conn.close()
         return jsonify({'success': False, 'message': 'Name conflict'}), 400
     conn.close()
@@ -1532,15 +1549,10 @@ def api_admin_county_mapping_create():
         conn.close()
         return jsonify({'success': False, 'message': f'Rate group "{group_name}" not found'}), 400
     mid = str(uuid.uuid4())
-    try:
-        c.execute('INSERT INTO county_group_map (id, state, county_name, group_name) VALUES (?, ?, ?, ?)',
-                  (mid, state, county_name, group_name))
-        conn.commit()
-    except sqlite3.IntegrityError:
-        # Update existing
-        c.execute('UPDATE county_group_map SET group_name = ? WHERE state = ? AND county_name = ?',
-                  (group_name, state, county_name))
-        conn.commit()
+    c.execute('''INSERT INTO county_group_map (id, state, county_name, group_name) VALUES (?, ?, ?, ?)
+                  ON CONFLICT (state, county_name) DO UPDATE SET group_name = EXCLUDED.group_name''',
+              (mid, state, county_name, group_name))
+    conn.commit()
     conn.close()
     return jsonify({'success': True})
 
@@ -3590,18 +3602,19 @@ def materialize_weighted_signals(days=90):
             .encode()
         ).hexdigest()
 
-        try:
-            c.execute('''
-                INSERT OR REPLACE INTO weighted_signals
-                (id, state, city, topic, signal_weight, entity_name, title, summary, source, source_type, confidence, published_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (sig_id, item['state'], item['city'], item['topic'], weight,
-                  item.get('entity_name', ''), item.get('title', ''), item.get('summary', ''),
-                  item.get('source', ''), item.get('source_type', ''), item.get('confidence', 'medium'),
-                  item['date_str']))
-            inserted += 1
-        except sqlite3.IntegrityError:
-            pass
+        c.execute('''
+            INSERT INTO weighted_signals
+            (id, state, city, topic, signal_weight, entity_name, title, summary, source, source_type, confidence, published_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET
+                signal_weight = EXCLUDED.signal_weight, entity_name = EXCLUDED.entity_name,
+                title = EXCLUDED.title, summary = EXCLUDED.summary, source = EXCLUDED.source,
+                source_type = EXCLUDED.source_type, confidence = EXCLUDED.confidence, published_at = EXCLUDED.published_at
+        ''', (sig_id, item['state'], item['city'], item['topic'], weight,
+              item.get('entity_name', ''), item.get('title', ''), item.get('summary', ''),
+              item.get('source', ''), item.get('source_type', ''), item.get('confidence', 'medium'),
+              item['date_str']))
+        inserted += 1
 
     conn.commit()
     conn.close()
@@ -3665,19 +3678,21 @@ def compute_market_momentum():
             momentum_label = 'Cooling'
 
         mid = str(uuid.uuid4())
-        try:
-            c.execute('''
-                INSERT OR REPLACE INTO market_momentum
-                (id, state, city, window_end_date, signals_7d, signals_14d, signals_30d,
-                 weighted_signals_7d, weighted_signals_14d, weighted_signals_30d,
-                 momentum_score, momentum_label, computed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ''', (mid, state, city, window_end, sig_7d, sig_14d, sig_30d,
-                  wsig_7d, wsig_14d, wsig_30d,
-                  round(momentum_score, 1), momentum_label))
-            inserted += 1
-        except sqlite3.IntegrityError:
-            pass
+        c.execute('''
+            INSERT INTO market_momentum
+            (id, state, city, window_end_date, signals_7d, signals_14d, signals_30d,
+             weighted_signals_7d, weighted_signals_14d, weighted_signals_30d,
+             momentum_score, momentum_label, computed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT (state, city, window_end_date) DO UPDATE SET
+                id = EXCLUDED.id, signals_7d = EXCLUDED.signals_7d, signals_14d = EXCLUDED.signals_14d,
+                signals_30d = EXCLUDED.signals_30d, weighted_signals_7d = EXCLUDED.weighted_signals_7d,
+                weighted_signals_14d = EXCLUDED.weighted_signals_14d, weighted_signals_30d = EXCLUDED.weighted_signals_30d,
+                momentum_score = EXCLUDED.momentum_score, momentum_label = EXCLUDED.momentum_label
+        ''', (mid, state, city, window_end, sig_7d, sig_14d, sig_30d,
+              wsig_7d, wsig_14d, wsig_30d,
+              round(momentum_score, 1), momentum_label))
+        inserted += 1
 
     conn.commit()
     conn.close()
@@ -3892,20 +3907,23 @@ def compute_lead_timing_scores(workspace_id=None):
 
         ws_id = workspace_id or 'default'
         lid = str(uuid.uuid4())
-        try:
-            c.execute('''
-                INSERT OR REPLACE INTO lead_timing_scores
-                (id, workspace_id, prospect_key, company_name, state, city,
-                 trigger_severity, swim_lane_fit, engagement_score,
-                 market_momentum_score, freshness_score, call_timing_score,
-                 timing_label, reasons, computed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ''', (lid, ws_id, p['prospect_key'], p['company_name'], p['state'], p['city'],
-                  trigger_severity, swim_lane_fit, engagement, momentum, freshness,
-                  call_timing, timing_label, json.dumps(reasons)))
-            scored += 1
-        except sqlite3.IntegrityError:
-            pass
+        c.execute('''
+            INSERT INTO lead_timing_scores
+            (id, workspace_id, prospect_key, company_name, state, city,
+             trigger_severity, swim_lane_fit, engagement_score,
+             market_momentum_score, freshness_score, call_timing_score,
+             timing_label, reasons, computed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT (workspace_id, prospect_key) DO UPDATE SET
+                id = EXCLUDED.id, company_name = EXCLUDED.company_name, state = EXCLUDED.state, city = EXCLUDED.city,
+                trigger_severity = EXCLUDED.trigger_severity, swim_lane_fit = EXCLUDED.swim_lane_fit,
+                engagement_score = EXCLUDED.engagement_score, market_momentum_score = EXCLUDED.market_momentum_score,
+                freshness_score = EXCLUDED.freshness_score, call_timing_score = EXCLUDED.call_timing_score,
+                timing_label = EXCLUDED.timing_label, reasons = EXCLUDED.reasons
+        ''', (lid, ws_id, p['prospect_key'], p['company_name'], p['state'], p['city'],
+              trigger_severity, swim_lane_fit, engagement, momentum, freshness,
+              call_timing, timing_label, json.dumps(reasons)))
+        scored += 1
 
     conn.commit()
     conn.close()
@@ -4048,14 +4066,14 @@ def run_trend_detection():
                 classification = 'Emerging'
 
             trend_id = str(uuid.uuid4())
-            try:
-                c.execute('''
-                    INSERT OR REPLACE INTO trend_signals (id, state, city, topic, count_7d, count_30d, trend_ratio, classification, computed_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (trend_id, state, city, topic, count_7d, count_30d, round(trend_ratio, 2), classification, computed_at))
-                inserted += 1
-            except sqlite3.IntegrityError:
-                pass
+            c.execute('''
+                INSERT INTO trend_signals (id, state, city, topic, count_7d, count_30d, trend_ratio, classification, computed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (state, city, topic, computed_at) DO UPDATE SET
+                    id = EXCLUDED.id, count_7d = EXCLUDED.count_7d, count_30d = EXCLUDED.count_30d,
+                    trend_ratio = EXCLUDED.trend_ratio, classification = EXCLUDED.classification
+            ''', (trend_id, state, city, topic, count_7d, count_30d, round(trend_ratio, 2), classification, computed_at))
+            inserted += 1
 
     conn.commit()
     conn.close()
