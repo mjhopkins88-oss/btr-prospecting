@@ -22,8 +22,9 @@ import requests
 
 from adapters.base import BaseAdapter
 from discovery_config import PERMIT_CACHE_TTL_HOURS
+from db import get_db as _get_db_central
 
-DB_PATH = 'prospects.db'
+# DB_PATH removed — all DB access via db.get_db()
 
 # Keywords to filter permits for BTR/multifamily relevance
 PERMIT_KEYWORDS = [
@@ -287,7 +288,7 @@ Return up to 5 results. Return ONLY the JSON array, no other text."""
     def _get_cached(self, city):
         """Get cached permit results for a city."""
         try:
-            conn = sqlite3.connect(DB_PATH)
+            conn = _get_db_central()
             c = conn.cursor()
             c.execute(
                 'SELECT payload_json FROM search_cache WHERE cache_key = ? AND expires_at > ?',
@@ -306,7 +307,7 @@ Return up to 5 results. Return ONLY the JSON array, no other text."""
         try:
             now = datetime.utcnow()
             expires = now + timedelta(hours=PERMIT_CACHE_TTL_HOURS)
-            conn = sqlite3.connect(DB_PATH)
+            conn = _get_db_central()
             c = conn.cursor()
             c.execute(
                 '''INSERT OR REPLACE INTO search_cache

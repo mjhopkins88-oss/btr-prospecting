@@ -11,13 +11,7 @@ from datetime import datetime, timedelta
 import anthropic
 import os
 
-DB_PATH = 'prospects.db'
-
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+from db import get_db
 
 
 def execute_prospecting_run(run_id, search_params):
