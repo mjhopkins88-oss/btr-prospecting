@@ -5913,7 +5913,24 @@ def _scheduled_optimization():
     except Exception as e:
         print(f"[Scheduler] Optimization error: {e}")
 
+def _scheduled_permit_feed():
+    """Scheduled permit-feed ingestion (5:15 AM PT, before discovery)."""
+    try:
+        from permit_feed.ingest_job import run_ingest
+        print("[Scheduler] Starting permit feed ingestion…")
+        items = run_ingest()
+        print(f"[Scheduler] Permit feed done: {len(items)} new signals")
+    except Exception as e:
+        print(f"[Scheduler] Permit feed error (non-fatal): {e}")
+
 _scheduler = BackgroundScheduler(daemon=True)
+_scheduler.add_job(
+    _scheduled_permit_feed,
+    CronTrigger(hour=5, minute=15, timezone=pytz.timezone('America/Los_Angeles')),
+    id='daily_permit_feed',
+    name='Daily Permit Feed Ingestion',
+    replace_existing=True
+)
 _scheduler.add_job(
     _scheduled_discovery,
     CronTrigger(
@@ -5959,6 +5976,7 @@ print("[Scheduler] Daily signal optimization at 6:45 AM PT")
 print("[Scheduler] Daily trend detection at 7:30 AM PT")
 print("[Scheduler] Weekly Sunbelt Brief every Monday 7:00 AM PT")
 print("[Scheduler] Daily government signals refresh at 5:30 AM PT")
+print("[Scheduler] Daily permit feed ingestion at 5:15 AM PT")
 
 
 if __name__ == '__main__':
