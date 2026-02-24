@@ -5171,10 +5171,13 @@ def _do_sparknotes():
         cache_conn.close()
         if cached:
             payload = json.loads(cached[0])
+            gen_at = cached[1]
+            if isinstance(gen_at, datetime):
+                gen_at = gen_at.isoformat()
             return jsonify({
                 'ok': True,
                 'data': payload,
-                'meta': {'cached': True, 'generated_at': cached[1]},
+                'meta': {'cached': True, 'generated_at': str(gen_at)},
             })
     except Exception as e:
         app.logger.debug(f'[sparknotes] Cache check skipped: {e}')
