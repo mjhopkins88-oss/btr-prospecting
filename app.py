@@ -669,6 +669,11 @@ def init_db():
         c.execute('CREATE INDEX IF NOT EXISTS idx_uw_rows_community ON underwriting_rows(community_id)')
     except Exception:
         pass
+    # Migrate: add deleted_at to underwriting_communities if missing (for existing DBs)
+    try:
+        c.execute('ALTER TABLE underwriting_communities ADD COLUMN deleted_at TIMESTAMP DEFAULT NULL')
+    except Exception:
+        pass  # Column already exists
     # Migrate: add deleted_at to underwriting_rows if missing (for existing DBs)
     try:
         c.execute('ALTER TABLE underwriting_rows ADD COLUMN deleted_at TIMESTAMP DEFAULT NULL')
@@ -754,7 +759,7 @@ def require_auth(f):
             return f(*args, **kwargs)
         user, workspace_id = _get_session_user()
         if not user:
-            return jsonify({'success': False, 'message': 'Authentication required', 'auth_required': True}), 401
+            return jsonify({'success': False, 'ok': False, 'message': 'Authentication required', 'error': 'Authentication required', 'auth_required': True}), 401
         g.user = user
         g.workspace_id = workspace_id
         return f(*args, **kwargs)
@@ -766,7 +771,7 @@ def require_role(role):
         @wraps(f)
         def decorated(*args, **kwargs):
             if g.user and g.user.get('role') != role:
-                return jsonify({'success': False, 'message': 'Insufficient permissions'}), 403
+                return jsonify({'success': False, 'ok': False, 'message': 'Insufficient permissions', 'error': 'Insufficient permissions'}), 403
             return f(*args, **kwargs)
         return decorated
     return decorator
@@ -779,7 +784,7 @@ def require_any_role(*roles):
         @wraps(f)
         def decorated(*args, **kwargs):
             if g.user and g.user.get('role') not in roles:
-                return jsonify({'success': False, 'message': 'Insufficient permissions'}), 403
+                return jsonify({'success': False, 'ok': False, 'message': 'Insufficient permissions', 'error': 'Insufficient permissions'}), 403
             return f(*args, **kwargs)
         return decorated
     return decorator
@@ -2888,11 +2893,11 @@ def api_uw_add_units(community_id):
     conn = _get_db_conn()
     c = conn.cursor()
 
-    # Load base row
+    # Load base row (exclude soft-deleted)
     if base_row_id:
-        c.execute(f'SELECT row_version, {", ".join(COLUMN_KEYS)} FROM underwriting_rows WHERE id = ? AND community_id = ?', (base_row_id, community_id))
+        c.execute(f'SELECT row_version, {", ".join(COLUMN_KEYS)} FROM underwriting_rows WHERE id = ? AND community_id = ? AND deleted_at IS NULL', (base_row_id, community_id))
     else:
-        c.execute(f'SELECT row_version, {", ".join(COLUMN_KEYS)} FROM underwriting_rows WHERE community_id = ? ORDER BY row_version DESC LIMIT 1', (community_id,))
+        c.execute(f'SELECT row_version, {", ".join(COLUMN_KEYS)} FROM underwriting_rows WHERE community_id = ? AND deleted_at IS NULL ORDER BY row_version DESC LIMIT 1', (community_id,))
     base = c.fetchone()
     if not base:
         conn.close()
@@ -2912,11 +2917,16 @@ def api_uw_add_units(community_id):
     placeholders = ', '.join(['?'] * len(COLUMN_KEYS))
     values = [merged[k] for k in COLUMN_KEYS]
 
-    c.execute(f'INSERT INTO underwriting_rows (id, community_id, row_version, created_at, {col_names}) VALUES (?, ?, ?, ?, {placeholders})',
-              [row_id, community_id, new_version, now] + values)
-    # Update community timestamp
-    c.execute('UPDATE underwriting_communities SET updated_at = ? WHERE id = ?', (now, community_id))
-    conn.commit()
+    try:
+        c.execute(f'INSERT INTO underwriting_rows (id, community_id, row_version, created_at, {col_names}) VALUES (?, ?, ?, ?, {placeholders})',
+                  [row_id, community_id, new_version, now] + values)
+        # Update community timestamp
+        c.execute('UPDATE underwriting_communities SET updated_at = ? WHERE id = ?', (now, community_id))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify({'ok': False, 'error': f'Database error: {e}'}), 500
     conn.close()
     return jsonify({'ok': True, 'row_id': row_id, 'row_version': new_version})
 
@@ -2942,11 +2952,16 @@ def api_uw_update_row(row_id):
     params.append(row_id)
     conn = _get_db_conn()
     c = conn.cursor()
-    c.execute(f'UPDATE underwriting_rows SET {", ".join(updates)} WHERE id = ?', params)
-    if c.rowcount == 0:
+    try:
+        c.execute(f'UPDATE underwriting_rows SET {", ".join(updates)} WHERE id = ?', params)
+        if c.rowcount == 0:
+            conn.close()
+            return jsonify({'ok': False, 'error': 'Row not found'}), 404
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
         conn.close()
-        return jsonify({'ok': False, 'error': 'Row not found'}), 404
-    conn.commit()
+        return jsonify({'ok': False, 'error': f'Database error: {e}'}), 500
     conn.close()
     return jsonify({'ok': True})
 
@@ -3001,34 +3016,38 @@ def api_uw_list_rows():
 
     col_select = ', '.join(f'r.{k}' for k in COLUMN_KEYS)
 
-    if latest_only:
-        # Subquery: max row_version per community (exclude soft-deleted)
-        sql = f'''SELECT r.id, r.community_id, r.row_version, r.created_at,
-                         uc.community_key, uc.location_name as uc_name, {col_select}
-                  FROM underwriting_rows r
-                  JOIN underwriting_communities uc ON uc.id = r.community_id
-                  INNER JOIN (
-                      SELECT community_id, MAX(row_version) as max_v FROM underwriting_rows WHERE deleted_at IS NULL GROUP BY community_id
-                  ) latest ON r.community_id = latest.community_id AND r.row_version = latest.max_v
-                  WHERE r.deleted_at IS NULL AND uc.deleted_at IS NULL'''
-        if community_id:
-            sql += ' AND r.community_id = ?'
-            c.execute(sql + ' ORDER BY uc.location_name', (community_id,))
+    try:
+        if latest_only:
+            # Subquery: max row_version per community (exclude soft-deleted)
+            sql = f'''SELECT r.id, r.community_id, r.row_version, r.created_at,
+                             uc.community_key, uc.location_name as uc_name, {col_select}
+                      FROM underwriting_rows r
+                      JOIN underwriting_communities uc ON uc.id = r.community_id
+                      INNER JOIN (
+                          SELECT community_id, MAX(row_version) as max_v FROM underwriting_rows WHERE deleted_at IS NULL GROUP BY community_id
+                      ) latest ON r.community_id = latest.community_id AND r.row_version = latest.max_v
+                      WHERE r.deleted_at IS NULL AND uc.deleted_at IS NULL'''
+            if community_id:
+                sql += ' AND r.community_id = ?'
+                c.execute(sql + ' ORDER BY uc.location_name', (community_id,))
+            else:
+                c.execute(sql + ' ORDER BY uc.location_name')
         else:
-            c.execute(sql + ' ORDER BY uc.location_name')
-    else:
-        sql = f'''SELECT r.id, r.community_id, r.row_version, r.created_at,
-                         uc.community_key, uc.location_name as uc_name, {col_select}
-                  FROM underwriting_rows r
-                  JOIN underwriting_communities uc ON uc.id = r.community_id
-                  WHERE r.deleted_at IS NULL AND uc.deleted_at IS NULL'''
-        if community_id:
-            sql += ' AND r.community_id = ?'
-            c.execute(sql + ' ORDER BY uc.location_name, r.row_version', (community_id,))
-        else:
-            c.execute(sql + ' ORDER BY uc.location_name, r.row_version')
+            sql = f'''SELECT r.id, r.community_id, r.row_version, r.created_at,
+                             uc.community_key, uc.location_name as uc_name, {col_select}
+                      FROM underwriting_rows r
+                      JOIN underwriting_communities uc ON uc.id = r.community_id
+                      WHERE r.deleted_at IS NULL AND uc.deleted_at IS NULL'''
+            if community_id:
+                sql += ' AND r.community_id = ?'
+                c.execute(sql + ' ORDER BY uc.location_name, r.row_version', (community_id,))
+            else:
+                c.execute(sql + ' ORDER BY uc.location_name, r.row_version')
 
-    rows_raw = c.fetchall()
+        rows_raw = c.fetchall()
+    except Exception as e:
+        conn.close()
+        return jsonify({'ok': False, 'error': f'Database query failed: {e}'}), 500
     conn.close()
 
     rows = []
