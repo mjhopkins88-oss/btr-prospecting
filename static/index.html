@@ -3388,9 +3388,12 @@
             const [loading, setLoading] = useState(true);
             const [showHistory, setShowHistory] = useState(false);
             const [showNewForm, setShowNewForm] = useState(false);
-            const [addUnitsTarget, setAddUnitsTarget] = useState(null); // {community_id, row}
+            const [addUnitsTarget, setAddUnitsTarget] = useState(null);
             const [editRow, setEditRow] = useState(null);
             const [showImportModal, setShowImportModal] = useState(false);
+            const [deleteTarget, setDeleteTarget] = useState(null); // {community_id, name}
+            const [deleting, setDeleting] = useState(false);
+            const [hoveredRow, setHoveredRow] = useState(null);
 
             const loadColumns = async () => {
                 try {
@@ -3417,17 +3420,90 @@
                 window.open(`${API_BASE}/api/underwriting/export?mode=${mode}`, '_blank');
             };
 
-            // ── Inline editing ──
-            const saveInlineEdit = async (rowId, key, value) => {
+            const deleteCommunity = async () => {
+                if (!deleteTarget) return;
+                setDeleting(true);
                 try {
-                    await fetch(`${API_BASE}/api/underwriting/rows/${rowId}`, {
-                        method: 'PATCH', headers: {'Content-Type':'application/json'},
-                        body: JSON.stringify({ [key]: value }),
-                    });
-                } catch(e) { alert('Save failed: ' + e.message); }
+                    const res = await fetch(`${API_BASE}/api/underwriting/communities/${deleteTarget.community_id}?mode=soft`, { method: 'DELETE' });
+                    const d = await res.json();
+                    if (d.ok) {
+                        setDeleteTarget(null);
+                        loadRows();
+                    } else {
+                        alert(d.error || 'Delete failed');
+                    }
+                } catch(e) { alert('Network error: ' + e.message); }
+                setDeleting(false);
             };
 
+            // ── Sticky column config ──
             const stickyKeys = ['location_name', 'city', 'state_province_district'];
+            const stickyWidths = [160, 120, 100]; // px widths for each sticky col
+            const actionsWidth = 130;
+            const versionWidth = 60;
+            const stickyLeftOffsets = stickyKeys.map((_, i) => {
+                let offset = actionsWidth;
+                if (showHistory) offset += versionWidth;
+                for (let j = 0; j < i; j++) offset += stickyWidths[j];
+                return offset;
+            });
+
+            // ── Section grouping for header row ──
+            const sectionOrder = ['location', 'values', 'construction', 'building', 'structure', 'premium'];
+            const sectionColors = {
+                location: '#6366f1', values: '#10b981', construction: '#f59e0b',
+                building: '#3b82f6', structure: '#8b5cf6', premium: '#ef4444',
+            };
+
+            const buildSectionGroups = () => {
+                if (!columns.length) return [];
+                const groups = [];
+                let curSection = null;
+                let curCount = 0;
+                columns.forEach(col => {
+                    const sec = col.section || 'other';
+                    if (sec !== curSection) {
+                        if (curSection !== null) groups.push({ section: curSection, count: curCount });
+                        curSection = sec;
+                        curCount = 1;
+                    } else {
+                        curCount++;
+                    }
+                });
+                if (curSection !== null) groups.push({ section: curSection, count: curCount });
+                return groups;
+            };
+
+            // ── Cell formatter ──
+            const formatCell = (col, value) => {
+                if (!value && value !== 0) return '';
+                const v = String(value);
+                if (!v) return '';
+                if (col.type === 'currency') {
+                    const n = Number(v);
+                    if (isNaN(n)) return v;
+                    return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+                }
+                if (col.type === 'percent') {
+                    const n = Number(v);
+                    if (isNaN(n)) return v;
+                    return n.toFixed(1) + '%';
+                }
+                if (col.type === 'date' && v.match(/^\d{4}-\d{2}-\d{2}/)) {
+                    const parts = v.split('-');
+                    return parts[1] + '/' + parts[2].substring(0,2) + '/' + parts[0];
+                }
+                return v;
+            };
+
+            // ── Color scheme ──
+            const rowBgEven = '#0b1220';
+            const rowBgOdd = '#0f172a';
+            const rowBgHover = '#162032';
+            const headerBg = '#080e1a';
+            const groupHeaderBg = '#0a1020';
+
+            const sectionGroups = buildSectionGroups();
 
             return (
                 <div>
@@ -3450,51 +3526,100 @@
                     {loading ? <div style={{textAlign:'center',padding:'3rem',color:'#64748b'}}>Loading...</div> : rows.length === 0 ? (
                         <EmptyState title="No underwriting records" subtitle='Click "+ New Community" to add the first record' icon={<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-slate-600"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>} />
                     ) : (
-                        <div style={{overflowX:'auto',border:'1px solid #1e293b',borderRadius:'0.5rem',maxHeight:'70vh',overflowY:'auto'}}>
-                            <table style={{borderCollapse:'collapse',width:'max-content',minWidth:'100%',fontSize:'0.78rem'}}>
+                        <div style={{overflowX:'auto',border:'1px solid #1e293b',borderRadius:'0.5rem',maxHeight:'74vh',overflowY:'auto'}}>
+                            <table style={{borderCollapse:'collapse',width:'max-content',minWidth:'100%',fontSize:'0.76rem'}}>
                                 <thead>
-                                    <tr style={{position:'sticky',top:0,zIndex:20,background:'#0f172a'}}>
-                                        <th style={{position:'sticky',left:0,zIndex:30,background:'#0f172a',padding:'0.5rem 0.75rem',borderBottom:'2px solid #334155',color:'#94a3b8',fontWeight:700,textAlign:'left',whiteSpace:'nowrap',fontSize:'0.7rem',textTransform:'uppercase',letterSpacing:'0.05em',minWidth:'100px'}}>Actions</th>
-                                        {showHistory && <th style={{position:'sticky',top:0,zIndex:20,background:'#0f172a',padding:'0.5rem 0.75rem',borderBottom:'2px solid #334155',color:'#94a3b8',fontWeight:700,textAlign:'left',whiteSpace:'nowrap',fontSize:'0.7rem',textTransform:'uppercase',letterSpacing:'0.05em'}}>Version</th>}
-                                        {columns.map((col, ci) => (
-                                            <th key={col.key} style={{
-                                                position: stickyKeys.includes(col.key) ? 'sticky' : 'relative',
-                                                left: stickyKeys.includes(col.key) ? (stickyKeys.indexOf(col.key) === 0 ? '100px' : stickyKeys.indexOf(col.key) === 1 ? '260px' : '360px') : 'auto',
-                                                zIndex: stickyKeys.includes(col.key) ? 25 : 20,
-                                                background:'#0f172a',padding:'0.5rem 0.75rem',borderBottom:'2px solid #334155',color:'#94a3b8',
-                                                fontWeight:700,textAlign:'left',whiteSpace:'nowrap',fontSize:'0.7rem',textTransform:'uppercase',letterSpacing:'0.05em',
-                                                minWidth: col.type === 'currency' ? '120px' : '100px',
-                                            }}>{col.header}</th>
+                                    {/* ── Group header row ── */}
+                                    <tr style={{position:'sticky',top:0,zIndex:40,background:groupHeaderBg}}>
+                                        <th style={{position:'sticky',left:0,zIndex:50,background:groupHeaderBg,borderBottom:'1px solid #1e293b',padding:0,minWidth:actionsWidth+'px'}} rowSpan="1"></th>
+                                        {showHistory && <th style={{position:'sticky',top:0,zIndex:40,background:groupHeaderBg,borderBottom:'1px solid #1e293b',padding:0,minWidth:versionWidth+'px'}}></th>}
+                                        {stickyKeys.map((sk,si) => (
+                                            <th key={sk} style={{position:'sticky',left:stickyLeftOffsets[si]+'px',zIndex:45,background:groupHeaderBg,borderBottom:'1px solid #1e293b',padding:0,minWidth:stickyWidths[si]+'px'}}></th>
                                         ))}
+                                        {sectionGroups.map(g => {
+                                            // subtract sticky columns that belong to this section
+                                            const stickyInSection = stickyKeys.filter((sk,si) => {
+                                                const col = columns.find(c => c.key === sk);
+                                                return col && col.section === g.section;
+                                            }).length;
+                                            const span = g.count - stickyInSection;
+                                            if (span <= 0) return null;
+                                            const color = sectionColors[g.section] || '#64748b';
+                                            const label = UW_SECTIONS[g.section] || g.section;
+                                            return (
+                                                <th key={g.section} colSpan={span} style={{
+                                                    background:groupHeaderBg, padding:'0.35rem 0.5rem', borderBottom:`2px solid ${color}`,
+                                                    color, fontSize:'0.65rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em',
+                                                    textAlign:'center', whiteSpace:'nowrap',
+                                                }}>{label}</th>
+                                            );
+                                        })}
+                                    </tr>
+                                    {/* ── Column header row ── */}
+                                    <tr style={{position:'sticky',top:'26px',zIndex:38,background:headerBg}}>
+                                        <th style={{position:'sticky',left:0,zIndex:48,background:headerBg,padding:'0.4rem 0.5rem',borderBottom:'2px solid #334155',color:'#94a3b8',fontWeight:700,textAlign:'left',whiteSpace:'nowrap',fontSize:'0.68rem',textTransform:'uppercase',letterSpacing:'0.05em',minWidth:actionsWidth+'px'}}>Actions</th>
+                                        {showHistory && <th style={{position:'sticky',top:'26px',zIndex:38,background:headerBg,padding:'0.4rem 0.5rem',borderBottom:'2px solid #334155',color:'#94a3b8',fontWeight:700,textAlign:'left',whiteSpace:'nowrap',fontSize:'0.68rem',textTransform:'uppercase',letterSpacing:'0.05em',minWidth:versionWidth+'px'}}>Ver</th>}
+                                        {columns.map((col, ci) => {
+                                            const si = stickyKeys.indexOf(col.key);
+                                            const isSticky = si >= 0;
+                                            const isNumeric = ['currency','numeric','integer','percent'].includes(col.type);
+                                            return (
+                                                <th key={col.key} style={{
+                                                    position: isSticky ? 'sticky' : 'relative',
+                                                    left: isSticky ? stickyLeftOffsets[si]+'px' : 'auto',
+                                                    zIndex: isSticky ? 42 : 38,
+                                                    background: headerBg, padding:'0.4rem 0.5rem', borderBottom:'2px solid #334155',
+                                                    color:'#94a3b8', fontWeight:700, textAlign: isNumeric ? 'right' : 'left',
+                                                    whiteSpace:'nowrap', fontSize:'0.68rem', textTransform:'uppercase', letterSpacing:'0.05em',
+                                                    minWidth: isSticky ? stickyWidths[si]+'px' : (col.type === 'currency' ? '115px' : '95px'),
+                                                }}>{col.header}</th>
+                                            );
+                                        })}
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {rows.map((row, ri) => (
-                                        <tr key={row.id} style={{borderBottom:'1px solid #1e293b',background: ri % 2 === 0 ? 'transparent' : 'rgba(15,23,42,0.5)'}}>
-                                            <td style={{position:'sticky',left:0,zIndex:10,background: ri % 2 === 0 ? '#0b1220' : '#0f172a',padding:'0.4rem 0.5rem',whiteSpace:'nowrap'}}>
-                                                <div style={{display:'flex',gap:'0.3rem'}}>
-                                                    <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.65rem',padding:'0.15rem 0.4rem'}} onClick={() => setEditRow(row)}>Edit</button>
-                                                    <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.65rem',padding:'0.15rem 0.4rem',borderColor:'#f59e0b',color:'#fcd34d'}} onClick={() => setAddUnitsTarget({community_id: row.community_id, row})}>+Units</button>
-                                                </div>
-                                            </td>
-                                            {showHistory && <td style={{padding:'0.4rem 0.5rem',color:'#64748b'}}>{row.row_version}</td>}
-                                            {columns.map(col => (
-                                                <td key={col.key} style={{
-                                                    position: stickyKeys.includes(col.key) ? 'sticky' : 'relative',
-                                                    left: stickyKeys.includes(col.key) ? (stickyKeys.indexOf(col.key) === 0 ? '100px' : stickyKeys.indexOf(col.key) === 1 ? '260px' : '360px') : 'auto',
-                                                    zIndex: stickyKeys.includes(col.key) ? 10 : 1,
-                                                    background: stickyKeys.includes(col.key) ? (ri % 2 === 0 ? '#0b1220' : '#0f172a') : 'transparent',
-                                                    padding:'0.4rem 0.5rem',color:'#e2e8f0',maxWidth:'200px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
-                                                    textAlign: ['currency','numeric','integer','percent'].includes(col.type) ? 'right' : 'left',
-                                                    fontFamily: ['currency','numeric','integer','percent'].includes(col.type) ? "'Orbitron', monospace" : 'inherit',
-                                                }}>
-                                                    {col.type === 'currency' && row[col.key] ? `$${Number(row[col.key]).toLocaleString()}` :
-                                                     col.type === 'percent' && row[col.key] ? `${row[col.key]}%` :
-                                                     row[col.key] || ''}
+                                    {rows.map((row, ri) => {
+                                        const isHovered = hoveredRow === ri;
+                                        const baseBg = ri % 2 === 0 ? rowBgEven : rowBgOdd;
+                                        const bg = isHovered ? rowBgHover : baseBg;
+                                        const stickyBg = isHovered ? rowBgHover : baseBg;
+                                        return (
+                                            <tr key={row.id}
+                                                onMouseEnter={() => setHoveredRow(ri)}
+                                                onMouseLeave={() => setHoveredRow(null)}
+                                                style={{borderBottom:'1px solid #1e293b', background: bg, transition:'background 0.1s'}}>
+                                                <td style={{position:'sticky',left:0,zIndex:10,background:stickyBg,padding:'0.35rem 0.4rem',whiteSpace:'nowrap',transition:'background 0.1s'}}>
+                                                    <div style={{display:'flex',gap:'0.25rem'}}>
+                                                        <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.63rem',padding:'0.12rem 0.35rem'}} onClick={() => setEditRow(row)}>Edit</button>
+                                                        <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.63rem',padding:'0.12rem 0.35rem',borderColor:'#f59e0b',color:'#fcd34d'}} onClick={() => setAddUnitsTarget({community_id: row.community_id, row})}>+Units</button>
+                                                        <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.63rem',padding:'0.12rem 0.35rem',borderColor:'#ef4444',color:'#f87171'}} onClick={() => setDeleteTarget({community_id: row.community_id, name: row.location_name || row._community_name || 'this community'})}>Del</button>
+                                                    </div>
                                                 </td>
-                                            ))}
-                                        </tr>
-                                    ))}
+                                                {showHistory && <td style={{padding:'0.35rem 0.4rem',color:'#475569',fontSize:'0.72rem',background:bg,transition:'background 0.1s'}}>{row.row_version}</td>}
+                                                {columns.map(col => {
+                                                    const si = stickyKeys.indexOf(col.key);
+                                                    const isSticky = si >= 0;
+                                                    const isNumeric = ['currency','numeric','integer','percent'].includes(col.type);
+                                                    return (
+                                                        <td key={col.key} style={{
+                                                            position: isSticky ? 'sticky' : 'relative',
+                                                            left: isSticky ? stickyLeftOffsets[si]+'px' : 'auto',
+                                                            zIndex: isSticky ? 10 : 1,
+                                                            background: isSticky ? stickyBg : bg,
+                                                            padding:'0.35rem 0.5rem', color: isNumeric ? '#93c5fd' : '#e2e8f0',
+                                                            maxWidth:'200px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+                                                            textAlign: isNumeric ? 'right' : 'left',
+                                                            fontFamily: isNumeric ? "'Orbitron', monospace" : 'inherit',
+                                                            fontSize: isNumeric ? '0.73rem' : '0.76rem',
+                                                            transition:'background 0.1s',
+                                                        }}>
+                                                            {formatCell(col, row[col.key])}
+                                                        </td>
+                                                    );
+                                                })}
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         </div>
@@ -3508,6 +3633,27 @@
                     {addUnitsTarget && <UWFormModal columns={columns} onClose={() => setAddUnitsTarget(null)} onSaved={() => { setAddUnitsTarget(null); loadRows(); }} mode="add-units" initialData={addUnitsTarget.row} communityId={addUnitsTarget.community_id} />}
                     {/* Import Modal */}
                     {showImportModal && <UWImportModal onClose={() => setShowImportModal(false)} onImported={() => { setShowImportModal(false); loadRows(); }} />}
+
+                    {/* Delete Community Confirm Modal */}
+                    {deleteTarget && (
+                        <div style={{position:'fixed',inset:0,zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.7)'}}>
+                            <div style={{background:'#0f172a',border:'1px solid #334155',borderRadius:'1rem',width:'95vw',maxWidth:'440px',padding:'1.5rem'}}>
+                                <h3 style={{margin:'0 0 0.75rem',color:'#f1f5f9',fontSize:'1.05rem'}}>Delete Community</h3>
+                                <p style={{color:'#94a3b8',fontSize:'0.88rem',margin:'0 0 0.5rem',lineHeight:1.5}}>
+                                    Are you sure you want to delete <strong style={{color:'#f87171'}}>{deleteTarget.name}</strong> and all its rows?
+                                </p>
+                                <p style={{color:'#64748b',fontSize:'0.78rem',margin:'0 0 1.25rem'}}>
+                                    This is a soft delete. Records can be recovered by an administrator.
+                                </p>
+                                <div style={{display:'flex',justifyContent:'flex-end',gap:'0.5rem'}}>
+                                    <button className="action-btn" style={styles.actionBtn} onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</button>
+                                    <button className="action-btn" style={{...styles.actionBtn,borderColor:'#ef4444',color:'#f87171'}} onClick={deleteCommunity} disabled={deleting}>
+                                        {deleting ? 'Deleting...' : 'Delete Community'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         }
