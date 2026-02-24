@@ -670,15 +670,9 @@ def init_db():
     except Exception:
         pass
     # Migrate: add deleted_at to underwriting_communities if missing (for existing DBs)
-    try:
-        c.execute('ALTER TABLE underwriting_communities ADD COLUMN deleted_at TIMESTAMP DEFAULT NULL')
-    except Exception:
-        pass  # Column already exists
+    _safe_add_column(_real_cursor, 'underwriting_communities', 'deleted_at', 'TIMESTAMP DEFAULT NULL')
     # Migrate: add deleted_at to underwriting_rows if missing (for existing DBs)
-    try:
-        c.execute('ALTER TABLE underwriting_rows ADD COLUMN deleted_at TIMESTAMP DEFAULT NULL')
-    except Exception:
-        pass  # Column already exists
+    _safe_add_column(_real_cursor, 'underwriting_rows', 'deleted_at', 'TIMESTAMP DEFAULT NULL')
 
     conn.commit()
     conn.close()
