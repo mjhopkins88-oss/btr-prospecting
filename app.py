@@ -5141,6 +5141,14 @@ def _build_sparknotes_items(tab, window_days):
 @require_auth
 def api_sunbelt_sparknotes():
     """Generate AI Sparknotes summary for Sunbelt tab items."""
+    try:
+        return _do_sparknotes()
+    except Exception as e:
+        app.logger.error(f'[sparknotes] Unhandled error: {e}\n{traceback.format_exc()}')
+        return jsonify({'ok': False, 'error': f'Internal error: {str(e)}'}), 500
+
+
+def _do_sparknotes():
     body = request.get_json(silent=True) or {}
     tab = body.get('tab', 'weekly')
     if tab not in _TAB_WINDOW_DEFAULTS:
@@ -5153,34 +5161,36 @@ def api_sunbelt_sparknotes():
 
     date_bucket = datetime.utcnow().strftime('%Y-%m-%d')
 
-    # Check cache
-    conn = _get_db_conn()
-    c = conn.cursor()
+    # Check cache (use separate connection so failures don't poison later queries)
     try:
-        c.execute('SELECT payload_json, created_at FROM sunbelt_summaries WHERE tab = ? AND window_days = ? AND date_bucket = ?',
-                  (tab, window_days, date_bucket))
-        cached = c.fetchone()
+        cache_conn = _get_db_conn()
+        cache_c = cache_conn.cursor()
+        cache_c.execute('SELECT payload_json, created_at FROM sunbelt_summaries WHERE tab = ? AND window_days = ? AND date_bucket = ?',
+                        (tab, window_days, date_bucket))
+        cached = cache_c.fetchone()
+        cache_conn.close()
         if cached:
-            conn.close()
             payload = json.loads(cached[0])
             return jsonify({
                 'ok': True,
                 'data': payload,
                 'meta': {'cached': True, 'generated_at': cached[1]},
             })
-    except Exception:
-        pass  # Table might not exist yet on old DBs; fall through to generate
+    except Exception as e:
+        app.logger.debug(f'[sparknotes] Cache check skipped: {e}')
+        try:
+            cache_conn.close()
+        except Exception:
+            pass
 
     # Build items for the prompt
     try:
         items = _build_sparknotes_items(tab, window_days)
     except Exception as e:
-        conn.close()
         app.logger.error(f'[sparknotes] Failed to build items for tab={tab}: {e}')
         return jsonify({'ok': False, 'error': 'Failed to gather signal data', 'details': str(e)}), 500
 
     if not items:
-        conn.close()
         return jsonify({
             'ok': False,
             'error': f'No signals found for tab "{tab}" in the last {window_days} days. Run discovery first.',
@@ -5226,7 +5236,6 @@ RULES:
         )
         raw = message.content[0].text if message.content else ''
     except Exception as e:
-        conn.close()
         app.logger.error(f'[sparknotes] LLM call failed: {e}')
         return jsonify({'ok': False, 'error': 'AI summary generation failed. Please try again.', 'details': str(e)}), 500
 
@@ -5241,7 +5250,6 @@ RULES:
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as e:
-        conn.close()
         app.logger.error(f'[sparknotes] JSON parse failed: {e}\nRaw: {raw[:500]}')
         return jsonify({'ok': False, 'error': 'AI returned invalid format. Please try again.'}), 500
 
@@ -5255,19 +5263,28 @@ RULES:
 
     generated_at = datetime.utcnow().isoformat()
 
-    # Cache the result
+    # Cache the result (separate connection — non-critical)
     try:
+        conn = _get_db_conn()
+        c = conn.cursor()
         summary_id = str(uuid.uuid4())
         c.execute('INSERT INTO sunbelt_summaries (id, tab, window_days, date_bucket, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
                   (summary_id, tab, window_days, date_bucket, json.dumps(payload), generated_at))
         conn.commit()
+        conn.close()
     except _IntegrityError:
-        conn.rollback()  # Race condition: another request cached it first; that's fine
+        try:
+            conn.rollback()
+            conn.close()
+        except Exception:
+            pass
     except Exception as e:
         app.logger.warning(f'[sparknotes] Cache write failed: {e}')
-        conn.rollback()
-    finally:
-        conn.close()
+        try:
+            conn.rollback()
+            conn.close()
+        except Exception:
+            pass
 
     return jsonify({
         'ok': True,

@@ -2311,13 +2311,22 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ tab: apiTab, windowDays: tabWindowDays[subTab] || 7 }),
                     });
-                    const d = await res.json();
-                    if (!d.ok) { setSparkError(d.error || 'Failed to generate sparknotes'); }
-                    else {
-                        setSparknotes(prev => ({...prev, [subTab]: { data: d.data, meta: d.meta }}));
-                        setSparkExpanded({});
+                    if (!res.ok) {
+                        // Try to parse error JSON; fall back to status text
+                        let errMsg = `Server error (${res.status})`;
+                        try { const ej = await res.json(); errMsg = ej.error || ej.message || errMsg; } catch (_) {
+                            try { errMsg = (await res.text()).substring(0, 200) || errMsg; } catch (_2) {}
+                        }
+                        setSparkError(errMsg);
+                    } else {
+                        const d = await res.json();
+                        if (!d.ok) { setSparkError(d.error || 'Failed to generate sparknotes'); }
+                        else {
+                            setSparknotes(prev => ({...prev, [subTab]: { data: d.data, meta: d.meta }}));
+                            setSparkExpanded({});
+                        }
                     }
-                } catch (e) { setSparkError('Network error generating sparknotes'); }
+                } catch (e) { setSparkError('Network error: ' + (e.message || 'Failed to connect')); }
                 setSparkLoading(false);
             };
 
