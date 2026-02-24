@@ -3390,6 +3390,7 @@
             const [showNewForm, setShowNewForm] = useState(false);
             const [addUnitsTarget, setAddUnitsTarget] = useState(null); // {community_id, row}
             const [editRow, setEditRow] = useState(null);
+            const [showImportModal, setShowImportModal] = useState(false);
 
             const loadColumns = async () => {
                 try {
@@ -3438,6 +3439,7 @@
                         </div>
                         <div style={{display:'flex',gap:'0.5rem',flexWrap:'wrap'}}>
                             <button className="action-btn" style={{...styles.actionBtn,borderColor:'#10b981',color:'#34d399'}} onClick={() => setShowNewForm(true)}>+ New Community</button>
+                            <button className="action-btn" style={{...styles.actionBtn,borderColor:'#6366f1',color:'#818cf8'}} onClick={() => setShowImportModal(true)}>Import Spreadsheet</button>
                             <button className="action-btn" style={styles.actionBtn} onClick={() => setShowHistory(!showHistory)}>{showHistory ? 'Latest Only' : 'Show History'}</button>
                             <button className="action-btn" style={styles.actionBtn} onClick={() => exportXlsx('latest')}>Export Latest XLSX</button>
                             {showHistory && <button className="action-btn" style={styles.actionBtn} onClick={() => exportXlsx('all')}>Export All XLSX</button>}
@@ -3504,6 +3506,274 @@
                     {editRow && <UWFormModal columns={columns} onClose={() => setEditRow(null)} onSaved={() => { setEditRow(null); loadRows(); }} mode="edit" initialData={editRow} />}
                     {/* Add Units Modal */}
                     {addUnitsTarget && <UWFormModal columns={columns} onClose={() => setAddUnitsTarget(null)} onSaved={() => { setAddUnitsTarget(null); loadRows(); }} mode="add-units" initialData={addUnitsTarget.row} communityId={addUnitsTarget.community_id} />}
+                    {/* Import Modal */}
+                    {showImportModal && <UWImportModal onClose={() => setShowImportModal(false)} onImported={() => { setShowImportModal(false); loadRows(); }} />}
+                </div>
+            );
+        }
+
+        // ── Import Spreadsheet Modal ──
+        function UWImportModal({ onClose, onImported }) {
+            const [file, setFile] = useState(null);
+            const [mode, setMode] = useState('merge');
+            const [dryRun, setDryRun] = useState(false);
+            const [uploading, setUploading] = useState(false);
+            const [result, setResult] = useState(null);
+            const [error, setError] = useState('');
+
+            const handleFileChange = (e) => {
+                const f = e.target.files[0];
+                if (f) {
+                    const ext = f.name.split('.').pop().toLowerCase();
+                    if (!['xlsx', 'csv'].includes(ext)) {
+                        setError('Please select an .xlsx or .csv file');
+                        setFile(null);
+                        return;
+                    }
+                    if (f.size > 25 * 1024 * 1024) {
+                        setError('File too large (max 25MB)');
+                        setFile(null);
+                        return;
+                    }
+                    setError('');
+                    setFile(f);
+                }
+            };
+
+            const doImport = async () => {
+                if (!file) { setError('Please select a file'); return; }
+                setUploading(true);
+                setError('');
+                setResult(null);
+                try {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('mode', mode);
+                    formData.append('dry_run', dryRun ? 'true' : 'false');
+                    formData.append('strict_headers', mode === 'strict' ? 'true' : 'false');
+
+                    const res = await fetch(`${API_BASE}/api/underwriting/import`, {
+                        method: 'POST',
+                        body: formData,
+                    });
+                    const d = await res.json();
+                    if (d.ok) {
+                        setResult(d.data);
+                    } else {
+                        setError(d.error || 'Import failed');
+                        if (d.data) setResult(d.data);
+                    }
+                } catch(e) {
+                    setError('Network error: ' + e.message);
+                }
+                setUploading(false);
+            };
+
+            const downloadErrorReport = () => {
+                if (!result || !result.errors || result.errors.length === 0) return;
+                const rows = [['Row', 'Field', 'Message']];
+                result.errors.forEach(e => {
+                    rows.push([e.rowIndex || '', e.field || '', e.message || '']);
+                });
+                if (result.warnings) {
+                    result.warnings.forEach(w => {
+                        rows.push([w.rowIndex || '', 'WARNING', w.message || '']);
+                    });
+                }
+                const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'import_errors.csv';
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            const downloadTemplate = () => {
+                window.open(`${API_BASE}/api/underwriting/import/template`, '_blank');
+            };
+
+            const modalBg = {position:'fixed',inset:0,zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.7)'};
+            const modalBox = {background:'#0f172a',border:'1px solid #334155',borderRadius:'1rem',width:'95vw',maxWidth:'640px',maxHeight:'90vh',display:'flex',flexDirection:'column'};
+            const labelStyle = {display:'block',fontSize:'0.72rem',color:'#94a3b8',fontWeight:600,marginBottom:'0.35rem',textTransform:'uppercase',letterSpacing:'0.03em'};
+            const summaryCard = {background:'#0b1220',border:'1px solid #1e293b',borderRadius:'0.5rem',padding:'0.75rem 1rem',marginBottom:'0.75rem'};
+            const summaryRow = {display:'flex',justifyContent:'space-between',padding:'0.25rem 0',fontSize:'0.85rem'};
+            const summaryLabel = {color:'#64748b'};
+            const summaryValue = {color:'#f1f5f9',fontWeight:600,fontFamily:"'Orbitron', monospace"};
+
+            return (
+                <div style={modalBg}>
+                    <div style={modalBox}>
+                        {/* Header */}
+                        <div style={{padding:'1.25rem 1.5rem',borderBottom:'1px solid #1e293b',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                            <h3 style={{margin:0,color:'#f1f5f9',fontSize:'1.1rem'}}>Import Spreadsheet</h3>
+                            <button onClick={onClose} style={{background:'none',border:'none',color:'#64748b',fontSize:'1.5rem',cursor:'pointer'}}>×</button>
+                        </div>
+
+                        {/* Body */}
+                        <div style={{padding:'1.25rem 1.5rem',overflowY:'auto',flex:1}}>
+                            {error && <div style={{padding:'0.5rem 0.75rem',background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:'6px',color:'#f87171',fontSize:'0.85rem',marginBottom:'1rem'}}>{error}</div>}
+
+                            {!result ? (
+                                <div>
+                                    {/* File Upload */}
+                                    <div style={{marginBottom:'1rem'}}>
+                                        <label style={labelStyle}>Upload File (.xlsx or .csv)</label>
+                                        <div style={{
+                                            border: '2px dashed #334155', borderRadius:'0.5rem', padding:'1.5rem',
+                                            textAlign:'center', cursor:'pointer', background:'#0b1220',
+                                            transition:'border-color 0.2s',
+                                        }}
+                                        onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor='#6366f1'; }}
+                                        onDragLeave={e => { e.currentTarget.style.borderColor='#334155'; }}
+                                        onDrop={e => { e.preventDefault(); e.currentTarget.style.borderColor='#334155'; const f = e.dataTransfer.files[0]; if(f) { const inp = {target:{files:[f]}}; handleFileChange(inp); } }}
+                                        onClick={() => document.getElementById('uw-import-file').click()}
+                                        >
+                                            <input id="uw-import-file" type="file" accept=".xlsx,.csv" onChange={handleFileChange} style={{display:'none'}} />
+                                            {file ? (
+                                                <div>
+                                                    <div style={{color:'#818cf8',fontSize:'0.9rem',fontWeight:600}}>{file.name}</div>
+                                                    <div style={{color:'#64748b',fontSize:'0.78rem',marginTop:'0.25rem'}}>{(file.size / 1024).toFixed(1)} KB</div>
+                                                </div>
+                                            ) : (
+                                                <div>
+                                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="1.5" style={{margin:'0 auto 0.5rem'}}>
+                                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                                                    </svg>
+                                                    <div style={{color:'#64748b',fontSize:'0.85rem'}}>Click or drag & drop</div>
+                                                    <div style={{color:'#475569',fontSize:'0.75rem',marginTop:'0.25rem'}}>Accepts .xlsx and .csv (max 25MB)</div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Mode Selector */}
+                                    <div style={{marginBottom:'1rem'}}>
+                                        <label style={labelStyle}>Import Mode</label>
+                                        <div style={{display:'flex',gap:'0.5rem'}}>
+                                            <button onClick={() => setMode('merge')} style={{
+                                                flex:1, padding:'0.6rem 0.75rem', borderRadius:'0.5rem', fontSize:'0.82rem',
+                                                border: mode==='merge' ? '1px solid #6366f1' : '1px solid #334155',
+                                                background: mode==='merge' ? 'rgba(99,102,241,0.1)' : '#0b1220',
+                                                color: mode==='merge' ? '#818cf8' : '#64748b', cursor:'pointer', textAlign:'left',
+                                            }}>
+                                                <div style={{fontWeight:600,marginBottom:'0.15rem'}}>Create + Merge</div>
+                                                <div style={{fontSize:'0.72rem',opacity:0.8}}>Normalize headers, create communities as needed</div>
+                                            </button>
+                                            <button onClick={() => setMode('strict')} style={{
+                                                flex:1, padding:'0.6rem 0.75rem', borderRadius:'0.5rem', fontSize:'0.82rem',
+                                                border: mode==='strict' ? '1px solid #f59e0b' : '1px solid #334155',
+                                                background: mode==='strict' ? 'rgba(245,158,11,0.1)' : '#0b1220',
+                                                color: mode==='strict' ? '#fcd34d' : '#64748b', cursor:'pointer', textAlign:'left',
+                                            }}>
+                                                <div style={{fontWeight:600,marginBottom:'0.15rem'}}>Strict Match</div>
+                                                <div style={{fontSize:'0.72rem',opacity:0.8}}>Headers must match exactly</div>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Dry Run */}
+                                    <div style={{marginBottom:'1rem'}}>
+                                        <label style={{display:'flex',alignItems:'center',gap:'0.5rem',cursor:'pointer',fontSize:'0.85rem',color:'#94a3b8'}}>
+                                            <input type="checkbox" checked={dryRun} onChange={e => setDryRun(e.target.checked)}
+                                                style={{accentColor:'#6366f1',width:'16px',height:'16px'}} />
+                                            Dry run (validate only, no writes)
+                                        </label>
+                                    </div>
+
+                                    {/* Template download */}
+                                    <div style={{padding:'0.6rem 0.75rem',background:'rgba(99,102,241,0.06)',border:'1px solid rgba(99,102,241,0.2)',borderRadius:'6px',fontSize:'0.8rem',color:'#94a3b8'}}>
+                                        Need the correct format? <button onClick={downloadTemplate} style={{background:'none',border:'none',color:'#818cf8',cursor:'pointer',textDecoration:'underline',fontSize:'0.8rem',padding:0}}>Download blank template</button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div>
+                                    {/* Import Results Summary */}
+                                    <div style={summaryCard}>
+                                        <div style={{...summaryRow,paddingBottom:'0.5rem',borderBottom:'1px solid #1e293b',marginBottom:'0.35rem'}}>
+                                            <span style={{color:'#f1f5f9',fontWeight:700,fontSize:'0.9rem'}}>{dryRun ? 'Dry Run Results' : 'Import Complete'}</span>
+                                            <span style={{color: error ? '#f87171' : '#34d399',fontWeight:600,fontSize:'0.85rem'}}>{error ? 'With Errors' : 'Success'}</span>
+                                        </div>
+                                        <div style={summaryRow}>
+                                            <span style={summaryLabel}>Rows Imported</span>
+                                            <span style={{...summaryValue,color:'#34d399'}}>{result.imported_rows}</span>
+                                        </div>
+                                        <div style={summaryRow}>
+                                            <span style={summaryLabel}>Communities Created</span>
+                                            <span style={{...summaryValue,color:'#818cf8'}}>{result.created_communities}</span>
+                                        </div>
+                                        <div style={summaryRow}>
+                                            <span style={summaryLabel}>Communities Matched</span>
+                                            <span style={summaryValue}>{result.matched_communities}</span>
+                                        </div>
+                                        <div style={summaryRow}>
+                                            <span style={summaryLabel}>Rows Skipped</span>
+                                            <span style={{...summaryValue,color: result.skipped_rows > 0 ? '#f87171' : '#64748b'}}>{result.skipped_rows}</span>
+                                        </div>
+                                    </div>
+
+                                    {/* Errors */}
+                                    {result.errors && result.errors.length > 0 && (
+                                        <div style={{marginBottom:'0.75rem'}}>
+                                            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.5rem'}}>
+                                                <span style={{color:'#f87171',fontSize:'0.85rem',fontWeight:600}}>Errors ({result.errors.length})</span>
+                                                <button onClick={downloadErrorReport} className="action-btn" style={{...styles.actionBtn,fontSize:'0.7rem',padding:'0.2rem 0.5rem',borderColor:'#f87171',color:'#f87171'}}>Download Error CSV</button>
+                                            </div>
+                                            <div style={{maxHeight:'150px',overflowY:'auto',background:'#0b1220',border:'1px solid #1e293b',borderRadius:'0.5rem',fontSize:'0.78rem'}}>
+                                                {result.errors.slice(0, 50).map((err, i) => (
+                                                    <div key={i} style={{padding:'0.35rem 0.75rem',borderBottom:'1px solid #0f172a',color:'#f1a1a1',display:'flex',gap:'0.5rem'}}>
+                                                        <span style={{color:'#f87171',fontWeight:600,whiteSpace:'nowrap'}}>Row {err.rowIndex}:</span>
+                                                        <span>{err.message}</span>
+                                                    </div>
+                                                ))}
+                                                {result.errors.length > 50 && <div style={{padding:'0.35rem 0.75rem',color:'#64748b',fontStyle:'italic'}}>...and {result.errors.length - 50} more (download CSV for full list)</div>}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Warnings */}
+                                    {result.warnings && result.warnings.length > 0 && (
+                                        <div style={{marginBottom:'0.75rem'}}>
+                                            <span style={{color:'#fcd34d',fontSize:'0.85rem',fontWeight:600,display:'block',marginBottom:'0.5rem'}}>Warnings ({result.warnings.length})</span>
+                                            <div style={{maxHeight:'120px',overflowY:'auto',background:'#0b1220',border:'1px solid #1e293b',borderRadius:'0.5rem',fontSize:'0.78rem'}}>
+                                                {result.warnings.slice(0, 30).map((w, i) => (
+                                                    <div key={i} style={{padding:'0.35rem 0.75rem',borderBottom:'1px solid #0f172a',color:'#fde68a'}}>
+                                                        {w.rowIndex ? <span style={{color:'#f59e0b',fontWeight:600}}>Row {w.rowIndex}: </span> : null}
+                                                        {w.message}
+                                                    </div>
+                                                ))}
+                                                {result.warnings.length > 30 && <div style={{padding:'0.35rem 0.75rem',color:'#64748b',fontStyle:'italic'}}>...and {result.warnings.length - 30} more</div>}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Footer */}
+                        <div style={{padding:'1rem 1.5rem',borderTop:'1px solid #1e293b',display:'flex',justifyContent:'flex-end',gap:'0.5rem'}}>
+                            {result ? (
+                                <React.Fragment>
+                                    <button className="action-btn" style={styles.actionBtn} onClick={() => { setResult(null); setFile(null); setError(''); }}>Import Another</button>
+                                    {!dryRun && result.imported_rows > 0 ? (
+                                        <button className="action-btn" style={{...styles.actionBtn,borderColor:'#10b981',color:'#34d399'}} onClick={onImported}>Done - View Data</button>
+                                    ) : dryRun && !error ? (
+                                        <button className="action-btn" style={{...styles.actionBtn,borderColor:'#6366f1',color:'#818cf8'}} onClick={() => { setDryRun(false); setResult(null); }}>Run Actual Import</button>
+                                    ) : (
+                                        <button className="action-btn" style={styles.actionBtn} onClick={onClose}>Close</button>
+                                    )}
+                                </React.Fragment>
+                            ) : (
+                                <React.Fragment>
+                                    <button className="action-btn" style={styles.actionBtn} onClick={onClose}>Cancel</button>
+                                    <button className="action-btn" style={{...styles.actionBtn,borderColor:'#6366f1',color:'#818cf8',opacity:uploading||!file?0.5:1}} onClick={doImport} disabled={uploading || !file}>
+                                        {uploading ? 'Importing...' : dryRun ? 'Validate' : 'Import'}
+                                    </button>
+                                </React.Fragment>
+                            )}
+                        </div>
+                    </div>
                 </div>
             );
         }

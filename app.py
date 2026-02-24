@@ -3110,6 +3110,86 @@ def api_uw_columns():
     return jsonify({'ok': True, 'columns': UNDERWRITING_COLUMNS})
 
 
+# ── Underwriting Import ──────────────────────────────────────────
+from underwriting_import import process_import, MAX_FILE_SIZE
+
+@app.route('/api/underwriting/import', methods=['POST'])
+@require_auth
+@require_role('admin')
+def api_uw_import():
+    """Import underwriting spreadsheet (XLSX/CSV). Admin-only."""
+    if 'file' not in request.files:
+        return jsonify({'ok': False, 'error': 'No file uploaded'}), 400
+
+    file = request.files['file']
+    if not file.filename:
+        return jsonify({'ok': False, 'error': 'No file selected'}), 400
+
+    dry_run = request.form.get('dry_run', 'false').lower() == 'true'
+    strict_headers = request.form.get('strict_headers', 'false').lower() == 'true'
+    mode = request.form.get('mode', 'merge')
+    if mode not in ('merge', 'strict'):
+        mode = 'merge'
+
+    try:
+        file_bytes = file.read()
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'Failed to read file: {str(e)}'}), 400
+
+    if len(file_bytes) > MAX_FILE_SIZE:
+        return jsonify({'ok': False, 'error': f'File too large. Maximum is {MAX_FILE_SIZE // (1024*1024)}MB.'}), 413
+
+    import logging
+    logging.info(f"[UW Import] file={file.filename}, size={len(file_bytes)}, dry_run={dry_run}, mode={mode}")
+
+    result = process_import(
+        file_bytes=file_bytes,
+        filename=file.filename,
+        dry_run=dry_run,
+        strict_headers=strict_headers,
+        mode=mode,
+        db_connector=_get_db_conn,
+    )
+
+    status = 200 if result.get('ok') else 400
+    return jsonify(result), status
+
+
+@app.route('/api/underwriting/import/template', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_uw_import_template():
+    """Download a blank XLSX template with canonical headers."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Underwriting SOV Template'
+
+    headers = [col['header'] for col in UNDERWRITING_COLUMNS]
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True, size=11)
+        cell.alignment = Alignment(horizontal='center', wrap_text=True)
+
+    for col_idx, col in enumerate(UNDERWRITING_COLUMNS, 1):
+        letter = get_column_letter(col_idx)
+        ws.column_dimensions[letter].width = max(14, min(len(col['header']) + 4, 30))
+
+    ws.freeze_panes = 'A2'
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    resp = make_response(output.getvalue())
+    resp.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    resp.headers['Content-Disposition'] = 'attachment; filename=underwriting_import_template.xlsx'
+    return resp
+
+
 # API Routes
 
 @app.route('/')
