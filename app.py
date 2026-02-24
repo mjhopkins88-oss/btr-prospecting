@@ -648,7 +648,8 @@ def init_db():
             community_key TEXT UNIQUE,
             location_name TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            deleted_at TIMESTAMP DEFAULT NULL
         )
     ''')
     # Build underwriting_rows table with all canonical columns
@@ -660,6 +661,7 @@ def init_db():
             community_id TEXT NOT NULL,
             row_version INTEGER NOT NULL DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            deleted_at TIMESTAMP DEFAULT NULL,
             {_uw_data_cols}
         )
     ''')
@@ -667,6 +669,11 @@ def init_db():
         c.execute('CREATE INDEX IF NOT EXISTS idx_uw_rows_community ON underwriting_rows(community_id)')
     except Exception:
         pass
+    # Migrate: add deleted_at to underwriting_rows if missing (for existing DBs)
+    try:
+        c.execute('ALTER TABLE underwriting_rows ADD COLUMN deleted_at TIMESTAMP DEFAULT NULL')
+    except Exception:
+        pass  # Column already exists
 
     conn.commit()
     conn.close()
@@ -2944,6 +2951,43 @@ def api_uw_update_row(row_id):
     return jsonify({'ok': True})
 
 
+@app.route('/api/underwriting/communities/<community_id>', methods=['DELETE'])
+@require_auth
+@require_role('admin')
+def api_uw_delete_community(community_id):
+    """Soft-delete or hard-delete a community and all its rows. Admin-only."""
+    mode = request.args.get('mode', 'soft')
+    if mode not in ('soft', 'hard'):
+        mode = 'soft'
+
+    conn = _get_db_conn()
+    c = conn.cursor()
+
+    # Verify community exists
+    c.execute('SELECT id, location_name FROM underwriting_communities WHERE id = ?', (community_id,))
+    community = c.fetchone()
+    if not community:
+        conn.close()
+        return jsonify({'ok': False, 'error': 'Community not found'}), 404
+
+    try:
+        if mode == 'hard':
+            c.execute('DELETE FROM underwriting_rows WHERE community_id = ?', (community_id,))
+            c.execute('DELETE FROM underwriting_communities WHERE id = ?', (community_id,))
+        else:
+            now = datetime.utcnow().isoformat()
+            c.execute('UPDATE underwriting_communities SET deleted_at = ? WHERE id = ?', (now, community_id))
+            c.execute('UPDATE underwriting_rows SET deleted_at = ? WHERE community_id = ?', (now, community_id))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+    conn.close()
+    return jsonify({'ok': True, 'mode': mode, 'community_id': community_id})
+
+
 @app.route('/api/underwriting/rows', methods=['GET'])
 @require_auth
 @require_role('admin')
@@ -2958,16 +3002,17 @@ def api_uw_list_rows():
     col_select = ', '.join(f'r.{k}' for k in COLUMN_KEYS)
 
     if latest_only:
-        # Subquery: max row_version per community
+        # Subquery: max row_version per community (exclude soft-deleted)
         sql = f'''SELECT r.id, r.community_id, r.row_version, r.created_at,
                          uc.community_key, uc.location_name as uc_name, {col_select}
                   FROM underwriting_rows r
                   JOIN underwriting_communities uc ON uc.id = r.community_id
                   INNER JOIN (
-                      SELECT community_id, MAX(row_version) as max_v FROM underwriting_rows GROUP BY community_id
-                  ) latest ON r.community_id = latest.community_id AND r.row_version = latest.max_v'''
+                      SELECT community_id, MAX(row_version) as max_v FROM underwriting_rows WHERE deleted_at IS NULL GROUP BY community_id
+                  ) latest ON r.community_id = latest.community_id AND r.row_version = latest.max_v
+                  WHERE r.deleted_at IS NULL AND uc.deleted_at IS NULL'''
         if community_id:
-            sql += ' WHERE r.community_id = ?'
+            sql += ' AND r.community_id = ?'
             c.execute(sql + ' ORDER BY uc.location_name', (community_id,))
         else:
             c.execute(sql + ' ORDER BY uc.location_name')
@@ -2975,9 +3020,10 @@ def api_uw_list_rows():
         sql = f'''SELECT r.id, r.community_id, r.row_version, r.created_at,
                          uc.community_key, uc.location_name as uc_name, {col_select}
                   FROM underwriting_rows r
-                  JOIN underwriting_communities uc ON uc.id = r.community_id'''
+                  JOIN underwriting_communities uc ON uc.id = r.community_id
+                  WHERE r.deleted_at IS NULL AND uc.deleted_at IS NULL'''
         if community_id:
-            sql += ' WHERE r.community_id = ?'
+            sql += ' AND r.community_id = ?'
             c.execute(sql + ' ORDER BY uc.location_name, r.row_version', (community_id,))
         else:
             c.execute(sql + ' ORDER BY uc.location_name, r.row_version')
@@ -3022,15 +3068,17 @@ def api_uw_export():
                   FROM underwriting_rows r
                   JOIN underwriting_communities uc ON uc.id = r.community_id
                   INNER JOIN (
-                      SELECT community_id, MAX(row_version) as max_v FROM underwriting_rows GROUP BY community_id
-                  ) latest ON r.community_id = latest.community_id AND r.row_version = latest.max_v'''
+                      SELECT community_id, MAX(row_version) as max_v FROM underwriting_rows WHERE deleted_at IS NULL GROUP BY community_id
+                  ) latest ON r.community_id = latest.community_id AND r.row_version = latest.max_v
+                  WHERE r.deleted_at IS NULL AND uc.deleted_at IS NULL'''
     else:
         sql = f'''SELECT r.row_version, {col_select}
                   FROM underwriting_rows r
-                  JOIN underwriting_communities uc ON uc.id = r.community_id'''
+                  JOIN underwriting_communities uc ON uc.id = r.community_id
+                  WHERE r.deleted_at IS NULL AND uc.deleted_at IS NULL'''
 
     if community_id:
-        sql += ' WHERE r.community_id = ?'
+        sql += ' AND r.community_id = ?'
         c.execute(sql + ' ORDER BY uc.location_name, r.row_version', (community_id,))
     else:
         c.execute(sql + ' ORDER BY uc.location_name, r.row_version')
