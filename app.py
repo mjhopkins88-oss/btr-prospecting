@@ -623,6 +623,24 @@ def init_db():
     except Exception:
         pass
 
+    # --- Broker Saved Items (Deal Board) ---
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS broker_saved (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            prospect_id INTEGER,
+            company TEXT,
+            notes TEXT DEFAULT '',
+            status TEXT DEFAULT 'saved',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_broker_saved_user ON broker_saved(user_id)')
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -714,6 +732,19 @@ def require_role(role):
         @wraps(f)
         def decorated(*args, **kwargs):
             if g.user and g.user.get('role') != role:
+                return jsonify({'success': False, 'message': 'Insufficient permissions'}), 403
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
+_VALID_ROLES = ('admin', 'producer', 'broker')
+
+def require_any_role(*roles):
+    """Decorator: require user has one of the specified roles (must be used after require_auth)."""
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            if g.user and g.user.get('role') not in roles:
                 return jsonify({'success': False, 'message': 'Insufficient permissions'}), 403
             return f(*args, **kwargs)
         return decorated
@@ -965,8 +996,8 @@ def api_auth_create_user():
         return jsonify({'success': False, 'message': 'name, email, and password are required'}), 400
     if len(password) < 8:
         return jsonify({'success': False, 'message': 'Password must be at least 8 characters'}), 400
-    if role not in ('admin', 'producer'):
-        return jsonify({'success': False, 'message': 'Role must be admin or producer'}), 400
+    if role not in _VALID_ROLES:
+        return jsonify({'success': False, 'message': f'Role must be one of: {", ".join(_VALID_ROLES)}'}), 400
 
     user_id = str(uuid.uuid4())
     password_hash = _hash_password(password)
@@ -1028,8 +1059,8 @@ def api_admin_create_user():
         return jsonify({'success': False, 'message': 'name, email, and password are required'}), 400
     if len(password) < 8:
         return jsonify({'success': False, 'message': 'Password must be at least 8 characters'}), 400
-    if role not in ('admin', 'producer'):
-        return jsonify({'success': False, 'message': 'Role must be admin or producer'}), 400
+    if role not in _VALID_ROLES:
+        return jsonify({'success': False, 'message': f'Role must be one of: {", ".join(_VALID_ROLES)}'}), 400
 
     user_id = str(uuid.uuid4())
     password_hash = _hash_password(password)
@@ -1601,6 +1632,7 @@ def _log_lead_activity(cursor, lead_id, actor_user_id, action_type, old_value=No
 
 @app.route('/api/crm/lead/upsert', methods=['POST'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_crm_upsert_lead():
     """Create or find a CRM lead by prospect_key."""
     if not g.user:
@@ -1661,6 +1693,7 @@ def api_crm_upsert_lead():
 
 @app.route('/api/crm/leads', methods=['GET'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_crm_list_leads():
     """List CRM leads with optional filters: owner=me, status=, due=1"""
     if not g.user:
@@ -1719,6 +1752,7 @@ def api_crm_list_leads():
 
 @app.route('/api/crm/leads/<lead_id>', methods=['PATCH'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_crm_update_lead(lead_id):
     """Update a CRM lead (status, owner, followup, priority)."""
     if not g.user:
@@ -1783,6 +1817,7 @@ def api_crm_update_lead(lead_id):
 
 @app.route('/api/crm/leads/<lead_id>/touchpoints', methods=['POST'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_crm_add_touchpoint(lead_id):
     """Log a CRM touchpoint."""
     if not g.user:
@@ -1839,6 +1874,7 @@ def api_crm_add_touchpoint(lead_id):
 
 @app.route('/api/crm/leads/<lead_id>/touchpoints', methods=['GET'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_crm_list_touchpoints(lead_id):
     """Get all touchpoints for a lead."""
     if not g.user:
@@ -1910,6 +1946,7 @@ def api_crm_assign_lead(lead_id):
 
 @app.route('/api/crm/workspace-users', methods=['GET'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_crm_workspace_users():
     """List users in the current workspace (for assignment dropdowns)."""
     if not g.user:
@@ -1925,6 +1962,7 @@ def api_crm_workspace_users():
 
 @app.route('/api/crm/leads/<lead_id>/activity', methods=['GET'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_crm_lead_activity(lead_id):
     """Get activity timeline for a lead. Admin sees any; producer only own leads."""
     if not g.user:
@@ -2026,6 +2064,7 @@ def api_admin_activity_overview():
 
 @app.route('/api/crm/leads/bulk-status', methods=['GET'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_crm_bulk_status():
     """Get CRM status for multiple prospect_keys at once (for card overlays)."""
     if not g.user:
@@ -2602,6 +2641,159 @@ def run_daily_discovery(is_scheduled=False):
     finally:
         _discovery_running = False
 
+# ===================================================================
+# BROKER API ROUTES (Deal Board)
+# ===================================================================
+
+@app.route('/api/broker/saved', methods=['GET'])
+@require_auth
+@require_any_role('admin', 'broker')
+def api_broker_saved_list():
+    """List broker's saved prospects (Deal Board)."""
+    conn = _get_db_conn()
+    c = conn.cursor()
+    c.execute('SELECT id, prospect_id, company, notes, status, created_at, updated_at FROM broker_saved WHERE user_id = ? ORDER BY created_at DESC', (g.user['id'],))
+    rows = c.fetchall()
+    conn.close()
+    items = []
+    for r in rows:
+        created = r[5]
+        updated = r[6]
+        if isinstance(created, datetime):
+            created = created.isoformat()
+        if isinstance(updated, datetime):
+            updated = updated.isoformat()
+        items.append({
+            'id': r[0], 'prospect_id': r[1], 'company': r[2],
+            'notes': r[3], 'status': r[4],
+            'created_at': str(created or ''), 'updated_at': str(updated or ''),
+        })
+    return jsonify({'success': True, 'items': items})
+
+
+@app.route('/api/broker/saved', methods=['POST'])
+@require_auth
+@require_any_role('admin', 'broker')
+def api_broker_saved_create():
+    """Save a prospect to broker's Deal Board."""
+    data = request.json or {}
+    prospect_id = data.get('prospect_id')
+    company = data.get('company', '').strip()
+    notes = data.get('notes', '').strip()
+
+    if not company and not prospect_id:
+        return jsonify({'success': False, 'message': 'prospect_id or company required'}), 400
+
+    # If prospect_id given, look up company name
+    if prospect_id and not company:
+        conn = _get_db_conn()
+        c = conn.cursor()
+        c.execute('SELECT company FROM prospects WHERE id = ?', (prospect_id,))
+        row = c.fetchone()
+        conn.close()
+        company = row[0] if row else 'Unknown'
+
+    item_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+    conn = _get_db_conn()
+    c = conn.cursor()
+    try:
+        c.execute('INSERT INTO broker_saved (id, user_id, prospect_id, company, notes, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                  (item_id, g.user['id'], prospect_id, company, notes, 'saved', now, now))
+        conn.commit()
+    except _IntegrityError:
+        conn.rollback()
+        conn.close()
+        return jsonify({'success': False, 'message': 'Already saved'}), 409
+    conn.close()
+    return jsonify({'success': True, 'item': {
+        'id': item_id, 'prospect_id': prospect_id, 'company': company,
+        'notes': notes, 'status': 'saved', 'created_at': now, 'updated_at': now,
+    }})
+
+
+@app.route('/api/broker/saved/<item_id>', methods=['PATCH'])
+@require_auth
+@require_any_role('admin', 'broker')
+def api_broker_saved_update(item_id):
+    """Update a saved Deal Board item (notes, status)."""
+    data = request.json or {}
+    conn = _get_db_conn()
+    c = conn.cursor()
+    # Verify ownership
+    c.execute('SELECT id FROM broker_saved WHERE id = ? AND user_id = ?', (item_id, g.user['id']))
+    if not c.fetchone():
+        conn.close()
+        return jsonify({'success': False, 'message': 'Not found'}), 404
+
+    updates = []
+    params = []
+    if 'notes' in data:
+        updates.append('notes = ?')
+        params.append(data['notes'])
+    if 'status' in data:
+        updates.append('status = ?')
+        params.append(data['status'])
+    if updates:
+        updates.append('updated_at = ?')
+        params.append(datetime.utcnow().isoformat())
+        params.append(item_id)
+        c.execute(f'UPDATE broker_saved SET {", ".join(updates)} WHERE id = ?', params)
+        conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+
+@app.route('/api/broker/saved/<item_id>', methods=['DELETE'])
+@require_auth
+@require_any_role('admin', 'broker')
+def api_broker_saved_delete(item_id):
+    """Remove item from Deal Board."""
+    conn = _get_db_conn()
+    c = conn.cursor()
+    c.execute('DELETE FROM broker_saved WHERE id = ? AND user_id = ?', (item_id, g.user['id']))
+    deleted = c.rowcount
+    conn.commit()
+    conn.close()
+    if not deleted:
+        return jsonify({'success': False, 'message': 'Not found'}), 404
+    return jsonify({'success': True})
+
+
+@app.route('/api/broker/export-csv', methods=['GET'])
+@require_auth
+@require_any_role('admin', 'broker')
+def api_broker_export_csv():
+    """Export broker's saved Deal Board items as CSV."""
+    import csv
+    import io
+
+    conn = _get_db_conn()
+    c = conn.cursor()
+    c.execute('''SELECT bs.company, bs.notes, bs.status, bs.created_at,
+                        p.executive, p.title, p.city, p.state, p.score, p.tiv, p.units,
+                        p.signals, p.why_now, p.email, p.phone
+                 FROM broker_saved bs
+                 LEFT JOIN prospects p ON bs.prospect_id = p.id
+                 WHERE bs.user_id = ?
+                 ORDER BY bs.created_at DESC''', (g.user['id'],))
+    rows = c.fetchall()
+    conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['Company', 'Notes', 'Status', 'Saved At',
+                     'Executive', 'Title', 'City', 'State', 'Score', 'TIV', 'Units',
+                     'Signals', 'Why Now', 'Email', 'Phone'])
+    for r in rows:
+        writer.writerow([str(v or '') for v in r])
+
+    resp = make_response(output.getvalue())
+    resp.headers['Content-Type'] = 'text/csv'
+    resp.headers['Content-Disposition'] = 'attachment; filename=deal-board-export.csv'
+    return resp
+
+
 # API Routes
 
 @app.route('/')
@@ -2771,6 +2963,7 @@ def api_export_csv():
 
 @app.route('/api/email/generate', methods=['POST'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_generate_email():
     """Generate personalized email for a prospect using EMAIL GEN SPEC"""
     try:
@@ -3120,6 +3313,7 @@ def api_prospecting_run_results(run_id):
 
 @app.route('/api/discovery/config', methods=['GET'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_discovery_config():
     """Get current discovery configuration"""
     return jsonify({'success': True, 'config': DISCOVERY_CONFIG})
@@ -3144,6 +3338,7 @@ def api_update_discovery_config():
 
 @app.route('/api/discovery/latest', methods=['GET'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_discovery_latest():
     """Get the most recent discovery run"""
     conn = _get_db_conn()
@@ -3172,6 +3367,7 @@ def api_discovery_latest():
 
 @app.route('/api/discovery/run', methods=['POST'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_discovery_run():
     """Manually trigger a discovery run (background thread)"""
     global _discovery_running
@@ -3197,6 +3393,7 @@ def api_discovery_run():
 
 @app.route('/api/discovery/status', methods=['GET'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_discovery_status():
     """Check if a discovery run is currently in progress"""
     return jsonify({'success': True, 'running': _discovery_running})
@@ -3204,6 +3401,7 @@ def api_discovery_status():
 
 @app.route('/api/discovery/history', methods=['GET'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_discovery_history():
     """Get past discovery run summaries"""
     conn = _get_db_conn()
@@ -3221,6 +3419,7 @@ def api_discovery_history():
 
 @app.route('/api/discovery/run/<int:run_id>', methods=['GET'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_discovery_run_detail(run_id):
     """Get full results for a specific discovery run"""
     conn = _get_db_conn()
@@ -3249,6 +3448,7 @@ def api_discovery_run_detail(run_id):
 
 @app.route('/api/discovery/source-refresh', methods=['GET'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_discovery_source_refresh():
     """Get last-refreshed timestamps for each source type"""
     from discovery_engine import get_source_refresh_times
@@ -3463,6 +3663,7 @@ def _compute_activity_scores(items, days=7):
 
 @app.route('/api/discovery/statewide/run', methods=['POST'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_statewide_run():
     """Run statewide search for a single state. Returns items immediately (cached)."""
     data = request.json or {}
@@ -3483,6 +3684,7 @@ def api_statewide_run():
 
 @app.route('/api/discovery/state-summary', methods=['GET'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_state_summary():
     """Get activity summary for a state: top cities (7d + 30d) + items."""
     from serpapi_client import get_cached
@@ -3513,6 +3715,7 @@ def api_state_summary():
 
 @app.route('/api/discovery/state-rankings', methods=['GET'])
 @require_auth
+@require_any_role('admin', 'producer')
 def api_state_rankings():
     """Get rankings across all 5 states for the last 7 days."""
     from serpapi_client import get_cached
