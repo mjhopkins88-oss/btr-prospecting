@@ -423,6 +423,19 @@ def init_db():
     c.execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_state ON market_momentum(state, city, window_end_date)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_date ON market_momentum(window_end_date)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_st ON market_momentum(state)')
+    # --- Sunbelt Sparknotes Summaries (cached LLM output) ---
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS sunbelt_summaries (
+            id TEXT PRIMARY KEY,
+            tab TEXT NOT NULL,
+            window_days INTEGER NOT NULL,
+            date_bucket TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(tab, window_days, date_bucket)
+        )
+    ''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_sunbelt_summaries_lookup ON sunbelt_summaries(tab, window_days, date_bucket)')
     # --- Lead Timing Scores ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS lead_timing_scores (
@@ -4978,6 +4991,289 @@ def api_sunbelt_state_rankings():
     except Exception as e:
         app.logger.error(f'[sunbelt/state-rankings] Error: {e}')
         return jsonify({'ok': False, 'error': 'Failed to compute state rankings', 'details': str(e)}), 500
+
+
+# --- Sunbelt AI Sparknotes ---
+
+_TAB_WINDOW_DEFAULTS = {'weekly': 7, 'momentum': 7, 'trends': 7, 'state_rankings': 30}
+
+def _build_sparknotes_items(tab, window_days):
+    """Build the item list for sparknotes from the same data the UI renders."""
+    signals = _gather_all_signals(days=window_days)
+    if not signals:
+        return []
+
+    if tab == 'weekly':
+        # Top highlights by weight (same logic as /api/sunbelt/weekly)
+        scored = []
+        for s in signals:
+            w = get_signal_weight(s.get('topic', '') + ' ' + s.get('title', ''))
+            scored.append((w, s))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [{
+            'id': str(i),
+            'title': s.get('title') or s.get('summary', '')[:80] or 'Untitled',
+            'snippet_or_summary': s.get('summary') or s.get('title') or '',
+            'topic': s.get('topic', 'other'),
+            'city': s.get('city') or None,
+            'state': s.get('state') or None,
+            'source_url': s.get('url') or None,
+            'created_at': s.get('date_str', ''),
+        } for i, (w, s) in enumerate(scored[:15])]
+
+    elif tab == 'momentum':
+        # Top markets by momentum (same logic as /api/sunbelt/momentum)
+        window_cutoff = (datetime.utcnow() - timedelta(days=window_days)).isoformat()
+        city_data = {}
+        for s in signals:
+            city = s.get('city') or None
+            state = s.get('state') or None
+            if not city or not state:
+                continue
+            key = f"{city}|{state}"
+            if key not in city_data:
+                city_data[key] = {'city': city, 'state': state, 'count_window': 0, 'count_baseline': 0,
+                                  'titles': [], 'topics': set()}
+            d = city_data[key]
+            d['count_baseline'] += 1
+            d['topics'].add(s.get('topic', 'other'))
+            if s.get('date_str', '') >= window_cutoff:
+                d['count_window'] += 1
+                if len(d['titles']) < 3:
+                    d['titles'].append(s.get('title') or s.get('summary', '')[:80] or 'Untitled')
+        ranked = sorted(city_data.values(), key=lambda d: d['count_window'], reverse=True)[:15]
+        return [{
+            'id': str(i),
+            'title': f"{d['city']}, {d['state']} — {d['count_window']} signals in {window_days}d",
+            'snippet_or_summary': '; '.join(d['titles']) if d['titles'] else 'Market activity detected',
+            'topic': ', '.join(sorted(d['topics'])[:3]),
+            'city': d['city'],
+            'state': d['state'],
+            'source_url': None,
+            'created_at': '',
+        } for i, d in enumerate(ranked)]
+
+    elif tab == 'trends':
+        # Trend groups (same logic as /api/sunbelt/trends)
+        baseline_days = max(window_days * 4, 30)
+        all_sigs = _gather_all_signals(days=baseline_days)
+        window_cutoff = (datetime.utcnow() - timedelta(days=window_days)).isoformat()
+        groups = {}
+        for s in all_sigs:
+            state = s.get('state') or None
+            city = s.get('city') or None
+            topic = s.get('topic', 'other')
+            key = f"{state or ''}|{city or ''}|{topic}"
+            if key not in groups:
+                groups[key] = {'state': state, 'city': city, 'topic': topic,
+                               'count_window': 0, 'count_baseline': 0, 'title': ''}
+            g = groups[key]
+            g['count_baseline'] += 1
+            if s.get('date_str', '') >= window_cutoff:
+                g['count_window'] += 1
+                if not g['title']:
+                    g['title'] = s.get('title') or s.get('summary', '')[:80] or 'Untitled'
+        trends = []
+        for key, g in groups.items():
+            if g['count_window'] < 2:
+                continue
+            baseline_weekly = g['count_baseline'] / max(1, baseline_days / 7.0)
+            ratio = g['count_window'] / max(1, baseline_weekly) if baseline_weekly > 0 else g['count_window']
+            if ratio >= 2.5:
+                classification = 'Accelerating'
+            elif ratio >= 1.5:
+                classification = 'Emerging'
+            elif g['count_window'] > g['count_baseline'] / 2:
+                classification = 'Peaking'
+            else:
+                classification = 'Cooling'
+            trends.append({**g, 'ratio': ratio, 'classification': classification})
+        trends.sort(key=lambda x: x['ratio'], reverse=True)
+        return [{
+            'id': str(i),
+            'title': f"{t['city'] or 'Unknown'}, {t['state'] or '??'} — {t['topic']} ({t['classification']})",
+            'snippet_or_summary': f"{t['count_window']} signals in {window_days}d vs {t['count_baseline']} baseline. Ratio: {t['ratio']:.1f}x. {t['title']}",
+            'topic': t['topic'],
+            'city': t['city'],
+            'state': t['state'],
+            'source_url': None,
+            'created_at': '',
+        } for i, t in enumerate(trends[:15])]
+
+    elif tab == 'state_rankings':
+        # State rankings (same logic as /api/sunbelt/state-rankings)
+        state_data = {}
+        for s in signals:
+            state = s.get('state') or None
+            if not state:
+                continue
+            if state not in state_data:
+                state_data[state] = {'state': state, 'total': 0, 'weighted': 0,
+                                     'cities': {}, 'topics': {}, 'capital': 0, 'construction': 0}
+            sd = state_data[state]
+            w = get_signal_weight(s.get('topic', '') + ' ' + s.get('title', ''))
+            sd['total'] += 1
+            sd['weighted'] += w
+            city = s.get('city') or 'Unknown'
+            sd['cities'][city] = sd['cities'].get(city, 0) + w
+            topic = s.get('topic', 'other')
+            sd['topics'][topic] = sd['topics'].get(topic, 0) + 1
+            if topic in ('acquisition', 'sale', 'financing', 'jv', 'joint_venture', 'capital'):
+                sd['capital'] += 1
+            if topic in ('groundbreaking', 'construction', 'permit', 'rezoning', 'new_build', 'permit_rezoning'):
+                sd['construction'] += 1
+        rankings = sorted(state_data.values(), key=lambda d: d['weighted'], reverse=True)[:15]
+        return [{
+            'id': str(i),
+            'title': f"{STATEWIDE_STATES.get(sd['state'], sd['state'])} — {sd['total']} signals, weight {sd['weighted']}",
+            'snippet_or_summary': f"Capital events: {sd['capital']}, Construction: {sd['construction']}. Top cities: {', '.join(c for c, _ in sorted(sd['cities'].items(), key=lambda x: x[1], reverse=True)[:3])}",
+            'topic': ', '.join(t for t, _ in sorted(sd['topics'].items(), key=lambda x: x[1], reverse=True)[:3]),
+            'city': None,
+            'state': sd['state'],
+            'source_url': None,
+            'created_at': '',
+        } for i, sd in enumerate(rankings)]
+
+    return []
+
+
+@app.route('/api/sunbelt/sparknotes', methods=['POST'])
+@require_auth
+def api_sunbelt_sparknotes():
+    """Generate AI Sparknotes summary for Sunbelt tab items."""
+    body = request.get_json(silent=True) or {}
+    tab = body.get('tab', 'weekly')
+    if tab not in _TAB_WINDOW_DEFAULTS:
+        return jsonify({'ok': False, 'error': f'Invalid tab: {tab}. Must be one of: {", ".join(_TAB_WINDOW_DEFAULTS.keys())}'}), 400
+
+    try:
+        window_days = min(int(body.get('windowDays', _TAB_WINDOW_DEFAULTS[tab])), 180)
+    except (ValueError, TypeError):
+        window_days = _TAB_WINDOW_DEFAULTS[tab]
+
+    date_bucket = datetime.utcnow().strftime('%Y-%m-%d')
+
+    # Check cache
+    conn = _get_db_conn()
+    c = conn.cursor()
+    try:
+        c.execute('SELECT payload_json, created_at FROM sunbelt_summaries WHERE tab = ? AND window_days = ? AND date_bucket = ?',
+                  (tab, window_days, date_bucket))
+        cached = c.fetchone()
+        if cached:
+            conn.close()
+            payload = json.loads(cached[0])
+            return jsonify({
+                'ok': True,
+                'data': payload,
+                'meta': {'cached': True, 'generated_at': cached[1]},
+            })
+    except Exception:
+        pass  # Table might not exist yet on old DBs; fall through to generate
+
+    # Build items for the prompt
+    try:
+        items = _build_sparknotes_items(tab, window_days)
+    except Exception as e:
+        conn.close()
+        app.logger.error(f'[sparknotes] Failed to build items for tab={tab}: {e}')
+        return jsonify({'ok': False, 'error': 'Failed to gather signal data', 'details': str(e)}), 500
+
+    if not items:
+        conn.close()
+        return jsonify({
+            'ok': False,
+            'error': f'No signals found for tab "{tab}" in the last {window_days} days. Run discovery first.',
+        }), 404
+
+    # Build LLM prompt
+    prompt = f"""You are a senior market analyst for a Build-to-Rent (BTR) and Single-Family Rental (SFR) insurance brokerage.
+
+Analyze the following {len(items)} intelligence items from the "{tab}" view ({window_days}-day window) and produce a structured Sparknotes summary.
+
+ITEMS:
+{json.dumps(items, indent=2)}
+
+Return ONLY valid JSON (no markdown fencing, no explanation) matching this EXACT schema:
+
+{{
+  "executive_summary": "3-7 bullet points as a single string, each bullet on its own line starting with '- '. Concise, brokerage tone. Focus on actionable intelligence for BTR/SFR insurance producers.",
+  "key_themes": ["theme1", "theme2", "...up to 6 themes"],
+  "sparknotes_by_item": [
+    {{
+      "id": "<matching item id>",
+      "one_liner": "1 sentence distilling the item",
+      "bullets": ["key point 1", "key point 2"],
+      "why_it_matters": "1 sentence on insurance/brokerage relevance",
+      "suggested_next_step": "1 sentence actionable next step for a producer"
+    }}
+  ]
+}}
+
+RULES:
+- sparknotes_by_item MUST have one entry per input item, in the same order, with matching "id" values.
+- executive_summary should synthesize themes across ALL items, not just repeat them.
+- key_themes should be short labels (2-5 words each).
+- Keep bullet points under 25 words each.
+- Tone: professional, analytical, data-driven. Not salesy.
+- If data is sparse, note that and provide analysis based on what's available."""
+
+    try:
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        raw = message.content[0].text if message.content else ''
+    except Exception as e:
+        conn.close()
+        app.logger.error(f'[sparknotes] LLM call failed: {e}')
+        return jsonify({'ok': False, 'error': 'AI summary generation failed. Please try again.', 'details': str(e)}), 500
+
+    # Parse JSON from response (strip markdown fences if present)
+    raw = raw.strip()
+    if raw.startswith('```'):
+        raw = raw.split('\n', 1)[1] if '\n' in raw else raw[3:]
+        if raw.endswith('```'):
+            raw = raw[:-3]
+        raw = raw.strip()
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as e:
+        conn.close()
+        app.logger.error(f'[sparknotes] JSON parse failed: {e}\nRaw: {raw[:500]}')
+        return jsonify({'ok': False, 'error': 'AI returned invalid format. Please try again.'}), 500
+
+    # Validate required keys
+    if not isinstance(payload.get('executive_summary'), str):
+        payload['executive_summary'] = ''
+    if not isinstance(payload.get('key_themes'), list):
+        payload['key_themes'] = []
+    if not isinstance(payload.get('sparknotes_by_item'), list):
+        payload['sparknotes_by_item'] = []
+
+    generated_at = datetime.utcnow().isoformat()
+
+    # Cache the result
+    try:
+        summary_id = str(uuid.uuid4())
+        c.execute('INSERT INTO sunbelt_summaries (id, tab, window_days, date_bucket, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+                  (summary_id, tab, window_days, date_bucket, json.dumps(payload), generated_at))
+        conn.commit()
+    except _IntegrityError:
+        conn.rollback()  # Race condition: another request cached it first; that's fine
+    except Exception as e:
+        app.logger.warning(f'[sparknotes] Cache write failed: {e}')
+        conn.rollback()
+    finally:
+        conn.close()
+
+    return jsonify({
+        'ok': True,
+        'data': payload,
+        'meta': {'cached': False, 'generated_at': generated_at},
+    })
 
 
 # --- Government Signal Enrichment (Phase 1) ---
