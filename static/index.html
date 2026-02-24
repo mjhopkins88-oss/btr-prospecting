@@ -956,14 +956,17 @@
                             />
                         </React.Fragment>
                     )}
-                    {activeTab === 'discovery' && <DailyDiscovery />}
-                    {activeTab === 'pipeline' && <PipelinePage user={user} />}
-                    {activeTab === 'followups' && <FollowUpsPage user={user} />}
-                    {activeTab === 'statewide' && <StatewideDiscovery />}
+                    {activeTab === 'discovery' && user?.role !== 'broker' && <DailyDiscovery />}
+                    {activeTab === 'pipeline' && user?.role !== 'broker' && <PipelinePage user={user} />}
+                    {activeTab === 'followups' && user?.role !== 'broker' && <FollowUpsPage user={user} />}
+                    {activeTab === 'statewide' && user?.role !== 'broker' && <StatewideDiscovery />}
                     {activeTab === 'intelligence' && <SunbeltIntelligence user={user} />}
+                    {activeTab === 'dealboard' && <DealBoardPage user={user} />}
                     {activeTab === 'admin' && user && user.is_super_admin && <AdminPage user={user} />}
                     {activeTab === 'quoting' && user && user.role === 'admin' && <QuotingPage user={user} />}
-                    {activeTab === 'quoting' && (!user || user.role !== 'admin') && (() => { setActiveTab('pipeline'); return null; })()}
+                    {/* Route guards: redirect to default tab if user navigates to a tab they shouldn't see */}
+                    {activeTab === 'quoting' && (!user || user.role !== 'admin') && (() => { setActiveTab(ROLE_DEFAULT_TAB[user?.role] || 'search'); return null; })()}
+                    {user?.role === 'broker' && ['discovery','pipeline','followups','statewide'].includes(activeTab) && (() => { setActiveTab('search'); return null; })()}
                     {showEmailModal && (
                         <EmailModal
                             email={emailTemplate}
@@ -996,7 +999,7 @@
                             <span className="text-sm text-slate-400">{user.name}</span>
                             <span className={cn(
                                 'text-[0.65rem] px-2 py-0.5 rounded-lg font-semibold uppercase',
-                                user.role==='admin' ? 'bg-purple-500/15 text-purple-300' : 'bg-cyan-500/15 text-cyan-300'
+                                user.role==='admin' ? 'bg-purple-500/15 text-purple-300' : user.role==='broker' ? 'bg-amber-500/15 text-amber-300' : 'bg-cyan-500/15 text-cyan-300'
                             )}>{user.role}</span>
                             <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.75rem'}} onClick={onLogout}>Logout</button>
                         </div>
@@ -1005,16 +1008,48 @@
             );
         }
 
-        function TabBar({ activeTab, setActiveTab, user }) {
-            const tabs = [
+        // Role-based tab definitions
+        const ROLE_TABS = {
+            broker: [
+                { id: 'search', label: 'Prospect Search' },
+                { id: 'intelligence', label: 'Sunbelt Intelligence' },
+                { id: 'dealboard', label: 'Deal Board' },
+            ],
+            producer: [
                 { id: 'search', label: 'Prospect Search' },
                 { id: 'discovery', label: 'Daily Discovery' },
                 { id: 'statewide', label: 'Statewide' },
                 { id: 'intelligence', label: 'Sunbelt Intelligence' },
                 { id: 'pipeline', label: 'My Pipeline' },
                 { id: 'followups', label: 'Follow-ups Due' },
-            ];
-            if (user && user.role === 'admin') {
+            ],
+            admin: [
+                { id: 'search', label: 'Prospect Search' },
+                { id: 'discovery', label: 'Daily Discovery' },
+                { id: 'statewide', label: 'Statewide' },
+                { id: 'intelligence', label: 'Sunbelt Intelligence' },
+                { id: 'pipeline', label: 'My Pipeline' },
+                { id: 'followups', label: 'Follow-ups Due' },
+            ],
+        };
+
+        // Default tab per role (for route guard redirects)
+        const ROLE_DEFAULT_TAB = { broker: 'search', producer: 'search', admin: 'search' };
+
+        // Broker-mode label mappings
+        const BROKER_LABELS = {
+            'Trigger Severity': 'Deal Heat',
+            'Insurance Triggers': 'Growth Signals',
+            'Competitive Difficulty': 'Deal Complexity',
+        };
+        function brokerLabel(label, role) {
+            return role === 'broker' ? (BROKER_LABELS[label] || label) : label;
+        }
+
+        function TabBar({ activeTab, setActiveTab, user }) {
+            const role = user?.role || 'producer';
+            const tabs = [...(ROLE_TABS[role] || ROLE_TABS.producer)];
+            if (role === 'admin') {
                 tabs.push({ id: 'quoting', label: 'Quoting' });
             }
             if (user && user.is_super_admin) {
@@ -1366,7 +1401,7 @@
                     {/* Score Breakdown */}
                     {hasBreakdown && (
                         <div style={{padding: '0.75rem', background: '#0b1220', borderRadius: '8px', border: '1px solid #1e293b'}}>
-                            <div style={{fontSize: '0.7rem', color: '#64748b', fontWeight: 600, marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Trigger Severity</div>
+                            <div style={{fontSize: '0.7rem', color: '#64748b', fontWeight: 600, marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em'}}>{brokerLabel('Trigger Severity', user?.role)}</div>
                             <ScoreBar label="Capital Event" value={breakdown.capital_event || 0} max={40} color="#ef4444" />
                             <ScoreBar label="Construction" value={breakdown.construction_stage || 0} max={25} color="#06b6d4" />
                             <ScoreBar label="Expansion" value={breakdown.expansion_velocity || 0} max={20} color="#f59e0b" />
@@ -1409,7 +1444,7 @@
                     {/* Insurance Trigger Pills */}
                     {triggers.length > 0 && (
                         <div>
-                            <SectionLabel className="mb-1.5">Insurance Triggers</SectionLabel>
+                            <SectionLabel className="mb-1.5">{brokerLabel('Insurance Triggers', user?.role)}</SectionLabel>
                             <div className="flex flex-wrap gap-1.5">
                                 {triggers.map((trigger, idx) => (
                                     <SignalPill key={idx} label={trigger} glow={score >= 90} />
@@ -1440,7 +1475,7 @@
                                         display: 'inline-block',
                                     }} />
                                     <span style={{fontSize: '0.75rem', color: '#94a3b8'}}>
-                                        {competitiveDifficulty} Competition
+                                        {user?.role === 'broker' ? `${competitiveDifficulty} Complexity` : `${competitiveDifficulty} Competition`}
                                     </span>
                                 </div>
                             )}
@@ -1559,33 +1594,64 @@
 
                     {/* Action Buttons */}
                     <div style={{...styles.cardActions, justifyContent: 'flex-end'}}>
-                        {!crmInfo ? (
-                            <button className="action-btn" style={{...styles.actionBtn,borderColor:'#10b981',color:'#34d399'}} onClick={() => onSaveToPipeline(prospect)}>
-                                {user?.role === 'admin' ? 'Save to Pipeline' : 'Save to My Leads'}
-                            </button>
+                        {user?.role === 'broker' ? (
+                            <React.Fragment>
+                                <button className="action-btn" style={{...styles.actionBtn,borderColor:'#f59e0b',color:'#fcd34d'}} onClick={async () => {
+                                    try {
+                                        const res = await fetch(`${API_BASE}/api/broker/saved`, {
+                                            method: 'POST', headers: {'Content-Type':'application/json'},
+                                            body: JSON.stringify({ prospect_id: prospect.id, company: prospect.company }),
+                                        });
+                                        const d = await res.json();
+                                        alert(d.success ? 'Saved to Deal Board!' : (d.message || 'Failed'));
+                                    } catch(e) { alert('Error saving: ' + e.message); }
+                                }}>
+                                    Save to Deal Board
+                                </button>
+                                <button className="action-btn" style={styles.actionBtn} onClick={() => setShowEmailOptions(!showEmailOptions)}>
+                                    {showEmailOptions ? 'Cancel' : 'Generate Email'}
+                                </button>
+                                {prospect.linkedin ? (
+                                    <a href={`https://${prospect.linkedin}`} target="_blank" rel="noopener noreferrer" style={{...styles.actionBtn, textDecoration: 'none', textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center'}}>
+                                        LinkedIn DM
+                                    </a>
+                                ) : (
+                                    <button className="action-btn btn-disabled" style={styles.actionBtn} disabled>
+                                        LinkedIn DM
+                                    </button>
+                                )}
+                            </React.Fragment>
                         ) : (
-                            <button className="action-btn" style={styles.actionBtn} onClick={() => onLogTouchpoint(crmInfo.lead_id, prospect.company)}>
-                                Log Touchpoint
-                            </button>
+                            <React.Fragment>
+                                {!crmInfo ? (
+                                    <button className="action-btn" style={{...styles.actionBtn,borderColor:'#10b981',color:'#34d399'}} onClick={() => onSaveToPipeline(prospect)}>
+                                        {user?.role === 'admin' ? 'Save to Pipeline' : 'Save to My Leads'}
+                                    </button>
+                                ) : (
+                                    <button className="action-btn" style={styles.actionBtn} onClick={() => onLogTouchpoint(crmInfo.lead_id, prospect.company)}>
+                                        Log Touchpoint
+                                    </button>
+                                )}
+                                <button className="action-btn" style={styles.actionBtn} onClick={() => setShowEmailOptions(!showEmailOptions)}>
+                                    {showEmailOptions ? 'Cancel' : 'Generate Email'}
+                                </button>
+                                {prospect.linkedin ? (
+                                    <a href={`https://${prospect.linkedin}`} target="_blank" rel="noopener noreferrer" style={{...styles.actionBtn, textDecoration: 'none', textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center'}}>
+                                        LinkedIn DM
+                                    </a>
+                                ) : (
+                                    <button className="action-btn btn-disabled" style={styles.actionBtn} disabled>
+                                        LinkedIn DM
+                                    </button>
+                                )}
+                                <button className="action-btn btn-disabled" style={styles.actionBtn} disabled>
+                                    Call Angle
+                                </button>
+                                <button className="action-btn" style={styles.actionBtn} onClick={() => onDelete(prospect.id)}>
+                                    Delete
+                                </button>
+                            </React.Fragment>
                         )}
-                        <button className="action-btn" style={styles.actionBtn} onClick={() => setShowEmailOptions(!showEmailOptions)}>
-                            {showEmailOptions ? 'Cancel' : 'Generate Email'}
-                        </button>
-                        {prospect.linkedin ? (
-                            <a href={`https://${prospect.linkedin}`} target="_blank" rel="noopener noreferrer" style={{...styles.actionBtn, textDecoration: 'none', textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center'}}>
-                                LinkedIn DM
-                            </a>
-                        ) : (
-                            <button className="action-btn btn-disabled" style={styles.actionBtn} disabled>
-                                LinkedIn DM
-                            </button>
-                        )}
-                        <button className="action-btn btn-disabled" style={styles.actionBtn} disabled>
-                            Call Angle
-                        </button>
-                        <button className="action-btn" style={styles.actionBtn} onClick={() => onDelete(prospect.id)}>
-                            Delete
-                        </button>
                     </div>
                 </div>
             );
@@ -3303,6 +3369,127 @@
             );
         }
 
+        // ======= DEAL BOARD PAGE (Broker) =======
+        function DealBoardPage({ user }) {
+            const [items, setItems] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [editId, setEditId] = useState(null);
+            const [editNotes, setEditNotes] = useState('');
+            const [editStatus, setEditStatus] = useState('');
+            const statusOptions = ['saved', 'reviewing', 'contacted', 'negotiating', 'closed', 'passed'];
+
+            const loadItems = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/broker/saved`);
+                    const d = await res.json();
+                    if (d.success) setItems(d.items);
+                } catch(e) { console.error('Failed to load deal board', e); }
+                setLoading(false);
+            };
+
+            useEffect(() => { loadItems(); }, []);
+
+            const deleteItem = async (id) => {
+                if (!confirm('Remove from Deal Board?')) return;
+                try {
+                    await fetch(`${API_BASE}/api/broker/saved/${id}`, { method: 'DELETE' });
+                    setItems(prev => prev.filter(i => i.id !== id));
+                } catch(e) { alert('Error removing item'); }
+            };
+
+            const saveEdit = async (id) => {
+                try {
+                    await fetch(`${API_BASE}/api/broker/saved/${id}`, {
+                        method: 'PATCH', headers: {'Content-Type':'application/json'},
+                        body: JSON.stringify({ notes: editNotes, status: editStatus }),
+                    });
+                    setEditId(null);
+                    loadItems();
+                } catch(e) { alert('Error saving'); }
+            };
+
+            const exportCsv = () => {
+                window.open(`${API_BASE}/api/broker/export-csv`, '_blank');
+            };
+
+            const statusColor = (s) => {
+                const map = { saved: '#94a3b8', reviewing: '#60a5fa', contacted: '#fbbf24', negotiating: '#a78bfa', closed: '#34d399', passed: '#ef4444' };
+                return map[s] || '#94a3b8';
+            };
+
+            if (loading) return <div style={{textAlign:'center',padding:'3rem',color:'#64748b'}}>Loading Deal Board...</div>;
+
+            return (
+                <div>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.5rem'}}>
+                        <div>
+                            <h2 style={{...styles.sectionTitle, fontSize:'1.3rem', margin:0}}>Deal Board</h2>
+                            <p style={{color:'#64748b',fontSize:'0.85rem',margin:'0.25rem 0 0'}}>
+                                {items.length} saved {items.length === 1 ? 'deal' : 'deals'}
+                            </p>
+                        </div>
+                        <button className="action-btn" style={{...styles.actionBtn, borderColor:'#10b981', color:'#34d399'}} onClick={exportCsv}>
+                            Export CSV
+                        </button>
+                    </div>
+                    {items.length === 0 ? (
+                        <EmptyState
+                            title="No saved deals yet"
+                            subtitle='Use "Save to Deal Board" on prospect cards to start building your list'
+                            icon={<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-slate-600"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>}
+                        />
+                    ) : (
+                        <div style={{display:'flex',flexDirection:'column',gap:'0.75rem'}}>
+                            {items.map(item => (
+                                <div key={item.id} style={{...styles.card, borderRadius:'0.75rem', padding:'1rem 1.25rem'}}>
+                                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:'1rem'}}>
+                                        <div style={{flex:1,minWidth:0}}>
+                                            <div style={{display:'flex',alignItems:'center',gap:'0.5rem',flexWrap:'wrap'}}>
+                                                <h3 style={{...styles.companyName,marginBottom:0,fontSize:'1rem'}}>{item.company || 'Unknown'}</h3>
+                                                <span style={{
+                                                    fontSize:'0.65rem', padding:'0.15rem 0.45rem', borderRadius:'4px', fontWeight:600,
+                                                    background:`${statusColor(item.status)}20`, color: statusColor(item.status),
+                                                    textTransform:'uppercase', letterSpacing:'0.03em',
+                                                }}>{item.status}</span>
+                                            </div>
+                                            <p style={{color:'#64748b',fontSize:'0.78rem',margin:'0.25rem 0 0'}}>
+                                                Saved {item.created_at ? new Date(item.created_at).toLocaleDateString() : ''}
+                                            </p>
+                                        </div>
+                                        <div style={{display:'flex',gap:'0.5rem',flexShrink:0}}>
+                                            <button className="action-btn" style={styles.actionBtn} onClick={() => {
+                                                setEditId(item.id); setEditNotes(item.notes || ''); setEditStatus(item.status);
+                                            }}>Edit</button>
+                                            <button className="action-btn" style={{...styles.actionBtn,borderColor:'#ef4444',color:'#f87171'}} onClick={() => deleteItem(item.id)}>Remove</button>
+                                        </div>
+                                    </div>
+                                    {item.notes && <p style={{color:'#cbd5e1',fontSize:'0.85rem',margin:'0.5rem 0 0',lineHeight:'1.5'}}>{item.notes}</p>}
+                                    {editId === item.id && (
+                                        <div style={{marginTop:'0.75rem',padding:'0.75rem',background:'#0b1220',borderRadius:'8px',border:'1px solid #1e293b'}}>
+                                            <div style={{marginBottom:'0.5rem'}}>
+                                                <label style={{fontSize:'0.7rem',color:'#64748b',fontWeight:600,display:'block',marginBottom:'0.25rem',textTransform:'uppercase'}}>Status</label>
+                                                <select style={styles.select} value={editStatus} onChange={e => setEditStatus(e.target.value)}>
+                                                    {statusOptions.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+                                                </select>
+                                            </div>
+                                            <div style={{marginBottom:'0.5rem'}}>
+                                                <label style={{fontSize:'0.7rem',color:'#64748b',fontWeight:600,display:'block',marginBottom:'0.25rem',textTransform:'uppercase'}}>Notes</label>
+                                                <textarea style={{...styles.select,height:'4rem',resize:'vertical'}} value={editNotes} onChange={e => setEditNotes(e.target.value)} />
+                                            </div>
+                                            <div style={{display:'flex',gap:'0.5rem'}}>
+                                                <button className="action-btn" style={{...styles.actionBtn,borderColor:'#10b981',color:'#34d399'}} onClick={() => saveEdit(item.id)}>Save</button>
+                                                <button className="action-btn" style={styles.actionBtn} onClick={() => setEditId(null)}>Cancel</button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
         // ======= ADMIN PAGE (Super Admin Only) =======
         function AdminPage({ user }) {
             const [users, setUsers] = useState([]);
@@ -3440,8 +3627,8 @@
                                             <td style={{ ...tbl.td, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.85rem' }}>{u.email}</td>
                                             <td style={tbl.td}>
                                                 <span style={tbl.badge(
-                                                    u.role === 'admin' ? '#f59e0b' : '#34d399',
-                                                    u.role === 'admin' ? 'rgba(245,158,11,0.15)' : 'rgba(16,185,129,0.1)'
+                                                    u.role === 'admin' ? '#f59e0b' : u.role === 'broker' ? '#fb923c' : '#34d399',
+                                                    u.role === 'admin' ? 'rgba(245,158,11,0.15)' : u.role === 'broker' ? 'rgba(251,146,60,0.15)' : 'rgba(16,185,129,0.1)'
                                                 )}>{u.role}</span>
                                             </td>
                                             <td style={{ ...tbl.td, color: '#94a3b8', fontSize: '0.85rem' }}>
@@ -3500,6 +3687,7 @@
                                         <select style={styles.select} value={createForm.role}
                                             onChange={e => setCreateForm({ ...createForm, role: e.target.value })}>
                                             <option value="producer">Producer</option>
+                                            <option value="broker">Broker</option>
                                             <option value="admin">Admin</option>
                                         </select>
                                         {createError && <div style={{ color: '#ef4444', fontSize: '0.85rem' }}>{createError}</div>}
