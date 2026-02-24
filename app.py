@@ -641,6 +641,33 @@ def init_db():
     except Exception:
         pass
 
+    # --- Underwriting Communities + Rows ---
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS underwriting_communities (
+            id TEXT PRIMARY KEY,
+            community_key TEXT UNIQUE,
+            location_name TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    # Build underwriting_rows table with all canonical columns
+    from underwriting_columns import COLUMN_KEYS
+    _uw_data_cols = ', '.join(f'{k} TEXT' for k in COLUMN_KEYS)
+    c.execute(f'''
+        CREATE TABLE IF NOT EXISTS underwriting_rows (
+            id TEXT PRIMARY KEY,
+            community_id TEXT NOT NULL,
+            row_version INTEGER NOT NULL DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            {_uw_data_cols}
+        )
+    ''')
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_uw_rows_community ON underwriting_rows(community_id)')
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -2792,6 +2819,295 @@ def api_broker_export_csv():
     resp.headers['Content-Type'] = 'text/csv'
     resp.headers['Content-Disposition'] = 'attachment; filename=deal-board-export.csv'
     return resp
+
+
+# ===================================================================
+# UNDERWRITING SHEET API (Admin Only)
+# ===================================================================
+
+from underwriting_columns import UNDERWRITING_COLUMNS, COLUMN_KEYS, HEADER_MAP, COLUMN_TYPES
+
+@app.route('/api/underwriting/communities', methods=['POST'])
+@require_auth
+@require_role('admin')
+def api_uw_create_community():
+    """Create a new underwriting community + initial row."""
+    data = request.json or {}
+    row_data = data.get('row', {})
+    location_name = row_data.get('location_name') or data.get('location_name', '')
+    community_key = data.get('community_key') or f"{location_name}_{uuid.uuid4().hex[:6]}"
+
+    if not location_name:
+        return jsonify({'ok': False, 'error': 'location_name is required'}), 400
+
+    community_id = str(uuid.uuid4())
+    row_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+
+    conn = _get_db_conn()
+    c = conn.cursor()
+    try:
+        c.execute('INSERT INTO underwriting_communities (id, community_key, location_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+                  (community_id, community_key, location_name, now, now))
+
+        col_names = ', '.join(COLUMN_KEYS)
+        placeholders = ', '.join(['?'] * len(COLUMN_KEYS))
+        values = [str(row_data.get(k, '') or '') for k in COLUMN_KEYS]
+
+        c.execute(f'INSERT INTO underwriting_rows (id, community_id, row_version, created_at, {col_names}) VALUES (?, ?, ?, ?, {placeholders})',
+                  [row_id, community_id, 1, now] + values)
+        conn.commit()
+    except _IntegrityError:
+        conn.rollback()
+        conn.close()
+        return jsonify({'ok': False, 'error': 'Community key already exists'}), 409
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify({'ok': False, 'error': str(e)}), 500
+    conn.close()
+    return jsonify({'ok': True, 'community_id': community_id, 'row_id': row_id})
+
+
+@app.route('/api/underwriting/communities/<community_id>/add-units', methods=['POST'])
+@require_auth
+@require_role('admin')
+def api_uw_add_units(community_id):
+    """Add a new row version (add-on phase) to an existing community."""
+    data = request.json or {}
+    row_data = data.get('row', {})
+    base_row_id = data.get('base_row_id')
+
+    conn = _get_db_conn()
+    c = conn.cursor()
+
+    # Load base row
+    if base_row_id:
+        c.execute(f'SELECT row_version, {", ".join(COLUMN_KEYS)} FROM underwriting_rows WHERE id = ? AND community_id = ?', (base_row_id, community_id))
+    else:
+        c.execute(f'SELECT row_version, {", ".join(COLUMN_KEYS)} FROM underwriting_rows WHERE community_id = ? ORDER BY row_version DESC LIMIT 1', (community_id,))
+    base = c.fetchone()
+    if not base:
+        conn.close()
+        return jsonify({'ok': False, 'error': 'Community or base row not found'}), 404
+
+    base_version = base[0]
+    base_values = {COLUMN_KEYS[i]: (base[i + 1] or '') for i in range(len(COLUMN_KEYS))}
+
+    # Merge: base values + user edits
+    merged = {k: str(row_data.get(k, base_values.get(k, '')) or '') for k in COLUMN_KEYS}
+
+    row_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+    new_version = base_version + 1
+
+    col_names = ', '.join(COLUMN_KEYS)
+    placeholders = ', '.join(['?'] * len(COLUMN_KEYS))
+    values = [merged[k] for k in COLUMN_KEYS]
+
+    c.execute(f'INSERT INTO underwriting_rows (id, community_id, row_version, created_at, {col_names}) VALUES (?, ?, ?, ?, {placeholders})',
+              [row_id, community_id, new_version, now] + values)
+    # Update community timestamp
+    c.execute('UPDATE underwriting_communities SET updated_at = ? WHERE id = ?', (now, community_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True, 'row_id': row_id, 'row_version': new_version})
+
+
+@app.route('/api/underwriting/rows/<row_id>', methods=['PATCH'])
+@require_auth
+@require_role('admin')
+def api_uw_update_row(row_id):
+    """Update fields on an existing underwriting row."""
+    data = request.json or {}
+    if not data:
+        return jsonify({'ok': False, 'error': 'No fields to update'}), 400
+
+    updates = []
+    params = []
+    for k in COLUMN_KEYS:
+        if k in data:
+            updates.append(f'{k} = ?')
+            params.append(str(data[k]) if data[k] is not None else '')
+    if not updates:
+        return jsonify({'ok': False, 'error': 'No valid fields provided'}), 400
+
+    params.append(row_id)
+    conn = _get_db_conn()
+    c = conn.cursor()
+    c.execute(f'UPDATE underwriting_rows SET {", ".join(updates)} WHERE id = ?', params)
+    if c.rowcount == 0:
+        conn.close()
+        return jsonify({'ok': False, 'error': 'Row not found'}), 404
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/underwriting/rows', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_uw_list_rows():
+    """List underwriting rows. ?community_id=&latest=true|false"""
+    community_id = request.args.get('community_id', '')
+    latest_only = request.args.get('latest', 'true').lower() == 'true'
+
+    conn = _get_db_conn()
+    c = conn.cursor()
+
+    col_select = ', '.join(f'r.{k}' for k in COLUMN_KEYS)
+
+    if latest_only:
+        # Subquery: max row_version per community
+        sql = f'''SELECT r.id, r.community_id, r.row_version, r.created_at,
+                         uc.community_key, uc.location_name as uc_name, {col_select}
+                  FROM underwriting_rows r
+                  JOIN underwriting_communities uc ON uc.id = r.community_id
+                  INNER JOIN (
+                      SELECT community_id, MAX(row_version) as max_v FROM underwriting_rows GROUP BY community_id
+                  ) latest ON r.community_id = latest.community_id AND r.row_version = latest.max_v'''
+        if community_id:
+            sql += ' WHERE r.community_id = ?'
+            c.execute(sql + ' ORDER BY uc.location_name', (community_id,))
+        else:
+            c.execute(sql + ' ORDER BY uc.location_name')
+    else:
+        sql = f'''SELECT r.id, r.community_id, r.row_version, r.created_at,
+                         uc.community_key, uc.location_name as uc_name, {col_select}
+                  FROM underwriting_rows r
+                  JOIN underwriting_communities uc ON uc.id = r.community_id'''
+        if community_id:
+            sql += ' WHERE r.community_id = ?'
+            c.execute(sql + ' ORDER BY uc.location_name, r.row_version', (community_id,))
+        else:
+            c.execute(sql + ' ORDER BY uc.location_name, r.row_version')
+
+    rows_raw = c.fetchall()
+    conn.close()
+
+    rows = []
+    for r in rows_raw:
+        row_dict = {
+            'id': r[0], 'community_id': r[1], 'row_version': r[2],
+            'created_at': str(r[3] or ''),
+            'community_key': r[4], '_community_name': r[5],
+        }
+        for i, k in enumerate(COLUMN_KEYS):
+            row_dict[k] = r[6 + i] or ''
+        rows.append(row_dict)
+
+    return jsonify({'ok': True, 'data': rows, 'meta': {'count': len(rows)}})
+
+
+@app.route('/api/underwriting/export', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_uw_export():
+    """Export underwriting rows as XLSX with exact spreadsheet columns."""
+    import io
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, numbers
+    from openpyxl.utils import get_column_letter
+
+    mode = request.args.get('mode', 'latest')
+    community_id = request.args.get('community_id', '')
+
+    conn = _get_db_conn()
+    c = conn.cursor()
+
+    col_select = ', '.join(f'r.{k}' for k in COLUMN_KEYS)
+
+    if mode == 'latest':
+        sql = f'''SELECT r.row_version, {col_select}
+                  FROM underwriting_rows r
+                  JOIN underwriting_communities uc ON uc.id = r.community_id
+                  INNER JOIN (
+                      SELECT community_id, MAX(row_version) as max_v FROM underwriting_rows GROUP BY community_id
+                  ) latest ON r.community_id = latest.community_id AND r.row_version = latest.max_v'''
+    else:
+        sql = f'''SELECT r.row_version, {col_select}
+                  FROM underwriting_rows r
+                  JOIN underwriting_communities uc ON uc.id = r.community_id'''
+
+    if community_id:
+        sql += ' WHERE r.community_id = ?'
+        c.execute(sql + ' ORDER BY uc.location_name, r.row_version', (community_id,))
+    else:
+        c.execute(sql + ' ORDER BY uc.location_name, r.row_version')
+
+    rows_raw = c.fetchall()
+    conn.close()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Underwriting SOV'
+
+    # Header row
+    headers = [col['header'] for col in UNDERWRITING_COLUMNS]
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True, size=11)
+        cell.alignment = Alignment(horizontal='center', wrap_text=True)
+
+    # Data rows
+    for r in rows_raw:
+        row_vals = []
+        for i, col in enumerate(UNDERWRITING_COLUMNS):
+            val = r[i + 1] or ''  # +1 to skip row_version
+            ctype = col['type']
+            if val and ctype in ('currency', 'numeric'):
+                try:
+                    val = float(val)
+                except (ValueError, TypeError):
+                    pass
+            elif val and ctype == 'integer':
+                try:
+                    val = int(float(val))
+                except (ValueError, TypeError):
+                    pass
+            elif val and ctype == 'percent':
+                try:
+                    val = float(val) / 100.0 if float(val) > 1 else float(val)
+                except (ValueError, TypeError):
+                    pass
+            row_vals.append(val)
+        ws.append(row_vals)
+
+    # Formatting
+    for col_idx, col in enumerate(UNDERWRITING_COLUMNS, 1):
+        letter = get_column_letter(col_idx)
+        ctype = col['type']
+        # Column widths
+        ws.column_dimensions[letter].width = max(14, min(len(col['header']) + 4, 30))
+        # Number formats for data rows
+        for row_idx in range(2, ws.max_row + 1):
+            cell = ws.cell(row=row_idx, column=col_idx)
+            if ctype == 'currency':
+                cell.number_format = '#,##0.00'
+            elif ctype == 'percent':
+                cell.number_format = '0.0%'
+            elif ctype == 'date':
+                cell.number_format = 'YYYY-MM-DD'
+
+    # Freeze header row
+    ws.freeze_panes = 'A2'
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    resp = make_response(output.getvalue())
+    resp.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    resp.headers['Content-Disposition'] = f'attachment; filename=underwriting_sov_{mode}.xlsx'
+    return resp
+
+
+@app.route('/api/underwriting/columns', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_uw_columns():
+    """Return canonical column definitions for frontend grid/form rendering."""
+    return jsonify({'ok': True, 'columns': UNDERWRITING_COLUMNS})
 
 
 # API Routes

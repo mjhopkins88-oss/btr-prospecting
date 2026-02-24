@@ -964,8 +964,10 @@
                     {activeTab === 'dealboard' && <DealBoardPage user={user} />}
                     {activeTab === 'admin' && user && user.is_super_admin && <AdminPage user={user} />}
                     {activeTab === 'quoting' && user && user.role === 'admin' && <QuotingPage user={user} />}
+                    {activeTab === 'underwriting' && user && user.role === 'admin' && <UnderwritingSheet user={user} />}
                     {/* Route guards: redirect to default tab if user navigates to a tab they shouldn't see */}
                     {activeTab === 'quoting' && (!user || user.role !== 'admin') && (() => { setActiveTab(ROLE_DEFAULT_TAB[user?.role] || 'search'); return null; })()}
+                    {activeTab === 'underwriting' && (!user || user.role !== 'admin') && (() => { setActiveTab(ROLE_DEFAULT_TAB[user?.role] || 'search'); return null; })()}
                     {user?.role === 'broker' && ['discovery','pipeline','followups','statewide'].includes(activeTab) && (() => { setActiveTab('search'); return null; })()}
                     {showEmailModal && (
                         <EmailModal
@@ -1051,6 +1053,7 @@
             const tabs = [...(ROLE_TABS[role] || ROLE_TABS.producer)];
             if (role === 'admin') {
                 tabs.push({ id: 'quoting', label: 'Quoting' });
+                tabs.push({ id: 'underwriting', label: 'Underwriting Sheet' });
             }
             if (user && user.is_super_admin) {
                 tabs.push({ id: 'admin', label: 'Admin' });
@@ -3365,6 +3368,248 @@
                             )}
                         </div>
                     )}
+                </div>
+            );
+        }
+
+        // ======= UNDERWRITING SHEET (Admin Only) =======
+        const UW_SECTIONS = {
+            location: 'Location',
+            values: 'Values & BI',
+            construction: 'Construction & Occupancy',
+            building: 'Building Details',
+            structure: 'Roof & Structural Features',
+            premium: 'Premium & Tax',
+        };
+
+        function UnderwritingSheet({ user }) {
+            const [columns, setColumns] = useState([]);
+            const [rows, setRows] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [showHistory, setShowHistory] = useState(false);
+            const [showNewForm, setShowNewForm] = useState(false);
+            const [addUnitsTarget, setAddUnitsTarget] = useState(null); // {community_id, row}
+            const [editRow, setEditRow] = useState(null);
+
+            const loadColumns = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/underwriting/columns`);
+                    const d = await res.json();
+                    if (d.ok) setColumns(d.columns);
+                } catch(e) { console.error('Failed to load columns', e); }
+            };
+
+            const loadRows = async () => {
+                setLoading(true);
+                try {
+                    const res = await fetch(`${API_BASE}/api/underwriting/rows?latest=${!showHistory}`);
+                    const d = await res.json();
+                    if (d.ok) setRows(d.data);
+                } catch(e) { console.error('Failed to load rows', e); }
+                setLoading(false);
+            };
+
+            useEffect(() => { loadColumns(); }, []);
+            useEffect(() => { loadRows(); }, [showHistory]);
+
+            const exportXlsx = (mode) => {
+                window.open(`${API_BASE}/api/underwriting/export?mode=${mode}`, '_blank');
+            };
+
+            // ── Inline editing ──
+            const saveInlineEdit = async (rowId, key, value) => {
+                try {
+                    await fetch(`${API_BASE}/api/underwriting/rows/${rowId}`, {
+                        method: 'PATCH', headers: {'Content-Type':'application/json'},
+                        body: JSON.stringify({ [key]: value }),
+                    });
+                } catch(e) { alert('Save failed: ' + e.message); }
+            };
+
+            const stickyKeys = ['location_name', 'city', 'state_province_district'];
+
+            return (
+                <div>
+                    {/* Header bar */}
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1rem',flexWrap:'wrap',gap:'0.75rem'}}>
+                        <div>
+                            <h2 style={{...styles.sectionTitle,fontSize:'1.3rem',margin:0}}>Underwriting Sheet</h2>
+                            <p style={{color:'#64748b',fontSize:'0.85rem',margin:'0.25rem 0 0'}}>{rows.length} {showHistory ? 'total rows' : 'communities'}</p>
+                        </div>
+                        <div style={{display:'flex',gap:'0.5rem',flexWrap:'wrap'}}>
+                            <button className="action-btn" style={{...styles.actionBtn,borderColor:'#10b981',color:'#34d399'}} onClick={() => setShowNewForm(true)}>+ New Community</button>
+                            <button className="action-btn" style={styles.actionBtn} onClick={() => setShowHistory(!showHistory)}>{showHistory ? 'Latest Only' : 'Show History'}</button>
+                            <button className="action-btn" style={styles.actionBtn} onClick={() => exportXlsx('latest')}>Export Latest XLSX</button>
+                            {showHistory && <button className="action-btn" style={styles.actionBtn} onClick={() => exportXlsx('all')}>Export All XLSX</button>}
+                        </div>
+                    </div>
+
+                    {/* Spreadsheet Grid */}
+                    {loading ? <div style={{textAlign:'center',padding:'3rem',color:'#64748b'}}>Loading...</div> : rows.length === 0 ? (
+                        <EmptyState title="No underwriting records" subtitle='Click "+ New Community" to add the first record' icon={<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-slate-600"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>} />
+                    ) : (
+                        <div style={{overflowX:'auto',border:'1px solid #1e293b',borderRadius:'0.5rem',maxHeight:'70vh',overflowY:'auto'}}>
+                            <table style={{borderCollapse:'collapse',width:'max-content',minWidth:'100%',fontSize:'0.78rem'}}>
+                                <thead>
+                                    <tr style={{position:'sticky',top:0,zIndex:20,background:'#0f172a'}}>
+                                        <th style={{position:'sticky',left:0,zIndex:30,background:'#0f172a',padding:'0.5rem 0.75rem',borderBottom:'2px solid #334155',color:'#94a3b8',fontWeight:700,textAlign:'left',whiteSpace:'nowrap',fontSize:'0.7rem',textTransform:'uppercase',letterSpacing:'0.05em',minWidth:'100px'}}>Actions</th>
+                                        {showHistory && <th style={{position:'sticky',top:0,zIndex:20,background:'#0f172a',padding:'0.5rem 0.75rem',borderBottom:'2px solid #334155',color:'#94a3b8',fontWeight:700,textAlign:'left',whiteSpace:'nowrap',fontSize:'0.7rem',textTransform:'uppercase',letterSpacing:'0.05em'}}>Version</th>}
+                                        {columns.map((col, ci) => (
+                                            <th key={col.key} style={{
+                                                position: stickyKeys.includes(col.key) ? 'sticky' : 'relative',
+                                                left: stickyKeys.includes(col.key) ? (stickyKeys.indexOf(col.key) === 0 ? '100px' : stickyKeys.indexOf(col.key) === 1 ? '260px' : '360px') : 'auto',
+                                                zIndex: stickyKeys.includes(col.key) ? 25 : 20,
+                                                background:'#0f172a',padding:'0.5rem 0.75rem',borderBottom:'2px solid #334155',color:'#94a3b8',
+                                                fontWeight:700,textAlign:'left',whiteSpace:'nowrap',fontSize:'0.7rem',textTransform:'uppercase',letterSpacing:'0.05em',
+                                                minWidth: col.type === 'currency' ? '120px' : '100px',
+                                            }}>{col.header}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {rows.map((row, ri) => (
+                                        <tr key={row.id} style={{borderBottom:'1px solid #1e293b',background: ri % 2 === 0 ? 'transparent' : 'rgba(15,23,42,0.5)'}}>
+                                            <td style={{position:'sticky',left:0,zIndex:10,background: ri % 2 === 0 ? '#0b1220' : '#0f172a',padding:'0.4rem 0.5rem',whiteSpace:'nowrap'}}>
+                                                <div style={{display:'flex',gap:'0.3rem'}}>
+                                                    <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.65rem',padding:'0.15rem 0.4rem'}} onClick={() => setEditRow(row)}>Edit</button>
+                                                    <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.65rem',padding:'0.15rem 0.4rem',borderColor:'#f59e0b',color:'#fcd34d'}} onClick={() => setAddUnitsTarget({community_id: row.community_id, row})}>+Units</button>
+                                                </div>
+                                            </td>
+                                            {showHistory && <td style={{padding:'0.4rem 0.5rem',color:'#64748b'}}>{row.row_version}</td>}
+                                            {columns.map(col => (
+                                                <td key={col.key} style={{
+                                                    position: stickyKeys.includes(col.key) ? 'sticky' : 'relative',
+                                                    left: stickyKeys.includes(col.key) ? (stickyKeys.indexOf(col.key) === 0 ? '100px' : stickyKeys.indexOf(col.key) === 1 ? '260px' : '360px') : 'auto',
+                                                    zIndex: stickyKeys.includes(col.key) ? 10 : 1,
+                                                    background: stickyKeys.includes(col.key) ? (ri % 2 === 0 ? '#0b1220' : '#0f172a') : 'transparent',
+                                                    padding:'0.4rem 0.5rem',color:'#e2e8f0',maxWidth:'200px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+                                                    textAlign: ['currency','numeric','integer','percent'].includes(col.type) ? 'right' : 'left',
+                                                    fontFamily: ['currency','numeric','integer','percent'].includes(col.type) ? "'Orbitron', monospace" : 'inherit',
+                                                }}>
+                                                    {col.type === 'currency' && row[col.key] ? `$${Number(row[col.key]).toLocaleString()}` :
+                                                     col.type === 'percent' && row[col.key] ? `${row[col.key]}%` :
+                                                     row[col.key] || ''}
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+
+                    {/* New Community Modal */}
+                    {showNewForm && <UWFormModal columns={columns} onClose={() => setShowNewForm(false)} onSaved={() => { setShowNewForm(false); loadRows(); }} mode="create" />}
+                    {/* Edit Row Modal */}
+                    {editRow && <UWFormModal columns={columns} onClose={() => setEditRow(null)} onSaved={() => { setEditRow(null); loadRows(); }} mode="edit" initialData={editRow} />}
+                    {/* Add Units Modal */}
+                    {addUnitsTarget && <UWFormModal columns={columns} onClose={() => setAddUnitsTarget(null)} onSaved={() => { setAddUnitsTarget(null); loadRows(); }} mode="add-units" initialData={addUnitsTarget.row} communityId={addUnitsTarget.community_id} />}
+                </div>
+            );
+        }
+
+        // Shared form modal for Create / Edit / Add-Units
+        function UWFormModal({ columns, onClose, onSaved, mode, initialData, communityId }) {
+            const [form, setForm] = useState(() => {
+                const init = {};
+                columns.forEach(c => { init[c.key] = (initialData && initialData[c.key]) || ''; });
+                return init;
+            });
+            const [saving, setSaving] = useState(false);
+            const [error, setError] = useState('');
+            const [activeSection, setActiveSection] = useState('location');
+
+            const set = (key, val) => setForm(prev => ({...prev, [key]: val}));
+
+            const highlightKeys = mode === 'add-units' ? ['number_of_units','buildings_values','contents_values','bi_values_12m','total_bi_values','premium_taxes_12m','premium_14m','inception_date'] : [];
+
+            const save = async () => {
+                setSaving(true); setError('');
+                try {
+                    let url, body;
+                    if (mode === 'create') {
+                        url = `${API_BASE}/api/underwriting/communities`;
+                        body = { location_name: form.location_name, row: form };
+                    } else if (mode === 'edit') {
+                        url = `${API_BASE}/api/underwriting/rows/${initialData.id}`;
+                        body = form;
+                    } else {
+                        url = `${API_BASE}/api/underwriting/communities/${communityId}/add-units`;
+                        body = { row: form };
+                    }
+                    const res = await fetch(url, {
+                        method: mode === 'edit' ? 'PATCH' : 'POST',
+                        headers: {'Content-Type':'application/json'},
+                        body: JSON.stringify(body),
+                    });
+                    const d = await res.json();
+                    if (d.ok) { onSaved(); }
+                    else { setError(d.error || 'Failed to save'); }
+                } catch(e) { setError('Network error: ' + e.message); }
+                setSaving(false);
+            };
+
+            // Group columns by section
+            const sections = {};
+            columns.forEach(c => {
+                const sec = c.section || 'other';
+                if (!sections[sec]) sections[sec] = [];
+                sections[sec].push(c);
+            });
+
+            const title = mode === 'create' ? 'New Community' : mode === 'edit' ? 'Edit Row' : 'Add Units / Phase';
+
+            return (
+                <div style={{position:'fixed',inset:0,zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.7)'}}>
+                    <div style={{background:'#0f172a',border:'1px solid #334155',borderRadius:'1rem',width:'95vw',maxWidth:'900px',maxHeight:'90vh',display:'flex',flexDirection:'column'}}>
+                        {/* Modal header */}
+                        <div style={{padding:'1.25rem 1.5rem',borderBottom:'1px solid #1e293b',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                            <h3 style={{margin:0,color:'#f1f5f9',fontSize:'1.1rem'}}>{title}</h3>
+                            <button onClick={onClose} style={{background:'none',border:'none',color:'#64748b',fontSize:'1.5rem',cursor:'pointer'}}>×</button>
+                        </div>
+                        {/* Section tabs */}
+                        <div style={{display:'flex',gap:'0',borderBottom:'1px solid #1e293b',overflowX:'auto',flexShrink:0}}>
+                            {Object.entries(UW_SECTIONS).filter(([k]) => sections[k]).map(([key, label]) => (
+                                <button key={key} onClick={() => setActiveSection(key)} style={{
+                                    padding:'0.6rem 1rem',fontSize:'0.78rem',fontWeight:activeSection===key?700:400,
+                                    color:activeSection===key?'#34d399':'#64748b',background:'transparent',border:'none',
+                                    borderBottom:activeSection===key?'2px solid #34d399':'2px solid transparent',
+                                    cursor:'pointer',whiteSpace:'nowrap',
+                                }}>{label}</button>
+                            ))}
+                        </div>
+                        {/* Form body */}
+                        <div style={{padding:'1.25rem 1.5rem',overflowY:'auto',flex:1}}>
+                            {error && <div style={{padding:'0.5rem 0.75rem',background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:'6px',color:'#f87171',fontSize:'0.85rem',marginBottom:'1rem'}}>{error}</div>}
+                            {mode === 'add-units' && <div style={{padding:'0.5rem 0.75rem',background:'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.3)',borderRadius:'6px',color:'#fcd34d',fontSize:'0.85rem',marginBottom:'1rem'}}>Prefilled from latest row (v{initialData?.row_version}). Edit the highlighted fields for the new phase, then save.</div>}
+                            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0.75rem'}}>
+                                {(sections[activeSection] || []).map(col => (
+                                    <div key={col.key} style={{
+                                        ...(highlightKeys.includes(col.key) ? {background:'rgba(245,158,11,0.08)',border:'1px solid rgba(245,158,11,0.25)',borderRadius:'6px',padding:'0.5rem'} : {}),
+                                    }}>
+                                        <label style={{display:'block',fontSize:'0.7rem',color: col.required ? '#f59e0b' : '#64748b',fontWeight:600,marginBottom:'0.25rem',textTransform:'uppercase',letterSpacing:'0.03em'}}>
+                                            {col.header}{col.required ? ' *' : ''}
+                                        </label>
+                                        <input
+                                            type={col.type === 'integer' || col.type === 'numeric' || col.type === 'currency' || col.type === 'percent' ? 'number' : col.type === 'date' ? 'date' : 'text'}
+                                            step={col.type === 'currency' || col.type === 'numeric' || col.type === 'percent' ? 'any' : undefined}
+                                            value={form[col.key] || ''}
+                                            onChange={e => set(col.key, e.target.value)}
+                                            style={{...styles.select,width:'100%',boxSizing:'border-box'}}
+                                            placeholder={col.header}
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        {/* Footer */}
+                        <div style={{padding:'1rem 1.5rem',borderTop:'1px solid #1e293b',display:'flex',justifyContent:'flex-end',gap:'0.5rem'}}>
+                            <button className="action-btn" style={styles.actionBtn} onClick={onClose}>Cancel</button>
+                            <button className="action-btn" style={{...styles.actionBtn,borderColor:'#10b981',color:'#34d399'}} onClick={save} disabled={saving}>
+                                {saving ? 'Saving...' : mode === 'add-units' ? 'Add Phase' : 'Save'}
+                            </button>
+                        </div>
+                    </div>
                 </div>
             );
         }
