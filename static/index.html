@@ -2201,6 +2201,12 @@
             const [optLoading, setOptLoading] = useState(false);
             const [actionError, setActionError] = useState('');
 
+            // Sparknotes state
+            const [sparknotes, setSparknotes] = useState({});  // keyed by tab name
+            const [sparkLoading, setSparkLoading] = useState(false);
+            const [sparkError, setSparkError] = useState('');
+            const [sparkExpanded, setSparkExpanded] = useState({});  // keyed by item id
+
             const setTabLoading = (tab, val) => setLoading(prev => ({...prev, [tab]: val}));
             const setTabError = (tab, val) => setErrors(prev => ({...prev, [tab]: val}));
 
@@ -2292,6 +2298,127 @@
                 if (text) navigator.clipboard.writeText(text);
             };
 
+            // --- Sparknotes ---
+            const tabToApiTab = { brief: 'weekly', momentum: 'momentum', trends: 'trends', rankings: 'state_rankings' };
+            const tabWindowDays = { brief: 7, momentum: 7, trends: 7, rankings: 30 };
+
+            const generateSparknotes = async () => {
+                const apiTab = tabToApiTab[subTab] || 'weekly';
+                setSparkLoading(true); setSparkError('');
+                try {
+                    const res = await fetch(`${API_BASE}/api/sunbelt/sparknotes`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ tab: apiTab, windowDays: tabWindowDays[subTab] || 7 }),
+                    });
+                    const d = await res.json();
+                    if (!d.ok) { setSparkError(d.error || 'Failed to generate sparknotes'); }
+                    else {
+                        setSparknotes(prev => ({...prev, [subTab]: { data: d.data, meta: d.meta }}));
+                        setSparkExpanded({});
+                    }
+                } catch (e) { setSparkError('Network error generating sparknotes'); }
+                setSparkLoading(false);
+            };
+
+            const copySparknotes = () => {
+                const sn = sparknotes[subTab]?.data;
+                if (!sn) return;
+                let text = '=== AI SPARKNOTES ===\n\n';
+                text += 'EXECUTIVE SUMMARY:\n' + (sn.executive_summary || '') + '\n\n';
+                text += 'KEY THEMES: ' + (sn.key_themes || []).join(', ') + '\n\n';
+                (sn.sparknotes_by_item || []).forEach((item, i) => {
+                    text += `--- Item ${i + 1} ---\n`;
+                    text += item.one_liner + '\n';
+                    (item.bullets || []).forEach(b => { text += '  - ' + b + '\n'; });
+                    text += 'Why it matters: ' + (item.why_it_matters || '') + '\n';
+                    text += 'Next step: ' + (item.suggested_next_step || '') + '\n\n';
+                });
+                navigator.clipboard.writeText(text);
+            };
+
+            const toggleSparkItem = (id) => {
+                setSparkExpanded(prev => ({...prev, [id]: !prev[id]}));
+            };
+
+            const SparknotesPanel = () => {
+                const sn = sparknotes[subTab]?.data;
+                const meta = sparknotes[subTab]?.meta;
+                if (!sn) return null;
+                return (
+                    <div style={{ background: 'linear-gradient(135deg, rgba(16,185,129,0.08), rgba(167,139,250,0.08))', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '12px', padding: '1.5rem', marginBottom: '1.5rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                            <h3 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '0.85rem', fontWeight: 700, color: '#34d399', textTransform: 'uppercase', margin: 0 }}>AI Sparknotes</h3>
+                            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                {meta?.cached && <span style={{ fontSize: '0.65rem', color: '#64748b', background: 'rgba(100,116,139,0.15)', padding: '0.15rem 0.5rem', borderRadius: '10px' }}>cached</span>}
+                                <span style={{ fontSize: '0.65rem', color: '#64748b' }}>{meta?.generated_at ? new Date(meta.generated_at).toLocaleString() : ''}</span>
+                                <button onClick={copySparknotes} style={{...styles.btn, fontSize: '0.75rem', padding: '0.3rem 0.75rem'}}>Copy Sparknotes</button>
+                            </div>
+                        </div>
+
+                        {/* Executive Summary */}
+                        {sn.executive_summary && (
+                            <div style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid #334155', borderRadius: '8px', padding: '1rem', marginBottom: '1rem' }}>
+                                <h4 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '0.7rem', fontWeight: 700, color: '#22d3ee', textTransform: 'uppercase', marginTop: 0, marginBottom: '0.5rem' }}>Executive Summary</h4>
+                                {sn.executive_summary.split('\n').map((line, i) => {
+                                    const trimmed = line.replace(/^[-•]\s*/, '').trim();
+                                    if (!trimmed) return null;
+                                    return <div key={i} style={{ fontSize: '0.85rem', color: '#cbd5e1', lineHeight: '1.6', marginBottom: '0.25rem', paddingLeft: '0.75rem', borderLeft: '2px solid rgba(34,211,238,0.3)' }}>{trimmed}</div>;
+                                })}
+                            </div>
+                        )}
+
+                        {/* Key Themes */}
+                        {sn.key_themes && sn.key_themes.length > 0 && (
+                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+                                {sn.key_themes.map((theme, i) => (
+                                    <span key={i} style={{
+                                        background: 'rgba(167,139,250,0.15)', border: '1px solid rgba(167,139,250,0.3)',
+                                        borderRadius: '20px', padding: '0.25rem 0.75rem', fontSize: '0.75rem', color: '#c4b5fd', fontWeight: 500
+                                    }}>{theme}</span>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Sparknotes by item */}
+                        {sn.sparknotes_by_item && sn.sparknotes_by_item.length > 0 && (
+                            <div>
+                                <h4 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '0.7rem', fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Item Sparknotes</h4>
+                                {sn.sparknotes_by_item.map((item, i) => {
+                                    const expanded = sparkExpanded[item.id || i];
+                                    return (
+                                        <div key={item.id || i} style={{ background: 'rgba(15,23,42,0.4)', border: '1px solid #334155', borderRadius: '8px', padding: '0.75rem 1rem', marginBottom: '0.5rem', cursor: 'pointer', transition: 'border-color 0.2s' }}
+                                             onClick={() => toggleSparkItem(item.id || i)}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                <span style={{ fontSize: '0.85rem', color: '#f1f5f9', fontWeight: 500 }}>{item.one_liner}</span>
+                                                <span style={{ fontSize: '0.7rem', color: '#64748b', flexShrink: 0, marginLeft: '0.5rem' }}>{expanded ? '▲' : '▼'}</span>
+                                            </div>
+                                            {expanded && (
+                                                <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid #334155' }}>
+                                                    {item.bullets && item.bullets.map((b, j) => (
+                                                        <div key={j} style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.3rem', paddingLeft: '0.75rem', borderLeft: '2px solid rgba(148,163,184,0.3)' }}>{b}</div>
+                                                    ))}
+                                                    {item.why_it_matters && (
+                                                        <div style={{ fontSize: '0.8rem', color: '#fbbf24', marginTop: '0.5rem' }}>
+                                                            <strong>Why it matters:</strong> {item.why_it_matters}
+                                                        </div>
+                                                    )}
+                                                    {item.suggested_next_step && (
+                                                        <div style={{ fontSize: '0.8rem', color: '#34d399', marginTop: '0.3rem' }}>
+                                                            <strong>Next step:</strong> {item.suggested_next_step}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                );
+            };
+
             const classColor = (cls) => {
                 const c = (cls || '').toLowerCase();
                 if (c === 'accelerating') return { bg: 'rgba(239,68,68,0.15)', color: '#f87171', border: '#ef4444' };
@@ -2343,17 +2470,28 @@
                     </div>
 
                     {actionError && <ErrorPanel msg={actionError} />}
+                    {sparkError && <ErrorPanel msg={sparkError} />}
+
+                    {/* Sparknotes Panel (shared across all tabs) */}
+                    {sparknotes[subTab] && <SparknotesPanel />}
 
                     {/* WEEKLY BRIEF TAB */}
                     {subTab === 'brief' && (
                         <div>
-                            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', alignItems: 'center' }}>
+                            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                                 {user?.role === 'admin' && (
                                     <button onClick={generateBrief} disabled={genLoading} style={{
                                         ...styles.btnPrimary, opacity: genLoading ? 0.6 : 1,
                                         cursor: genLoading ? 'not-allowed' : 'pointer'
                                     }}>{genLoading ? 'Generating...' : 'Generate Brief Now'}</button>
                                 )}
+                                <button onClick={generateSparknotes} disabled={sparkLoading} style={{
+                                    background: sparkLoading ? 'rgba(167,139,250,0.1)' : 'rgba(167,139,250,0.15)',
+                                    border: '1px solid rgba(167,139,250,0.4)', color: '#c4b5fd',
+                                    padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.85rem',
+                                    cursor: sparkLoading ? 'not-allowed' : 'pointer', fontFamily: "'Inter', sans-serif",
+                                    fontWeight: 500, opacity: sparkLoading ? 0.6 : 1, transition: 'all 0.2s'
+                                }}>{sparkLoading ? 'Generating Sparknotes...' : 'Generate Sparknotes'}</button>
                                 <button onClick={copyBrief} style={styles.btn} disabled={!weeklyData?.brief_text}>Copy to Clipboard</button>
                                 <button onClick={fetchWeekly} style={styles.btn}>Refresh</button>
                             </div>
@@ -2434,13 +2572,20 @@
                     {/* MOMENTUM INDEX TAB */}
                     {subTab === 'momentum' && (
                         <div>
-                            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', alignItems: 'center' }}>
+                            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                                 {user?.role === 'admin' && (
                                     <button onClick={runOptimization} disabled={optLoading} style={{
                                         ...styles.btnPrimary, opacity: optLoading ? 0.6 : 1,
                                         cursor: optLoading ? 'not-allowed' : 'pointer'
                                     }}>{optLoading ? 'Running...' : 'Run Optimization'}</button>
                                 )}
+                                <button onClick={generateSparknotes} disabled={sparkLoading} style={{
+                                    background: sparkLoading ? 'rgba(167,139,250,0.1)' : 'rgba(167,139,250,0.15)',
+                                    border: '1px solid rgba(167,139,250,0.4)', color: '#c4b5fd',
+                                    padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.85rem',
+                                    cursor: sparkLoading ? 'not-allowed' : 'pointer', fontFamily: "'Inter', sans-serif",
+                                    fontWeight: 500, opacity: sparkLoading ? 0.6 : 1, transition: 'all 0.2s'
+                                }}>{sparkLoading ? 'Generating Sparknotes...' : 'Generate Sparknotes'}</button>
                                 <button onClick={fetchMomentum} style={styles.btn}>Refresh</button>
                                 <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
                                     Top cities by momentum (7d vs 30d baseline)
@@ -2504,6 +2649,13 @@
                                     onChange={e => setTrendFilter(f => ({...f, topic: e.target.value}))}
                                     style={{...styles.input, minWidth: '180px'}}
                                 />
+                                <button onClick={generateSparknotes} disabled={sparkLoading} style={{
+                                    background: sparkLoading ? 'rgba(167,139,250,0.1)' : 'rgba(167,139,250,0.15)',
+                                    border: '1px solid rgba(167,139,250,0.4)', color: '#c4b5fd',
+                                    padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.85rem',
+                                    cursor: sparkLoading ? 'not-allowed' : 'pointer', fontFamily: "'Inter', sans-serif",
+                                    fontWeight: 500, opacity: sparkLoading ? 0.6 : 1, transition: 'all 0.2s'
+                                }}>{sparkLoading ? 'Generating Sparknotes...' : 'Generate Sparknotes'}</button>
                                 <button onClick={fetchTrends} style={styles.btn}>Refresh</button>
                                 <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
                                     {(trendsData?.trends || []).length} trends found
@@ -2565,7 +2717,14 @@
                     {/* STATE RANKINGS TAB */}
                     {subTab === 'rankings' && (
                         <div>
-                            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', alignItems: 'center' }}>
+                            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                <button onClick={generateSparknotes} disabled={sparkLoading} style={{
+                                    background: sparkLoading ? 'rgba(167,139,250,0.1)' : 'rgba(167,139,250,0.15)',
+                                    border: '1px solid rgba(167,139,250,0.4)', color: '#c4b5fd',
+                                    padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.85rem',
+                                    cursor: sparkLoading ? 'not-allowed' : 'pointer', fontFamily: "'Inter', sans-serif",
+                                    fontWeight: 500, opacity: sparkLoading ? 0.6 : 1, transition: 'all 0.2s'
+                                }}>{sparkLoading ? 'Generating Sparknotes...' : 'Generate Sparknotes'}</button>
                                 <button onClick={fetchRankings} style={styles.btn}>Refresh</button>
                             </div>
 
