@@ -339,7 +339,6 @@ def init_db():
     c.execute('CREATE INDEX IF NOT EXISTS idx_crm_leads_owner ON crm_leads(workspace_id, owner_user_id, status)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_crm_leads_followup ON crm_leads(workspace_id, next_followup_at)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_crm_companies_key ON crm_companies(workspace_id, prospect_key)')
-    _safe_add_column(_real_cursor, 'crm_leads', 'notes', "TEXT DEFAULT ''")
 
     # --- Lead Activity Log ---
     c.execute('''
@@ -1740,8 +1739,7 @@ def api_crm_list_leads():
         SELECT l.id, l.status, l.owner_user_id, l.last_touch_at, l.next_followup_at, l.priority, l.created_at,
                co.company_name, co.prospect_key, co.website,
                u.name as owner_name,
-               la.action_type as last_action_type, la.created_at as last_activity_at,
-               l.notes
+               la.action_type as last_action_type, la.created_at as last_activity_at
         FROM crm_leads l
         JOIN crm_companies co ON l.company_id = co.id
         LEFT JOIN users u ON l.owner_user_id = u.id
@@ -1780,7 +1778,6 @@ def api_crm_list_leads():
             'created_at': r[6], 'company_name': r[7], 'prospect_key': r[8],
             'website': r[9], 'owner_name': r[10],
             'last_action_type': r[11], 'last_activity_at': r[12],
-            'notes': r[13] or '',
         })
     conn.close()
     return jsonify({'success': True, 'leads': leads})
@@ -1821,7 +1818,7 @@ def api_crm_update_lead(lead_id):
 
     updates = []
     params = []
-    for field in ('status', 'owner_user_id', 'next_followup_at', 'priority', 'notes'):
+    for field in ('status', 'owner_user_id', 'next_followup_at', 'priority'):
         if field in data:
             updates.append(f'{field} = ?')
             params.append(data[field])
@@ -4633,16 +4630,9 @@ def _gather_all_signals(days=30):
     Returns list of normalized items: {state, city, topic, date_str, source}
     No SerpAPI calls — reads only existing cached/stored data.
     """
+    from serpapi_client import get_cached
     cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
     all_items = []
-
-    def _to_date_str(val):
-        """Normalize a date value to an ISO string (Postgres returns datetime objects, SQLite returns strings)."""
-        if val is None:
-            return ''
-        if hasattr(val, 'isoformat'):
-            return val.isoformat()
-        return str(val)
 
     # Source 1: discovery_runs.results_json (daily discovery signals)
     conn = _get_db_conn()
@@ -4651,7 +4641,7 @@ def _gather_all_signals(days=30):
     for row in c.fetchall():
         try:
             results = json.loads(row[0]) if row[0] else {}
-            run_date = _to_date_str(row[1])
+            run_date = row[1]
             for location, data in results.items():
                 for sig in (data.get('signals') or []):
                     topic = sig.get('signal_type', 'other')
@@ -4681,7 +4671,7 @@ def _gather_all_signals(days=30):
     for row in c.fetchall():
         try:
             items = json.loads(row[1]) if row[1] else []
-            cache_date = _to_date_str(row[2])
+            cache_date = row[2]
             for item in items:
                 topic = item.get('event_type', 'other')
                 all_items.append({
