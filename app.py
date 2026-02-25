@@ -1471,7 +1471,7 @@ def api_quotes_property():
                   grouping_name, rate_x100, aop_buydown, replacement_cost, total_tiv, base_premium, taxes, total_premium, warnings)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
               (quote_id, ws, uid, sqft, rc_per_sf, loss_rents, city, state, county,
-               group_name, quote['effective_rate_x100'], 1 if aop_buydown else 0,
+               group_name, quote['effective_rate_x100'], bool(aop_buydown),
                quote['replacement_cost'], quote['total_tiv'], quote['base_premium'],
                quote['taxes'], quote['total_premium'], json.dumps(warnings)))
     conn.commit()
