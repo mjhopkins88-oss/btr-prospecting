@@ -9,7 +9,7 @@ from functools import wraps
 import os
 import secrets
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date as _date_type
 import json
 import time
 import csv
@@ -36,6 +36,17 @@ SESSION_DURATION_HOURS = 720  # 30 days
 SUPER_ADMIN_EMAIL = os.getenv('SUPER_ADMIN_EMAIL', 'mjhopkins88@gmail.com').strip().lower()
 
 app = Flask(__name__, static_folder='static')
+
+# Custom JSON provider: auto-serialize datetime objects from Postgres
+from flask.json.provider import DefaultJSONProvider
+class _DTJSONProvider(DefaultJSONProvider):
+    def default(self, o):
+        if isinstance(o, (datetime, _date_type)):
+            return o.isoformat()
+        return super().default(o)
+app.json_provider_class = _DTJSONProvider
+app.json = _DTJSONProvider(app)
+
 CORS(app, supports_credentials=True)
 
 # --- Login rate limiter (in-memory) ---
