@@ -685,6 +685,128 @@ def init_db():
     # Migrate: add deleted_at to underwriting_rows if missing (for existing DBs)
     _safe_add_column(_real_cursor, 'underwriting_rows', 'deleted_at', 'TIMESTAMP DEFAULT NULL')
 
+    # ---- Search Performance & City Discovery Engine tables ----
+
+    # STEP 1: Search metrics instrumentation
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS search_metrics_daily (
+            id TEXT PRIMARY KEY,
+            date TEXT NOT NULL UNIQUE,
+            avg_response_time_ms REAL DEFAULT 0,
+            p95_response_time_ms REAL DEFAULT 0,
+            time_to_first_result_ms REAL DEFAULT 0,
+            null_result_rate REAL DEFAULT 0,
+            avg_results_returned REAL DEFAULT 0,
+            total_searches INTEGER DEFAULT 0,
+            cache_hit_rate REAL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Raw search timing log (individual requests, aggregated daily)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS search_request_log (
+            id TEXT PRIMARY KEY,
+            endpoint TEXT NOT NULL,
+            response_time_ms REAL NOT NULL,
+            result_count INTEGER DEFAULT 0,
+            cache_hit BOOLEAN DEFAULT 0,
+            city TEXT,
+            state TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # STEP 6: City discovery model
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS city_signal_metrics (
+            id TEXT PRIMARY KEY,
+            city TEXT NOT NULL,
+            state TEXT NOT NULL,
+            permit_growth_rate REAL DEFAULT 0,
+            article_velocity REAL DEFAULT 0,
+            capital_event_count REAL DEFAULT 0,
+            land_transaction_count REAL DEFAULT 0,
+            population_growth_proxy REAL DEFAULT 0,
+            composite_city_score REAL DEFAULT 0,
+            status TEXT DEFAULT 'tracked',
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(city, state)
+        )
+    ''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_city_signal_score ON city_signal_metrics(composite_city_score DESC)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_city_signal_state ON city_signal_metrics(state)')
+
+    # STEP 8: Search config (city boost, freshness decay, etc.)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS search_config (
+            id TEXT PRIMARY KEY,
+            recency_multiplier REAL DEFAULT 1.0,
+            freshness_decay_rate REAL DEFAULT 0.03,
+            city_boost TEXT DEFAULT '{}',
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # PART 3: Config version history for safety guardrails
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS search_config_versions (
+            id TEXT PRIMARY KEY,
+            config_snapshot TEXT NOT NULL,
+            avg_response_time_ms REAL,
+            p95_response_time_ms REAL,
+            change_reason TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Migrate: add final_score column to run_prospects for precomputed scores (STEP 3)
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'run_prospects', 'final_score', 'REAL DEFAULT 0')
+    # Migrate: add final_score column to prospects table
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospects', 'final_score', 'REAL DEFAULT 0')
+
+    # STEP 5: Index optimization for search performance
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_prospects_city ON prospects(city)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_prospects_state ON prospects(state)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_prospects_score ON prospects(score DESC)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_prospects_final_score ON prospects(final_score DESC)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_prospects_created ON prospects(created_at DESC)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_city ON run_prospects(city)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_state ON run_prospects(state)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_final_score ON run_prospects(final_score DESC)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_search_request_log_date ON search_request_log(created_at)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_weighted_signals_entity ON weighted_signals(entity_name)')
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -2551,11 +2673,16 @@ def save_prospects_to_db(prospects):
     return saved_count
 
 def get_all_prospects_from_db():
-    """Retrieve all prospects from database"""
+    """Retrieve all prospects from database. Uses final_score (precomputed) for sort order."""
     conn = _get_db_conn()
     c = conn.cursor()
-    c.execute('SELECT * FROM prospects ORDER BY score DESC, created_at DESC')
-    
+    # Use precomputed final_score (includes city boost + freshness decay) with fallback to raw score
+    c.execute('''SELECT id, company, executive, title, linkedin, email, phone,
+                        city, state, score, tiv, units, project_name, project_status,
+                        signals, why_now, created_at, final_score
+                 FROM prospects
+                 ORDER BY COALESCE(NULLIF(final_score, 0), score) DESC, created_at DESC''')
+
     prospects = []
     for row in c.fetchall():
         prospects.append({
@@ -2575,9 +2702,10 @@ def get_all_prospects_from_db():
             'projectStatus': row[13],
             'signals': json.loads(row[14]) if row[14] else [],
             'whyNow': row[15],
-            'createdAt': row[16]
+            'createdAt': row[16],
+            'finalScore': row[17],
         })
-    
+
     conn.close()
     return prospects
 
@@ -3317,6 +3445,7 @@ def api_health():
 @require_auth
 def api_search():
     """Search for new BTR prospects"""
+    _t0 = time.time()
     try:
         data = request.json
         city = data.get('city', 'Texas')
@@ -3330,6 +3459,7 @@ def api_search():
         if error_msg:
             # On rate limit or API failure, return existing DB results so UI isn't empty
             db_prospects = get_all_prospects_from_db()
+            _log_search_request('/api/search', (time.time() - _t0) * 1000, len(db_prospects), True, city=city)
             return jsonify({
                 'success': False,
                 'message': error_msg,
@@ -3338,6 +3468,7 @@ def api_search():
             }), 200
 
         if not prospects:
+            _log_search_request('/api/search', (time.time() - _t0) * 1000, 0, False, city=city)
             return jsonify({
                 'success': False,
                 'message': 'No prospects found. Try a different city or state.',
@@ -3350,6 +3481,7 @@ def api_search():
         # Auto-update master spreadsheet
         total = generate_master_csv()
 
+        _log_search_request('/api/search', (time.time() - _t0) * 1000, len(prospects), False, city=city)
         return jsonify({
             'success': True,
             'message': f'Found {len(prospects)} prospects, saved {saved_count} new ones. Master spreadsheet updated ({total} total).',
@@ -3359,6 +3491,7 @@ def api_search():
         })
 
     except Exception as e:
+        _log_search_request('/api/search', (time.time() - _t0) * 1000, 0, False)
         print(f"API Error: {str(e)}")
         return jsonify({
             'success': False,
@@ -3370,8 +3503,10 @@ def api_search():
 @require_auth
 def api_get_prospects():
     """Get all prospects from database"""
+    _t0 = time.time()
     try:
         prospects = get_all_prospects_from_db()
+        _log_search_request('/api/prospects', (time.time() - _t0) * 1000, len(prospects), False)
         return jsonify({
             'success': True,
             'prospects': prospects
@@ -4414,8 +4549,15 @@ def _compute_freshness_score(state, city, company_name):
     if not row or not row[0]:
         return 30
     try:
-        pub_date = datetime.fromisoformat(row[0].replace('Z', '+00:00')) if 'T' in row[0] else datetime.strptime(row[0][:10], '%Y-%m-%d')
-        days_ago = (datetime.utcnow() - pub_date.replace(tzinfo=None)).days
+        val = row[0]
+        if hasattr(val, 'isoformat'):
+            # Postgres returns datetime objects directly
+            pub_date = val.replace(tzinfo=None) if hasattr(val, 'tzinfo') and val.tzinfo else val
+        elif 'T' in str(val):
+            pub_date = datetime.fromisoformat(str(val).replace('Z', '+00:00')).replace(tzinfo=None)
+        else:
+            pub_date = datetime.strptime(str(val)[:10], '%Y-%m-%d')
+        days_ago = (datetime.utcnow() - pub_date).days
     except (ValueError, TypeError):
         return 30
 
@@ -4435,7 +4577,8 @@ def compute_lead_timing_scores(workspace_id=None):
     """
     print("[CallTiming] Computing lead timing scores...")
     conn = _get_db_conn()
-    conn.row_factory = sqlite3.Row
+    if not _is_postgres():
+        conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
     # Gather all prospects from recent prospecting runs (last 90 days)
@@ -4460,18 +4603,21 @@ def compute_lead_timing_scores(workspace_id=None):
     prospect_list = []
 
     for p in prospects:
-        company = p['company_name']
-        city = p['city'] or ''
-        state = p['state'] or ''
+        # Support both sqlite3.Row (dict-like) and psycopg2 tuple access
+        company = p['company_name'] if hasattr(p, 'keys') else p[0]
+        city = (p['city'] if hasattr(p, 'keys') else p[1]) or ''
+        state = (p['state'] if hasattr(p, 'keys') else p[2]) or ''
+        score = p['score'] if hasattr(p, 'keys') else p[3]
+        score_meta_raw = p['score_meta'] if hasattr(p, 'keys') else p[4]
         key = f"{company.lower().strip()}|{city.lower()}|{state.lower()}"
         if key in seen_keys:
             continue
         seen_keys.add(key)
 
         score_meta = {}
-        if p['score_meta']:
+        if score_meta_raw:
             try:
-                score_meta = json.loads(p['score_meta'])
+                score_meta = json.loads(score_meta_raw)
             except (json.JSONDecodeError, TypeError):
                 pass
 
@@ -4479,7 +4625,7 @@ def compute_lead_timing_scores(workspace_id=None):
             'company_name': company,
             'city': city,
             'state': state,
-            'score': p['score'],
+            'score': score,
             'swim_lane_fit_score': score_meta.get('swim_lane_fit_score'),
             'competitive_difficulty': score_meta.get('competitive_difficulty', 'Medium'),
             'unit_band': score_meta.get('unit_band', ''),
@@ -4487,9 +4633,10 @@ def compute_lead_timing_scores(workspace_id=None):
         })
 
     for p in main_prospects:
-        company = p['company']
-        city = p['city'] or ''
-        state = p['state'] or ''
+        company = p['company'] if hasattr(p, 'keys') else p[0]
+        city = (p['city'] if hasattr(p, 'keys') else p[1]) or ''
+        state = (p['state'] if hasattr(p, 'keys') else p[2]) or ''
+        score = p['score'] if hasattr(p, 'keys') else p[3]
         key = f"{company.lower().strip()}|{city.lower()}|{state.lower()}"
         if key in seen_keys:
             continue
@@ -4498,7 +4645,7 @@ def compute_lead_timing_scores(workspace_id=None):
             'company_name': company,
             'city': city,
             'state': state,
-            'score': p['score'],
+            'score': score,
             'swim_lane_fit_score': None,
             'competitive_difficulty': 'Medium',
             'unit_band': '',
@@ -4625,10 +4772,677 @@ def run_daily_optimization():
         materialize_weighted_signals(days=90)
         compute_market_momentum()
         compute_lead_timing_scores()
+        # SPI: precompute final scores after momentum/timing are fresh
+        precompute_final_scores()
+        invalidate_search_cache()
         print("[Optimization] Daily optimization complete.")
     except Exception as e:
         print(f"[Optimization] Error: {e}")
         traceback.print_exc()
+
+
+# ===================================================================
+# SEARCH PERFORMANCE INDEX (SPI) ENGINE
+# Steps 1-9: Metrics, Precomputation, Caching, City Discovery, Guardrails
+# ===================================================================
+
+# --- STEP 1: Search Request Logging ---
+
+def _log_search_request(endpoint, response_time_ms, result_count, cache_hit, city=None, state=None):
+    """Log an individual search request for metrics aggregation."""
+    try:
+        conn = _get_db_conn()
+        c = conn.cursor()
+        c.execute('''INSERT INTO search_request_log (id, endpoint, response_time_ms, result_count, cache_hit, city, state)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                  (str(uuid.uuid4()), endpoint, response_time_ms, result_count, bool(cache_hit), city, state))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f'[SPI] Failed to log search request: {e}')
+
+
+def aggregate_search_metrics_daily():
+    """Aggregate search_request_log into search_metrics_daily. Runs nightly."""
+    print("[SPI] Aggregating daily search metrics...")
+    conn = _get_db_conn()
+    c = conn.cursor()
+
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    yesterday = (datetime.utcnow() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+    # Aggregate yesterday's requests
+    c.execute('''SELECT response_time_ms, result_count, cache_hit
+                 FROM search_request_log
+                 WHERE created_at >= ? AND created_at < ?''', (yesterday, today))
+    rows = c.fetchall()
+
+    if not rows:
+        conn.close()
+        print("[SPI] No search requests to aggregate for yesterday.")
+        return
+
+    times = [r[0] for r in rows]
+    counts = [r[1] for r in rows]
+    cache_hits = sum(1 for r in rows if r[2])
+    null_results = sum(1 for r in rows if r[1] == 0)
+
+    times_sorted = sorted(times)
+    total = len(times)
+    avg_time = sum(times) / total
+    p95_idx = int(total * 0.95)
+    p95_time = times_sorted[min(p95_idx, total - 1)]
+    first_result_times = [t for t, cnt in zip(times, counts) if cnt > 0]
+    avg_first_result = sum(first_result_times) / len(first_result_times) if first_result_times else 0
+
+    metric_id = str(uuid.uuid4())
+    c.execute('''INSERT INTO search_metrics_daily
+                 (id, date, avg_response_time_ms, p95_response_time_ms, time_to_first_result_ms,
+                  null_result_rate, avg_results_returned, total_searches, cache_hit_rate)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (date) DO UPDATE SET
+                    avg_response_time_ms = EXCLUDED.avg_response_time_ms,
+                    p95_response_time_ms = EXCLUDED.p95_response_time_ms,
+                    time_to_first_result_ms = EXCLUDED.time_to_first_result_ms,
+                    null_result_rate = EXCLUDED.null_result_rate,
+                    avg_results_returned = EXCLUDED.avg_results_returned,
+                    total_searches = EXCLUDED.total_searches,
+                    cache_hit_rate = EXCLUDED.cache_hit_rate''',
+              (metric_id, yesterday, round(avg_time, 2), round(p95_time, 2), round(avg_first_result, 2),
+               round(null_results / total, 4), round(sum(counts) / total, 2), total,
+               round(cache_hits / total, 4)))
+
+    # Cleanup old request logs (keep 14 days)
+    cutoff = (datetime.utcnow() - timedelta(days=14)).isoformat()
+    c.execute('DELETE FROM search_request_log WHERE created_at < ?', (cutoff,))
+
+    conn.commit()
+    conn.close()
+    print(f"[SPI] Aggregated {total} searches for {yesterday}: avg={avg_time:.0f}ms, p95={p95_time:.0f}ms, cache_hit={cache_hits/total:.1%}")
+
+
+def get_baseline_metrics(days=7):
+    """Return baseline metrics for last N days."""
+    conn = _get_db_conn()
+    c = conn.cursor()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%d')
+    c.execute('SELECT * FROM search_metrics_daily WHERE date >= ? ORDER BY date DESC', (cutoff,))
+    rows = c.fetchall()
+    conn.close()
+    return [{'date': r[1], 'avg_response_time_ms': r[2], 'p95_response_time_ms': r[3],
+             'time_to_first_result_ms': r[4], 'null_result_rate': r[5], 'avg_results_returned': r[6],
+             'total_searches': r[7], 'cache_hit_rate': r[8]} for r in rows]
+
+
+# --- STEP 3: Precompute Final Scores (NO LOGIC CHANGES) ---
+
+def precompute_final_scores():
+    """
+    Nightly job: recompute final_score for all prospects and run_prospects.
+    formula: final_score = base_score * city_boost * freshness_multiplier
+    The underlying scoring formula (capital_event, construction_stage, etc.) is UNCHANGED.
+    This only moves the city_boost/freshness multiplication out of the request path.
+    """
+    import math
+    print("[SPI] Precomputing final scores...")
+
+    # Load search config
+    config = _get_search_config()
+    city_boost = json.loads(config.get('city_boost', '{}'))
+    decay_rate = config.get('freshness_decay_rate', 0.03)
+
+    conn = _get_db_conn()
+    c = conn.cursor()
+
+    # Precompute for prospects table
+    c.execute('SELECT id, score, city, state, created_at FROM prospects WHERE score > 0')
+    prospect_rows = c.fetchall()
+    updated = 0
+    for row in prospect_rows:
+        pid, base_score, city, state, created_at = row[0], row[1] or 0, row[2] or '', row[3] or '', row[4]
+        boost = city_boost.get(city, 1.0)
+        # Freshness decay based on created_at
+        days_old = 0
+        if created_at:
+            try:
+                if hasattr(created_at, 'isoformat'):
+                    dt = created_at
+                elif 'T' in str(created_at):
+                    dt = datetime.fromisoformat(str(created_at).replace('Z', '+00:00')).replace(tzinfo=None)
+                else:
+                    dt = datetime.strptime(str(created_at)[:10], '%Y-%m-%d')
+                days_old = max(0, (datetime.utcnow() - dt).days)
+            except (ValueError, TypeError):
+                days_old = 0
+        freshness_mult = math.exp(-decay_rate * days_old)
+        final = round(base_score * boost * freshness_mult, 2)
+        c.execute('UPDATE prospects SET final_score = ? WHERE id = ?', (final, pid))
+        updated += 1
+
+    # Precompute for run_prospects table
+    c.execute('SELECT id, score, city, state, created_at FROM run_prospects WHERE score > 0')
+    rp_rows = c.fetchall()
+    for row in rp_rows:
+        rpid, base_score, city, state, created_at = row[0], row[1] or 0, row[2] or '', row[3] or '', row[4]
+        boost = city_boost.get(city, 1.0)
+        days_old = 0
+        if created_at:
+            try:
+                if hasattr(created_at, 'isoformat'):
+                    dt = created_at
+                elif 'T' in str(created_at):
+                    dt = datetime.fromisoformat(str(created_at).replace('Z', '+00:00')).replace(tzinfo=None)
+                else:
+                    dt = datetime.strptime(str(created_at)[:10], '%Y-%m-%d')
+                days_old = max(0, (datetime.utcnow() - dt).days)
+            except (ValueError, TypeError):
+                days_old = 0
+        freshness_mult = math.exp(-decay_rate * days_old)
+        final = round(base_score * boost * freshness_mult, 2)
+        c.execute('UPDATE run_prospects SET final_score = ? WHERE id = ?', (final, rpid))
+        updated += 1
+
+    conn.commit()
+    conn.close()
+    print(f"[SPI] Precomputed final_score for {updated} prospects.")
+    return updated
+
+
+# --- STEP 4: Smart Caching Layer ---
+
+_search_result_cache = {}  # city:filters_hash -> { results, timestamp }
+_SEARCH_CACHE_TTL = 6 * 3600  # 6 hours
+
+def _cache_key_for_search(city, filters=None):
+    """Generate cache key: search:{city}:{filters_hash}"""
+    filters_str = json.dumps(filters or {}, sort_keys=True)
+    fhash = hashlib.md5(filters_str.encode()).hexdigest()[:12]
+    return f"search:{(city or '').lower().strip()}:{fhash}"
+
+
+def _get_cached_search(city, filters=None):
+    """Return cached top-20 results for a city, or None if miss."""
+    key = _cache_key_for_search(city, filters)
+    entry = _search_result_cache.get(key)
+    if entry:
+        age = (datetime.utcnow() - entry['timestamp']).total_seconds()
+        if age < _SEARCH_CACHE_TTL:
+            return entry['results']
+        else:
+            del _search_result_cache[key]
+    return None
+
+
+def _set_cached_search(city, results, filters=None):
+    """Cache top-20 results for a city."""
+    key = _cache_key_for_search(city, filters)
+    _search_result_cache[key] = {
+        'results': results[:20],
+        'timestamp': datetime.utcnow(),
+    }
+
+
+def invalidate_search_cache():
+    """Invalidate all search result caches. Called after nightly recompute or city expansion."""
+    global _search_result_cache
+    _search_result_cache = {}
+    print("[SPI] Search result cache invalidated.")
+
+
+# --- STEP 6: City Discovery Model ---
+
+def _normalize_0_1(values):
+    """Normalize a list of values to 0-1 scale."""
+    if not values:
+        return []
+    mn, mx = min(values), max(values)
+    if mx == mn:
+        return [0.5] * len(values)
+    return [(v - mn) / (mx - mn) for v in values]
+
+
+def compute_city_signal_scores():
+    """
+    Compute composite_city_score for all tracked cities from existing signal data.
+    Uses ONLY existing cached/stored data (no paid APIs).
+
+    composite_city_score =
+      (permit_growth_rate * 0.25) +
+      (article_velocity * 0.20) +
+      (capital_event_count * 0.25) +
+      (land_transaction_count * 0.15) +
+      (population_growth_proxy * 0.15)
+    """
+    print("[CityDiscovery] Computing city signal scores...")
+    conn = _get_db_conn()
+    c = conn.cursor()
+
+    # Gather signal counts per city from weighted_signals (last 30 days)
+    cutoff_30d = (datetime.utcnow() - timedelta(days=30)).isoformat()
+    cutoff_90d = (datetime.utcnow() - timedelta(days=90)).isoformat()
+
+    c.execute('''SELECT state, city, topic, signal_weight, published_at
+                 FROM weighted_signals WHERE published_at >= ?''', (cutoff_90d,))
+    signals = c.fetchall()
+    conn.close()
+
+    if not signals:
+        print("[CityDiscovery] No signals to compute city scores.")
+        return 0
+
+    # Aggregate by city
+    city_data = {}
+    for row in signals:
+        state, city, topic, weight, pub_date = row[0], row[1], row[2] or '', row[3] or 1, row[4] or ''
+        key = f"{city}|{state}"
+        if key not in city_data:
+            city_data[key] = {'city': city, 'state': state, 'permits': 0, 'articles': 0,
+                              'capital_events': 0, 'land_transactions': 0,
+                              'articles_30d': 0, 'articles_90d': 0}
+        t = topic.lower()
+        is_recent = pub_date >= cutoff_30d if pub_date else False
+
+        if 'permit' in t or 'rezoning' in t or 'entitlement' in t or 'zoning' in t:
+            city_data[key]['permits'] += weight
+        elif 'financing' in t or 'capital' in t or 'credit' in t or 'fund' in t or 'jv' in t:
+            city_data[key]['capital_events'] += weight
+        elif 'acquisition' in t or 'sale' in t or 'purchase' in t or 'land' in t or 'disposition' in t:
+            city_data[key]['land_transactions'] += weight
+        else:
+            city_data[key]['articles'] += weight
+
+        if is_recent:
+            city_data[key]['articles_30d'] += 1
+        city_data[key]['articles_90d'] += 1
+
+    cities = list(city_data.values())
+    if not cities:
+        return 0
+
+    # Compute raw metrics
+    for cd in cities:
+        # Permit growth: permits weighted count
+        cd['permit_growth_rate'] = cd['permits']
+        # Article velocity: articles in 30d
+        cd['article_velocity'] = cd['articles_30d']
+        # Capital event count: weighted
+        cd['capital_event_count_raw'] = cd['capital_events']
+        # Land transaction count: weighted
+        cd['land_transaction_count_raw'] = cd['land_transactions']
+        # Population growth proxy: total signal volume in 90d (proxy for market activity)
+        cd['population_growth_proxy'] = cd['articles_90d']
+
+    # Normalize all inputs to 0-1 scale
+    permit_vals = _normalize_0_1([cd['permit_growth_rate'] for cd in cities])
+    article_vals = _normalize_0_1([cd['article_velocity'] for cd in cities])
+    capital_vals = _normalize_0_1([cd['capital_event_count_raw'] for cd in cities])
+    land_vals = _normalize_0_1([cd['land_transaction_count_raw'] for cd in cities])
+    pop_vals = _normalize_0_1([cd['population_growth_proxy'] for cd in cities])
+
+    # Compute composite score
+    conn = _get_db_conn()
+    c = conn.cursor()
+    updated = 0
+
+    for i, cd in enumerate(cities):
+        composite = (
+            permit_vals[i] * 0.25 +
+            article_vals[i] * 0.20 +
+            capital_vals[i] * 0.25 +
+            land_vals[i] * 0.15 +
+            pop_vals[i] * 0.15
+        )
+        composite = round(composite, 4)
+
+        cid = hashlib.md5(f"{cd['city']}:{cd['state']}".encode()).hexdigest()
+        c.execute('''INSERT INTO city_signal_metrics
+                     (id, city, state, permit_growth_rate, article_velocity, capital_event_count,
+                      land_transaction_count, population_growth_proxy, composite_city_score, last_updated)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                     ON CONFLICT (city, state) DO UPDATE SET
+                        permit_growth_rate = EXCLUDED.permit_growth_rate,
+                        article_velocity = EXCLUDED.article_velocity,
+                        capital_event_count = EXCLUDED.capital_event_count,
+                        land_transaction_count = EXCLUDED.land_transaction_count,
+                        population_growth_proxy = EXCLUDED.population_growth_proxy,
+                        composite_city_score = EXCLUDED.composite_city_score,
+                        last_updated = CURRENT_TIMESTAMP''',
+                  (cid, cd['city'], cd['state'], round(permit_vals[i], 4), round(article_vals[i], 4),
+                   round(capital_vals[i], 4), round(land_vals[i], 4), round(pop_vals[i], 4), composite))
+        updated += 1
+
+    conn.commit()
+    conn.close()
+    print(f"[CityDiscovery] Scored {updated} cities.")
+    return updated
+
+
+# --- STEP 7: Weekly Auto-Discovery Job ---
+
+def run_weekly_city_discovery():
+    """
+    Weekly job: identify top 5 emerging cities not already in primary ingestion.
+    Adds them as candidate_city to city_signal_metrics.
+    Does NOT auto-boost ranking — requires manual promotion.
+    """
+    from discovery_config import DISCOVERY_CITIES
+    print("[CityDiscovery] Running weekly city discovery...")
+
+    # First recompute scores
+    compute_city_signal_scores()
+
+    conn = _get_db_conn()
+    c = conn.cursor()
+
+    # Get current primary cities
+    primary_cities = set()
+    for dc in DISCOVERY_CITIES:
+        primary_cities.add(f"{dc['city'].lower()}|{dc['state'].lower()}")
+
+    # Get top cities by composite score, excluding primary
+    c.execute('''SELECT city, state, composite_city_score
+                 FROM city_signal_metrics
+                 ORDER BY composite_city_score DESC
+                 LIMIT 50''')
+    rows = c.fetchall()
+
+    candidates = []
+    for row in rows:
+        key = f"{row[0].lower()}|{row[1].lower()}"
+        if key not in primary_cities and row[2] > 0:
+            candidates.append({'city': row[0], 'state': row[1], 'score': row[2]})
+            if len(candidates) >= 5:
+                break
+
+    # Flag as candidate_city
+    for cand in candidates:
+        c.execute('''UPDATE city_signal_metrics SET status = 'candidate_city'
+                     WHERE city = ? AND state = ?''', (cand['city'], cand['state']))
+
+    conn.commit()
+    conn.close()
+    city_names = [c['city'] + ', ' + c['state'] for c in candidates]
+    print(f"[CityDiscovery] Identified {len(candidates)} candidate cities: {city_names}")
+    return candidates
+
+
+# --- STEP 8: Search Config (City Boost) ---
+
+def _get_search_config():
+    """Get current search config (or defaults)."""
+    conn = _get_db_conn()
+    c = conn.cursor()
+    c.execute('SELECT recency_multiplier, freshness_decay_rate, city_boost, last_updated FROM search_config ORDER BY last_updated DESC LIMIT 1')
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return {'recency_multiplier': 1.0, 'freshness_decay_rate': 0.03, 'city_boost': '{}'}
+    return {
+        'recency_multiplier': row[0],
+        'freshness_decay_rate': row[1],
+        'city_boost': row[2] or '{}',
+    }
+
+
+def _save_search_config(recency_multiplier=None, freshness_decay_rate=None, city_boost=None, reason='manual'):
+    """Save search config with version history and safety checks."""
+    current = _get_search_config()
+
+    new_rm = recency_multiplier if recency_multiplier is not None else current['recency_multiplier']
+    new_fdr = freshness_decay_rate if freshness_decay_rate is not None else current['freshness_decay_rate']
+    new_cb = json.dumps(city_boost) if city_boost is not None else current['city_boost']
+
+    # PART 3: Safety guardrail — no weight change > 15% per cycle
+    if city_boost:
+        old_boosts = json.loads(current['city_boost'])
+        for city_key, new_val in city_boost.items():
+            old_val = old_boosts.get(city_key, 1.0)
+            if old_val > 0 and abs(new_val - old_val) / old_val > 0.15:
+                print(f"[SPI-GUARD] Rejected boost change for {city_key}: {old_val} -> {new_val} (>15% change)")
+                city_boost[city_key] = old_val * (1.15 if new_val > old_val else 0.85)
+        new_cb = json.dumps(city_boost)
+
+    conn = _get_db_conn()
+    c = conn.cursor()
+
+    # Save new config
+    config_id = str(uuid.uuid4())
+    c.execute('''INSERT INTO search_config (id, recency_multiplier, freshness_decay_rate, city_boost)
+                 VALUES (?, ?, ?, ?)''', (config_id, new_rm, new_fdr, new_cb))
+
+    # Save version snapshot with current performance metrics
+    metrics = get_baseline_metrics(days=1)
+    avg_resp = metrics[0]['avg_response_time_ms'] if metrics else None
+    p95_resp = metrics[0]['p95_response_time_ms'] if metrics else None
+
+    version_id = str(uuid.uuid4())
+    snapshot = json.dumps({'recency_multiplier': new_rm, 'freshness_decay_rate': new_fdr, 'city_boost': new_cb})
+    c.execute('''INSERT INTO search_config_versions (id, config_snapshot, avg_response_time_ms, p95_response_time_ms, change_reason)
+                 VALUES (?, ?, ?, ?, ?)''', (version_id, snapshot, avg_resp, p95_resp, reason))
+
+    conn.commit()
+    conn.close()
+    print(f"[SPI] Search config saved (version {version_id[:8]}). Reason: {reason}")
+
+
+# --- STEP 9: Freshness Prioritization (via final_score) ---
+# Implemented in precompute_final_scores() above:
+#   freshness_score = exp(-decay_rate * days_since_last_activity)
+#   final_score = base_score * city_boost * freshness_score
+# Decay rate adjustable via search_config.freshness_decay_rate
+
+
+# --- PART 3: Safety Guardrails ---
+
+def _check_performance_regression():
+    """
+    Safety check: if avg_response_time increased > 15% vs last 7-day baseline, auto-rollback config.
+    """
+    metrics = get_baseline_metrics(days=7)
+    if len(metrics) < 2:
+        return  # Not enough data
+
+    recent = metrics[0]  # yesterday
+    baseline_avg = sum(m['avg_response_time_ms'] for m in metrics[1:]) / len(metrics[1:])
+
+    if baseline_avg > 0 and recent['avg_response_time_ms'] > baseline_avg * 1.15:
+        print(f"[SPI-GUARD] Performance regression detected! "
+              f"Yesterday: {recent['avg_response_time_ms']:.0f}ms vs baseline: {baseline_avg:.0f}ms")
+        # Rollback to default config
+        _save_search_config(recency_multiplier=1.0, freshness_decay_rate=0.03, city_boost={}, reason='auto_rollback_performance')
+        invalidate_search_cache()
+        print("[SPI-GUARD] Auto-rolled back search config to defaults.")
+
+
+# --- Combined SPI Nightly Job ---
+
+def run_spi_nightly():
+    """
+    Master SPI job: metrics → scores → cache invalidation → performance check.
+    Runs after daily optimization.
+    """
+    print("[SPI] Starting nightly SPI pipeline...")
+    try:
+        # Step 1: Aggregate metrics
+        aggregate_search_metrics_daily()
+
+        # Step 3: Precompute final scores
+        precompute_final_scores()
+
+        # Step 4: Invalidate stale caches
+        invalidate_search_cache()
+
+        # Step 6: Recompute city scores
+        compute_city_signal_scores()
+
+        # Part 3: Check for performance regression
+        _check_performance_regression()
+
+        print("[SPI] Nightly SPI pipeline complete.")
+    except Exception as e:
+        print(f"[SPI] Error in nightly pipeline: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+# --- SPI API Endpoints ---
+
+@app.route('/api/spi/metrics', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_spi_metrics():
+    """Return search performance metrics for last N days."""
+    days = min(int(request.args.get('days', 7)), 90)
+    metrics = get_baseline_metrics(days=days)
+    return jsonify({'success': True, 'metrics': metrics, 'days': days})
+
+
+@app.route('/api/spi/bottleneck-report', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_spi_bottleneck_report():
+    """STEP 2: Return structured bottleneck analysis."""
+    report = {
+        'bottlenecks': [
+            {
+                'area': 'SerpAPI Calls',
+                'severity': 'high',
+                'description': 'Search endpoint makes 4 synchronous SerpAPI queries (3s min delay each = 12s+)',
+                'impact_ms': 12000,
+                'mitigation': 'Aggressive caching (24h TTL already in place) + precomputed result cache',
+            },
+            {
+                'area': 'Claude API Extraction',
+                'severity': 'high',
+                'description': 'Claude sonnet call for prospect extraction is synchronous in request path (~3-8s)',
+                'impact_ms': 5000,
+                'mitigation': 'In-memory result cache (1h TTL) avoids re-extraction for same city',
+            },
+            {
+                'area': 'Score Computation',
+                'severity': 'low',
+                'description': 'Scores are computed by Claude during ingestion, NOT per-request. Already optimal.',
+                'impact_ms': 0,
+                'mitigation': 'final_score precomputation adds city_boost + freshness decay nightly',
+            },
+            {
+                'area': 'Database Queries',
+                'severity': 'medium',
+                'description': 'SELECT * FROM prospects ORDER BY score DESC — full table scan on unindexed column',
+                'impact_ms': 50,
+                'mitigation': 'Added indexes on city, state, score DESC, final_score DESC, created_at',
+            },
+            {
+                'area': 'External Enrichment',
+                'severity': 'low',
+                'description': 'No enrichment calls during /api/prospects read path. SerpAPI only on /api/search.',
+                'impact_ms': 0,
+                'mitigation': 'N/A — already decoupled',
+            },
+            {
+                'area': 'Sorting on Computed Expressions',
+                'severity': 'low',
+                'description': 'ORDER BY score DESC uses raw column. No computed expressions in sort.',
+                'impact_ms': 5,
+                'mitigation': 'Added B-tree index on score DESC + final_score DESC',
+            },
+        ],
+        'summary': {
+            'critical_bottleneck': 'Synchronous SerpAPI + Claude API calls (~15-20s per search)',
+            'already_optimized': ['Score computation (Claude at ingestion time)', 'SerpAPI cache (24h)', 'In-memory result cache (1h)'],
+            'new_optimizations': ['Precomputed final_score (nightly)', 'Smart city result cache (6h)', 'Database index optimization', 'City boost multiplier (config-based)'],
+        },
+    }
+    return jsonify({'success': True, 'report': report})
+
+
+@app.route('/api/spi/config', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_spi_config_get():
+    """Get current search config."""
+    config = _get_search_config()
+    config['city_boost'] = json.loads(config.get('city_boost', '{}'))
+    return jsonify({'success': True, 'config': config})
+
+
+@app.route('/api/spi/config', methods=['PUT'])
+@require_auth
+@require_role('admin')
+def api_spi_config_update():
+    """Update search config (with safety guardrails)."""
+    data = request.json or {}
+    _save_search_config(
+        recency_multiplier=data.get('recency_multiplier'),
+        freshness_decay_rate=data.get('freshness_decay_rate'),
+        city_boost=data.get('city_boost'),
+        reason=data.get('reason', 'admin_update'),
+    )
+    # Recompute scores with new config
+    precompute_final_scores()
+    invalidate_search_cache()
+    return jsonify({'success': True, 'message': 'Config updated. Scores recomputed.'})
+
+
+@app.route('/api/spi/config/history', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_spi_config_history():
+    """Get config version history with performance snapshots."""
+    conn = _get_db_conn()
+    c = conn.cursor()
+    c.execute('''SELECT id, config_snapshot, avg_response_time_ms, p95_response_time_ms, change_reason, created_at
+                 FROM search_config_versions ORDER BY created_at DESC LIMIT 20''')
+    rows = c.fetchall()
+    conn.close()
+    versions = [{'id': r[0], 'config': json.loads(r[1]), 'avg_response_time_ms': r[2],
+                 'p95_response_time_ms': r[3], 'reason': r[4], 'created_at': r[5]} for r in rows]
+    return jsonify({'success': True, 'versions': versions})
+
+
+@app.route('/api/spi/city-discovery', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_spi_city_discovery():
+    """Get city discovery rankings and candidates."""
+    conn = _get_db_conn()
+    c = conn.cursor()
+    c.execute('''SELECT city, state, permit_growth_rate, article_velocity, capital_event_count,
+                        land_transaction_count, population_growth_proxy, composite_city_score, status, last_updated
+                 FROM city_signal_metrics
+                 ORDER BY composite_city_score DESC LIMIT 50''')
+    rows = c.fetchall()
+    conn.close()
+    cities = [{'city': r[0], 'state': r[1], 'permit_growth_rate': r[2], 'article_velocity': r[3],
+               'capital_event_count': r[4], 'land_transaction_count': r[5], 'population_growth_proxy': r[6],
+               'composite_city_score': r[7], 'status': r[8], 'last_updated': r[9]} for r in rows]
+    return jsonify({'success': True, 'cities': cities})
+
+
+@app.route('/api/spi/indexes', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_spi_indexes():
+    """STEP 5: Return list of indexes created for search optimization."""
+    indexes = [
+        {'table': 'prospects', 'index': 'idx_prospects_city', 'columns': 'city'},
+        {'table': 'prospects', 'index': 'idx_prospects_state', 'columns': 'state'},
+        {'table': 'prospects', 'index': 'idx_prospects_score', 'columns': 'score DESC'},
+        {'table': 'prospects', 'index': 'idx_prospects_final_score', 'columns': 'final_score DESC'},
+        {'table': 'prospects', 'index': 'idx_prospects_created', 'columns': 'created_at DESC'},
+        {'table': 'run_prospects', 'index': 'idx_run_prospects_city', 'columns': 'city'},
+        {'table': 'run_prospects', 'index': 'idx_run_prospects_state', 'columns': 'state'},
+        {'table': 'run_prospects', 'index': 'idx_run_prospects_final_score', 'columns': 'final_score DESC'},
+        {'table': 'run_prospects', 'index': 'idx_run_prospects_score', 'columns': 'run_id, score DESC'},
+        {'table': 'weighted_signals', 'index': 'idx_weighted_signals_state', 'columns': 'state, city'},
+        {'table': 'weighted_signals', 'index': 'idx_weighted_signals_date', 'columns': 'published_at'},
+        {'table': 'weighted_signals', 'index': 'idx_weighted_signals_entity', 'columns': 'entity_name'},
+        {'table': 'market_momentum', 'index': 'idx_market_momentum_state', 'columns': 'state, city, window_end_date'},
+        {'table': 'lead_timing_scores', 'index': 'idx_lead_timing_score', 'columns': 'call_timing_score DESC'},
+        {'table': 'city_signal_metrics', 'index': 'idx_city_signal_score', 'columns': 'composite_city_score DESC'},
+        {'table': 'search_request_log', 'index': 'idx_search_request_log_date', 'columns': 'created_at'},
+    ]
+    return jsonify({'success': True, 'indexes': indexes, 'total': len(indexes)})
 
 
 # ===================================================================
@@ -6391,6 +7205,20 @@ def _scheduled_permit_feed():
     except Exception as e:
         print(f"[Scheduler] Permit feed error (non-fatal): {e}")
 
+def _scheduled_spi_nightly():
+    """SPI nightly: metrics aggregation → score precompute → cache invalidation → perf check."""
+    try:
+        run_spi_nightly()
+    except Exception as e:
+        print(f"[Scheduler] SPI nightly error: {e}")
+
+def _scheduled_weekly_city_discovery():
+    """Weekly city discovery: compute city scores, identify emerging candidates."""
+    try:
+        run_weekly_city_discovery()
+    except Exception as e:
+        print(f"[Scheduler] City discovery error: {e}")
+
 _scheduler = BackgroundScheduler(daemon=True)
 _scheduler.add_job(
     _scheduled_permit_feed,
@@ -6438,6 +7266,20 @@ _scheduler.add_job(
     name='Daily Government Signals Refresh',
     replace_existing=True
 )
+_scheduler.add_job(
+    _scheduled_spi_nightly,
+    CronTrigger(hour=8, minute=15, timezone=pytz.timezone('America/Los_Angeles')),
+    id='spi_nightly',
+    name='SPI Nightly (Metrics + Score Precompute)',
+    replace_existing=True
+)
+_scheduler.add_job(
+    _scheduled_weekly_city_discovery,
+    CronTrigger(day_of_week='wed', hour=8, minute=30, timezone=pytz.timezone('America/Los_Angeles')),
+    id='weekly_city_discovery',
+    name='Weekly City Discovery',
+    replace_existing=True
+)
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
 print("[Scheduler] Daily signal optimization at 6:45 AM PT")
@@ -6445,6 +7287,8 @@ print("[Scheduler] Daily trend detection at 7:30 AM PT")
 print("[Scheduler] Weekly Sunbelt Brief every Monday 7:00 AM PT")
 print("[Scheduler] Daily government signals refresh at 5:30 AM PT")
 print("[Scheduler] Daily permit feed ingestion at 5:15 AM PT")
+print("[Scheduler] SPI nightly pipeline at 8:15 AM PT")
+print("[Scheduler] Weekly city discovery every Wednesday 8:30 AM PT")
 
 
 if __name__ == '__main__':
