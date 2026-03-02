@@ -2343,7 +2343,7 @@
                 try {
                     const res = await fetch(`${API_BASE}/api/sunbelt/momentum?windowDays=7&baselineDays=30`);
                     const d = await res.json();
-                    if (d.ok === false) { setTabError('momentum', d.details ? `${d.error}: ${d.details}` : (d.error || 'Failed to load momentum')); }
+                    if (d.ok === false) { setTabError('momentum', d.error || 'Failed to load momentum'); }
                     else { setMomentumData(d.data); }
                 } catch (e) { setTabError('momentum', 'Network error loading momentum'); }
                 setTabLoading('momentum', false);
@@ -2357,7 +2357,7 @@
                     if (trendFilter.topic) url += `&topic=${encodeURIComponent(trendFilter.topic)}`;
                     const res = await fetch(url);
                     const d = await res.json();
-                    if (d.ok === false) { setTabError('trends', d.details ? `${d.error}: ${d.details}` : (d.error || 'Failed to load trends')); }
+                    if (d.ok === false) { setTabError('trends', d.error || 'Failed to load trends'); }
                     else { setTrendsData(d.data); }
                 } catch (e) { setTabError('trends', 'Network error loading trends'); }
                 setTabLoading('trends', false);
@@ -4650,121 +4650,6 @@
             );
         }
 
-        // ======= LEAD CARD (Pipeline) =======
-        function LeadCard({ lead, user, updateLead, loadLeads, workspaceUsers, onLogTouchpoint, onViewActivity }) {
-            const [notesText, setNotesText] = useState(lead.notes || '');
-            const [notesOpen, setNotesOpen] = useState(!!(lead.notes));
-            const [saving, setSaving] = useState(false);
-            const timerRef = useRef(null);
-
-            const saveNotes = (text) => {
-                if (timerRef.current) clearTimeout(timerRef.current);
-                timerRef.current = setTimeout(async () => {
-                    setSaving(true);
-                    try {
-                        await fetch(`${API_BASE}/api/crm/leads/${lead.id}`, {
-                            method: 'PATCH', headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({ notes: text })
-                        });
-                    } catch (e) { console.error('Notes save error:', e); }
-                    setSaving(false);
-                }, 600);
-            };
-
-            const handleNotesChange = (e) => {
-                const text = e.target.value;
-                setNotesText(text);
-                saveNotes(text);
-            };
-
-            return (
-                <div style={{background:'#1e293b',border:'1px solid #334155',borderRadius:'12px',padding:'1rem'}}>
-                    <div style={{display:'flex',alignItems:'center',gap:'1rem',flexWrap:'wrap'}}>
-                        <div style={{flex:1,minWidth:'200px'}}>
-                            <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:'1rem',fontWeight:700,color:'#f1f5f9',marginBottom:'0.2rem'}}>{lead.company_name}</div>
-                            <span style={{fontSize:'0.75rem',color:'#64748b'}}>
-                                {lead.owner_user_id === user?.id ? 'Owned by: Me' : lead.owner_name ? `Owned by: ${lead.owner_name}` : 'Unassigned'}
-                            </span>
-                        </div>
-                        <select style={{...styles.select,fontSize:'0.8rem',padding:'0.35rem 0.5rem'}} value={lead.status}
-                            onChange={e => updateLead(lead.id, 'status', e.target.value)}>
-                            {CRM_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                        {user?.role === 'admin' && (
-                            <div style={{display:'flex',alignItems:'center',gap:'0.5rem'}}>
-                                <label style={{fontSize:'0.7rem',color:'#64748b'}}>Assign:</label>
-                                <select style={{...styles.select,fontSize:'0.8rem',padding:'0.35rem 0.5rem',minWidth:'120px'}}
-                                    value={lead.owner_user_id || ''}
-                                    onChange={async e => {
-                                        const newOwnerId = e.target.value || null;
-                                        try {
-                                            await fetch(`${API_BASE}/api/crm/leads/${lead.id}/assign`, {
-                                                method: 'PATCH', headers: {'Content-Type': 'application/json'},
-                                                body: JSON.stringify({ owner_id: newOwnerId })
-                                            });
-                                            loadLeads();
-                                        } catch (err) { console.error('Reassign error:', err); }
-                                    }}>
-                                    <option value="">Unassigned</option>
-                                    {workspaceUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                                </select>
-                            </div>
-                        )}
-                        <div style={{display:'flex',alignItems:'center',gap:'0.5rem'}}>
-                            <label style={{fontSize:'0.7rem',color:'#64748b'}}>Follow-up:</label>
-                            <input type="date" style={{...styles.input,minWidth:'130px',fontSize:'0.8rem',padding:'0.3rem 0.5rem'}}
-                                value={lead.next_followup_at ? lead.next_followup_at.split('T')[0] : ''}
-                                onChange={e => updateLead(lead.id, 'next_followup_at', e.target.value ? new Date(e.target.value).toISOString() : null)} />
-                        </div>
-                        {lead.last_activity_at && (
-                            <span style={{fontSize:'0.7rem',color:'#475569'}}>
-                                {(() => {
-                                    const diff = Date.now() - new Date(lead.last_activity_at).getTime();
-                                    const d = Math.floor(diff / 86400000);
-                                    const label = (lead.last_action_type || '').replace(/_/g,' ').toLowerCase();
-                                    return `${d === 0 ? 'Today' : d + 'd ago'} · ${label}`;
-                                })()}
-                            </span>
-                        )}
-                        <button className="action-btn" style={styles.actionBtn} onClick={onLogTouchpoint}>
-                            Log Touchpoint
-                        </button>
-                        <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.75rem'}} onClick={onViewActivity}>
-                            View Activity
-                        </button>
-                        <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.7rem',padding:'0.2rem 0.5rem',
-                            borderColor: notesOpen ? '#6366f1' : '#475569', color: notesOpen ? '#818cf8' : '#94a3b8'}}
-                            onClick={() => setNotesOpen(!notesOpen)}>
-                            {notesOpen ? 'Hide Notes' : (lead.notes ? 'Show Notes' : '+ Notes')}
-                        </button>
-                    </div>
-                    {notesOpen && (
-                        <div style={{marginTop:'0.75rem',paddingTop:'0.6rem',borderTop:'1px solid #293548'}}>
-                            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.35rem'}}>
-                                <span style={{fontSize:'0.7rem',color:'#64748b',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.04em'}}>Notes</span>
-                                {saving && <span style={{fontSize:'0.65rem',color:'#6366f1',fontStyle:'italic'}}>Saving...</span>}
-                            </div>
-                            <textarea
-                                value={notesText}
-                                onChange={handleNotesChange}
-                                placeholder="Add notes about this prospect..."
-                                rows={3}
-                                style={{
-                                    width:'100%',boxSizing:'border-box',
-                                    background:'#0f172a',border:'1px solid #334155',borderRadius:'0.5rem',
-                                    color:'#e2e8f0',fontSize:'0.82rem',padding:'0.6rem 0.75rem',
-                                    resize:'vertical',fontFamily:'Inter,system-ui,sans-serif',lineHeight:1.5,
-                                    outline:'none',
-                                }}
-                                onFocus={e => { e.target.style.borderColor = '#6366f1'; }}
-                                onBlur={e => { e.target.style.borderColor = '#334155'; }}
-                            />
-                        </div>
-                    )}
-                </div>
-            );
-        }
-
         // ======= PIPELINE PAGE =======
         function PipelinePage({ user }) {
             const [leads, setLeads] = useState([]);
@@ -4846,10 +4731,60 @@
                     {!loading && leads.length > 0 && (
                         <div style={{display:'flex',flexDirection:'column',gap:'0.75rem'}}>
                             {leads.map(lead => (
-                                <LeadCard key={lead.id} lead={lead} user={user} updateLead={updateLead} loadLeads={loadLeads}
-                                    workspaceUsers={workspaceUsers}
-                                    onLogTouchpoint={() => setTouchpointTarget({lead_id:lead.id,company_name:lead.company_name})}
-                                    onViewActivity={() => setActivityTarget({lead_id:lead.id,company_name:lead.company_name})} />
+                                <div key={lead.id} style={{background:'#1e293b',border:'1px solid #334155',borderRadius:'12px',padding:'1rem',display:'flex',alignItems:'center',gap:'1rem',flexWrap:'wrap'}}>
+                                    <div style={{flex:1,minWidth:'200px'}}>
+                                        <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:'1rem',fontWeight:700,color:'#f1f5f9',marginBottom:'0.2rem'}}>{lead.company_name}</div>
+                                        <span style={{fontSize:'0.75rem',color:'#64748b'}}>
+                                            {lead.owner_user_id === user?.id ? 'Owned by: Me' : lead.owner_name ? `Owned by: ${lead.owner_name}` : 'Unassigned'}
+                                        </span>
+                                    </div>
+                                    <select style={{...styles.select,fontSize:'0.8rem',padding:'0.35rem 0.5rem'}} value={lead.status}
+                                        onChange={e => updateLead(lead.id, 'status', e.target.value)}>
+                                        {CRM_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                                    </select>
+                                    {user?.role === 'admin' && (
+                                        <div style={{display:'flex',alignItems:'center',gap:'0.5rem'}}>
+                                            <label style={{fontSize:'0.7rem',color:'#64748b'}}>Assign:</label>
+                                            <select style={{...styles.select,fontSize:'0.8rem',padding:'0.35rem 0.5rem',minWidth:'120px'}}
+                                                value={lead.owner_user_id || ''}
+                                                onChange={async e => {
+                                                    const newOwnerId = e.target.value || null;
+                                                    try {
+                                                        await fetch(`${API_BASE}/api/crm/leads/${lead.id}/assign`, {
+                                                            method: 'PATCH', headers: {'Content-Type': 'application/json'},
+                                                            body: JSON.stringify({ owner_id: newOwnerId })
+                                                        });
+                                                        loadLeads();
+                                                    } catch (err) { console.error('Reassign error:', err); }
+                                                }}>
+                                                <option value="">Unassigned</option>
+                                                {workspaceUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                                            </select>
+                                        </div>
+                                    )}
+                                    <div style={{display:'flex',alignItems:'center',gap:'0.5rem'}}>
+                                        <label style={{fontSize:'0.7rem',color:'#64748b'}}>Follow-up:</label>
+                                        <input type="date" style={{...styles.input,minWidth:'130px',fontSize:'0.8rem',padding:'0.3rem 0.5rem'}}
+                                            value={lead.next_followup_at ? lead.next_followup_at.split('T')[0] : ''}
+                                            onChange={e => updateLead(lead.id, 'next_followup_at', e.target.value ? new Date(e.target.value).toISOString() : null)} />
+                                    </div>
+                                    {lead.last_activity_at && (
+                                        <span style={{fontSize:'0.7rem',color:'#475569'}}>
+                                            {(() => {
+                                                const diff = Date.now() - new Date(lead.last_activity_at).getTime();
+                                                const d = Math.floor(diff / 86400000);
+                                                const label = (lead.last_action_type || '').replace(/_/g,' ').toLowerCase();
+                                                return `${d === 0 ? 'Today' : d + 'd ago'} · ${label}`;
+                                            })()}
+                                        </span>
+                                    )}
+                                    <button className="action-btn" style={styles.actionBtn} onClick={() => setTouchpointTarget({lead_id:lead.id,company_name:lead.company_name})}>
+                                        Log Touchpoint
+                                    </button>
+                                    <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.75rem'}} onClick={() => setActivityTarget({lead_id:lead.id,company_name:lead.company_name})}>
+                                        View Activity
+                                    </button>
+                                </div>
                             ))}
                         </div>
                     )}
