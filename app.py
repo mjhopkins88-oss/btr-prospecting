@@ -47,6 +47,17 @@ class _DTJSONProvider(DefaultJSONProvider):
 app.json_provider_class = _DTJSONProvider
 app.json = _DTJSONProvider(app)
 
+
+def _safe_ts(val):
+    """Convert a potential datetime/date value to an ISO string safely.
+    Postgres returns datetime objects; SQLite returns strings. This normalizes both."""
+    if val is None:
+        return None
+    if hasattr(val, 'isoformat'):
+        return val.isoformat()
+    return str(val)
+
+
 CORS(app, supports_credentials=True)
 
 # --- Login rate limiter (in-memory) ---
@@ -447,6 +458,22 @@ def init_db():
         )
     ''')
     c.execute('CREATE INDEX IF NOT EXISTS idx_sunbelt_summaries_lookup ON sunbelt_summaries(tab, window_days, date_bucket)')
+    # --- Article Summaries (per-article structured sparknotes) ---
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS article_summaries (
+            id TEXT PRIMARY KEY,
+            article_id TEXT NOT NULL,
+            summary TEXT,
+            entities TEXT,
+            deal_type TEXT,
+            location TEXT,
+            capital TEXT,
+            timeline TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(article_id)
+        )
+    ''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_article_summaries_article ON article_summaries(article_id)')
     # --- Lead Timing Scores ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS lead_timing_scores (
@@ -807,6 +834,13 @@ def init_db():
     except Exception:
         pass
 
+    # Migrate: add SPI score columns to search_metrics_daily
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'search_metrics_daily', 'spi_score', 'REAL DEFAULT 0')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'search_metrics_daily', 'speed_score', 'REAL DEFAULT 0')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'search_metrics_daily', 'signal_density_score', 'REAL DEFAULT 0')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'search_metrics_daily', 'freshness_score', 'REAL DEFAULT 0')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'search_metrics_daily', 'city_coverage_score', 'REAL DEFAULT 0')
+
     conn.commit()
     conn.close()
 
@@ -1142,7 +1176,7 @@ def api_auth_list_users():
     conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id, name, email, role, created_at FROM users WHERE workspace_id = ?', (g.workspace_id,))
-    users = [{'id': r[0], 'name': r[1], 'email': r[2], 'role': r[3], 'created_at': r[4]} for r in c.fetchall()]
+    users = [{'id': r[0], 'name': r[1], 'email': r[2], 'role': r[3], 'created_at': _safe_ts(r[4])} for r in c.fetchall()]
     conn.close()
     return jsonify({'success': True, 'users': users})
 
@@ -1204,7 +1238,7 @@ def api_admin_list_users():
         users.append({
             'id': r[0], 'name': r[1], 'email': r[2], 'role': r[3],
             'is_super_admin': bool(r[4]), 'is_disabled': bool(r[5]),
-            'last_login_at': r[6], 'created_at': r[7]
+            'last_login_at': _safe_ts(r[6]), 'created_at': _safe_ts(r[7])
         })
     conn.close()
     return jsonify({'success': True, 'users': users})
@@ -1643,7 +1677,7 @@ def api_quotes_history():
             'rate_x100': r[8], 'aop_buydown': bool(r[9]),
             'replacement_cost': r[10], 'total_tiv': r[11],
             'base_premium': r[12], 'taxes': r[13], 'total_premium': r[14],
-            'warnings': json.loads(r[15]) if r[15] else [], 'created_at': r[16],
+            'warnings': json.loads(r[15]) if r[15] else [], 'created_at': _safe_ts(r[16]),
         })
     conn.close()
     return jsonify({'success': True, 'quotes': quotes})
@@ -1658,7 +1692,7 @@ def api_admin_rate_groups_list():
     conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id, name, rate, rate_x100, created_at FROM rate_groups ORDER BY name')
-    groups = [{'id': r[0], 'name': r[1], 'rate': r[2], 'rate_x100': r[3], 'created_at': r[4]} for r in c.fetchall()]
+    groups = [{'id': r[0], 'name': r[1], 'rate': r[2], 'rate_x100': r[3], 'created_at': _safe_ts(r[4])} for r in c.fetchall()]
     conn.close()
     return jsonify({'success': True, 'groups': groups})
 
@@ -1735,7 +1769,7 @@ def api_admin_county_mapping_list():
         c.execute('SELECT id, state, county_name, group_name, created_at FROM county_group_map WHERE state = ? ORDER BY county_name', (state_filter,))
     else:
         c.execute('SELECT id, state, county_name, group_name, created_at FROM county_group_map ORDER BY state, county_name')
-    mappings = [{'id': r[0], 'state': r[1], 'county_name': r[2], 'group_name': r[3], 'created_at': r[4]} for r in c.fetchall()]
+    mappings = [{'id': r[0], 'state': r[1], 'county_name': r[2], 'group_name': r[3], 'created_at': _safe_ts(r[4])} for r in c.fetchall()]
     conn.close()
     return jsonify({'success': True, 'mappings': mappings})
 
@@ -1907,8 +1941,8 @@ def api_crm_list_leads():
     for r in c.fetchall():
         leads.append({
             'id': r[0], 'status': r[1], 'owner_user_id': r[2],
-            'last_touch_at': r[3], 'next_followup_at': r[4], 'priority': r[5],
-            'created_at': r[6], 'company_name': r[7], 'prospect_key': r[8],
+            'last_touch_at': _safe_ts(r[3]), 'next_followup_at': _safe_ts(r[4]), 'priority': r[5],
+            'created_at': _safe_ts(r[6]), 'company_name': r[7], 'prospect_key': r[8],
             'website': r[9], 'owner_name': r[10],
             'last_action_type': r[11], 'last_activity_at': r[12],
         })
@@ -2060,7 +2094,7 @@ def api_crm_list_touchpoints(lead_id):
     for r in c.fetchall():
         touchpoints.append({
             'id': r[0], 'type': r[1], 'outcome': r[2], 'notes': r[3],
-            'occurred_at': r[4], 'next_followup_at': r[5], 'user_name': r[6],
+            'occurred_at': _safe_ts(r[4]), 'next_followup_at': _safe_ts(r[5]), 'user_name': r[6],
         })
     conn.close()
     return jsonify({'success': True, 'touchpoints': touchpoints})
@@ -2161,7 +2195,7 @@ def api_crm_lead_activity(lead_id):
         new_val = json.loads(r[3]) if r[3] else None
         activities.append({
             'id': r[0], 'action_type': r[1], 'old_value': old_val,
-            'new_value': new_val, 'created_at': r[4],
+            'new_value': new_val, 'created_at': _safe_ts(r[4]),
             'actor': {'id': r[5], 'name': r[6], 'email': r[7], 'role': r[8]},
         })
     conn.close()
@@ -2220,7 +2254,7 @@ def api_admin_activity_overview():
         new_val = json.loads(r[4]) if r[4] else None
         activities.append({
             'id': r[0], 'lead_id': r[1], 'action_type': r[2],
-            'old_value': old_val, 'new_value': new_val, 'created_at': r[5],
+            'old_value': old_val, 'new_value': new_val, 'created_at': _safe_ts(r[5]),
             'actor': {'id': r[6], 'name': r[7], 'email': r[8], 'role': r[9]},
             'company_name': r[10], 'prospect_key': r[11],
         })
@@ -2257,7 +2291,7 @@ def api_crm_bulk_status():
     for r in c.fetchall():
         statuses[r[0]] = {
             'lead_id': r[1], 'status': r[2], 'owner_user_id': r[3],
-            'next_followup_at': r[4], 'owner_name': r[5],
+            'next_followup_at': _safe_ts(r[4]), 'owner_name': r[5],
         }
     conn.close()
     return jsonify({'success': True, 'statuses': statuses})
@@ -2672,16 +2706,29 @@ def save_prospects_to_db(prospects):
     conn.close()
     return saved_count
 
-def get_all_prospects_from_db():
-    """Retrieve all prospects from database. Uses final_score (precomputed) for sort order."""
+def get_all_prospects_from_db(start_date='', end_date=''):
+    """Retrieve all prospects from database. Uses final_score (precomputed) for sort order.
+    Optional start_date/end_date (ISO strings) filter by created_at range.
+    """
     conn = _get_db_conn()
     c = conn.cursor()
     # Use precomputed final_score (includes city boost + freshness decay) with fallback to raw score
-    c.execute('''SELECT id, company, executive, title, linkedin, email, phone,
-                        city, state, score, tiv, units, project_name, project_status,
-                        signals, why_now, created_at, final_score
-                 FROM prospects
-                 ORDER BY COALESCE(NULLIF(final_score, 0), score) DESC, created_at DESC''')
+    query = '''SELECT id, company, executive, title, linkedin, email, phone,
+                      city, state, score, tiv, units, project_name, project_status,
+                      signals, why_now, created_at, final_score
+               FROM prospects'''
+    params = []
+    conditions = []
+    if start_date:
+        conditions.append('created_at >= ?')
+        params.append(start_date)
+    if end_date:
+        conditions.append('created_at <= ?')
+        params.append(end_date)
+    if conditions:
+        query += ' WHERE ' + ' AND '.join(conditions)
+    query += ' ORDER BY COALESCE(NULLIF(final_score, 0), score) DESC, created_at DESC'
+    c.execute(query, params)
 
     prospects = []
     for row in c.fetchall():
@@ -2702,7 +2749,7 @@ def get_all_prospects_from_db():
             'projectStatus': row[13],
             'signals': json.loads(row[14]) if row[14] else [],
             'whyNow': row[15],
-            'createdAt': row[16],
+            'createdAt': row[16].isoformat() if hasattr(row[16], 'isoformat') else (row[16] or ''),
             'finalScore': row[17],
         })
 
@@ -3502,10 +3549,14 @@ def api_search():
 @app.route('/api/prospects', methods=['GET'])
 @require_auth
 def api_get_prospects():
-    """Get all prospects from database"""
+    """Get all prospects from database with optional date filtering.
+    Query params: start_date, end_date (ISO strings) for date range filtering.
+    """
     _t0 = time.time()
     try:
-        prospects = get_all_prospects_from_db()
+        start_date = request.args.get('start_date', '').strip()
+        end_date = request.args.get('end_date', '').strip()
+        prospects = get_all_prospects_from_db(start_date=start_date, end_date=end_date)
         _log_search_request('/api/prospects', (time.time() - _t0) * 1000, len(prospects), False)
         return jsonify({
             'success': True,
@@ -3825,8 +3876,8 @@ def api_prospecting_run_status(run_id):
         'status': row[0],
         'total_prospects': row[1] or 0,
         'error': row[2],
-        'created_at': row[3],
-        'completed_at': row[4],
+        'created_at': _safe_ts(row[3]),
+        'completed_at': _safe_ts(row[4]),
     })
 
 
@@ -3884,7 +3935,7 @@ def api_prospecting_run_results(run_id):
             'linkedin': row[11],
             'units': row[12],
             'projectName': row[13],
-            'createdAt': row[14],
+            'createdAt': _safe_ts(row[14]),
         }
 
         # Merge score_meta fields into prospect
@@ -3959,7 +4010,7 @@ def api_discovery_latest():
     return jsonify({
         'success': True,
         'run': {
-            'id': row[0], 'run_at': row[1],
+            'id': row[0], 'run_at': _safe_ts(row[1]),
             'results': json.loads(row[2]) if row[2] else {},
             'digest': row[3], 'city_count': row[4],
             'total_new': row[5], 'status': row[6],
@@ -4013,7 +4064,7 @@ def api_discovery_history():
     runs = []
     for row in c.fetchall():
         runs.append({
-            'id': row[0], 'run_at': row[1],
+            'id': row[0], 'run_at': _safe_ts(row[1]),
             'city_count': row[2], 'total_new': row[3], 'status': row[4]
         })
     conn.close()
@@ -4040,7 +4091,7 @@ def api_discovery_run_detail(run_id):
     return jsonify({
         'success': True,
         'run': {
-            'id': row[0], 'run_at': row[1],
+            'id': row[0], 'run_at': _safe_ts(row[1]),
             'results': json.loads(row[2]) if row[2] else {},
             'digest': row[3], 'city_count': row[4],
             'total_new': row[5], 'status': row[6],
@@ -4447,76 +4498,85 @@ def compute_market_momentum():
     Reads from weighted_signals table. No SerpAPI calls.
     """
     print("[Momentum] Computing market momentum...")
-    now = datetime.utcnow()
-    window_end = now.strftime('%Y-%m-%d')
-    cutoff_7d = (now - timedelta(days=7)).isoformat()
-    cutoff_14d = (now - timedelta(days=14)).isoformat()
-    cutoff_30d = (now - timedelta(days=30)).isoformat()
+    try:
+        now = datetime.utcnow()
+        window_end = now.strftime('%Y-%m-%d')
+        cutoff_7d = (now - timedelta(days=7)).isoformat()
+        cutoff_14d = (now - timedelta(days=14)).isoformat()
+        cutoff_30d = (now - timedelta(days=30)).isoformat()
 
-    conn = _get_db_conn()
-    c = conn.cursor()
+        conn = _get_db_conn()
+        c = conn.cursor()
 
-    # Get all unique (state, city) pairs from weighted_signals in the 5 states
-    # Filter out NULL/empty/Unknown cities to keep rankings clean
-    c.execute('''
-        SELECT DISTINCT state, city FROM weighted_signals
-        WHERE state IN ('TX','AZ','GA','NC','FL') AND published_at >= ?
-        AND city IS NOT NULL AND city != '' AND city != 'Unknown'
-    ''', (cutoff_30d,))
-    markets = c.fetchall()
-
-    inserted = 0
-    for state, city in markets:
-        # Unweighted counts
-        c.execute('SELECT COUNT(*) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_7d))
-        sig_7d = c.fetchone()[0]
-        c.execute('SELECT COUNT(*) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_14d))
-        sig_14d = c.fetchone()[0]
-        c.execute('SELECT COUNT(*) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_30d))
-        sig_30d = c.fetchone()[0]
-
-        # Weighted counts
-        c.execute('SELECT COALESCE(SUM(signal_weight),0) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_7d))
-        wsig_7d = c.fetchone()[0]
-        c.execute('SELECT COALESCE(SUM(signal_weight),0) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_14d))
-        wsig_14d = c.fetchone()[0]
-        c.execute('SELECT COALESCE(SUM(signal_weight),0) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_30d))
-        wsig_30d = c.fetchone()[0]
-
-        # Momentum score
-        baseline = wsig_30d / 4.0
-        ratio_7d = wsig_7d / max(1, baseline)
-        ratio_14d = wsig_14d / max(1, baseline * 2)
-        momentum_score = max(0, min(100, ratio_7d * 60 + ratio_14d * 40))
-
-        if momentum_score >= 65:
-            momentum_label = 'Accelerating'
-        elif momentum_score >= 40:
-            momentum_label = 'Stable'
-        else:
-            momentum_label = 'Cooling'
-
-        mid = str(uuid.uuid4())
+        # Get all unique (state, city) pairs from weighted_signals in the 5 states
+        # Filter out NULL/empty/Unknown cities to keep rankings clean
         c.execute('''
-            INSERT INTO market_momentum
-            (id, state, city, window_end_date, signals_7d, signals_14d, signals_30d,
-             weighted_signals_7d, weighted_signals_14d, weighted_signals_30d,
-             momentum_score, momentum_label, computed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT (state, city, window_end_date) DO UPDATE SET
-                id = EXCLUDED.id, signals_7d = EXCLUDED.signals_7d, signals_14d = EXCLUDED.signals_14d,
-                signals_30d = EXCLUDED.signals_30d, weighted_signals_7d = EXCLUDED.weighted_signals_7d,
-                weighted_signals_14d = EXCLUDED.weighted_signals_14d, weighted_signals_30d = EXCLUDED.weighted_signals_30d,
-                momentum_score = EXCLUDED.momentum_score, momentum_label = EXCLUDED.momentum_label
-        ''', (mid, state, city, window_end, sig_7d, sig_14d, sig_30d,
-              wsig_7d, wsig_14d, wsig_30d,
-              round(momentum_score, 1), momentum_label))
-        inserted += 1
+            SELECT DISTINCT state, city FROM weighted_signals
+            WHERE state IN ('TX','AZ','GA','NC','FL') AND published_at >= ?
+            AND city IS NOT NULL AND city != '' AND city != 'Unknown'
+        ''', (cutoff_30d,))
+        markets = c.fetchall()
 
-    conn.commit()
-    conn.close()
-    print(f"[Momentum] Computed momentum for {inserted} markets.")
-    return inserted
+        inserted = 0
+        for state, city in markets:
+            try:
+                # Unweighted counts
+                c.execute('SELECT COUNT(*) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_7d))
+                sig_7d = c.fetchone()[0]
+                c.execute('SELECT COUNT(*) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_14d))
+                sig_14d = c.fetchone()[0]
+                c.execute('SELECT COUNT(*) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_30d))
+                sig_30d = c.fetchone()[0]
+
+                # Weighted counts
+                c.execute('SELECT COALESCE(SUM(signal_weight),0) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_7d))
+                wsig_7d = c.fetchone()[0] or 0
+                c.execute('SELECT COALESCE(SUM(signal_weight),0) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_14d))
+                wsig_14d = c.fetchone()[0] or 0
+                c.execute('SELECT COALESCE(SUM(signal_weight),0) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_30d))
+                wsig_30d = c.fetchone()[0] or 0
+
+                # Safe momentum score: prevent division by zero
+                baseline = float(wsig_30d) / 4.0
+                ratio_7d = float(wsig_7d) / max(1.0, baseline)
+                ratio_14d = float(wsig_14d) / max(1.0, baseline * 2)
+                momentum_score = max(0, min(100, ratio_7d * 60 + ratio_14d * 40))
+
+                if momentum_score >= 65:
+                    momentum_label = 'Accelerating'
+                elif momentum_score >= 40:
+                    momentum_label = 'Stable'
+                else:
+                    momentum_label = 'Cooling'
+
+                mid = str(uuid.uuid4())
+                c.execute('''
+                    INSERT INTO market_momentum
+                    (id, state, city, window_end_date, signals_7d, signals_14d, signals_30d,
+                     weighted_signals_7d, weighted_signals_14d, weighted_signals_30d,
+                     momentum_score, momentum_label, computed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT (state, city, window_end_date) DO UPDATE SET
+                        id = EXCLUDED.id, signals_7d = EXCLUDED.signals_7d, signals_14d = EXCLUDED.signals_14d,
+                        signals_30d = EXCLUDED.signals_30d, weighted_signals_7d = EXCLUDED.weighted_signals_7d,
+                        weighted_signals_14d = EXCLUDED.weighted_signals_14d, weighted_signals_30d = EXCLUDED.weighted_signals_30d,
+                        momentum_score = EXCLUDED.momentum_score, momentum_label = EXCLUDED.momentum_label
+                ''', (mid, state, city, window_end, sig_7d, sig_14d, sig_30d,
+                      wsig_7d, wsig_14d, wsig_30d,
+                      round(momentum_score, 1), momentum_label))
+                inserted += 1
+            except Exception as e:
+                print(f"[Momentum] Error computing for {city}, {state}: {e}")
+                continue
+
+        conn.commit()
+        conn.close()
+        print(f"[Momentum] Computed momentum for {inserted} markets.")
+        return inserted
+    except Exception as e:
+        print(f"[Momentum] Fatal error: {e}")
+        traceback.print_exc()
+        return 0
 
 
 def _get_momentum_for_city(state, city):
@@ -4861,6 +4921,81 @@ def aggregate_search_metrics_daily():
     print(f"[SPI] Aggregated {total} searches for {yesterday}: avg={avg_time:.0f}ms, p95={p95_time:.0f}ms, cache_hit={cache_hits/total:.1%}")
 
 
+def compute_spi_daily():
+    """
+    Compute the Search Performance Index (SPI) score for the most recent day.
+    SPI = (0.50 * speed_score) + (0.25 * signal_density_score) + (0.15 * freshness_score) + (0.10 * city_coverage_score)
+    All sub-scores normalized to 0-100.
+    """
+    print("[SPI] Computing daily SPI score...")
+    try:
+        conn = _get_db_conn()
+        c = conn.cursor()
+        yesterday = (datetime.utcnow() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+        # Get yesterday's metrics
+        c.execute('SELECT avg_response_time_ms, p95_response_time_ms, null_result_rate, avg_results_returned, cache_hit_rate FROM search_metrics_daily WHERE date = ?', (yesterday,))
+        row = c.fetchone()
+        if not row:
+            conn.close()
+            print("[SPI] No metrics for yesterday; skipping SPI computation.")
+            return
+
+        avg_time, p95_time, null_rate, avg_results, cache_rate = row
+
+        # Speed score: lower avg response time = higher score
+        # Target: <2000ms = 100, >10000ms = 0
+        speed_score = max(0.0, min(100.0, (1.0 - (float(avg_time or 0) - 2000) / 8000) * 100))
+
+        # Signal density score: based on avg results returned and non-null rate
+        density_raw = (float(avg_results or 0) / max(1, 10)) * (1.0 - float(null_rate or 0))
+        signal_density_score = max(0.0, min(100.0, density_raw * 100))
+
+        # Freshness score: based on recent signal recency from weighted_signals
+        cutoff_7d = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        cutoff_30d = (datetime.utcnow() - timedelta(days=30)).isoformat()
+        c.execute('SELECT COUNT(*) FROM weighted_signals WHERE published_at >= ?', (cutoff_7d,))
+        recent_signals = c.fetchone()[0] or 0
+        c.execute('SELECT COUNT(*) FROM weighted_signals WHERE published_at >= ?', (cutoff_30d,))
+        total_signals = c.fetchone()[0] or 0
+        freshness_ratio = recent_signals / max(1, total_signals)
+        freshness_score = max(0.0, min(100.0, freshness_ratio * 100 * (7.0 / 30.0 * 4.0)))  # normalized for weekly proportion
+
+        # City coverage score: active_cities / candidate_cities
+        c.execute("SELECT COUNT(DISTINCT city || '|' || state) FROM weighted_signals WHERE published_at >= ?", (cutoff_30d,))
+        active_cities = c.fetchone()[0] or 0
+        c.execute('SELECT COUNT(*) FROM city_signal_metrics')
+        candidate_cities = c.fetchone()[0] or 0
+        if candidate_cities == 0:
+            # Fallback: use number of tracked cities in the 5 states
+            candidate_cities = max(active_cities, 1)
+        city_coverage_score = max(0.0, min(100.0, (active_cities / max(1, candidate_cities)) * 100))
+
+        # Composite SPI
+        spi_score = (
+            0.50 * speed_score +
+            0.25 * signal_density_score +
+            0.15 * freshness_score +
+            0.10 * city_coverage_score
+        )
+        spi_score = round(max(0.0, min(100.0, spi_score)), 1)
+
+        # Update the daily metrics row with SPI scores
+        c.execute('''UPDATE search_metrics_daily SET
+                        spi_score = ?, speed_score = ?, signal_density_score = ?,
+                        freshness_score = ?, city_coverage_score = ?
+                     WHERE date = ?''',
+                  (spi_score, round(speed_score, 1), round(signal_density_score, 1),
+                   round(freshness_score, 1), round(city_coverage_score, 1), yesterday))
+
+        conn.commit()
+        conn.close()
+        print(f"[SPI] Daily SPI for {yesterday}: {spi_score} (speed={speed_score:.1f}, density={signal_density_score:.1f}, fresh={freshness_score:.1f}, coverage={city_coverage_score:.1f})")
+    except Exception as e:
+        print(f"[SPI] Error computing SPI: {e}")
+        traceback.print_exc()
+
+
 def get_baseline_metrics(days=7):
     """Return baseline metrics for last N days."""
     conn = _get_db_conn()
@@ -4871,7 +5006,13 @@ def get_baseline_metrics(days=7):
     conn.close()
     return [{'date': r[1], 'avg_response_time_ms': r[2], 'p95_response_time_ms': r[3],
              'time_to_first_result_ms': r[4], 'null_result_rate': r[5], 'avg_results_returned': r[6],
-             'total_searches': r[7], 'cache_hit_rate': r[8]} for r in rows]
+             'total_searches': r[7], 'cache_hit_rate': r[8],
+             'spi_score': r[9] if len(r) > 9 else 0,
+             'speed_score': r[10] if len(r) > 10 else 0,
+             'signal_density_score': r[11] if len(r) > 11 else 0,
+             'freshness_score': r[12] if len(r) > 12 else 0,
+             'city_coverage_score': r[13] if len(r) > 13 else 0,
+             } for r in rows]
 
 
 # --- STEP 3: Precompute Final Scores (NO LOGIC CHANGES) ---
@@ -5278,6 +5419,9 @@ def run_spi_nightly():
         # Part 3: Check for performance regression
         _check_performance_regression()
 
+        # Step 7: Compute daily SPI composite score
+        compute_spi_daily()
+
         print("[SPI] Nightly SPI pipeline complete.")
     except Exception as e:
         print(f"[SPI] Error in nightly pipeline: {e}")
@@ -5396,7 +5540,7 @@ def api_spi_config_history():
     rows = c.fetchall()
     conn.close()
     versions = [{'id': r[0], 'config': json.loads(r[1]), 'avg_response_time_ms': r[2],
-                 'p95_response_time_ms': r[3], 'reason': r[4], 'created_at': r[5]} for r in rows]
+                 'p95_response_time_ms': r[3], 'reason': r[4], 'created_at': _safe_ts(r[5])} for r in rows]
     return jsonify({'success': True, 'versions': versions})
 
 
@@ -5533,11 +5677,15 @@ def run_trend_detection():
     now = datetime.utcnow()
     cutoff_7d = (now - timedelta(days=7)).isoformat()
 
-    # Group by (state, city, topic)
+    # Group by (state, city, topic) — handle null topics
     from collections import defaultdict
     groups = defaultdict(lambda: {'items_7d': 0, 'items_30d': 0})
     for item in all_items:
-        key = (item['state'], item['city'], item['topic'])
+        topic = item.get('topic') or 'other'
+        if not topic.strip():
+            topic = 'other'
+        item['topic'] = topic
+        key = (item['state'], item['city'], topic)
         groups[key]['items_30d'] += 1
         if item['date_str'] and item['date_str'] >= cutoff_7d:
             groups[key]['items_7d'] += 1
@@ -5717,7 +5865,7 @@ def api_intelligence_trends():
         trends.append({
             'id': r[0], 'state': r[1], 'city': r[2], 'topic': r[3],
             'count_7d': r[4], 'count_30d': r[5], 'trend_ratio': r[6],
-            'classification': r[7], 'computed_at': r[8],
+            'classification': r[7], 'computed_at': _safe_ts(r[8]),
         })
     conn.close()
     return jsonify({'success': True, 'trends': trends})
@@ -5730,7 +5878,7 @@ def api_intelligence_briefs():
     conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id, generated_at, week_start, week_end FROM weekly_briefs ORDER BY generated_at DESC LIMIT 20')
-    briefs = [{'id': r[0], 'generated_at': r[1], 'week_start': r[2], 'week_end': r[3]} for r in c.fetchall()]
+    briefs = [{'id': r[0], 'generated_at': _safe_ts(r[1]), 'week_start': _safe_ts(r[2]), 'week_end': _safe_ts(r[3])} for r in c.fetchall()]
     conn.close()
     return jsonify({'success': True, 'briefs': briefs})
 
@@ -5751,9 +5899,9 @@ def api_intelligence_briefs_latest():
         'brief': {
             'id': row[0],
             'content': json.loads(row[1]) if row[1] else {},
-            'generated_at': row[2],
-            'week_start': row[3],
-            'week_end': row[4],
+            'generated_at': _safe_ts(row[2]),
+            'week_start': _safe_ts(row[3]),
+            'week_end': _safe_ts(row[4]),
         }
     })
 
@@ -5774,9 +5922,9 @@ def api_intelligence_brief_detail(brief_id):
         'brief': {
             'id': row[0],
             'content': json.loads(row[1]) if row[1] else {},
-            'generated_at': row[2],
-            'week_start': row[3],
-            'week_end': row[4],
+            'generated_at': _safe_ts(row[2]),
+            'week_start': _safe_ts(row[3]),
+            'week_end': _safe_ts(row[4]),
         }
     })
 
@@ -6302,8 +6450,13 @@ def api_sunbelt_momentum():
                                   {'total_signals': len(signals), 'cities_scored': len(raw_scores)}),
         })
     except Exception as e:
-        app.logger.error(f'[sunbelt/momentum] Error: {e}')
-        return jsonify({'ok': False, 'error': 'Failed to compute momentum', 'details': str(e)}), 500
+        app.logger.error(f'[sunbelt/momentum] Error: {e}\n{traceback.format_exc()}')
+        return jsonify({
+            'ok': False,
+            'error': 'Failed to compute momentum',
+            'details': str(e),
+            'data': {'markets': []},
+        }), 500
 
 
 @app.route('/api/sunbelt/trends', methods=['GET'])
@@ -6334,12 +6487,14 @@ def api_sunbelt_trends():
 
         window_cutoff = (datetime.utcnow() - timedelta(days=window_days)).isoformat()
 
-        # Group by (state, city, topic)
+        # Group by (state, city, topic) — handle null topics safely
         groups = {}  # key -> {count_window, count_baseline, items_window}
         for s in signals:
             state = s.get('state') or None
             city = s.get('city') or None
-            topic = s.get('topic', 'other')
+            topic = s.get('topic') or 'other'
+            if not topic or not topic.strip():
+                topic = 'other'
             if topic_filter and topic.lower() != topic_filter:
                 continue
             key = f"{state or ''}|{city or ''}|{topic}"
@@ -6396,8 +6551,13 @@ def api_sunbelt_trends():
                                   {'total_signals': len(signals), 'trends_found': len(trends)}),
         })
     except Exception as e:
-        app.logger.error(f'[sunbelt/trends] Error: {e}')
-        return jsonify({'ok': False, 'error': 'Failed to compute trends', 'details': str(e)}), 500
+        app.logger.error(f'[sunbelt/trends] Error: {e}\n{traceback.format_exc()}')
+        return jsonify({
+            'ok': False,
+            'error': 'Failed to compute trends',
+            'details': str(e),
+            'data': {'trends': []},
+        }), 500
 
 
 @app.route('/api/sunbelt/state-rankings', methods=['GET'])
@@ -6703,7 +6863,13 @@ Return ONLY valid JSON (no markdown fencing, no explanation) matching this EXACT
       "one_liner": "1 sentence distilling the item",
       "bullets": ["key point 1", "key point 2"],
       "why_it_matters": "1 sentence on insurance/brokerage relevance",
-      "suggested_next_step": "1 sentence actionable next step for a producer"
+      "suggested_next_step": "1 sentence actionable next step for a producer",
+      "opportunity_overview": "2-3 sentence opportunity overview for producers",
+      "entities": {{"developers": ["name1"], "lenders": ["name2"], "operators": ["name3"]}},
+      "deal_type": "acquisition|financing|construction|JV|lease-up|other",
+      "location": "City, ST",
+      "capital_involved": "$X million or null if not mentioned",
+      "timeline": "Expected timeline or null if not mentioned"
     }}
   ]
 }}
@@ -6770,6 +6936,38 @@ RULES:
         app.logger.warning(f'[sparknotes] Cache write failed: {e}')
         try:
             conn.rollback()
+            conn.close()
+        except Exception:
+            pass
+
+    # Store per-article structured summaries (non-critical)
+    try:
+        conn = _get_db_conn()
+        c = conn.cursor()
+        for item_note in payload.get('sparknotes_by_item', []):
+            article_id = item_note.get('id', '')
+            if not article_id:
+                continue
+            entities = item_note.get('entities', {})
+            c.execute('''INSERT INTO article_summaries
+                         (id, article_id, summary, entities, deal_type, location, capital, timeline)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                         ON CONFLICT (article_id) DO UPDATE SET
+                            summary = EXCLUDED.summary, entities = EXCLUDED.entities,
+                            deal_type = EXCLUDED.deal_type, location = EXCLUDED.location,
+                            capital = EXCLUDED.capital, timeline = EXCLUDED.timeline''',
+                      (str(uuid.uuid4()), article_id,
+                       item_note.get('opportunity_overview', item_note.get('one_liner', '')),
+                       json.dumps(entities) if isinstance(entities, dict) else str(entities),
+                       item_note.get('deal_type', ''),
+                       item_note.get('location', ''),
+                       item_note.get('capital_involved', ''),
+                       item_note.get('timeline', '')))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f'[sparknotes] Article summary storage failed (non-critical): {e}')
+        try:
             conn.close()
         except Exception:
             pass
@@ -6994,7 +7192,7 @@ def api_government_signals():
                 'source_url': row[9],
                 'source_name': row[10],
                 'summary': row[11],
-                'created_at': row[12],
+                'created_at': _safe_ts(row[12]),
             })
         conn.close()
 

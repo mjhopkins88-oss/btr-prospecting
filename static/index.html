@@ -686,9 +686,30 @@
                 } catch (e) { console.error('Call timing lookup error:', e); }
             }, []);
 
-            const loadProspects = async () => {
+            const loadProspects = async (dateOpt) => {
                 try {
-                    const response = await fetch(`${API_BASE}/api/prospects`);
+                    const df = dateOpt || dateFilter;
+                    let url = `${API_BASE}/api/prospects`;
+                    const params = new URLSearchParams();
+                    const now = new Date();
+                    if (df === 'today') {
+                        params.set('start_date', now.toISOString().slice(0, 10) + 'T00:00:00');
+                        params.set('end_date', now.toISOString());
+                    } else if (df === '7days') {
+                        const d = new Date(now); d.setDate(d.getDate() - 7);
+                        params.set('start_date', d.toISOString());
+                        params.set('end_date', now.toISOString());
+                    } else if (df === '30days') {
+                        const d = new Date(now); d.setDate(d.getDate() - 30);
+                        params.set('start_date', d.toISOString());
+                        params.set('end_date', now.toISOString());
+                    } else if (df === 'custom' && customDateStart && customDateEnd) {
+                        params.set('start_date', customDateStart + 'T00:00:00');
+                        params.set('end_date', customDateEnd + 'T23:59:59');
+                    }
+                    const qs = params.toString();
+                    if (qs) url += '?' + qs;
+                    const response = await fetch(url);
                     const data = await response.json();
                     if (data.success) {
                         setProspects(data.prospects);
@@ -851,6 +872,9 @@
             const [filterLowComp, setFilterLowComp] = useState(false);
             const [filterCallNow, setFilterCallNow] = useState(false);
             const [callTimingScores, setCallTimingScores] = useState({});
+            const [dateFilter, setDateFilter] = useState('all');
+            const [customDateStart, setCustomDateStart] = useState('');
+            const [customDateEnd, setCustomDateEnd] = useState('');
 
             const filteredProspects = prospects.filter(p => {
                 if (searchCity !== 'all' && searchCity !== 'Texas' && !p.city?.toLowerCase().includes(searchCity.toLowerCase())) return false;
@@ -941,6 +965,13 @@
                                 setFilterLowComp={setFilterLowComp}
                                 filterCallNow={filterCallNow}
                                 setFilterCallNow={setFilterCallNow}
+                                dateFilter={dateFilter}
+                                setDateFilter={setDateFilter}
+                                customDateStart={customDateStart}
+                                setCustomDateStart={setCustomDateStart}
+                                customDateEnd={customDateEnd}
+                                setCustomDateEnd={setCustomDateEnd}
+                                onDateFilterChange={(df) => loadProspects(df)}
                             />
                             {searchStatus && <SearchStatus message={searchStatus} />}
                             {loading && <Loading />}
@@ -1104,7 +1135,7 @@
             );
         }
 
-        function Controls({ searchCity, setSearchCity, filterScore, setFilterScore, filterTrigger, setFilterTrigger, filterSwimLane, setFilterSwimLane, sortBy, setSortBy, onSearch, onExport, loading, hasProspects, cooldown, filterEightyPlus, setFilterEightyPlus, filterCapitalEvents, setFilterCapitalEvents, filterLowComp, setFilterLowComp, filterCallNow, setFilterCallNow }) {
+        function Controls({ searchCity, setSearchCity, filterScore, setFilterScore, filterTrigger, setFilterTrigger, filterSwimLane, setFilterSwimLane, sortBy, setSortBy, onSearch, onExport, loading, hasProspects, cooldown, filterEightyPlus, setFilterEightyPlus, filterCapitalEvents, setFilterCapitalEvents, filterLowComp, setFilterLowComp, filterCallNow, setFilterCallNow, dateFilter, setDateFilter, customDateStart, setCustomDateStart, customDateEnd, setCustomDateEnd, onDateFilterChange }) {
             const isDisabled = loading || cooldown > 0;
             let btnLabel = 'Search Prospects';
             if (loading) btnLabel = 'Searching...';
@@ -1160,6 +1191,21 @@
                             <option value="swim_lane">Sort: Swim Lane Fit</option>
                             <option value="call_timing">Sort: Call Timing</option>
                         </select>
+                        <select style={styles.select} value={dateFilter} onChange={(e) => { setDateFilter(e.target.value); if (e.target.value !== 'custom') onDateFilterChange(e.target.value); }}>
+                            <option value="all">Date: All Time</option>
+                            <option value="today">Date: Today</option>
+                            <option value="7days">Date: Last 7 Days</option>
+                            <option value="30days">Date: Last 30 Days</option>
+                            <option value="custom">Date: Custom Range</option>
+                        </select>
+                        {dateFilter === 'custom' && (
+                            <React.Fragment>
+                                <input type="date" style={{...styles.input, width: '140px'}} value={customDateStart} onChange={e => setCustomDateStart(e.target.value)} />
+                                <span style={{color:'#94a3b8', fontSize:'0.8rem'}}>to</span>
+                                <input type="date" style={{...styles.input, width: '140px'}} value={customDateEnd} onChange={e => setCustomDateEnd(e.target.value)} />
+                                <button style={styles.btn} onClick={() => onDateFilterChange('custom')}>Apply</button>
+                            </React.Fragment>
+                        )}
                         {hasProspects && (
                             <button className="action-btn" style={styles.btn} onClick={onExport}>
                                 Download CSV
