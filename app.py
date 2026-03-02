@@ -40,10 +40,21 @@ app = Flask(__name__, static_folder='static')
 # Custom JSON provider: auto-serialize datetime objects from Postgres
 from flask.json.provider import DefaultJSONProvider
 class _DTJSONProvider(DefaultJSONProvider):
-    def default(self, o):
+    @staticmethod
+    def default(o):
         if isinstance(o, (datetime, _date_type)):
             return o.isoformat()
-        return super().default(o)
+        if hasattr(o, 'isoformat'):
+            return o.isoformat()
+        if isinstance(o, set):
+            return list(o)
+        return DefaultJSONProvider.default(o)
+
+    def dumps(self, obj, **kwargs):
+        kwargs.setdefault("default", self.default)
+        kwargs.setdefault("ensure_ascii", self.ensure_ascii)
+        kwargs.setdefault("sort_keys", self.sort_keys)
+        return json.dumps(obj, **kwargs)
 app.json_provider_class = _DTJSONProvider
 app.json = _DTJSONProvider(app)
 
@@ -2818,12 +2829,12 @@ def run_daily_discovery(is_scheduled=False):
             INSERT INTO discovery_runs (results_json, digest_text, city_count, total_new, status, adapter_stats)
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (
-            json.dumps(results),
+            json.dumps(results, default=str),
             digest,
             len(config['cities']),
             total_new,
             'completed',
-            json.dumps(adapter_stats)
+            json.dumps(adapter_stats, default=str)
         ))
         conn.commit()
         conn.close()
@@ -2839,7 +2850,7 @@ def run_daily_discovery(is_scheduled=False):
                     'results': results,
                     'digest': digest,
                     'adapter_stats': adapter_stats
-                }).encode('utf-8')
+                }, default=str).encode('utf-8')
                 req = urllib.request.Request(
                     config['webhook_url'],
                     data=payload,
@@ -5770,7 +5781,7 @@ def generate_weekly_brief():
 Generate the Weekly Sunbelt Risk Intelligence Brief for {context['week']}.
 
 DATA:
-{json.dumps(context, indent=2)}
+{json.dumps(context, indent=2, default=str)}
 
 Write a structured report with these EXACT sections (use markdown headers):
 
@@ -5827,7 +5838,7 @@ Return the brief as markdown text."""
     conn = _get_db_conn()
     c = conn.cursor()
     c.execute('INSERT INTO weekly_briefs (id, brief_json, week_start, week_end) VALUES (?, ?, ?, ?)',
-              (brief_id, json.dumps(brief_data), week_start, week_end))
+              (brief_id, json.dumps(brief_data, default=str), week_start, week_end))
     conn.commit()
     conn.close()
     print(f"[WeeklyBrief] Brief generated and stored (id={brief_id})")
@@ -6850,7 +6861,7 @@ def _do_sparknotes():
 Analyze the following {len(items)} intelligence items from the "{tab}" view ({window_days}-day window) and produce a structured Sparknotes summary.
 
 ITEMS:
-{json.dumps(items, indent=2)}
+{json.dumps(items, indent=2, default=str)}
 
 Return ONLY valid JSON (no markdown fencing, no explanation) matching this EXACT schema:
 
@@ -6923,7 +6934,7 @@ RULES:
         c = conn.cursor()
         summary_id = str(uuid.uuid4())
         c.execute('INSERT INTO sunbelt_summaries (id, tab, window_days, date_bucket, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-                  (summary_id, tab, window_days, date_bucket, json.dumps(payload), generated_at))
+                  (summary_id, tab, window_days, date_bucket, json.dumps(payload, default=str), generated_at))
         conn.commit()
         conn.close()
     except _IntegrityError:
