@@ -89,7 +89,7 @@ def run_market_discovery():
                 INSERT INTO markets
                 (id, city, state, population, population_growth, permit_growth,
                  rent_growth, market_score, collectors_active, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (
                 str(uuid.uuid4()), city, state,
                 m.get('population'),
@@ -97,6 +97,7 @@ def run_market_discovery():
                 m.get('permit_growth'),
                 m.get('rent_growth'),
                 market_score,
+                False,
             ))
 
             # Log the discovery

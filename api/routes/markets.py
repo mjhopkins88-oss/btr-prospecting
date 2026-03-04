@@ -47,7 +47,7 @@ def get_markets():
         sql += ' AND market_score >= ?'
         params.append(min_score)
     if active_only and active_only.lower() in ('true', '1', 'yes'):
-        sql += ' AND collectors_active = 1'
+        sql += ' AND collectors_active = TRUE'
 
     sql += ' ORDER BY market_score DESC, created_at DESC LIMIT ? OFFSET ?'
     params.extend([limit, offset])
@@ -72,10 +72,10 @@ def market_stats():
     stats = {
         'total_markets': fetch_one("SELECT COUNT(*) as count FROM markets"),
         'active_markets': fetch_one(
-            "SELECT COUNT(*) as count FROM markets WHERE collectors_active = 1"
+            "SELECT COUNT(*) as count FROM markets WHERE collectors_active = TRUE"
         ),
         'pending_markets': fetch_one(
-            "SELECT COUNT(*) as count FROM markets WHERE collectors_active = 0"
+            "SELECT COUNT(*) as count FROM markets WHERE collectors_active = FALSE"
         ),
         'avg_score': fetch_one(
             "SELECT ROUND(AVG(market_score), 1) as avg FROM markets"
