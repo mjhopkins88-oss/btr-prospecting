@@ -1161,6 +1161,65 @@ def init_db():
     _safe_add_column(_cur_for_migrate, 'predicted_projects', 'contractor_linked', 'BOOLEAN DEFAULT 0')
     _safe_add_column(_cur_for_migrate, 'predicted_projects', 'consultant_linked', 'BOOLEAN DEFAULT 0')
 
+    # ===================================================================
+    # AUTONOMOUS MARKET EXPANSION — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS markets (
+            id TEXT PRIMARY KEY,
+            city TEXT,
+            state TEXT,
+            population INTEGER,
+            population_growth REAL,
+            permit_growth REAL,
+            rent_growth REAL,
+            market_score INTEGER,
+            collectors_active BOOLEAN DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS city_growth_metrics (
+            id TEXT PRIMARY KEY,
+            city TEXT,
+            state TEXT,
+            population INTEGER,
+            population_growth REAL,
+            housing_permits INTEGER,
+            permit_growth REAL,
+            median_rent REAL,
+            rent_growth REAL,
+            last_updated TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS market_expansion_log (
+            id TEXT PRIMARY KEY,
+            city TEXT,
+            state TEXT,
+            action TEXT,
+            market_score INTEGER,
+            details TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_markets_score ON markets(market_score DESC)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_markets_city ON markets(city, state)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_cgm_city ON city_growth_metrics(city, state)')
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -1174,12 +1233,14 @@ from api.routes.projects import projects_bp
 from api.routes.signals import signals_bp
 from api.routes.pipeline import pipeline_bp
 from api.routes.predictions import predictions_bp
+from api.routes.markets import markets_bp
 
 app.register_blueprint(leads_bp)
 app.register_blueprint(projects_bp)
 app.register_blueprint(signals_bp)
 app.register_blueprint(pipeline_bp)
 app.register_blueprint(predictions_bp)
+app.register_blueprint(markets_bp)
 
 
 # ===================================================================
@@ -7876,6 +7937,22 @@ _scheduler.add_job(
     name='Relationship Graph Builder (every 12h)',
     replace_existing=True
 )
+
+def _scheduled_market_expansion():
+    """Weekly market expansion: discover new markets and deploy collectors."""
+    try:
+        from workers.jobs.market_expansion_job import run_market_expansion
+        run_market_expansion()
+    except Exception as e:
+        print(f"[Scheduler] Market expansion error: {e}")
+
+_scheduler.add_job(
+    _scheduled_market_expansion,
+    CronTrigger(day_of_week='mon', hour=2, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='weekly_market_expansion',
+    name='Market Expansion (weekly Monday 2 AM)',
+    replace_existing=True
+)
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
 print("[Scheduler] Daily signal optimization at 6:45 AM PT")
@@ -7883,6 +7960,7 @@ print("[Scheduler] Daily trend detection at 7:30 AM PT")
 print("[Scheduler] Weekly Sunbelt Brief every Monday 7:00 AM PT")
 print("[Scheduler] Daily government signals refresh at 5:30 AM PT")
 print("[Scheduler] Daily permit feed ingestion at 5:15 AM PT")
+print("[Scheduler] Weekly market expansion every Monday 2:00 AM PT")
 print("[Scheduler] SPI nightly pipeline at 8:15 AM PT")
 print("[Scheduler] Weekly city discovery every Wednesday 8:30 AM PT")
 print("[Scheduler] Lead Intelligence pipeline at 3:00 AM PT")
