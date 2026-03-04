@@ -993,6 +993,7 @@
                     {activeTab === 'statewide' && user?.role !== 'broker' && <StatewideDiscovery />}
                     {activeTab === 'intelligence' && <SunbeltIntelligence user={user} />}
                     {activeTab === 'predictions' && user?.role !== 'broker' && <PredictedDevelopments />}
+                    {activeTab === 'markets' && user?.role !== 'broker' && <MarketExpansion />}
                     {activeTab === 'dealboard' && <DealBoardPage user={user} />}
                     {activeTab === 'admin' && user && user.is_super_admin && <AdminPage user={user} />}
                     {activeTab === 'quoting' && user && user.role === 'admin' && <QuotingPage user={user} />}
@@ -1055,6 +1056,7 @@
                 { id: 'statewide', label: 'Statewide' },
                 { id: 'intelligence', label: 'Sunbelt Intelligence' },
                 { id: 'predictions', label: 'Predicted Devs' },
+                { id: 'markets', label: 'Market Expansion' },
                 { id: 'pipeline', label: 'My Pipeline' },
                 { id: 'followups', label: 'Follow-ups Due' },
             ],
@@ -1064,6 +1066,7 @@
                 { id: 'statewide', label: 'Statewide' },
                 { id: 'intelligence', label: 'Sunbelt Intelligence' },
                 { id: 'predictions', label: 'Predicted Devs' },
+                { id: 'markets', label: 'Market Expansion' },
                 { id: 'pipeline', label: 'My Pipeline' },
                 { id: 'followups', label: 'Follow-ups Due' },
             ],
@@ -4278,6 +4281,162 @@
                                             pred.consultant_linked && smallBadge('CONSULTANT', '#2dd4bf', '45,212,191,0.15'),
                                             React.createElement('span', { style: { fontSize: '0.7rem', color: '#64748b' } },
                                                 pred.prediction_date ? new Date(pred.prediction_date).toLocaleDateString() : '')
+                                        ),
+                                    ),
+                                )
+                            )
+                        )
+            );
+        }
+
+        // ===================================================================
+        // MARKET EXPANSION — Dashboard Component
+        // ===================================================================
+        function MarketExpansion() {
+            const [markets, setMarkets] = useState([]);
+            const [stats, setStats] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [filterState, setFilterState] = useState('');
+
+            const loadMarkets = async () => {
+                setLoading(true);
+                try {
+                    const params = new URLSearchParams();
+                    if (filterState) params.set('state', filterState);
+                    params.set('limit', '100');
+                    const resp = await fetch(`/api/markets?${params}`, { credentials: 'include' });
+                    const data = await resp.json();
+                    setMarkets(data.markets || []);
+                } catch (e) {
+                    console.error('Error loading markets:', e);
+                }
+                setLoading(false);
+            };
+
+            const loadStats = async () => {
+                try {
+                    const resp = await fetch('/api/markets/stats', { credentials: 'include' });
+                    const data = await resp.json();
+                    setStats(data);
+                } catch (e) {
+                    console.error('Error loading market stats:', e);
+                }
+            };
+
+            useEffect(() => { loadMarkets(); loadStats(); }, [filterState]);
+
+            const scoreColor = (s) => {
+                if (s >= 85) return '#10b981';
+                if (s >= 70) return '#f59e0b';
+                if (s >= 50) return '#f97316';
+                return '#ef4444';
+            };
+
+            const scoreBadge = (s) => ({
+                display: 'inline-block',
+                padding: '0.2rem 0.6rem',
+                borderRadius: '9999px',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                color: '#fff',
+                background: scoreColor(s),
+            });
+
+            const pctDisplay = (val, suffix) => {
+                if (val == null) return '\u2014';
+                return `${Number(val).toFixed(1)}${suffix || '%'}`;
+            };
+
+            const statCard = (val, label, color) => React.createElement('div', {
+                style: { background: '#1e293b', border: '1px solid #334155', borderRadius: '0.75rem', padding: '0.85rem', textAlign: 'center' }
+            },
+                React.createElement('div', { style: { fontSize: '1.4rem', fontWeight: 700, color } }, val),
+                React.createElement('div', { style: { fontSize: '0.7rem', color: '#94a3b8', marginTop: '0.2rem' } }, label)
+            );
+
+            return React.createElement('div', { style: { padding: '1.5rem' } },
+                // Header
+                React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' } },
+                    React.createElement('h2', { style: { fontSize: '1.4rem', fontWeight: 700, color: '#f1f5f9', margin: 0 } }, 'Market Expansion'),
+                    React.createElement('div', { style: { display: 'flex', gap: '0.5rem', alignItems: 'center' } },
+                        React.createElement('span', { style: { fontSize: '0.75rem', color: '#94a3b8' } }, 'Filter State:'),
+                        React.createElement('input', {
+                            type: 'text',
+                            placeholder: 'e.g. AZ',
+                            value: filterState,
+                            onChange: (e) => setFilterState(e.target.value.toUpperCase()),
+                            style: {
+                                padding: '0.35rem 0.6rem', borderRadius: '6px', width: '60px',
+                                border: '1px solid #475569', background: '#0f172a', color: '#e2e8f0',
+                                fontSize: '0.8rem', textAlign: 'center',
+                            }
+                        })
+                    )
+                ),
+
+                // Stats row
+                stats && React.createElement('div', {
+                    style: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem', marginBottom: '1.5rem' }
+                },
+                    statCard(stats.total_markets?.count || 0, 'Total Markets', '#22d3ee'),
+                    statCard(stats.active_markets?.count || 0, 'Active', '#10b981'),
+                    statCard(stats.pending_markets?.count || 0, 'Pending', '#f59e0b'),
+                    statCard(stats.avg_score?.avg || 0, 'Avg Score', '#a78bfa'),
+                ),
+
+                // Market cards
+                loading
+                    ? React.createElement('div', { style: { textAlign: 'center', padding: '3rem', color: '#94a3b8' } }, 'Loading markets...')
+                    : markets.length === 0
+                        ? React.createElement('div', { style: { textAlign: 'center', padding: '3rem', color: '#64748b' } }, 'No markets detected yet. The expansion engine scans weekly.')
+                        : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.75rem' } },
+                            markets.map(m =>
+                                React.createElement('div', {
+                                    key: m.id,
+                                    style: {
+                                        background: '#1e293b',
+                                        border: m.collectors_active ? '1px solid #10b981' : '1px solid #334155',
+                                        borderRadius: '0.75rem',
+                                        padding: '1.25rem',
+                                    }
+                                },
+                                    // Top row: city + score
+                                    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' } },
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { fontSize: '1.05rem', fontWeight: 600, color: '#f1f5f9' } },
+                                                `${m.city || '?'}, ${m.state || '?'}`
+                                            ),
+                                            React.createElement('div', { style: { fontSize: '0.8rem', color: '#94a3b8', marginTop: '0.15rem' } },
+                                                m.population ? `Pop: ${Number(m.population).toLocaleString()}` : ''
+                                            ),
+                                        ),
+                                        React.createElement('div', { style: { textAlign: 'center' } },
+                                            React.createElement('span', { style: scoreBadge(m.market_score) }, m.market_score),
+                                            React.createElement('div', { style: { fontSize: '0.6rem', color: '#64748b', marginTop: '0.2rem' } }, 'market score')
+                                        ),
+                                    ),
+
+                                    // Metrics grid
+                                    React.createElement('div', {
+                                        style: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem', marginBottom: '0.75rem',
+                                                 background: '#0f172a', borderRadius: '8px', padding: '0.75rem' }
+                                    },
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Pop Growth'),
+                                            React.createElement('div', { style: { fontSize: '1.1rem', fontWeight: 700, color: m.population_growth > 2 ? '#10b981' : '#e2e8f0' } }, pctDisplay(m.population_growth))
+                                        ),
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Permit Growth'),
+                                            React.createElement('div', { style: { fontSize: '1.1rem', fontWeight: 700, color: m.permit_growth > 15 ? '#10b981' : '#e2e8f0' } }, pctDisplay(m.permit_growth))
+                                        ),
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Rent Growth'),
+                                            React.createElement('div', { style: { fontSize: '1.1rem', fontWeight: 700, color: m.rent_growth > 5 ? '#10b981' : '#e2e8f0' } }, pctDisplay(m.rent_growth))
+                                        ),
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Collectors'),
+                                            React.createElement('div', { style: { fontSize: '1.1rem', fontWeight: 700, color: m.collectors_active ? '#10b981' : '#f59e0b' } },
+                                                m.collectors_active ? 'Active' : 'Pending')
                                         ),
                                     ),
                                 )
