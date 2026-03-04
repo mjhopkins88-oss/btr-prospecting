@@ -1175,7 +1175,7 @@ def init_db():
             permit_growth REAL,
             rent_growth REAL,
             market_score INTEGER,
-            collectors_active BOOLEAN DEFAULT 0,
+            collectors_active BOOLEAN DEFAULT FALSE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')

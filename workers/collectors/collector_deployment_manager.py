@@ -36,7 +36,7 @@ def deploy_collectors_for_new_markets():
     cur.execute('''
         SELECT id, city, state, market_score
         FROM markets
-        WHERE collectors_active = 0
+        WHERE collectors_active = FALSE
         ORDER BY market_score DESC
     ''')
     rows = cur.fetchall()
@@ -60,7 +60,7 @@ def deploy_collectors_for_new_markets():
 
             # Mark collectors as active
             cur.execute('''
-                UPDATE markets SET collectors_active = 1 WHERE id = ?
+                UPDATE markets SET collectors_active = TRUE WHERE id = ?
             ''', (market['id'],))
 
             # Log deployment
