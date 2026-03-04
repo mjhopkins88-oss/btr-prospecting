@@ -141,14 +141,21 @@ def _adapt_schema_sql(sql):
     return sql
 
 def _safe_add_column(cursor, table, column, definition):
-    """Add a column if it doesn't exist. Works on both SQLite and PostgreSQL."""
+    """Add a column if it doesn't exist. Works on both SQLite and PostgreSQL.
+    Uses SAVEPOINT on PostgreSQL to prevent transaction abort on failure."""
     try:
         if _is_postgres():
+            cursor.execute('SAVEPOINT _safe_col')
             cursor.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}")
+            cursor.execute('RELEASE SAVEPOINT _safe_col')
         else:
             cursor.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
     except Exception:
-        pass  # column already exists
+        if _is_postgres():
+            try:
+                cursor.execute('ROLLBACK TO SAVEPOINT _safe_col')
+            except Exception:
+                pass
 
 def init_db():
     """Initialize database schema (non-destructive, additive only).
@@ -159,13 +166,27 @@ def init_db():
     _real_cursor = conn.cursor()
 
     class _SchemaExecProxy:
-        """Proxy that auto-adapts schema SQL for the target database engine."""
+        """Proxy that auto-adapts schema SQL for the target database engine.
+        On PostgreSQL, uses SAVEPOINTs so a failed statement does not abort
+        the entire transaction (psycopg2.errors.InFailedSqlTransaction)."""
         def execute(self, sql, params=None):
             adapted = _adapt_schema_sql(sql)
-            if params:
-                _real_cursor.execute(adapted, params)
-            else:
-                _real_cursor.execute(adapted)
+            if _is_postgres():
+                _real_cursor.execute('SAVEPOINT _schema_sp')
+            try:
+                if params:
+                    _real_cursor.execute(adapted, params)
+                else:
+                    _real_cursor.execute(adapted)
+                if _is_postgres():
+                    _real_cursor.execute('RELEASE SAVEPOINT _schema_sp')
+            except Exception:
+                if _is_postgres():
+                    try:
+                        _real_cursor.execute('ROLLBACK TO SAVEPOINT _schema_sp')
+                    except Exception:
+                        pass
+                raise
         def fetchone(self):
             return _real_cursor.fetchone()
         def fetchall(self):
@@ -1114,7 +1135,7 @@ def init_db():
     # Add new columns to predicted_projects (non-destructive migration)
     _cur_for_migrate = _real_cursor if _is_postgres() else c
     _safe_add_column(_cur_for_migrate, 'predicted_projects', 'signal_count', 'INTEGER DEFAULT 0')
-    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'cluster_detected', 'BOOLEAN DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'cluster_detected', 'BOOLEAN DEFAULT FALSE')
     _safe_add_column(_cur_for_migrate, 'predicted_projects', 'expected_construction_window', 'TEXT')
 
     # ===================================================================
@@ -1151,15 +1172,15 @@ def init_db():
 
     # Add relationship columns to predicted_project_index and predicted_projects
     _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'relationship_count', 'INTEGER DEFAULT 0')
-    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'developer_linked', 'BOOLEAN DEFAULT 0')
-    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'contractor_linked', 'BOOLEAN DEFAULT 0')
-    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'consultant_linked', 'BOOLEAN DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'developer_linked', 'BOOLEAN DEFAULT FALSE')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'contractor_linked', 'BOOLEAN DEFAULT FALSE')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'consultant_linked', 'BOOLEAN DEFAULT FALSE')
     _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'relationship_boost', 'INTEGER DEFAULT 0')
 
     _safe_add_column(_cur_for_migrate, 'predicted_projects', 'relationship_count', 'INTEGER DEFAULT 0')
-    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'developer_linked', 'BOOLEAN DEFAULT 0')
-    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'contractor_linked', 'BOOLEAN DEFAULT 0')
-    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'consultant_linked', 'BOOLEAN DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'developer_linked', 'BOOLEAN DEFAULT FALSE')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'contractor_linked', 'BOOLEAN DEFAULT FALSE')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'consultant_linked', 'BOOLEAN DEFAULT FALSE')
 
     # ===================================================================
     # AUTONOMOUS MARKET EXPANSION — Tables
