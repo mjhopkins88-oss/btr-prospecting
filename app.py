@@ -1002,6 +1002,65 @@ def init_db():
     except Exception:
         pass
 
+    # ===================================================================
+    # DEVELOPMENT EVENT PATTERN DETECTION — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS development_events (
+            id TEXT PRIMARY KEY,
+            event_type TEXT,
+            city TEXT,
+            state TEXT,
+            parcel_id TEXT,
+            developer TEXT,
+            event_date TIMESTAMP,
+            source TEXT,
+            metadata TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS predicted_projects (
+            id TEXT PRIMARY KEY,
+            city TEXT,
+            state TEXT,
+            developer TEXT,
+            prediction_date TIMESTAMP,
+            confidence INTEGER,
+            pattern_detected TEXT,
+            confirmed BOOLEAN DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Development event indexes
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_dev_events_type ON development_events(event_type)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_dev_events_city ON development_events(city, state)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_dev_events_parcel ON development_events(parcel_id)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_dev_events_date ON development_events(event_date)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_predicted_projects_city ON predicted_projects(city, state)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_predicted_projects_confidence ON predicted_projects(confidence DESC)')
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -1014,11 +1073,13 @@ from api.routes.leads import leads_bp
 from api.routes.projects import projects_bp
 from api.routes.signals import signals_bp
 from api.routes.pipeline import pipeline_bp
+from api.routes.predictions import predictions_bp
 
 app.register_blueprint(leads_bp)
 app.register_blueprint(projects_bp)
 app.register_blueprint(signals_bp)
 app.register_blueprint(pipeline_bp)
+app.register_blueprint(predictions_bp)
 
 
 # ===================================================================
@@ -7667,6 +7728,22 @@ _scheduler.add_job(
     name='Lead Intelligence Nightly Pipeline',
     replace_existing=True
 )
+
+def _scheduled_pattern_scan():
+    """Pattern scan: generate events from signals, detect BTR patterns, store predictions."""
+    try:
+        from workers.jobs.pattern_scan_job import run_pattern_scan
+        run_pattern_scan()
+    except Exception as e:
+        print(f"[Scheduler] Pattern scan error: {e}")
+
+_scheduler.add_job(
+    _scheduled_pattern_scan,
+    CronTrigger(hour='*/12', minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='pattern_scan_12h',
+    name='BTR Pattern Scan (every 12h)',
+    replace_existing=True
+)
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
 print("[Scheduler] Daily signal optimization at 6:45 AM PT")
@@ -7677,6 +7754,7 @@ print("[Scheduler] Daily permit feed ingestion at 5:15 AM PT")
 print("[Scheduler] SPI nightly pipeline at 8:15 AM PT")
 print("[Scheduler] Weekly city discovery every Wednesday 8:30 AM PT")
 print("[Scheduler] Lead Intelligence pipeline at 3:00 AM PT")
+print("[Scheduler] BTR Pattern Scan every 12 hours")
 
 
 if __name__ == '__main__':
