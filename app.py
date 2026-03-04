@@ -852,10 +852,173 @@ def init_db():
     _safe_add_column(_real_cursor if _is_postgres() else c, 'search_metrics_daily', 'freshness_score', 'REAL DEFAULT 0')
     _safe_add_column(_real_cursor if _is_postgres() else c, 'search_metrics_daily', 'city_coverage_score', 'REAL DEFAULT 0')
 
+    # ===================================================================
+    # LEAD INTELLIGENCE PLATFORM — Entity Graph Tables
+    # These tables extend the system without touching existing tables.
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS li_projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            city TEXT,
+            state TEXT,
+            project_type TEXT DEFAULT 'BTR',
+            status TEXT DEFAULT 'rumored',
+            unit_count INTEGER,
+            estimated_value REAL,
+            source_url TEXT,
+            raw_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(name, city, state)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS li_companies (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            domain TEXT,
+            company_type TEXT DEFAULT 'developer',
+            hq_city TEXT,
+            hq_state TEXT,
+            employee_count INTEGER,
+            raw_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(name)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS li_contacts (
+            id TEXT PRIMARY KEY,
+            company_id TEXT,
+            full_name TEXT NOT NULL,
+            title TEXT,
+            email TEXT,
+            phone TEXT,
+            linkedin_url TEXT,
+            role_tag TEXT DEFAULT 'unknown',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(full_name, company_id)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS li_signals (
+            id TEXT PRIMARY KEY,
+            source_type TEXT NOT NULL,
+            headline TEXT,
+            body TEXT,
+            url TEXT,
+            published_at TIMESTAMP,
+            city TEXT,
+            state TEXT,
+            raw_json TEXT,
+            project_id TEXT,
+            company_id TEXT,
+            signal_type TEXT DEFAULT 'news',
+            strength REAL DEFAULT 0.5,
+            normalized BOOLEAN DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(url, headline)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS li_leads (
+            id TEXT PRIMARY KEY,
+            project_id TEXT,
+            company_id TEXT,
+            contact_id TEXT,
+            score REAL DEFAULT 0.0,
+            score_components TEXT,
+            grade TEXT DEFAULT 'C',
+            status TEXT DEFAULT 'new',
+            assigned_to TEXT,
+            region TEXT,
+            next_action TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(project_id, company_id)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS li_outcomes (
+            id TEXT PRIMARY KEY,
+            lead_id TEXT NOT NULL,
+            outcome_type TEXT NOT NULL,
+            notes TEXT,
+            revenue REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS li_score_weights (
+            id TEXT PRIMARY KEY,
+            signal_type TEXT NOT NULL,
+            weight REAL DEFAULT 1.0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(signal_type)
+        )
+    ''')
+
+    # Entity-graph indexes
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_li_projects_city ON li_projects(city, state)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_li_signals_project ON li_signals(project_id)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_li_signals_company ON li_signals(company_id)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_li_signals_type ON li_signals(signal_type)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_li_leads_score ON li_leads(score DESC)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_li_leads_status ON li_leads(status)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_li_contacts_company ON li_contacts(company_id)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_li_outcomes_lead ON li_outcomes(lead_id)')
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
 init_db()
+
+# ===================================================================
+# LEAD INTELLIGENCE PLATFORM — Blueprint Registration
+# ===================================================================
+from api.routes.leads import leads_bp
+from api.routes.projects import projects_bp
+from api.routes.signals import signals_bp
+from api.routes.pipeline import pipeline_bp
+
+app.register_blueprint(leads_bp)
+app.register_blueprint(projects_bp)
+app.register_blueprint(signals_bp)
+app.register_blueprint(pipeline_bp)
 
 
 # ===================================================================
@@ -7489,6 +7652,21 @@ _scheduler.add_job(
     name='Weekly City Discovery',
     replace_existing=True
 )
+def _scheduled_li_pipeline():
+    """Nightly lead intelligence pipeline run."""
+    try:
+        from workers.pipeline import run_full_pipeline
+        run_full_pipeline()
+    except Exception as e:
+        print(f"[Scheduler] Lead Intelligence pipeline error: {e}")
+
+_scheduler.add_job(
+    _scheduled_li_pipeline,
+    CronTrigger(hour=3, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='li_nightly_pipeline',
+    name='Lead Intelligence Nightly Pipeline',
+    replace_existing=True
+)
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
 print("[Scheduler] Daily signal optimization at 6:45 AM PT")
@@ -7498,6 +7676,7 @@ print("[Scheduler] Daily government signals refresh at 5:30 AM PT")
 print("[Scheduler] Daily permit feed ingestion at 5:15 AM PT")
 print("[Scheduler] SPI nightly pipeline at 8:15 AM PT")
 print("[Scheduler] Weekly city discovery every Wednesday 8:30 AM PT")
+print("[Scheduler] Lead Intelligence pipeline at 3:00 AM PT")
 
 
 if __name__ == '__main__':
