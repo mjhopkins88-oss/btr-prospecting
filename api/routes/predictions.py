@@ -1,6 +1,8 @@
 """
 API Routes: Predictions
 Flask Blueprint for predicted development projects.
+Queries predicted_project_index for fast, enriched results.
+Falls back to predicted_projects if the index is empty.
 """
 from flask import Blueprint, request, jsonify
 import json
@@ -19,11 +21,21 @@ def _safe_ts(val):
     return str(val)
 
 
+def _index_has_data():
+    """Check if predicted_project_index has rows."""
+    try:
+        row = fetch_one("SELECT COUNT(*) as count FROM predicted_project_index")
+        return row and row.get('count', 0) > 0
+    except Exception:
+        return False
+
+
 @predictions_bp.route('/api/predicted-projects', methods=['GET'])
 def get_predicted_projects():
     """
     GET /api/predicted-projects
-    Returns predicted development projects with optional filtering.
+    Returns predicted development projects with enriched scoring.
+    Queries predicted_project_index for speed; falls back to predicted_projects.
     Query params: city, state, confirmed, min_confidence, limit, offset
     """
     city = request.args.get('city')
@@ -33,12 +45,25 @@ def get_predicted_projects():
     limit = min(int(request.args.get('limit', 50)), 200)
     offset = int(request.args.get('offset', 0))
 
-    sql = '''
-        SELECT id, city, state, developer, prediction_date, confidence,
-               pattern_detected, confirmed, created_at
-        FROM predicted_projects
-        WHERE 1=1
-    '''
+    use_index = _index_has_data()
+
+    if use_index:
+        sql = '''
+            SELECT id, city, state, developer, prediction_date, confidence,
+                   signal_count, cluster_detected, expected_construction_window,
+                   pattern_detected, confirmed, freshness_boost,
+                   contactability_score, developer_reputation_boost, created_at
+            FROM predicted_project_index
+            WHERE 1=1
+        '''
+    else:
+        sql = '''
+            SELECT id, city, state, developer, prediction_date, confidence,
+                   signal_count, cluster_detected, expected_construction_window,
+                   pattern_detected, confirmed, created_at
+            FROM predicted_projects
+            WHERE 1=1
+        '''
     params = []
 
     if city:
@@ -59,11 +84,17 @@ def get_predicted_projects():
 
     rows = fetch_all(sql, params)
 
-    # Ensure all timestamps are ISO strings
     for row in rows:
         row['prediction_date'] = _safe_ts(row.get('prediction_date'))
         row['created_at'] = _safe_ts(row.get('created_at'))
         row['confirmed'] = bool(row.get('confirmed'))
+        row['cluster_detected'] = bool(row.get('cluster_detected'))
+        row['signal_count'] = row.get('signal_count') or 0
+        row['expected_construction_window'] = row.get('expected_construction_window') or None
+        if use_index:
+            row['freshness_boost'] = row.get('freshness_boost') or 0
+            row['contactability_score'] = row.get('contactability_score') or 0
+            row['developer_reputation_boost'] = row.get('developer_reputation_boost') or 0
 
     return jsonify({'predictions': rows, 'count': len(rows)})
 
@@ -71,16 +102,24 @@ def get_predicted_projects():
 @predictions_bp.route('/api/predicted-projects/<prediction_id>', methods=['GET'])
 def get_predicted_project(prediction_id):
     """Get a single predicted project with its associated events."""
+    # Try index first for enriched data
     prediction = fetch_one(
-        "SELECT * FROM predicted_projects WHERE id = ?",
+        "SELECT * FROM predicted_project_index WHERE id = ?",
         [prediction_id]
     )
+    if not prediction:
+        prediction = fetch_one(
+            "SELECT * FROM predicted_projects WHERE id = ?",
+            [prediction_id]
+        )
     if not prediction:
         return jsonify({'error': 'Prediction not found'}), 404
 
     prediction['prediction_date'] = _safe_ts(prediction.get('prediction_date'))
     prediction['created_at'] = _safe_ts(prediction.get('created_at'))
     prediction['confirmed'] = bool(prediction.get('confirmed'))
+    prediction['cluster_detected'] = bool(prediction.get('cluster_detected'))
+    prediction['signal_count'] = prediction.get('signal_count') or 0
 
     # Get associated development events for this city/state
     events = fetch_all('''
@@ -102,13 +141,16 @@ def get_predicted_project(prediction_id):
 @predictions_bp.route('/api/predicted-projects/stats', methods=['GET'])
 def prediction_stats():
     """Get prediction pipeline statistics."""
+    use_index = _index_has_data()
+    table = 'predicted_project_index' if use_index else 'predicted_projects'
+
     stats = {
-        'total': fetch_one("SELECT COUNT(*) as count FROM predicted_projects"),
-        'confirmed': fetch_one("SELECT COUNT(*) as count FROM predicted_projects WHERE confirmed = 1"),
-        'unconfirmed': fetch_one("SELECT COUNT(*) as count FROM predicted_projects WHERE confirmed = 0"),
-        'avg_confidence': fetch_one("SELECT ROUND(AVG(confidence), 1) as avg FROM predicted_projects"),
+        'total': fetch_one(f"SELECT COUNT(*) as count FROM {table}"),
+        'confirmed': fetch_one(f"SELECT COUNT(*) as count FROM {table} WHERE confirmed = 1"),
+        'unconfirmed': fetch_one(f"SELECT COUNT(*) as count FROM {table} WHERE confirmed = 0"),
+        'avg_confidence': fetch_one(f"SELECT ROUND(AVG(confidence), 1) as avg FROM {table}"),
         'by_state': fetch_all(
-            "SELECT state, COUNT(*) as count FROM predicted_projects "
+            f"SELECT state, COUNT(*) as count FROM {table} "
             "GROUP BY state ORDER BY count DESC"
         ),
         'events_total': fetch_one("SELECT COUNT(*) as count FROM development_events"),
@@ -117,6 +159,15 @@ def prediction_stats():
             "GROUP BY event_type ORDER BY count DESC"
         ),
     }
+
+    if use_index:
+        stats['clusters_detected'] = fetch_one(
+            f"SELECT COUNT(*) as count FROM {table} WHERE cluster_detected = 1"
+        )
+        stats['avg_signal_count'] = fetch_one(
+            f"SELECT ROUND(AVG(signal_count), 1) as avg FROM {table}"
+        )
+
     return jsonify(stats)
 
 
