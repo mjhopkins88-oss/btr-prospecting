@@ -225,6 +225,7 @@ def store_predictions(patterns):
         city = pat.get('city')
         state = pat.get('state')
         developer = pat.get('developer')
+        signal_count = pat.get('event_count', 0)
 
         # Check for existing unconfirmed prediction
         cur.execute('''
@@ -235,25 +236,27 @@ def store_predictions(patterns):
 
         existing = cur.fetchone()
         if existing:
-            # Update confidence if higher
+            # Update confidence and signal_count
             cur.execute('''
                 UPDATE predicted_projects
                 SET confidence = MAX(confidence, ?),
+                    signal_count = ?,
                     prediction_date = CURRENT_TIMESTAMP
                 WHERE id = ?
-            ''', (pat['confidence'], existing[0]))
+            ''', (pat['confidence'], signal_count, existing[0]))
         else:
             try:
                 cur.execute('''
                     INSERT INTO predicted_projects
                     (id, city, state, developer, prediction_date, confidence,
-                     pattern_detected, confirmed, created_at)
-                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, 0, CURRENT_TIMESTAMP)
+                     pattern_detected, confirmed, signal_count, created_at)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, 0, ?, CURRENT_TIMESTAMP)
                 ''', (
                     str(uuid.uuid4()),
                     city, state, developer,
                     pat['confidence'],
                     pat['pattern_detected'],
+                    signal_count,
                 ))
                 stored += 1
             except Exception as e:
