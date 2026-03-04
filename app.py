@@ -1117,6 +1117,50 @@ def init_db():
     _safe_add_column(_cur_for_migrate, 'predicted_projects', 'cluster_detected', 'BOOLEAN DEFAULT 0')
     _safe_add_column(_cur_for_migrate, 'predicted_projects', 'expected_construction_window', 'TEXT')
 
+    # ===================================================================
+    # RELATIONSHIP GRAPH — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS entity_relationships (
+            id TEXT PRIMARY KEY,
+            entity_a TEXT NOT NULL,
+            entity_a_type TEXT,
+            entity_b TEXT NOT NULL,
+            entity_b_type TEXT,
+            relationship_type TEXT NOT NULL,
+            source TEXT,
+            confidence INTEGER DEFAULT 50,
+            metadata TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_er_entity_a ON entity_relationships(entity_a)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_er_entity_b ON entity_relationships(entity_b)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_er_type ON entity_relationships(relationship_type)')
+    except Exception:
+        pass
+
+    # Add relationship columns to predicted_project_index and predicted_projects
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'relationship_count', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'developer_linked', 'BOOLEAN DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'contractor_linked', 'BOOLEAN DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'consultant_linked', 'BOOLEAN DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'relationship_boost', 'INTEGER DEFAULT 0')
+
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'relationship_count', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'developer_linked', 'BOOLEAN DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'contractor_linked', 'BOOLEAN DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'consultant_linked', 'BOOLEAN DEFAULT 0')
+
     conn.commit()
     conn.close()
 
@@ -7814,6 +7858,22 @@ _scheduler.add_job(
     CronTrigger(hour='*/12', minute=30, timezone=pytz.timezone('America/Los_Angeles')),
     id='prediction_optimizer_12h',
     name='Predicted Project Optimizer (every 12h)',
+    replace_existing=True
+)
+
+def _scheduled_relationship_graph_builder():
+    """Build relationship graph: entity relationships, developer resolution, parcel mapping."""
+    try:
+        from workers.jobs.relationship_graph_builder import run_relationship_graph_builder
+        run_relationship_graph_builder()
+    except Exception as e:
+        print(f"[Scheduler] Relationship graph builder error: {e}")
+
+_scheduler.add_job(
+    _scheduled_relationship_graph_builder,
+    CronTrigger(hour='*/12', minute=15, timezone=pytz.timezone('America/Los_Angeles')),
+    id='relationship_graph_12h',
+    name='Relationship Graph Builder (every 12h)',
     replace_existing=True
 )
 _scheduler.start()

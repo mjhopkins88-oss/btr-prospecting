@@ -52,7 +52,9 @@ def get_predicted_projects():
             SELECT id, city, state, developer, prediction_date, confidence,
                    signal_count, cluster_detected, expected_construction_window,
                    pattern_detected, confirmed, freshness_boost,
-                   contactability_score, developer_reputation_boost, created_at
+                   contactability_score, developer_reputation_boost,
+                   relationship_count, developer_linked, contractor_linked,
+                   consultant_linked, relationship_boost, created_at
             FROM predicted_project_index
             WHERE 1=1
         '''
@@ -79,7 +81,7 @@ def get_predicted_projects():
         sql += ' AND confidence >= ?'
         params.append(min_confidence)
 
-    sql += ' ORDER BY confidence DESC, prediction_date DESC LIMIT ? OFFSET ?'
+    sql += ' ORDER BY confidence DESC, relationship_count DESC, prediction_date DESC LIMIT ? OFFSET ?' if use_index else ' ORDER BY confidence DESC, prediction_date DESC LIMIT ? OFFSET ?'
     params.extend([limit, offset])
 
     rows = fetch_all(sql, params)
@@ -95,6 +97,11 @@ def get_predicted_projects():
             row['freshness_boost'] = row.get('freshness_boost') or 0
             row['contactability_score'] = row.get('contactability_score') or 0
             row['developer_reputation_boost'] = row.get('developer_reputation_boost') or 0
+            row['relationship_count'] = row.get('relationship_count') or 0
+            row['developer_linked'] = bool(row.get('developer_linked'))
+            row['contractor_linked'] = bool(row.get('contractor_linked'))
+            row['consultant_linked'] = bool(row.get('consultant_linked'))
+            row['relationship_boost'] = row.get('relationship_boost') or 0
 
     return jsonify({'predictions': rows, 'count': len(rows)})
 

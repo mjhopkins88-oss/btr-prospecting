@@ -4241,12 +4241,16 @@
 
                                     // Middle row: enriched data grid
                                     React.createElement('div', {
-                                        style: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem', marginBottom: '0.75rem',
+                                        style: { display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.75rem', marginBottom: '0.75rem',
                                                  background: '#0f172a', borderRadius: '8px', padding: '0.75rem' }
                                     },
                                         React.createElement('div', null,
                                             React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Signals'),
                                             React.createElement('div', { style: { fontSize: '1.1rem', fontWeight: 700, color: '#e2e8f0' } }, pred.signal_count || 0)
+                                        ),
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Relationships'),
+                                            React.createElement('div', { style: { fontSize: '1.1rem', fontWeight: 700, color: (pred.relationship_count > 0) ? '#a78bfa' : '#475569' } }, pred.relationship_count || 0)
                                         ),
                                         React.createElement('div', null,
                                             React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Cluster'),
@@ -4269,6 +4273,9 @@
                                             pred.confirmed && smallBadge('CONFIRMED', '#10b981', '16,185,129,0.15'),
                                             pred.cluster_detected && smallBadge('CLUSTER', '#f472b6', '244,114,182,0.15'),
                                             (pred.freshness_boost > 0) && smallBadge('FRESH', '#22d3ee', '34,211,238,0.15'),
+                                            pred.developer_linked && smallBadge('DEV LINKED', '#a78bfa', '167,139,250,0.15'),
+                                            pred.contractor_linked && smallBadge('CONTRACTOR', '#fb923c', '251,146,60,0.15'),
+                                            pred.consultant_linked && smallBadge('CONSULTANT', '#2dd4bf', '45,212,191,0.15'),
                                             React.createElement('span', { style: { fontSize: '0.7rem', color: '#64748b' } },
                                                 pred.prediction_date ? new Date(pred.prediction_date).toLocaleDateString() : '')
                                         ),

@@ -289,6 +289,17 @@ def run_optimizer():
         except Exception:
             timeline = None
 
+        # Relationship boost (additive layer from graph)
+        try:
+            from workers.search.relationship_graph_query import compute_relationship_data_for_prediction
+            rel_data = compute_relationship_data_for_prediction(city, state, developer)
+        except Exception:
+            rel_data = {'relationship_count': 0, 'developer_linked': False,
+                        'contractor_linked': False, 'consultant_linked': False,
+                        'relationship_boost': 0}
+
+        relationship_boost = rel_data.get('relationship_boost', 0)
+
         # Final confidence = multi_signal + boosts, capped at 100
         final_confidence = min(100, (
             multi_signal +
@@ -297,7 +308,8 @@ def run_optimizer():
             size_boost +
             cluster_boost +
             freshness +
-            contactability
+            contactability +
+            relationship_boost
         ))
 
         # Insert into index
@@ -307,8 +319,9 @@ def run_optimizer():
                 (id, city, state, developer, confidence, signal_count,
                  cluster_detected, expected_construction_window, prediction_date,
                  confirmed, pattern_detected, freshness_boost, contactability_score,
-                 developer_reputation_boost, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 developer_reputation_boost, relationship_count, developer_linked,
+                 contractor_linked, consultant_linked, relationship_boost, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (
                 pred['id'], city, state, developer,
                 final_confidence, signal_count,
@@ -320,6 +333,11 @@ def run_optimizer():
                 freshness,
                 contactability,
                 dev_reputation + dev_multi,
+                rel_data.get('relationship_count', 0),
+                1 if rel_data.get('developer_linked') else 0,
+                1 if rel_data.get('contractor_linked') else 0,
+                1 if rel_data.get('consultant_linked') else 0,
+                relationship_boost,
             ))
 
             # Also update predicted_projects with new columns
