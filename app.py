@@ -1061,6 +1061,62 @@ def init_db():
     except Exception:
         pass
 
+    # ===================================================================
+    # PREDICTION OPTIMIZER — Additional Tables & Columns
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS developer_profiles (
+            id TEXT PRIMARY KEY,
+            developer_name TEXT NOT NULL,
+            historical_projects INTEGER DEFAULT 0,
+            known_btr_builder BOOLEAN DEFAULT 0,
+            primary_markets TEXT,
+            avg_project_size INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(developer_name)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS predicted_project_index (
+            id TEXT PRIMARY KEY,
+            city TEXT,
+            state TEXT,
+            developer TEXT,
+            confidence INTEGER,
+            signal_count INTEGER DEFAULT 0,
+            cluster_detected BOOLEAN DEFAULT 0,
+            expected_construction_window TEXT,
+            prediction_date TIMESTAMP,
+            confirmed BOOLEAN DEFAULT 0,
+            pattern_detected TEXT,
+            freshness_boost INTEGER DEFAULT 0,
+            contactability_score INTEGER DEFAULT 0,
+            developer_reputation_boost INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_ppi_confidence ON predicted_project_index(confidence DESC)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_ppi_city ON predicted_project_index(city, state)')
+    except Exception:
+        pass
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_dev_profiles_name ON developer_profiles(developer_name)')
+    except Exception:
+        pass
+
+    # Add new columns to predicted_projects (non-destructive migration)
+    _cur_for_migrate = _real_cursor if _is_postgres() else c
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'signal_count', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'cluster_detected', 'BOOLEAN DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'expected_construction_window', 'TEXT')
+
     conn.commit()
     conn.close()
 
@@ -7744,6 +7800,22 @@ _scheduler.add_job(
     name='BTR Pattern Scan (every 12h)',
     replace_existing=True
 )
+
+def _scheduled_prediction_optimizer():
+    """Refresh predicted_project_index with enriched scoring."""
+    try:
+        from workers.jobs.predicted_project_optimizer import run_optimizer
+        run_optimizer()
+    except Exception as e:
+        print(f"[Scheduler] Prediction optimizer error: {e}")
+
+_scheduler.add_job(
+    _scheduled_prediction_optimizer,
+    CronTrigger(hour='*/12', minute=30, timezone=pytz.timezone('America/Los_Angeles')),
+    id='prediction_optimizer_12h',
+    name='Predicted Project Optimizer (every 12h)',
+    replace_existing=True
+)
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
 print("[Scheduler] Daily signal optimization at 6:45 AM PT")
@@ -7755,6 +7827,7 @@ print("[Scheduler] SPI nightly pipeline at 8:15 AM PT")
 print("[Scheduler] Weekly city discovery every Wednesday 8:30 AM PT")
 print("[Scheduler] Lead Intelligence pipeline at 3:00 AM PT")
 print("[Scheduler] BTR Pattern Scan every 12 hours")
+print("[Scheduler] Predicted Project Optimizer every 12 hours (offset +30m)")
 
 
 if __name__ == '__main__':
