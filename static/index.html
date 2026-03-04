@@ -992,6 +992,7 @@
                     {activeTab === 'followups' && user?.role !== 'broker' && <FollowUpsPage user={user} />}
                     {activeTab === 'statewide' && user?.role !== 'broker' && <StatewideDiscovery />}
                     {activeTab === 'intelligence' && <SunbeltIntelligence user={user} />}
+                    {activeTab === 'predictions' && user?.role !== 'broker' && <PredictedDevelopments />}
                     {activeTab === 'dealboard' && <DealBoardPage user={user} />}
                     {activeTab === 'admin' && user && user.is_super_admin && <AdminPage user={user} />}
                     {activeTab === 'quoting' && user && user.role === 'admin' && <QuotingPage user={user} />}
@@ -1053,6 +1054,7 @@
                 { id: 'discovery', label: 'Daily Discovery' },
                 { id: 'statewide', label: 'Statewide' },
                 { id: 'intelligence', label: 'Sunbelt Intelligence' },
+                { id: 'predictions', label: 'Predicted Devs' },
                 { id: 'pipeline', label: 'My Pipeline' },
                 { id: 'followups', label: 'Follow-ups Due' },
             ],
@@ -1061,6 +1063,7 @@
                 { id: 'discovery', label: 'Daily Discovery' },
                 { id: 'statewide', label: 'Statewide' },
                 { id: 'intelligence', label: 'Sunbelt Intelligence' },
+                { id: 'predictions', label: 'Predicted Devs' },
                 { id: 'pipeline', label: 'My Pipeline' },
                 { id: 'followups', label: 'Follow-ups Due' },
             ],
@@ -4088,6 +4091,189 @@
         }
 
         // ======= DEAL BOARD PAGE (Broker) =======
+        // ===================================================================
+        // PREDICTED DEVELOPMENTS — Dashboard Component
+        // ===================================================================
+        function PredictedDevelopments() {
+            const [predictions, setPredictions] = useState([]);
+            const [stats, setStats] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [filter, setFilter] = useState('all'); // all, confirmed, unconfirmed
+
+            const loadPredictions = async () => {
+                setLoading(true);
+                try {
+                    const params = new URLSearchParams();
+                    if (filter === 'confirmed') params.set('confirmed', 'true');
+                    if (filter === 'unconfirmed') params.set('confirmed', 'false');
+                    params.set('limit', '100');
+                    const resp = await fetch(`/api/predicted-projects?${params}`, { credentials: 'include' });
+                    const data = await resp.json();
+                    setPredictions(data.predictions || []);
+                } catch (e) {
+                    console.error('Error loading predictions:', e);
+                }
+                setLoading(false);
+            };
+
+            const loadStats = async () => {
+                try {
+                    const resp = await fetch('/api/predicted-projects/stats', { credentials: 'include' });
+                    const data = await resp.json();
+                    setStats(data);
+                } catch (e) {
+                    console.error('Error loading prediction stats:', e);
+                }
+            };
+
+            useEffect(() => { loadPredictions(); loadStats(); }, [filter]);
+
+            const confidenceColor = (c) => {
+                if (c >= 80) return '#10b981';
+                if (c >= 60) return '#f59e0b';
+                if (c >= 40) return '#f97316';
+                return '#ef4444';
+            };
+
+            const confidenceBadge = (c) => ({
+                display: 'inline-block',
+                padding: '0.2rem 0.6rem',
+                borderRadius: '9999px',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                color: '#fff',
+                background: confidenceColor(c),
+            });
+
+            const patternStyle = {
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.3rem',
+                fontSize: '0.75rem',
+                color: '#94a3b8',
+                fontFamily: 'monospace',
+            };
+
+            const arrowStyle = { color: '#22d3ee', fontWeight: 700 };
+
+            const formatPattern = (p) => {
+                if (!p) return '—';
+                const parts = p.split(' -> ');
+                return React.createElement('span', { style: patternStyle },
+                    ...parts.flatMap((part, i) => {
+                        const elements = [React.createElement('span', { key: `p${i}`, style: { color: '#e2e8f0' } }, part)];
+                        if (i < parts.length - 1) {
+                            elements.push(React.createElement('span', { key: `a${i}`, style: arrowStyle }, ' \u2192 '));
+                        }
+                        return elements;
+                    })
+                );
+            };
+
+            return React.createElement('div', { style: { padding: '1.5rem' } },
+                React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' } },
+                    React.createElement('h2', { style: { fontSize: '1.4rem', fontWeight: 700, color: '#f1f5f9', margin: 0 } }, 'Predicted Developments'),
+                    React.createElement('div', { style: { display: 'flex', gap: '0.5rem' } },
+                        ['all', 'unconfirmed', 'confirmed'].map(f =>
+                            React.createElement('button', {
+                                key: f,
+                                onClick: () => setFilter(f),
+                                style: {
+                                    padding: '0.4rem 0.8rem',
+                                    borderRadius: '6px',
+                                    border: filter === f ? '1px solid #22d3ee' : '1px solid #475569',
+                                    background: filter === f ? 'rgba(34,211,238,0.1)' : 'transparent',
+                                    color: filter === f ? '#22d3ee' : '#94a3b8',
+                                    cursor: 'pointer',
+                                    fontSize: '0.8rem',
+                                    fontWeight: 500,
+                                    textTransform: 'capitalize',
+                                }
+                            }, f)
+                        )
+                    )
+                ),
+
+                // Stats row
+                stats && React.createElement('div', {
+                    style: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '1.5rem' }
+                },
+                    React.createElement('div', { style: { background: '#1e293b', border: '1px solid #334155', borderRadius: '0.75rem', padding: '1rem', textAlign: 'center' } },
+                        React.createElement('div', { style: { fontSize: '1.5rem', fontWeight: 700, color: '#22d3ee' } }, stats.total?.count || 0),
+                        React.createElement('div', { style: { fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem' } }, 'Total Predictions')
+                    ),
+                    React.createElement('div', { style: { background: '#1e293b', border: '1px solid #334155', borderRadius: '0.75rem', padding: '1rem', textAlign: 'center' } },
+                        React.createElement('div', { style: { fontSize: '1.5rem', fontWeight: 700, color: '#10b981' } }, stats.confirmed?.count || 0),
+                        React.createElement('div', { style: { fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem' } }, 'Confirmed')
+                    ),
+                    React.createElement('div', { style: { background: '#1e293b', border: '1px solid #334155', borderRadius: '0.75rem', padding: '1rem', textAlign: 'center' } },
+                        React.createElement('div', { style: { fontSize: '1.5rem', fontWeight: 700, color: '#f59e0b' } }, stats.unconfirmed?.count || 0),
+                        React.createElement('div', { style: { fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem' } }, 'Unconfirmed')
+                    ),
+                    React.createElement('div', { style: { background: '#1e293b', border: '1px solid #334155', borderRadius: '0.75rem', padding: '1rem', textAlign: 'center' } },
+                        React.createElement('div', { style: { fontSize: '1.5rem', fontWeight: 700, color: '#a78bfa' } }, stats.events_total?.count || 0),
+                        React.createElement('div', { style: { fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem' } }, 'Dev Events')
+                    ),
+                ),
+
+                // Predictions table
+                loading
+                    ? React.createElement('div', { style: { textAlign: 'center', padding: '3rem', color: '#94a3b8' } }, 'Loading predictions...')
+                    : predictions.length === 0
+                        ? React.createElement('div', { style: { textAlign: 'center', padding: '3rem', color: '#64748b' } }, 'No predicted developments yet. The pattern engine scans every 12 hours.')
+                        : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.75rem' } },
+                            predictions.map(pred =>
+                                React.createElement('div', {
+                                    key: pred.id,
+                                    style: {
+                                        background: '#1e293b',
+                                        border: pred.confirmed ? '1px solid #10b981' : '1px solid #334155',
+                                        borderRadius: '0.75rem',
+                                        padding: '1.25rem',
+                                        display: 'grid',
+                                        gridTemplateColumns: '1fr 1fr auto',
+                                        gap: '1rem',
+                                        alignItems: 'center',
+                                    }
+                                },
+                                    React.createElement('div', null,
+                                        React.createElement('div', { style: { fontSize: '1rem', fontWeight: 600, color: '#f1f5f9' } },
+                                            `${pred.city || '?'}, ${pred.state || '?'}`
+                                        ),
+                                        React.createElement('div', { style: { fontSize: '0.85rem', color: '#94a3b8', marginTop: '0.25rem' } },
+                                            pred.developer || 'Unknown Developer'
+                                        ),
+                                        React.createElement('div', { style: { fontSize: '0.75rem', color: '#64748b', marginTop: '0.35rem' } },
+                                            `Predicted: ${pred.prediction_date ? new Date(pred.prediction_date).toLocaleDateString() : '—'}`
+                                        ),
+                                    ),
+                                    React.createElement('div', null,
+                                        React.createElement('div', { style: { marginBottom: '0.4rem' } }, formatPattern(pred.pattern_detected)),
+                                        pred.confirmed && React.createElement('span', {
+                                            style: {
+                                                display: 'inline-block',
+                                                padding: '0.15rem 0.5rem',
+                                                borderRadius: '9999px',
+                                                fontSize: '0.7rem',
+                                                fontWeight: 600,
+                                                color: '#10b981',
+                                                background: 'rgba(16,185,129,0.15)',
+                                                border: '1px solid rgba(16,185,129,0.3)',
+                                            }
+                                        }, 'CONFIRMED'),
+                                    ),
+                                    React.createElement('div', { style: { textAlign: 'center' } },
+                                        React.createElement('span', { style: confidenceBadge(pred.confidence) },
+                                            `${pred.confidence}%`
+                                        ),
+                                        React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', marginTop: '0.3rem' } }, 'confidence')
+                                    ),
+                                )
+                            )
+                        )
+            );
+        }
+
         function DealBoardPage({ user }) {
             const [items, setItems] = useState([]);
             const [loading, setLoading] = useState(true);
