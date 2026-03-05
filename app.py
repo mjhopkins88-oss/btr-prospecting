@@ -1613,6 +1613,42 @@ def init_db():
         )
     '''))
 
+    # Developer Intent Signals — early preparation signals before land acquisition
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS developer_intent_signals (
+            id TEXT PRIMARY KEY,
+            developer_id TEXT,
+            signal_type TEXT,
+            city TEXT,
+            state TEXT,
+            related_entity TEXT,
+            signal_strength INT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dis_developer ON developer_intent_signals(developer_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dis_city_state ON developer_intent_signals(city, state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dis_signal_type ON developer_intent_signals(signal_type)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dis_created ON developer_intent_signals(created_at DESC)')
+
+    # Developer Intent Predictions — predicted future project launches
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS developer_intent_predictions (
+            id TEXT PRIMARY KEY,
+            developer_id TEXT,
+            predicted_city TEXT,
+            predicted_state TEXT,
+            signal_count INT,
+            confidence_score INT,
+            reasoning TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dip_developer ON developer_intent_predictions(developer_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dip_city_state ON developer_intent_predictions(predicted_city, predicted_state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dip_confidence ON developer_intent_predictions(confidence_score DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dip_created ON developer_intent_predictions(created_at DESC)')
+
     conn.commit()
     conn.close()
 
@@ -1650,6 +1686,7 @@ from api.routes.signals import signals_bp
 from api.routes.pipeline import pipeline_bp
 from api.routes.predictions import predictions_bp
 from api.routes.markets import markets_bp
+from api.routes.developer_intent import developer_intent_bp
 
 app.register_blueprint(leads_bp)
 app.register_blueprint(projects_bp)
@@ -1657,6 +1694,7 @@ app.register_blueprint(signals_bp)
 app.register_blueprint(pipeline_bp)
 app.register_blueprint(predictions_bp)
 app.register_blueprint(markets_bp)
+app.register_blueprint(developer_intent_bp)
 
 
 # ===================================================================
