@@ -4269,8 +4269,14 @@
 
                                     // Bottom row: pattern + badges
                                     React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
-                                        React.createElement('div', null,
+                                        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } },
                                             formatPattern(pred.pattern_detected),
+                                            pred.pattern_name && React.createElement('span', {
+                                                style: { fontSize: '0.65rem', color: '#22d3ee', background: 'rgba(34,211,238,0.1)', padding: '0.1rem 0.4rem', borderRadius: '0.25rem', fontFamily: 'monospace' }
+                                            }, pred.pattern_name),
+                                            pred.pattern_confidence > 0 && React.createElement('span', {
+                                                style: { fontSize: '0.65rem', color: '#a78bfa', fontWeight: 600 }
+                                            }, pred.pattern_confidence + '%'),
                                         ),
                                         React.createElement('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.25rem' } },
                                             pred.confirmed && smallBadge('CONFIRMED', '#10b981', '16,185,129,0.15'),

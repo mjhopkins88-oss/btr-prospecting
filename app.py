@@ -1184,6 +1184,12 @@ def init_db():
     _safe_add_column(_cur_for_migrate, 'predicted_projects', 'contractor_linked', 'BOOLEAN DEFAULT FALSE')
     _safe_add_column(_cur_for_migrate, 'predicted_projects', 'consultant_linked', 'BOOLEAN DEFAULT FALSE')
 
+    # Add pattern engine columns to predicted_projects and predicted_project_index
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'pattern_name', 'TEXT')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'pattern_confidence', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'pattern_name', 'TEXT')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'pattern_confidence', 'INTEGER DEFAULT 0')
+
     # ===================================================================
     # AUTONOMOUS MARKET EXPANSION — Tables
     # ===================================================================
@@ -1242,6 +1248,84 @@ def init_db():
         c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cgm_city ON city_growth_metrics(city, state)')
     except Exception:
         pass
+
+    # ===================================================================
+    # PREDICTIVE DEVELOPMENT PATTERN ENGINE — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS development_patterns (
+            id TEXT PRIMARY KEY,
+            pattern_name TEXT,
+            signal_sequence TEXT,
+            time_window_days INTEGER,
+            base_confidence INTEGER,
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS pattern_signal_history (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            signal_type TEXT,
+            signal_date TIMESTAMP,
+            source TEXT,
+            metadata TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS pattern_matches (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            pattern_id TEXT,
+            match_confidence INTEGER,
+            signals_detected INTEGER,
+            first_signal_date TIMESTAMP,
+            last_signal_date TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS pattern_engine_log (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            pattern_id TEXT,
+            detection_time TIMESTAMP,
+            confidence INTEGER,
+            notes TEXT
+        )
+    ''')
+
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_psh_parcel ON pattern_signal_history(parcel_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_psh_type ON pattern_signal_history(signal_type)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_pm_parcel ON pattern_matches(parcel_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_pm_pattern ON pattern_matches(pattern_id)')
+
+    # Seed default BTR pattern if development_patterns is empty
+    c.execute('SELECT COUNT(*) FROM development_patterns')
+    if c.fetchone()[0] == 0:
+        import uuid as _uuid
+        c.execute('''
+            INSERT INTO development_patterns (id, pattern_name, signal_sequence,
+                time_window_days, base_confidence, description)
+            VALUES (?, 'BTR_EARLY_DEVELOPMENT',
+                'LAND_PURCHASE,ZONING_CASE,SUBDIVISION_PLAT',
+                90, 85,
+                'Typical early signal sequence preceding build-to-rent development')
+        ''', (str(_uuid.uuid4()),))
+        c.execute('''
+            INSERT INTO development_patterns (id, pattern_name, signal_sequence,
+                time_window_days, base_confidence, description)
+            VALUES (?, 'BTR_CONFIRMED_DEVELOPMENT',
+                'LAND_PURCHASE,ZONING_CASE,SUBDIVISION_PLAT,PERMIT_APPLICATION',
+                180, 95,
+                'Full confirmed BTR development sequence with permit')
+        ''', (str(_uuid.uuid4()),))
 
     conn.commit()
     conn.close()
@@ -7914,12 +7998,17 @@ _scheduler.add_job(
 )
 
 def _scheduled_pattern_scan():
-    """Pattern scan: generate events from signals, detect BTR patterns, store predictions."""
+    """Pattern scan: generate events, detect BTR patterns, run pattern detection engine."""
     try:
         from workers.jobs.pattern_scan_job import run_pattern_scan
         run_pattern_scan()
     except Exception as e:
         print(f"[Scheduler] Pattern scan error: {e}")
+    try:
+        from workers.analysis.pattern_scan_worker import run_pattern_scan_pipeline
+        run_pattern_scan_pipeline()
+    except Exception as e:
+        print(f"[Scheduler] Pattern detection engine error: {e}")
 
 _scheduler.add_job(
     _scheduled_pattern_scan,
