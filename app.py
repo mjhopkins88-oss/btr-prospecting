@@ -1706,6 +1706,24 @@ def init_db():
     c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cp_confidence ON capital_predictions(confidence_score DESC)')
     c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cp_created ON capital_predictions(created_at DESC)')
 
+    # Inside Sales Leads
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS sales_leads (
+            id TEXT PRIMARY KEY,
+            developer TEXT,
+            city TEXT,
+            state TEXT,
+            lead_score INT,
+            lead_summary TEXT,
+            source_signal TEXT,
+            confidence INT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_sl_developer_city ON sales_leads(developer, city)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_sl_score ON sales_leads(lead_score DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_sl_created ON sales_leads(created_at DESC)')
+
     conn.commit()
     conn.close()
 
@@ -1745,6 +1763,7 @@ from api.routes.predictions import predictions_bp
 from api.routes.markets import markets_bp
 from api.routes.developer_intent import developer_intent_bp
 from api.routes.capital_flow import capital_flow_bp
+from api.routes.sales_leads import sales_leads_bp
 
 app.register_blueprint(leads_bp)
 app.register_blueprint(projects_bp)
@@ -1754,6 +1773,7 @@ app.register_blueprint(predictions_bp)
 app.register_blueprint(markets_bp)
 app.register_blueprint(developer_intent_bp)
 app.register_blueprint(capital_flow_bp)
+app.register_blueprint(sales_leads_bp)
 
 
 # ===================================================================
