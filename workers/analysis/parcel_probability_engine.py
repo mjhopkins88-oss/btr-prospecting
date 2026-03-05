@@ -188,6 +188,22 @@ def run_probability_engine():
 
         scored += 1
 
+        # Log high-probability parcels to intelligence feed
+        if probability_score >= 70:
+            try:
+                from app import log_intelligence_event
+                log_intelligence_event(
+                    event_type='PARCEL_ALERT',
+                    title=f"NEW PARCEL ALERT \u2014 {parcel.get('city', 'Unknown')}",
+                    description=f"High development probability detected ({probability_score}%): {dev_type}",
+                    city=parcel.get('city'),
+                    state=parcel.get('state'),
+                    related_entity=parcel_id,
+                    entity_id=parcel_id,
+                )
+            except Exception:
+                pass
+
     conn.commit()
     conn.close()
 

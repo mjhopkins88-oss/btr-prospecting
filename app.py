@@ -1598,10 +1598,48 @@ def init_db():
     _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'parcel_probability_score', 'INTEGER DEFAULT 0')
     _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'parcel_development_likelihood', 'TEXT')
 
+    # Intelligence Events — live feed table
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS intelligence_events (
+            id TEXT PRIMARY KEY,
+            event_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            city TEXT,
+            state TEXT,
+            related_entity TEXT,
+            entity_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+
     conn.commit()
     conn.close()
 
 init_db()
+
+
+# ===================================================================
+# INTELLIGENCE EVENT LOGGING HELPER
+# ===================================================================
+def log_intelligence_event(event_type, title, description=None, city=None, state=None, related_entity=None, entity_id=None):
+    """Insert an event into intelligence_events for the live feed.
+    Safe to call from any engine — failures are silently caught so they
+    never break the calling code."""
+    try:
+        conn = _get_db_conn()
+        c = conn.cursor()
+        eid = str(uuid.uuid4())
+        c.execute(
+            'INSERT INTO intelligence_events (id, event_type, title, description, city, state, related_entity, entity_id) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (eid, event_type, title, description, city, state, related_entity, entity_id)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[IntelFeed] Failed to log event: {e}")
+
 
 # ===================================================================
 # LEAD INTELLIGENCE PLATFORM — Blueprint Registration
@@ -6606,6 +6644,40 @@ Return the brief as markdown text."""
     conn.close()
     print(f"[WeeklyBrief] Brief generated and stored (id={brief_id})")
     return brief_id
+
+
+# --- Intelligence Feed API ---
+
+@app.route('/api/intelligence-feed', methods=['GET'])
+@require_auth
+def api_intelligence_feed():
+    """Return latest intelligence events for the live feed."""
+    limit = min(int(request.args.get('limit', 100)), 500)
+    event_type = request.args.get('type')
+    try:
+        conn = _get_db_conn()
+        c = conn.cursor()
+        if event_type:
+            c.execute(
+                'SELECT * FROM intelligence_events WHERE event_type = ? ORDER BY created_at DESC LIMIT ?',
+                (event_type, limit)
+            )
+        else:
+            c.execute(
+                'SELECT * FROM intelligence_events ORDER BY created_at DESC LIMIT ?',
+                (limit,)
+            )
+        rows = c.fetchall()
+        cols = [d[0] for d in c.description] if c.description else []
+        conn.close()
+        events = [dict(zip(cols, r)) for r in rows]
+        # Normalize timestamps
+        for ev in events:
+            if 'created_at' in ev:
+                ev['created_at'] = _safe_ts(ev['created_at'])
+        return jsonify({'success': True, 'events': events})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # --- Intelligence API Endpoints ---

@@ -508,6 +508,23 @@ def run_discovery_job(config, is_scheduled=False):
         }
         if city_new:
             print(f"[Discovery] {location}: {len(city_new)} new signals")
+            # Log to intelligence feed
+            try:
+                from app import log_intelligence_event
+                parts = location.split(', ')
+                _city = parts[0] if parts else location
+                _state = parts[1] if len(parts) > 1 else ''
+                for sig in city_new:
+                    log_intelligence_event(
+                        event_type='SIGNAL',
+                        title=f"NEW SIGNAL \u2014 {_city}",
+                        description=sig.get('title', 'Signal detected'),
+                        city=_city,
+                        state=_state,
+                        related_entity=sig.get('source', ''),
+                    )
+            except Exception:
+                pass
 
     # Build digest
     digest = _format_signal_digest(results, all_new_signals)

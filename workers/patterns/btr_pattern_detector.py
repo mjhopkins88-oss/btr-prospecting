@@ -259,6 +259,19 @@ def store_predictions(patterns):
                     signal_count,
                 ))
                 stored += 1
+                # Log to intelligence feed
+                try:
+                    from app import log_intelligence_event
+                    log_intelligence_event(
+                        event_type='PATTERN',
+                        title=f"NEW PATTERN \u2014 {city}",
+                        description=f"Early BTR development sequence detected ({pat['pattern_detected']})",
+                        city=city,
+                        state=state,
+                        related_entity=developer,
+                    )
+                except Exception:
+                    pass
             except Exception as e:
                 print(f"[PatternDetector] Error storing prediction: {e}")
 

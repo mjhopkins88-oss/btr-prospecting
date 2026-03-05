@@ -189,6 +189,22 @@ def predict_expansions():
 
             predictions_made += 1
 
+            # Log to intelligence feed
+            try:
+                from app import log_intelligence_event
+                dev_name = profile.get('developer_name', 'Unknown developer')
+                log_intelligence_event(
+                    event_type='DEVELOPER_EXPANSION',
+                    title=f"NEW EXPANSION \u2014 {city}",
+                    description=f"Developer expansion detected: {dev_name} (confidence {confidence}%)",
+                    city=city,
+                    state=state,
+                    related_entity=dev_name,
+                    entity_id=developer_id,
+                )
+            except Exception:
+                pass
+
     conn.commit()
     conn.close()
 

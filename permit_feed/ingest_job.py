@@ -169,6 +169,19 @@ def run_ingest():
         source_stats[name] = {"fetched": len(raw_records), "new": new_count}
         print(f"[permit_feed]   → fetched={len(raw_records)}, new={new_count}")
 
+        # Log new permits to intelligence feed
+        if new_count > 0:
+            try:
+                from app import log_intelligence_event
+                log_intelligence_event(
+                    event_type='PERMIT',
+                    title=f"NEW PERMIT \u2014 {name}",
+                    description=f"{new_count} new permit(s) detected from {name}",
+                    state=src_state,
+                )
+            except Exception:
+                pass
+
         # Throttle between sources
         time.sleep(THROTTLE_SECS)
 
