@@ -60,6 +60,7 @@ def get_predicted_projects():
                    developer_expansion_reasoning,
                    contractor_activity_detected, contractor_firms_list,
                    contractor_developer_inference, contractor_confidence,
+                   parcel_probability_score, parcel_development_likelihood,
                    created_at
             FROM predicted_project_index
             WHERE 1=1
@@ -73,6 +74,7 @@ def get_predicted_projects():
                    developer_expansion_reasoning,
                    contractor_activity_detected, contractor_firms_list,
                    contractor_developer_inference, contractor_confidence,
+                   parcel_probability_score, parcel_development_likelihood,
                    confirmed, created_at
             FROM predicted_projects
             WHERE 1=1
@@ -119,6 +121,8 @@ def get_predicted_projects():
         row.pop('contractor_firms_list', None)
         row['contractor_developer_inference'] = row.get('contractor_developer_inference') or None
         row['contractor_confidence'] = row.get('contractor_confidence') or 0
+        row['parcel_probability_score'] = row.get('parcel_probability_score') or 0
+        row['parcel_development_likelihood'] = row.get('parcel_development_likelihood') or None
         if use_index:
             row['freshness_boost'] = row.get('freshness_boost') or 0
             row['contactability_score'] = row.get('contactability_score') or 0

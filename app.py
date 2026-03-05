@@ -1518,6 +1518,86 @@ def init_db():
     _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'contractor_developer_inference', 'TEXT')
     _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'contractor_confidence', 'INTEGER DEFAULT 0')
 
+    # ===================================================================
+    # PARCEL DEVELOPMENT PROBABILITY ENGINE — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS parcels (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            city TEXT,
+            state TEXT,
+            acreage REAL,
+            zoning TEXT,
+            owner_name TEXT,
+            owner_type TEXT,
+            last_sale_date TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS parcel_context (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            nearby_developments INTEGER,
+            population_growth REAL,
+            permit_growth REAL,
+            infrastructure_projects INTEGER,
+            development_pressure_score INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS parcel_development_probability (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            probability_score INTEGER,
+            likely_development_type TEXT,
+            reasoning TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS parcel_probability_log (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            probability_score INTEGER,
+            analysis_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            notes TEXT
+        )
+    ''')
+
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_parcels_parcel_id ON parcels(parcel_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_parcels_city ON parcels(city, state)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_pc_parcel ON parcel_context(parcel_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_pdp_parcel ON parcel_development_probability(parcel_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_pdp_score ON parcel_development_probability(probability_score DESC)')
+    except Exception:
+        pass
+
+    # Add parcel probability columns to predicted_projects and predicted_project_index
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'parcel_probability_score', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'parcel_development_likelihood', 'TEXT')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'parcel_probability_score', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'parcel_development_likelihood', 'TEXT')
+
     conn.commit()
     conn.close()
 
@@ -8286,6 +8366,21 @@ _scheduler.add_job(
     name='Contractor Intelligence Scan (every 12h)',
     replace_existing=True
 )
+def _scheduled_parcel_probability():
+    """Weekly parcel probability scan: analyze parcels, score development likelihood."""
+    try:
+        from workers.analysis.parcel_probability_worker import run_parcel_probability_pipeline
+        run_parcel_probability_pipeline()
+    except Exception as e:
+        print(f"[Scheduler] Parcel probability error: {e}")
+
+_scheduler.add_job(
+    _scheduled_parcel_probability,
+    CronTrigger(day_of_week='mon', hour=4, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='weekly_parcel_probability',
+    name='Parcel Probability Scan (weekly Monday 4 AM)',
+    replace_existing=True
+)
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
 print("[Scheduler] Daily signal optimization at 6:45 AM PT")
@@ -8301,6 +8396,7 @@ print("[Scheduler] BTR Pattern Scan every 12 hours")
 print("[Scheduler] Predicted Project Optimizer every 12 hours (offset +30m)")
 print("[Scheduler] Developer DNA Modeling every Sunday 3:00 AM PT")
 print("[Scheduler] Contractor Intelligence Scan every 12 hours (offset +45m)")
+print("[Scheduler] Parcel Probability Scan every Monday 4:00 AM PT")
 
 
 if __name__ == '__main__':
