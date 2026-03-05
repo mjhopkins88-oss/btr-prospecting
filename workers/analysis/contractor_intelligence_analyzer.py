@@ -134,6 +134,19 @@ def _ingest_activity_from_events(cur):
               event_date, source, metadata))
         ingested += 1
 
+        # Log to intelligence feed
+        try:
+            from app import log_intelligence_event
+            log_intelligence_event(
+                event_type='CONTRACTOR_ACTIVITY',
+                title=f"NEW CONTRACTOR ACTIVITY",
+                description=f"{activity_type} detected on parcel {parcel_id}",
+                related_entity=str(firm_id),
+                entity_id=parcel_id,
+            )
+        except Exception:
+            pass
+
     return ingested
 
 
