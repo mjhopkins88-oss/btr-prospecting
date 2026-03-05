@@ -300,6 +300,29 @@ def run_optimizer():
 
         relationship_boost = rel_data.get('relationship_boost', 0)
 
+        # Developer DNA boost (additional layer)
+        dna_boost = 0
+        dna_confidence = 0
+        expansion_signal = False
+        expansion_reasoning = None
+        try:
+            cur.execute('''
+                SELECT developer_dna_confidence, developer_expansion_signal,
+                       developer_expansion_reasoning
+                FROM predicted_projects WHERE id = ?
+            ''', (pred['id'],))
+            dna_row = cur.fetchone()
+            if dna_row:
+                dna_confidence = dna_row[0] or 0
+                expansion_signal = bool(dna_row[1])
+                expansion_reasoning = dna_row[2]
+                if expansion_signal:
+                    dna_boost += 15
+                if dna_confidence > 50:
+                    dna_boost += 10
+        except Exception:
+            pass
+
         # Final confidence = multi_signal + boosts, capped at 100
         final_confidence = min(100, (
             multi_signal +
@@ -309,7 +332,8 @@ def run_optimizer():
             cluster_boost +
             freshness +
             contactability +
-            relationship_boost
+            relationship_boost +
+            dna_boost
         ))
 
         # Insert into index
@@ -320,8 +344,10 @@ def run_optimizer():
                  cluster_detected, expected_construction_window, prediction_date,
                  confirmed, pattern_detected, freshness_boost, contactability_score,
                  developer_reputation_boost, relationship_count, developer_linked,
-                 contractor_linked, consultant_linked, relationship_boost, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 contractor_linked, consultant_linked, relationship_boost,
+                 developer_dna_confidence, developer_expansion_signal,
+                 developer_expansion_reasoning, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (
                 pred['id'], city, state, developer,
                 final_confidence, signal_count,
@@ -338,6 +364,9 @@ def run_optimizer():
                 bool(rel_data.get('contractor_linked')),
                 bool(rel_data.get('consultant_linked')),
                 relationship_boost,
+                dna_confidence,
+                expansion_signal,
+                expansion_reasoning,
             ))
 
             # Also update predicted_projects with new columns

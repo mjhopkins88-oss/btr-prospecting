@@ -4285,9 +4285,28 @@
                                             pred.developer_linked && smallBadge('DEV LINKED', '#a78bfa', '167,139,250,0.15'),
                                             pred.contractor_linked && smallBadge('CONTRACTOR', '#fb923c', '251,146,60,0.15'),
                                             pred.consultant_linked && smallBadge('CONSULTANT', '#2dd4bf', '45,212,191,0.15'),
+                                            pred.developer_expansion_signal && smallBadge('DNA MATCH', '#f59e0b', '245,158,11,0.15'),
                                             React.createElement('span', { style: { fontSize: '0.7rem', color: '#64748b' } },
                                                 pred.prediction_date ? new Date(pred.prediction_date).toLocaleDateString() : '')
                                         ),
+                                    ),
+
+                                    // Developer Intelligence section
+                                    pred.developer_expansion_signal && React.createElement('div', {
+                                        style: { marginTop: '0.6rem', padding: '0.6rem', background: 'rgba(245,158,11,0.08)',
+                                                 border: '1px solid rgba(245,158,11,0.2)', borderRadius: '0.5rem' }
+                                    },
+                                        React.createElement('div', {
+                                            style: { fontSize: '0.6rem', color: '#f59e0b', textTransform: 'uppercase',
+                                                     letterSpacing: '0.08em', fontWeight: 700, marginBottom: '0.3rem' }
+                                        }, 'Developer Intelligence'),
+                                        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                                            React.createElement('div', { style: { fontSize: '0.75rem', color: '#e2e8f0' } },
+                                                pred.developer_expansion_reasoning || 'Expansion signal detected'),
+                                            pred.developer_dna_confidence > 0 && React.createElement('div', {
+                                                style: { fontSize: '0.85rem', fontWeight: 700, color: '#f59e0b' }
+                                            }, pred.developer_dna_confidence + '%')
+                                        )
                                     ),
                                 )
                             )

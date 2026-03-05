@@ -55,7 +55,9 @@ def get_predicted_projects():
                    confirmed, freshness_boost,
                    contactability_score, developer_reputation_boost,
                    relationship_count, developer_linked, contractor_linked,
-                   consultant_linked, relationship_boost, created_at
+                   consultant_linked, relationship_boost,
+                   developer_dna_confidence, developer_expansion_signal,
+                   developer_expansion_reasoning, created_at
             FROM predicted_project_index
             WHERE 1=1
         '''
@@ -64,7 +66,8 @@ def get_predicted_projects():
             SELECT id, city, state, developer, prediction_date, confidence,
                    signal_count, cluster_detected, expected_construction_window,
                    pattern_detected, pattern_name, pattern_confidence,
-                   confirmed, created_at
+                   developer_dna_confidence, developer_expansion_signal,
+                   developer_expansion_reasoning, confirmed, created_at
             FROM predicted_projects
             WHERE 1=1
         '''
@@ -97,6 +100,9 @@ def get_predicted_projects():
         row['expected_construction_window'] = row.get('expected_construction_window') or None
         row['pattern_name'] = row.get('pattern_name') or None
         row['pattern_confidence'] = row.get('pattern_confidence') or 0
+        row['developer_dna_confidence'] = row.get('developer_dna_confidence') or 0
+        row['developer_expansion_signal'] = bool(row.get('developer_expansion_signal'))
+        row['developer_expansion_reasoning'] = row.get('developer_expansion_reasoning') or None
         if use_index:
             row['freshness_boost'] = row.get('freshness_boost') or 0
             row['contactability_score'] = row.get('contactability_score') or 0
