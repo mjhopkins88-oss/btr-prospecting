@@ -5285,6 +5285,7 @@
                                             pred.consultant_linked && smallBadge('CONSULTANT', '#2dd4bf', '45,212,191,0.15'),
                                             pred.developer_expansion_signal && smallBadge('DNA MATCH', '#f59e0b', '245,158,11,0.15'),
                                             pred.contractor_activity_detected && smallBadge('CONTRACTOR INTEL', '#ef4444', '239,68,68,0.15'),
+                                            pred.temporal_boost > 0 && smallBadge('TEMPORAL +' + pred.temporal_boost, '#8b5cf6', '139,92,246,0.15'),
                                             React.createElement('span', { style: { fontSize: '0.7rem', color: '#64748b' } },
                                                 pred.prediction_date ? new Date(pred.prediction_date).toLocaleDateString() : '')
                                         ),
@@ -5366,6 +5367,43 @@
                                                 style: { fontSize: '0.6rem', color: '#10b981', background: 'rgba(16,185,129,0.12)',
                                                          padding: '0.15rem 0.5rem', borderRadius: '0.25rem', fontWeight: 600 }
                                             }, 'HIGH PROBABILITY')
+                                        )
+                                    ),
+
+                                    // Temporal Pattern section
+                                    pred.temporal_boost > 0 && React.createElement('div', {
+                                        style: { marginTop: '0.6rem', padding: '0.6rem', background: 'rgba(139,92,246,0.08)',
+                                                 border: '1px solid rgba(139,92,246,0.2)', borderRadius: '0.5rem' }
+                                    },
+                                        React.createElement('div', {
+                                            style: { fontSize: '0.6rem', color: '#8b5cf6', textTransform: 'uppercase',
+                                                     letterSpacing: '0.08em', fontWeight: 700, marginBottom: '0.4rem' }
+                                        }, 'Temporal Pattern Match'),
+                                        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' } },
+                                            React.createElement('div', { style: { display: 'flex', gap: '0.8rem', alignItems: 'center' } },
+                                                React.createElement('div', null,
+                                                    React.createElement('div', { style: { fontSize: '0.55rem', color: '#64748b', textTransform: 'uppercase' } }, 'Boost'),
+                                                    React.createElement('div', { style: { fontSize: '1rem', fontWeight: 700, color: '#8b5cf6' } }, '+' + pred.temporal_boost)
+                                                ),
+                                                pred.temporal_match_stage && React.createElement('div', null,
+                                                    React.createElement('div', { style: { fontSize: '0.55rem', color: '#64748b', textTransform: 'uppercase' } }, 'Stage'),
+                                                    React.createElement('div', { style: { fontSize: '0.8rem', fontWeight: 600, color: '#c4b5fd' } }, pred.temporal_match_stage)
+                                                )
+                                            ),
+                                            pred.temporal_boost >= 30 && React.createElement('span', {
+                                                style: { fontSize: '0.6rem', color: '#8b5cf6', background: 'rgba(139,92,246,0.12)',
+                                                         padding: '0.15rem 0.5rem', borderRadius: '0.25rem', fontWeight: 600 }
+                                            }, 'STRONG PATTERN')
+                                        ),
+                                        pred.temporal_pattern_match && React.createElement('div', {
+                                            style: { marginTop: '0.3rem', fontSize: '0.7rem', color: '#a78bfa', fontFamily: 'monospace',
+                                                     background: 'rgba(139,92,246,0.06)', padding: '0.3rem 0.5rem', borderRadius: '0.25rem' }
+                                        },
+                                            ...pred.temporal_pattern_match.split(' -> ').flatMap((step, si, arr) => {
+                                                const els = [React.createElement('span', { key: 's' + si, style: { color: '#e2e8f0' } }, step)];
+                                                if (si < arr.length - 1) els.push(React.createElement('span', { key: 'a' + si, style: { color: '#8b5cf6', fontWeight: 700 } }, ' \u2192 '));
+                                                return els;
+                                            })
                                         )
                                     ),
                                 )

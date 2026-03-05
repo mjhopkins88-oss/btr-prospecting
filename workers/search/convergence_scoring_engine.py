@@ -12,6 +12,7 @@ Signals evaluated:
 - capital_predictions
 - opportunity_clusters
 - predicted_developments (base record)
+- temporal pattern match (learned from confirmed developments)
 
 Scoring model (max 100):
     signal_count * 20         (multi-signal bonus)
@@ -21,6 +22,7 @@ Scoring model (max 100):
     capital_signal            +30
     cluster_detected          +15
     developer_dna_match       +10
+    temporal_boost             0-40 (from temporal pattern engine)
 """
 from datetime import datetime, timedelta
 
@@ -128,6 +130,7 @@ def calculate_convergence_score(signals):
         capital_signal_detected        +30
         cluster_detected               +15
         developer_dna_match            +10
+        temporal_boost                 +0 to 40 (from temporal pattern engine)
 
     Capped at 100.
     """
@@ -146,6 +149,9 @@ def calculate_convergence_score(signals):
         score += 15
     if signals["developer_dna_match"]:
         score += 10
+
+    # Temporal pattern boost (learned from confirmed developments)
+    score += signals.get("temporal_boost", 0)
 
     return min(int(score), 100)
 
@@ -174,7 +180,8 @@ def score_all_predictions():
     """Score all predicted projects with convergence scores."""
     predictions = fetch_all(
         "SELECT id, city, state, developer, cluster_detected, "
-        "developer_expansion_signal FROM predicted_project_index"
+        "developer_expansion_signal, temporal_boost "
+        "FROM predicted_project_index"
     )
 
     if not predictions:
@@ -188,6 +195,11 @@ def score_all_predictions():
     for pred in predictions:
         try:
             signals = _collect_signals_for_prediction(pred)
+            # Include temporal boost from temporal pattern engine
+            signals["temporal_boost"] = pred.get("temporal_boost") or 0
+            if signals["temporal_boost"] > 0:
+                signals["signal_types"].append("Temporal Pattern")
+                signals["signal_count"] = len(signals["signal_types"])
             convergence = calculate_convergence_score(signals)
             _store_convergence_score(
                 pred["id"],
