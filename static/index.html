@@ -96,6 +96,21 @@
             50% { box-shadow: 0 0 20px rgba(16,185,129,0.5); }
         }
 
+        @keyframes navDropIn {
+            from { opacity: 0; transform: translateY(-8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Responsive navigation */
+        @media (max-width: 768px) {
+            .nav-desktop { display: none !important; }
+            .nav-mobile { display: block !important; }
+        }
+        @media (min-width: 769px) {
+            .nav-desktop { display: flex !important; }
+            .nav-mobile { display: none !important; }
+        }
+
         #root { position: relative; z-index: 1; }
 
         ::-webkit-scrollbar { width: 6px; }
@@ -1085,31 +1100,176 @@
             return role === 'broker' ? (BROKER_LABELS[label] || label) : label;
         }
 
+        // ===================================================================
+        // GROUPED NAVIGATION MENU
+        // ===================================================================
+        const NAV_GROUPS = {
+            broker: [
+                { label: 'Prospecting', items: [
+                    { id: 'search', label: 'Prospect Search' },
+                    { id: 'dealboard', label: 'Deal Board' },
+                ]},
+                { label: 'Intelligence', items: [
+                    { id: 'intelligence', label: 'Sunbelt Intelligence' },
+                ]},
+            ],
+            producer: [
+                { label: 'Prospecting', items: [
+                    { id: 'search', label: 'Prospect Search' },
+                    { id: 'discovery', label: 'Daily Discovery' },
+                    { id: 'statewide', label: 'Statewide' },
+                    { id: 'predictions', label: 'Predicted Devs' },
+                    { id: 'markets', label: 'Market Expansion' },
+                ]},
+                { label: 'Intelligence', items: [
+                    { id: 'intelligence', label: 'Sunbelt Intelligence' },
+                ]},
+                { label: 'Pipeline', items: [
+                    { id: 'pipeline', label: 'My Pipeline' },
+                    { id: 'followups', label: 'Follow-ups Due' },
+                ]},
+            ],
+            admin: [
+                { label: 'Prospecting', items: [
+                    { id: 'search', label: 'Prospect Search' },
+                    { id: 'discovery', label: 'Daily Discovery' },
+                    { id: 'statewide', label: 'Statewide' },
+                    { id: 'predictions', label: 'Predicted Devs' },
+                    { id: 'markets', label: 'Market Expansion' },
+                ]},
+                { label: 'Intelligence', items: [
+                    { id: 'intelligence', label: 'Sunbelt Intelligence' },
+                ]},
+                { label: 'Pipeline', items: [
+                    { id: 'pipeline', label: 'My Pipeline' },
+                    { id: 'followups', label: 'Follow-ups Due' },
+                    { id: 'quoting', label: 'Quoting' },
+                    { id: 'underwriting', label: 'Underwriting Sheet' },
+                ]},
+                { label: 'System', items: [
+                    { id: 'admin', label: 'Admin' },
+                ]},
+            ],
+        };
+
+        function NavDropdown({ group, activeTab, setActiveTab }) {
+            const [open, setOpen] = useState(false);
+            const timeoutRef = useRef(null);
+            const hasActive = group.items.some(i => i.id === activeTab);
+
+            const handleEnter = () => { clearTimeout(timeoutRef.current); setOpen(true); };
+            const handleLeave = () => { timeoutRef.current = setTimeout(() => setOpen(false), 120); };
+
+            useEffect(() => () => clearTimeout(timeoutRef.current), []);
+
+            return (
+                <div style={{ position: 'relative' }} onMouseEnter={handleEnter} onMouseLeave={handleLeave}>
+                    <button style={{
+                        background: 'transparent', border: 'none', color: hasActive ? '#00FFC6' : '#94a3b8',
+                        padding: '0.75rem 1.25rem', fontSize: '0.9rem', fontWeight: 700, cursor: 'pointer',
+                        fontFamily: "'Orbitron', sans-serif", transition: 'color 0.2s',
+                        borderBottom: hasActive ? '2px solid #00FFC6' : '2px solid transparent',
+                        marginBottom: '-2px', display: 'flex', alignItems: 'center', gap: '0.35rem',
+                    }} onClick={() => { if (group.items.length === 1) setActiveTab(group.items[0].id); }}>
+                        {group.label}
+                        {group.items.length > 1 && <span style={{ fontSize: '0.55rem', opacity: 0.6, transition: 'transform 0.2s', transform: open ? 'rotate(180deg)' : 'rotate(0)' }}>&#9660;</span>}
+                    </button>
+                    {open && group.items.length > 1 && (
+                        <div style={{
+                            position: 'absolute', top: '100%', left: 0, minWidth: '220px', zIndex: 1000,
+                            background: 'rgba(15,22,36,0.95)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+                            border: '1px solid rgba(255,255,255,0.08)', borderRadius: '0.5rem',
+                            padding: '0.4rem 0', marginTop: '2px', boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                            animation: 'navDropIn 200ms ease-out forwards',
+                        }}>
+                            {group.items.map(item => (
+                                <button key={item.id} onClick={() => { setActiveTab(item.id); setOpen(false); }} style={{
+                                    display: 'block', width: '100%', textAlign: 'left', background: activeTab === item.id ? 'rgba(0,255,198,0.08)' : 'transparent',
+                                    border: 'none', color: activeTab === item.id ? '#00FFC6' : '#cbd5e1',
+                                    padding: '0.6rem 1.1rem', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer',
+                                    fontFamily: "'Inter', sans-serif", transition: 'background 0.15s, color 0.15s',
+                                }} onMouseEnter={e => { e.target.style.background = 'rgba(0,255,198,0.08)'; e.target.style.color = '#00FFC6'; }}
+                                   onMouseLeave={e => { e.target.style.background = activeTab === item.id ? 'rgba(0,255,198,0.08)' : 'transparent'; e.target.style.color = activeTab === item.id ? '#00FFC6' : '#cbd5e1'; }}>
+                                    {item.label}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
         function TabBar({ activeTab, setActiveTab, user }) {
             const role = user?.role || 'producer';
-            const tabs = [...(ROLE_TABS[role] || ROLE_TABS.producer)];
-            if (role === 'admin') {
-                tabs.push({ id: 'quoting', label: 'Quoting' });
-                tabs.push({ id: 'underwriting', label: 'Underwriting Sheet' });
+            const [mobileOpen, setMobileOpen] = useState(false);
+
+            // Build groups based on role
+            let groups = [...(NAV_GROUPS[role] || NAV_GROUPS.producer)];
+
+            // For super_admin without admin role, add System group
+            if (user && user.is_super_admin && role !== 'admin') {
+                const hasSystem = groups.some(g => g.label === 'System');
+                if (!hasSystem) {
+                    groups.push({ label: 'System', items: [{ id: 'admin', label: 'Admin' }] });
+                }
             }
-            if (user && user.is_super_admin) {
-                tabs.push({ id: 'admin', label: 'Admin' });
+            // For admin, ensure admin tab is in System if super_admin
+            if (user && user.is_super_admin && role === 'admin') {
+                const sysGroup = groups.find(g => g.label === 'System');
+                if (sysGroup && !sysGroup.items.some(i => i.id === 'admin')) {
+                    // already there from NAV_GROUPS definition
+                }
             }
+
             return (
-                <div style={ds.tabBar}>
-                    {tabs.map(tab => (
-                        <button
-                            key={tab.id}
-                            style={{
-                                ...ds.tab,
-                                ...(activeTab === tab.id ? ds.tabActive : {})
-                            }}
-                            onClick={() => setActiveTab(tab.id)}
-                        >
-                            {tab.label}
+                <>
+                    {/* Desktop navigation */}
+                    <div style={{ ...ds.tabBar, display: 'flex', flexWrap: 'wrap' }} className="nav-desktop">
+                        {groups.map(group => (
+                            <NavDropdown key={group.label} group={group} activeTab={activeTab} setActiveTab={setActiveTab} />
+                        ))}
+                    </div>
+                    {/* Mobile hamburger */}
+                    <div className="nav-mobile" style={{ display: 'none', marginBottom: '1.5rem' }}>
+                        <button onClick={() => setMobileOpen(!mobileOpen)} style={{
+                            background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)',
+                            color: '#00FFC6', padding: '0.7rem 1rem', borderRadius: '0.5rem', cursor: 'pointer',
+                            fontSize: '1.1rem', fontFamily: "'Orbitron', sans-serif", fontWeight: 700,
+                            display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%', justifyContent: 'space-between',
+                        }}>
+                            <span>{mobileOpen ? 'Close Menu' : 'Menu'}</span>
+                            <span style={{ fontSize: '1.2rem' }}>{mobileOpen ? '\u2715' : '\u2630'}</span>
                         </button>
-                    ))}
-                </div>
+                        {mobileOpen && (
+                            <div style={{
+                                background: 'rgba(15,22,36,0.95)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+                                border: '1px solid rgba(255,255,255,0.08)', borderRadius: '0.5rem',
+                                marginTop: '0.5rem', padding: '0.5rem 0', animation: 'navDropIn 200ms ease-out forwards',
+                            }}>
+                                {groups.map(group => (
+                                    <div key={group.label}>
+                                        <div style={{ padding: '0.5rem 1rem', fontSize: '0.65rem', color: '#64748b',
+                                            textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700,
+                                            fontFamily: "'Orbitron', sans-serif", borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                            {group.label}
+                                        </div>
+                                        {group.items.map(item => (
+                                            <button key={item.id} onClick={() => { setActiveTab(item.id); setMobileOpen(false); }} style={{
+                                                display: 'block', width: '100%', textAlign: 'left',
+                                                background: activeTab === item.id ? 'rgba(0,255,198,0.08)' : 'transparent',
+                                                border: 'none', color: activeTab === item.id ? '#00FFC6' : '#cbd5e1',
+                                                padding: '0.65rem 1.5rem', fontSize: '0.85rem', fontWeight: 500,
+                                                cursor: 'pointer', fontFamily: "'Inter', sans-serif",
+                                            }}>
+                                                {item.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </>
             );
         }
 
