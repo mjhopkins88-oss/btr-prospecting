@@ -1024,6 +1024,7 @@
                     {activeTab === 'intelligence' && <SunbeltIntelligence user={user} />}
                     {activeTab === 'feed' && <LiveIntelligenceFeed />}
                     {activeTab === 'intent' && <DeveloperIntentPanel />}
+                    {activeTab === 'capital' && <CapitalFlowPanel />}
                     {activeTab === 'predictions' && user?.role !== 'broker' && <PredictedDevelopments />}
                     {activeTab === 'markets' && user?.role !== 'broker' && <MarketExpansion />}
                     {activeTab === 'dealboard' && <DealBoardPage user={user} />}
@@ -1130,6 +1131,7 @@
                     { id: 'intelligence', label: 'Sunbelt Intelligence' },
                     { id: 'feed', label: 'Live Feed' },
                     { id: 'intent', label: 'Developer Intent' },
+                    { id: 'capital', label: 'Capital Flow' },
                 ]},
             ],
             producer: [
@@ -1144,6 +1146,7 @@
                     { id: 'intelligence', label: 'Sunbelt Intelligence' },
                     { id: 'feed', label: 'Live Feed' },
                     { id: 'intent', label: 'Developer Intent' },
+                    { id: 'capital', label: 'Capital Flow' },
                 ]},
                 { label: 'Pipeline', items: [
                     { id: 'pipeline', label: 'My Pipeline' },
@@ -1162,6 +1165,7 @@
                     { id: 'intelligence', label: 'Sunbelt Intelligence' },
                     { id: 'feed', label: 'Live Feed' },
                     { id: 'intent', label: 'Developer Intent' },
+                    { id: 'capital', label: 'Capital Flow' },
                 ]},
                 { label: 'Pipeline', items: [
                     { id: 'pipeline', label: 'My Pipeline' },
@@ -1565,6 +1569,7 @@
             CONTRACTOR_ACTIVITY: { accent: '#f97316', bg: 'rgba(249,115,22,0.08)', border: 'rgba(249,115,22,0.2)' },
             PARCEL_ALERT: { accent: '#facc15', bg: 'rgba(250,204,21,0.08)', border: 'rgba(250,204,21,0.2)' },
             DEVELOPER_INTENT: { accent: '#a855f7', bg: 'rgba(168,85,247,0.08)', border: 'rgba(168,85,247,0.2)' },
+            CAPITAL_FLOW: { accent: '#eab308', bg: 'rgba(234,179,8,0.08)', border: 'rgba(234,179,8,0.2)' },
         };
 
         const FEED_EVENT_LABELS = {
@@ -1575,6 +1580,7 @@
             CONTRACTOR_ACTIVITY: 'CONTRACTOR',
             PARCEL_ALERT: 'PARCEL',
             DEVELOPER_INTENT: 'INTENT',
+            CAPITAL_FLOW: 'CAPITAL',
         };
 
         function FeedEventCard({ event, isNew }) {
@@ -1615,6 +1621,174 @@
                         </div>
                     )}
                 </div>
+            );
+        }
+
+        // ===================================================================
+        // CAPITAL FLOW PANEL
+        // ===================================================================
+        function CapitalFlowPanel() {
+            const [predictions, setPredictions] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [selectedPrediction, setSelectedPrediction] = useState(null);
+            const [filterState, setFilterState] = useState('');
+
+            useEffect(() => {
+                loadPredictions();
+            }, [filterState]);
+
+            const loadPredictions = async () => {
+                setLoading(true);
+                try {
+                    let url = '/api/capital-flow?limit=100';
+                    if (filterState) url += '&state=' + encodeURIComponent(filterState);
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    setPredictions(data.predictions || []);
+                } catch (e) {
+                    console.error('Failed to load capital predictions:', e);
+                }
+                setLoading(false);
+            };
+
+            const loadDetail = async (id) => {
+                try {
+                    const res = await fetch('/api/capital-flow/' + id);
+                    const data = await res.json();
+                    setSelectedPrediction(data);
+                } catch (e) {
+                    console.error('Failed to load capital detail:', e);
+                }
+            };
+
+            const eventTypeLabels = {
+                CONSTRUCTION_LOAN: 'Construction Loan',
+                LAND_ACQUISITION_LOAN: 'Land Acquisition Loan',
+                DEBT_PLACEMENT: 'Debt Placement',
+                EQUITY_INVESTMENT: 'Equity Investment',
+                JOINT_VENTURE: 'Joint Venture',
+                FUND_DEPLOYMENT: 'Fund Deployment',
+            };
+
+            const eventTypeColors = {
+                CONSTRUCTION_LOAN: '#eab308',
+                LAND_ACQUISITION_LOAN: '#f59e0b',
+                DEBT_PLACEMENT: '#3b82f6',
+                EQUITY_INVESTMENT: '#10b981',
+                JOINT_VENTURE: '#a855f7',
+                FUND_DEPLOYMENT: '#ef4444',
+            };
+
+            const confidenceColor = (score) => {
+                if (score >= 80) return '#10b981';
+                if (score >= 60) return '#f59e0b';
+                return '#ef4444';
+            };
+
+            const formatAmount = (amount) => {
+                if (!amount) return null;
+                if (amount >= 1000000) return '$' + (amount / 1000000).toFixed(0) + 'M';
+                if (amount >= 1000) return '$' + (amount / 1000).toFixed(0) + 'K';
+                return '$' + amount.toFixed(0);
+            };
+
+            const states = [...new Set(predictions.map(p => p.state).filter(Boolean))].sort();
+
+            return (
+                React.createElement('div', { style: { padding: '1.5rem' } },
+                    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' } },
+                        React.createElement('div', null,
+                            React.createElement('h2', { style: { color: '#e2e8f0', fontSize: '1.5rem', fontWeight: 700, fontFamily: "'Orbitron', sans-serif", margin: 0 } }, 'Capital Flow Signals'),
+                            React.createElement('p', { style: { color: '#64748b', fontSize: '0.85rem', marginTop: '0.3rem' } }, 'Financing signals indicating development projects are about to move forward')
+                        ),
+                        React.createElement('div', { style: { display: 'flex', gap: '0.75rem', alignItems: 'center' } },
+                            React.createElement('select', {
+                                value: filterState,
+                                onChange: (e) => setFilterState(e.target.value),
+                                style: { background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', borderRadius: '0.5rem', padding: '0.5rem 0.75rem', fontSize: '0.85rem' }
+                            },
+                                React.createElement('option', { value: '' }, 'All States'),
+                                states.map(s => React.createElement('option', { key: s, value: s }, s))
+                            ),
+                            React.createElement('button', {
+                                onClick: loadPredictions,
+                                style: { background: 'linear-gradient(135deg, #b45309, #eab308)', border: 'none', color: '#fff', borderRadius: '0.5rem', padding: '0.5rem 1rem', fontSize: '0.85rem', cursor: 'pointer', fontWeight: 600 }
+                            }, 'Refresh')
+                        )
+                    ),
+                    loading ? React.createElement('div', { style: { textAlign: 'center', padding: '3rem', color: '#94a3b8' } }, 'Scanning capital flow signals...') :
+                    predictions.length === 0 ? React.createElement('div', { style: { textAlign: 'center', padding: '3rem', color: '#64748b' } }, 'No capital predictions detected yet. The engine scans every 6 hours.') :
+                    React.createElement('div', { style: { display: 'grid', gridTemplateColumns: selectedPrediction ? '1fr 1fr' : '1fr', gap: '1.5rem' } },
+                        React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.75rem' } },
+                            predictions.map(p =>
+                                React.createElement('div', {
+                                    key: p.id,
+                                    onClick: () => loadDetail(p.id),
+                                    style: {
+                                        background: selectedPrediction && selectedPrediction.id === p.id ? 'rgba(234,179,8,0.12)' : 'rgba(30,41,59,0.6)',
+                                        border: selectedPrediction && selectedPrediction.id === p.id ? '1px solid rgba(234,179,8,0.4)' : '1px solid rgba(255,255,255,0.06)',
+                                        borderRadius: '0.75rem', padding: '1rem 1.25rem', cursor: 'pointer',
+                                        transition: 'all 0.2s',
+                                    }
+                                },
+                                    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { color: '#eab308', fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.05em', marginBottom: '0.3rem', fontFamily: "'Orbitron', sans-serif" } }, 'CAPITAL DEPLOYMENT DETECTED'),
+                                            React.createElement('div', { style: { color: '#e2e8f0', fontSize: '1rem', fontWeight: 600 } }, p.developer),
+                                            React.createElement('div', { style: { color: '#94a3b8', fontSize: '0.85rem', marginTop: '0.15rem' } }, (p.city || '') + (p.state ? ', ' + p.state : '')),
+                                            React.createElement('div', { style: { display: 'flex', gap: '0.5rem', marginTop: '0.4rem', alignItems: 'center' } },
+                                                React.createElement('span', { style: { background: eventTypeColors[p.capital_event] || '#eab308', color: '#000', padding: '0.15rem 0.5rem', borderRadius: '0.25rem', fontSize: '0.7rem', fontWeight: 700 } }, eventTypeLabels[p.capital_event] || p.capital_event),
+                                                p.estimated_amount && React.createElement('span', { style: { color: '#eab308', fontSize: '0.85rem', fontWeight: 700 } }, formatAmount(p.estimated_amount))
+                                            )
+                                        ),
+                                        React.createElement('div', { style: { textAlign: 'right' } },
+                                            React.createElement('div', { style: { color: confidenceColor(p.confidence), fontSize: '1.5rem', fontWeight: 700, fontFamily: "'Orbitron', sans-serif" } }, p.confidence + '%'),
+                                            React.createElement('div', { style: { color: '#64748b', fontSize: '0.7rem' } }, 'confidence')
+                                        )
+                                    ),
+                                    p.reasoning && React.createElement('div', { style: { color: '#94a3b8', fontSize: '0.8rem', marginTop: '0.5rem', lineHeight: 1.4 } }, p.reasoning)
+                                )
+                            )
+                        ),
+                        selectedPrediction && React.createElement('div', {
+                            style: { background: 'rgba(30,41,59,0.6)', border: '1px solid rgba(234,179,8,0.3)', borderRadius: '0.75rem', padding: '1.25rem', position: 'sticky', top: '1rem', alignSelf: 'start' }
+                        },
+                            React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' } },
+                                React.createElement('h3', { style: { color: '#e2e8f0', margin: 0, fontSize: '1.1rem' } }, 'Capital Details'),
+                                React.createElement('button', {
+                                    onClick: () => setSelectedPrediction(null),
+                                    style: { background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '1.2rem' }
+                                }, '\u00D7')
+                            ),
+                            React.createElement('div', { style: { marginBottom: '1rem' } },
+                                React.createElement('div', { style: { color: '#eab308', fontWeight: 700, fontSize: '0.9rem' } }, selectedPrediction.developer),
+                                React.createElement('div', { style: { color: '#94a3b8', fontSize: '0.85rem' } }, (selectedPrediction.city || '') + ', ' + (selectedPrediction.state || '')),
+                                selectedPrediction.estimated_amount && React.createElement('div', { style: { color: '#eab308', fontSize: '1.3rem', fontWeight: 700, marginTop: '0.5rem', fontFamily: "'Orbitron', sans-serif" } }, formatAmount(selectedPrediction.estimated_amount)),
+                                React.createElement('div', { style: { color: confidenceColor(selectedPrediction.confidence), fontSize: '1.1rem', fontWeight: 700, marginTop: '0.3rem', fontFamily: "'Orbitron', sans-serif" } }, 'Confidence: ' + selectedPrediction.confidence + '%')
+                            ),
+                            selectedPrediction.reasoning && React.createElement('div', { style: { color: '#cbd5e1', fontSize: '0.85rem', marginBottom: '1rem', padding: '0.75rem', background: 'rgba(234,179,8,0.08)', borderRadius: '0.5rem', lineHeight: 1.5 } }, selectedPrediction.reasoning),
+                            React.createElement('h4', { style: { color: '#94a3b8', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.5rem' } }, 'CAPITAL EVENTS'),
+                            (selectedPrediction.events || []).length === 0 ?
+                                React.createElement('div', { style: { color: '#64748b', fontSize: '0.8rem' } }, 'No event details available') :
+                                (selectedPrediction.events || []).map((ev, i) =>
+                                    React.createElement('div', {
+                                        key: ev.id || i,
+                                        style: { display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.5rem 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }
+                                    },
+                                        React.createElement('span', {
+                                            style: { display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: eventTypeColors[ev.event_type] || '#eab308', flexShrink: 0 }
+                                        }),
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 500 } }, eventTypeLabels[ev.event_type] || ev.event_type),
+                                            ev.lender_name && React.createElement('div', { style: { color: '#64748b', fontSize: '0.75rem' } }, 'Lender: ' + ev.lender_name),
+                                            ev.loan_amount && React.createElement('div', { style: { color: '#eab308', fontSize: '0.75rem', fontWeight: 600 } }, formatAmount(ev.loan_amount)),
+                                            React.createElement('div', { style: { color: '#475569', fontSize: '0.7rem' } }, timeAgo(ev.created_at))
+                                        )
+                                    )
+                                )
+                        )
+                    )
+                )
             );
         }
 
