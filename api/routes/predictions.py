@@ -76,7 +76,7 @@ def get_predicted_projects():
         params.append(state)
     if confirmed is not None:
         sql += ' AND confirmed = ?'
-        params.append(1 if confirmed.lower() in ('true', '1', 'yes') else 0)
+        params.append(confirmed.lower() in ('true', '1', 'yes'))
     if min_confidence is not None:
         sql += ' AND confidence >= ?'
         params.append(min_confidence)

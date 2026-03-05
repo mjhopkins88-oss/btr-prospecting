@@ -113,9 +113,9 @@ def _update_prediction_relationships():
                 WHERE id = ?
             ''', (
                 rel_data['relationship_count'],
-                1 if rel_data['developer_linked'] else 0,
-                1 if rel_data['contractor_linked'] else 0,
-                1 if rel_data['consultant_linked'] else 0,
+                bool(rel_data['developer_linked']),
+                bool(rel_data['contractor_linked']),
+                bool(rel_data['consultant_linked']),
                 pred['id'],
             ))
             updated += 1
