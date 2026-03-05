@@ -61,6 +61,8 @@ def get_predicted_projects():
                    contractor_activity_detected, contractor_firms_list,
                    contractor_developer_inference, contractor_confidence,
                    parcel_probability_score, parcel_development_likelihood,
+                   convergence_score, convergence_signal_count,
+                   convergence_signal_types,
                    created_at
             FROM predicted_project_index
             WHERE 1=1
@@ -94,7 +96,7 @@ def get_predicted_projects():
         sql += ' AND confidence >= ?'
         params.append(min_confidence)
 
-    sql += ' ORDER BY confidence DESC, relationship_count DESC, prediction_date DESC LIMIT ? OFFSET ?' if use_index else ' ORDER BY confidence DESC, prediction_date DESC LIMIT ? OFFSET ?'
+    sql += ' ORDER BY convergence_score DESC, confidence DESC, relationship_count DESC, prediction_date DESC LIMIT ? OFFSET ?' if use_index else ' ORDER BY confidence DESC, prediction_date DESC LIMIT ? OFFSET ?'
     params.extend([limit, offset])
 
     rows = fetch_all(sql, params)
@@ -132,6 +134,9 @@ def get_predicted_projects():
             row['contractor_linked'] = bool(row.get('contractor_linked'))
             row['consultant_linked'] = bool(row.get('consultant_linked'))
             row['relationship_boost'] = row.get('relationship_boost') or 0
+            row['convergence_score'] = row.get('convergence_score') or 0
+            row['convergence_signal_count'] = row.get('convergence_signal_count') or 0
+            row['convergence_signal_types'] = (row.get('convergence_signal_types') or '').split(', ') if row.get('convergence_signal_types') else []
 
     return jsonify({'predictions': rows, 'count': len(rows)})
 
@@ -203,6 +208,12 @@ def prediction_stats():
         )
         stats['avg_signal_count'] = fetch_one(
             f"SELECT ROUND(AVG(signal_count), 1) as avg FROM {table}"
+        )
+        stats['avg_convergence_score'] = fetch_one(
+            f"SELECT ROUND(AVG(convergence_score), 1) as avg FROM {table} WHERE convergence_score > 0"
+        )
+        stats['high_convergence'] = fetch_one(
+            f"SELECT COUNT(*) as count FROM {table} WHERE convergence_score >= 70"
         )
 
     return jsonify(stats)
