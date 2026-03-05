@@ -1241,7 +1241,7 @@
             }
 
             return (
-                <>
+                <React.Fragment>
                     {/* Desktop navigation */}
                     <div style={{ ...ds.tabBar, display: 'flex', flexWrap: 'wrap' }} className="nav-desktop">
                         {groups.map(group => (
@@ -1288,7 +1288,7 @@
                             </div>
                         )}
                     </div>
-                </>
+                </React.Fragment>
             );
         }
 
@@ -1357,7 +1357,7 @@
                 const brokerHidden = ['discovery', 'pipeline', 'followups', 'statewide', 'predictions', 'markets'];
                 pages.forEach(p => {
                     if (role === 'broker' && brokerHidden.includes(p.id)) return;
-                    items.push({ ...p, category: 'pages', icon: '\u{1F4C4}' });
+                    items.push({ ...p, category: 'pages', icon: '\uD83D\uDCC4' });
                 });
 
                 // Developers (from loaded prospects)
@@ -1365,7 +1365,7 @@
                 (prospects || []).forEach(p => {
                     if (p.company && !devSet.has(p.company)) {
                         devSet.add(p.company);
-                        items.push({ id: 'dev-' + p.company, label: p.company, category: 'developers', icon: '\u{1F3D7}', tabId: 'search' });
+                        items.push({ id: 'dev-' + p.company, label: p.company, category: 'developers', icon: '\uD83C\uDFD7', tabId: 'search' });
                     }
                 });
 
@@ -1375,7 +1375,7 @@
                     const city = p.city && p.state ? p.city + ', ' + p.state : (p.city || '');
                     if (city && !citySet.has(city)) {
                         citySet.add(city);
-                        items.push({ id: 'city-' + city, label: city, category: 'cities', icon: '\u{1F306}', tabId: 'markets' });
+                        items.push({ id: 'city-' + city, label: city, category: 'cities', icon: '\uD83C\uDF06', tabId: 'markets' });
                     }
                 });
 
@@ -1385,7 +1385,7 @@
                     'Charlotte SFR Expansion', 'Dallas Fort Worth BTR Portfolio',
                 ];
                 staticProjects.forEach(name => {
-                    items.push({ id: 'proj-' + name, label: name, category: 'projects', icon: '\u{1F4CD}', tabId: 'predictions' });
+                    items.push({ id: 'proj-' + name, label: name, category: 'projects', icon: '\uD83D\uDCCD', tabId: 'predictions' });
                 });
 
                 const staticParcels = [
@@ -1393,7 +1393,7 @@
                     'APN 442-19-320 (Dallas, TX)', 'APN 085-33-210 (Phoenix, AZ)',
                 ];
                 staticParcels.forEach(name => {
-                    items.push({ id: 'parcel-' + name, label: name, category: 'parcels', icon: '\u{1F4D0}', tabId: 'statewide' });
+                    items.push({ id: 'parcel-' + name, label: name, category: 'parcels', icon: '\uD83D\uDCD0', tabId: 'statewide' });
                 });
 
                 const staticSignals = [
@@ -1402,7 +1402,7 @@
                     'Capital raise detected — Tampa',
                 ];
                 staticSignals.forEach(name => {
-                    items.push({ id: 'sig-' + name, label: name, category: 'signals', icon: '\u{1F4E1}', tabId: 'intelligence' });
+                    items.push({ id: 'sig-' + name, label: name, category: 'signals', icon: '\uD83D\uDCE1', tabId: 'intelligence' });
                 });
 
                 // Tools (quick actions)
