@@ -4339,6 +4339,37 @@
                                             }, pred.contractor_confidence + '%')
                                         )
                                     ),
+
+                                    // Parcel Intelligence section
+                                    pred.parcel_probability_score > 0 && React.createElement('div', {
+                                        style: { marginTop: '0.6rem', padding: '0.6rem', background: 'rgba(16,185,129,0.08)',
+                                                 border: '1px solid rgba(16,185,129,0.2)', borderRadius: '0.5rem' }
+                                    },
+                                        React.createElement('div', {
+                                            style: { fontSize: '0.6rem', color: '#10b981', textTransform: 'uppercase',
+                                                     letterSpacing: '0.08em', fontWeight: 700, marginBottom: '0.4rem' }
+                                        }, 'Parcel Intelligence'),
+                                        React.createElement('div', {
+                                            style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' }
+                                        },
+                                            React.createElement('div', { style: { display: 'flex', gap: '0.8rem', alignItems: 'center' } },
+                                                React.createElement('div', null,
+                                                    React.createElement('div', { style: { fontSize: '0.55rem', color: '#64748b', textTransform: 'uppercase' } }, 'Probability'),
+                                                    React.createElement('div', { style: { fontSize: '1rem', fontWeight: 700, color: '#10b981' } }, pred.parcel_probability_score + '%')
+                                                ),
+                                                React.createElement('div', null,
+                                                    React.createElement('div', { style: { fontSize: '0.55rem', color: '#64748b', textTransform: 'uppercase' } }, 'Likelihood'),
+                                                    React.createElement('div', {
+                                                        style: { fontSize: '0.8rem', fontWeight: 600, color: pred.parcel_development_likelihood === 'Very High' ? '#10b981' : pred.parcel_development_likelihood === 'High' ? '#22d3ee' : '#f59e0b' }
+                                                    }, pred.parcel_development_likelihood || 'Pending')
+                                                )
+                                            ),
+                                            pred.parcel_probability_score >= 70 && React.createElement('span', {
+                                                style: { fontSize: '0.6rem', color: '#10b981', background: 'rgba(16,185,129,0.12)',
+                                                         padding: '0.15rem 0.5rem', borderRadius: '0.25rem', fontWeight: 600 }
+                                            }, 'HIGH PROBABILITY')
+                                        )
+                                    ),
                                 )
                             )
                         )

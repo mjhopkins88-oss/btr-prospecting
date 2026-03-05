@@ -348,6 +348,28 @@ def run_optimizer():
         except Exception:
             pass
 
+        # Parcel probability boost (additional layer)
+        parcel_boost = 0
+        parcel_prob_score = 0
+        parcel_likelihood = None
+        try:
+            cur.execute('''
+                SELECT parcel_probability_score, parcel_development_likelihood
+                FROM predicted_projects WHERE id = ?
+            ''', (pred['id'],))
+            parcel_row = cur.fetchone()
+            if parcel_row:
+                parcel_prob_score = parcel_row[0] or 0
+                parcel_likelihood = parcel_row[1]
+                if parcel_prob_score >= 85:
+                    parcel_boost = 25
+                elif parcel_prob_score >= 70:
+                    parcel_boost = 15
+                elif parcel_prob_score >= 50:
+                    parcel_boost = 5
+        except Exception:
+            pass
+
         # Final confidence = multi_signal + boosts, capped at 100
         final_confidence = min(100, (
             multi_signal +
@@ -359,7 +381,8 @@ def run_optimizer():
             contactability +
             relationship_boost +
             dna_boost +
-            contractor_boost
+            contractor_boost +
+            parcel_boost
         ))
 
         # Insert into index
@@ -375,8 +398,9 @@ def run_optimizer():
                  developer_expansion_reasoning,
                  contractor_activity_detected, contractor_firms_list,
                  contractor_developer_inference, contractor_confidence,
+                 parcel_probability_score, parcel_development_likelihood,
                  created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (
                 pred['id'], city, state, developer,
                 final_confidence, signal_count,
@@ -400,6 +424,8 @@ def run_optimizer():
                 contractor_firms_list,
                 contractor_dev_inference,
                 contractor_confidence,
+                parcel_prob_score,
+                parcel_likelihood,
             ))
 
             # Also update predicted_projects with new columns
