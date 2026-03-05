@@ -63,6 +63,8 @@ def get_predicted_projects():
                    parcel_probability_score, parcel_development_likelihood,
                    convergence_score, convergence_signal_count,
                    convergence_signal_types,
+                   temporal_boost, temporal_pattern_match,
+                   temporal_match_stage,
                    created_at
             FROM predicted_project_index
             WHERE 1=1
@@ -137,6 +139,9 @@ def get_predicted_projects():
             row['convergence_score'] = row.get('convergence_score') or 0
             row['convergence_signal_count'] = row.get('convergence_signal_count') or 0
             row['convergence_signal_types'] = (row.get('convergence_signal_types') or '').split(', ') if row.get('convergence_signal_types') else []
+            row['temporal_boost'] = row.get('temporal_boost') or 0
+            row['temporal_pattern_match'] = row.get('temporal_pattern_match') or None
+            row['temporal_match_stage'] = row.get('temporal_match_stage') or None
 
     return jsonify({'predictions': rows, 'count': len(rows)})
 
