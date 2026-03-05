@@ -101,6 +101,15 @@
             to { opacity: 1; transform: translateY(0); }
         }
 
+        @keyframes cmdPaletteIn {
+            from { opacity: 0; transform: scale(0.96); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes cmdPaletteOverlayIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
         /* Responsive navigation */
         @media (max-width: 768px) {
             .nav-desktop { display: none !important; }
@@ -952,6 +961,7 @@
             return (
                 <div style={styles.container}>
                     <Header user={user} onLogout={onLogout} />
+                    <CommandPalette activeTab={activeTab} setActiveTab={setActiveTab} user={user} prospects={prospects} />
                     <TabBar activeTab={activeTab} setActiveTab={setActiveTab} user={user} />
                     {activeTab === 'search' && (
                         <React.Fragment>
@@ -1270,6 +1280,263 @@
                         )}
                     </div>
                 </>
+            );
+        }
+
+        // ===================================================================
+        // COMMAND PALETTE (Cmd+K / Ctrl+K)
+        // ===================================================================
+        function CommandPalette({ activeTab, setActiveTab, user, prospects }) {
+            const [open, setOpen] = useState(false);
+            const [query, setQuery] = useState('');
+            const [selectedIndex, setSelectedIndex] = useState(0);
+            const inputRef = useRef(null);
+            const resultsRef = useRef(null);
+            const debounceRef = useRef(null);
+            const [debouncedQuery, setDebouncedQuery] = useState('');
+
+            // Global Cmd+K / Ctrl+K listener
+            useEffect(() => {
+                const handler = (e) => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                        e.preventDefault();
+                        setOpen(prev => !prev);
+                        setQuery('');
+                        setDebouncedQuery('');
+                        setSelectedIndex(0);
+                    }
+                };
+                window.addEventListener('keydown', handler);
+                return () => window.removeEventListener('keydown', handler);
+            }, []);
+
+            // Focus input when opened
+            useEffect(() => { if (open && inputRef.current) inputRef.current.focus(); }, [open]);
+
+            // Debounce search at 120ms
+            useEffect(() => {
+                clearTimeout(debounceRef.current);
+                debounceRef.current = setTimeout(() => setDebouncedQuery(query), 120);
+                return () => clearTimeout(debounceRef.current);
+            }, [query]);
+
+            // Build searchable items
+            const allItems = React.useMemo(() => {
+                const items = [];
+                const role = user?.role || 'producer';
+
+                // Pages
+                const pages = [
+                    { id: 'search', label: 'Prospect Search' },
+                    { id: 'discovery', label: 'Daily Discovery' },
+                    { id: 'statewide', label: 'Statewide' },
+                    { id: 'intelligence', label: 'Sunbelt Intelligence' },
+                    { id: 'predictions', label: 'Predicted Devs' },
+                    { id: 'markets', label: 'Market Expansion' },
+                    { id: 'pipeline', label: 'My Pipeline' },
+                    { id: 'followups', label: 'Follow-ups Due' },
+                ];
+                if (role === 'admin') {
+                    pages.push({ id: 'quoting', label: 'Quoting' });
+                    pages.push({ id: 'underwriting', label: 'Underwriting Sheet' });
+                }
+                if (user && user.is_super_admin) {
+                    pages.push({ id: 'admin', label: 'Admin' });
+                }
+                // Filter pages by role for brokers
+                const brokerHidden = ['discovery', 'pipeline', 'followups', 'statewide', 'predictions', 'markets'];
+                pages.forEach(p => {
+                    if (role === 'broker' && brokerHidden.includes(p.id)) return;
+                    items.push({ ...p, category: 'pages', icon: '\u{1F4C4}' });
+                });
+
+                // Developers (from loaded prospects)
+                const devSet = new Set();
+                (prospects || []).forEach(p => {
+                    if (p.company && !devSet.has(p.company)) {
+                        devSet.add(p.company);
+                        items.push({ id: 'dev-' + p.company, label: p.company, category: 'developers', icon: '\u{1F3D7}', tabId: 'search' });
+                    }
+                });
+
+                // Cities / Markets (from loaded prospects)
+                const citySet = new Set();
+                (prospects || []).forEach(p => {
+                    const city = p.city && p.state ? p.city + ', ' + p.state : (p.city || '');
+                    if (city && !citySet.has(city)) {
+                        citySet.add(city);
+                        items.push({ id: 'city-' + city, label: city, category: 'cities', icon: '\u{1F306}', tabId: 'markets' });
+                    }
+                });
+
+                // Static seed data for Projects, Parcels, Signals when no live data
+                const staticProjects = [
+                    'Greenville BTR Project', 'Austin Townhome Development', 'Phoenix Mesa BTR',
+                    'Charlotte SFR Expansion', 'Dallas Fort Worth BTR Portfolio',
+                ];
+                staticProjects.forEach(name => {
+                    items.push({ id: 'proj-' + name, label: name, category: 'projects', icon: '\u{1F4CD}', tabId: 'predictions' });
+                });
+
+                const staticParcels = [
+                    'APN 301-42-109 (Mesa, AZ)', 'APN 127-08-055 (Charlotte, NC)',
+                    'APN 442-19-320 (Dallas, TX)', 'APN 085-33-210 (Phoenix, AZ)',
+                ];
+                staticParcels.forEach(name => {
+                    items.push({ id: 'parcel-' + name, label: name, category: 'parcels', icon: '\u{1F4D0}', tabId: 'statewide' });
+                });
+
+                const staticSignals = [
+                    'Permit surge detected — Phoenix', 'Land acquisition cluster — Dallas',
+                    'Zoning change alert — Charlotte', 'Construction start signal — Austin',
+                    'Capital raise detected — Tampa',
+                ];
+                staticSignals.forEach(name => {
+                    items.push({ id: 'sig-' + name, label: name, category: 'signals', icon: '\u{1F4E1}', tabId: 'intelligence' });
+                });
+
+                // Tools (quick actions)
+                const tools = [
+                    { id: 'tool-create-prospect', label: 'Create Prospect', tabId: 'search' },
+                    { id: 'tool-open-pipeline', label: 'Open Pipeline', tabId: 'pipeline' },
+                    { id: 'tool-run-discovery', label: 'Run Discovery Scan', tabId: 'discovery' },
+                    { id: 'tool-intel-brief', label: 'Generate Intelligence Brief', tabId: 'intelligence' },
+                ];
+                tools.forEach(t => {
+                    items.push({ ...t, category: 'tools', icon: '\u26A1' });
+                });
+
+                return items;
+            }, [prospects, user]);
+
+            // Filter results
+            const q = debouncedQuery.toLowerCase();
+            const filtered = q ? allItems.filter(item => item.label.toLowerCase().includes(q)) : allItems.slice(0, 20);
+
+            // Group by category (maintain order)
+            const categoryOrder = ['pages', 'developers', 'cities', 'projects', 'parcels', 'signals', 'tools'];
+            const categoryLabels = { pages: 'Pages', developers: 'Developers', cities: 'Cities / Markets', projects: 'Projects', parcels: 'Parcels', signals: 'Signals', tools: 'Tools' };
+            const grouped = {};
+            categoryOrder.forEach(cat => {
+                const items = filtered.filter(i => i.category === cat);
+                if (items.length > 0) grouped[cat] = items;
+            });
+            const flatResults = categoryOrder.reduce((acc, cat) => acc.concat(grouped[cat] || []), []);
+
+            // Scroll selected into view
+            useEffect(() => {
+                if (resultsRef.current) {
+                    const el = resultsRef.current.querySelector('[data-selected="true"]');
+                    if (el) el.scrollIntoView({ block: 'nearest' });
+                }
+            }, [selectedIndex]);
+
+            // Keyboard navigation
+            const handleKeyDown = (e) => {
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setSelectedIndex(i => Math.min(i + 1, flatResults.length - 1));
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setSelectedIndex(i => Math.max(i - 1, 0));
+                } else if (e.key === 'Enter' && flatResults[selectedIndex]) {
+                    e.preventDefault();
+                    const item = flatResults[selectedIndex];
+                    setActiveTab(item.tabId || item.id);
+                    setOpen(false);
+                } else if (e.key === 'Escape') {
+                    setOpen(false);
+                }
+            };
+
+            if (!open) return null;
+
+            const kbdStyle = { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '4px', padding: '0.1rem 0.35rem', fontSize: '0.65rem', color: '#64748b', fontFamily: 'monospace' };
+
+            return (
+                <div style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                    background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
+                    display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: '15vh',
+                    zIndex: 9999, animation: 'cmdPaletteOverlayIn 180ms ease-out forwards',
+                }} onClick={() => setOpen(false)} role="dialog" aria-modal="true" aria-label="Command palette">
+                    <div style={{
+                        background: 'rgba(15,22,36,0.95)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+                        border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px',
+                        boxShadow: '0 30px 80px rgba(0,0,0,0.5)', width: '720px', maxWidth: '92vw',
+                        maxHeight: '70vh', display: 'flex', flexDirection: 'column',
+                        animation: 'cmdPaletteIn 180ms ease-out forwards', overflow: 'hidden',
+                    }} onClick={e => e.stopPropagation()} onKeyDown={handleKeyDown}>
+                        <input
+                            ref={inputRef}
+                            type="text"
+                            value={query}
+                            onChange={e => { setQuery(e.target.value); setSelectedIndex(0); }}
+                            placeholder="Search developers, markets, parcels, tools\u2026"
+                            style={{
+                                background: 'transparent', border: 'none', borderBottom: '1px solid rgba(255,255,255,0.06)',
+                                color: '#f1f5f9', padding: '1rem 1.25rem', fontSize: '1.05rem',
+                                fontFamily: "'Inter', sans-serif", outline: 'none', width: '100%',
+                            }}
+                            aria-label="Search command palette"
+                        />
+                        <div ref={resultsRef} style={{ overflowY: 'auto', padding: '0.5rem 0', flex: 1 }} role="listbox">
+                            {categoryOrder.map(cat => {
+                                const items = grouped[cat];
+                                if (!items) return null;
+                                return (
+                                    <div key={cat}>
+                                        <div style={{
+                                            padding: '0.5rem 1.25rem 0.25rem', fontSize: '0.65rem', color: '#64748b',
+                                            textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700,
+                                            fontFamily: "'Orbitron', sans-serif",
+                                        }}>
+                                            {items[0].icon} {categoryLabels[cat]}
+                                        </div>
+                                        {items.map(item => {
+                                            const idx = flatResults.indexOf(item);
+                                            const isSelected = idx === selectedIndex;
+                                            return (
+                                                <button
+                                                    key={item.id}
+                                                    role="option"
+                                                    aria-selected={isSelected}
+                                                    data-selected={isSelected}
+                                                    style={{
+                                                        display: 'flex', alignItems: 'center', gap: '0.75rem',
+                                                        padding: '0.55rem 1.25rem', cursor: 'pointer', fontSize: '0.9rem',
+                                                        color: isSelected ? '#00FFC6' : '#cbd5e1',
+                                                        fontFamily: "'Inter', sans-serif", transition: 'background 0.1s, color 0.1s',
+                                                        border: 'none', width: '100%', textAlign: 'left',
+                                                        background: isSelected ? 'rgba(0,255,180,0.08)' : 'transparent',
+                                                    }}
+                                                    onClick={() => { setActiveTab(item.tabId || item.id); setOpen(false); }}
+                                                    onMouseEnter={() => setSelectedIndex(idx)}
+                                                >
+                                                    {item.label}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                );
+                            })}
+                            {flatResults.length === 0 && (
+                                <div style={{ padding: '2rem', textAlign: 'center', color: '#475569', fontSize: '0.9rem' }}>
+                                    No results found
+                                </div>
+                            )}
+                        </div>
+                        <div style={{
+                            borderTop: '1px solid rgba(255,255,255,0.06)', padding: '0.5rem 1.25rem',
+                            display: 'flex', gap: '1rem', fontSize: '0.7rem', color: '#475569',
+                            fontFamily: "'Inter', sans-serif",
+                        }}>
+                            <span><span style={kbdStyle}>\u2191\u2193</span> navigate</span>
+                            <span><span style={kbdStyle}>Enter</span> select</span>
+                            <span><span style={kbdStyle}>Esc</span> close</span>
+                        </div>
+                    </div>
+                </div>
             );
         }
 
