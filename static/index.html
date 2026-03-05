@@ -4286,6 +4286,7 @@
                                             pred.contractor_linked && smallBadge('CONTRACTOR', '#fb923c', '251,146,60,0.15'),
                                             pred.consultant_linked && smallBadge('CONSULTANT', '#2dd4bf', '45,212,191,0.15'),
                                             pred.developer_expansion_signal && smallBadge('DNA MATCH', '#f59e0b', '245,158,11,0.15'),
+                                            pred.contractor_activity_detected && smallBadge('CONTRACTOR INTEL', '#ef4444', '239,68,68,0.15'),
                                             React.createElement('span', { style: { fontSize: '0.7rem', color: '#64748b' } },
                                                 pred.prediction_date ? new Date(pred.prediction_date).toLocaleDateString() : '')
                                         ),
@@ -4306,6 +4307,36 @@
                                             pred.developer_dna_confidence > 0 && React.createElement('div', {
                                                 style: { fontSize: '0.85rem', fontWeight: 700, color: '#f59e0b' }
                                             }, pred.developer_dna_confidence + '%')
+                                        )
+                                    ),
+
+                                    // Contractor Intelligence section
+                                    pred.contractor_activity_detected && React.createElement('div', {
+                                        style: { marginTop: '0.6rem', padding: '0.6rem', background: 'rgba(239,68,68,0.08)',
+                                                 border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0.5rem' }
+                                    },
+                                        React.createElement('div', {
+                                            style: { fontSize: '0.6rem', color: '#ef4444', textTransform: 'uppercase',
+                                                     letterSpacing: '0.08em', fontWeight: 700, marginBottom: '0.4rem' }
+                                        }, 'Contractor Intelligence'),
+                                        pred.contractor_firms && pred.contractor_firms.length > 0 && React.createElement('div', {
+                                            style: { display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginBottom: '0.3rem' }
+                                        },
+                                            ...pred.contractor_firms.map((firm, i) => React.createElement('span', {
+                                                key: i,
+                                                style: { fontSize: '0.65rem', color: '#fca5a5', background: 'rgba(239,68,68,0.12)',
+                                                         padding: '0.1rem 0.4rem', borderRadius: '0.25rem', fontFamily: 'monospace' }
+                                            }, firm))
+                                        ),
+                                        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                                            pred.contractor_developer_inference && React.createElement('div', {
+                                                style: { fontSize: '0.75rem', color: '#e2e8f0' }
+                                            }, 'Developer Likely: ', React.createElement('span', {
+                                                style: { fontWeight: 700, color: '#fca5a5' }
+                                            }, pred.contractor_developer_inference)),
+                                            pred.contractor_confidence > 0 && React.createElement('div', {
+                                                style: { fontSize: '0.85rem', fontWeight: 700, color: '#ef4444' }
+                                            }, pred.contractor_confidence + '%')
                                         )
                                     ),
                                 )

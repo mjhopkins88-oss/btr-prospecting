@@ -323,6 +323,31 @@ def run_optimizer():
         except Exception:
             pass
 
+        # Contractor intelligence boost (additional layer)
+        contractor_boost = 0
+        contractor_detected = False
+        contractor_firms_list = None
+        contractor_dev_inference = None
+        contractor_confidence = 0
+        try:
+            cur.execute('''
+                SELECT contractor_activity_detected, contractor_firms_list,
+                       contractor_developer_inference, contractor_confidence
+                FROM predicted_projects WHERE id = ?
+            ''', (pred['id'],))
+            ctr_row = cur.fetchone()
+            if ctr_row:
+                contractor_detected = bool(ctr_row[0])
+                contractor_firms_list = ctr_row[1]
+                contractor_dev_inference = ctr_row[2]
+                contractor_confidence = ctr_row[3] or 0
+                if contractor_detected:
+                    contractor_boost += 10
+                if contractor_confidence > 50:
+                    contractor_boost += 10
+        except Exception:
+            pass
+
         # Final confidence = multi_signal + boosts, capped at 100
         final_confidence = min(100, (
             multi_signal +
@@ -333,7 +358,8 @@ def run_optimizer():
             freshness +
             contactability +
             relationship_boost +
-            dna_boost
+            dna_boost +
+            contractor_boost
         ))
 
         # Insert into index
@@ -346,8 +372,11 @@ def run_optimizer():
                  developer_reputation_boost, relationship_count, developer_linked,
                  contractor_linked, consultant_linked, relationship_boost,
                  developer_dna_confidence, developer_expansion_signal,
-                 developer_expansion_reasoning, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 developer_expansion_reasoning,
+                 contractor_activity_detected, contractor_firms_list,
+                 contractor_developer_inference, contractor_confidence,
+                 created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (
                 pred['id'], city, state, developer,
                 final_confidence, signal_count,
@@ -367,6 +396,10 @@ def run_optimizer():
                 dna_confidence,
                 expansion_signal,
                 expansion_reasoning,
+                contractor_detected,
+                contractor_firms_list,
+                contractor_dev_inference,
+                contractor_confidence,
             ))
 
             # Also update predicted_projects with new columns

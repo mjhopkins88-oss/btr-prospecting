@@ -57,7 +57,10 @@ def get_predicted_projects():
                    relationship_count, developer_linked, contractor_linked,
                    consultant_linked, relationship_boost,
                    developer_dna_confidence, developer_expansion_signal,
-                   developer_expansion_reasoning, created_at
+                   developer_expansion_reasoning,
+                   contractor_activity_detected, contractor_firms_list,
+                   contractor_developer_inference, contractor_confidence,
+                   created_at
             FROM predicted_project_index
             WHERE 1=1
         '''
@@ -67,7 +70,10 @@ def get_predicted_projects():
                    signal_count, cluster_detected, expected_construction_window,
                    pattern_detected, pattern_name, pattern_confidence,
                    developer_dna_confidence, developer_expansion_signal,
-                   developer_expansion_reasoning, confirmed, created_at
+                   developer_expansion_reasoning,
+                   contractor_activity_detected, contractor_firms_list,
+                   contractor_developer_inference, contractor_confidence,
+                   confirmed, created_at
             FROM predicted_projects
             WHERE 1=1
         '''
@@ -103,6 +109,16 @@ def get_predicted_projects():
         row['developer_dna_confidence'] = row.get('developer_dna_confidence') or 0
         row['developer_expansion_signal'] = bool(row.get('developer_expansion_signal'))
         row['developer_expansion_reasoning'] = row.get('developer_expansion_reasoning') or None
+        row['contractor_activity_detected'] = bool(row.get('contractor_activity_detected'))
+        # Parse contractor_firms_list from JSON string to array
+        firms_raw = row.get('contractor_firms_list')
+        try:
+            row['contractor_firms'] = json.loads(firms_raw) if firms_raw else []
+        except Exception:
+            row['contractor_firms'] = []
+        row.pop('contractor_firms_list', None)
+        row['contractor_developer_inference'] = row.get('contractor_developer_inference') or None
+        row['contractor_confidence'] = row.get('contractor_confidence') or 0
         if use_index:
             row['freshness_boost'] = row.get('freshness_boost') or 0
             row['contactability_score'] = row.get('contactability_score') or 0

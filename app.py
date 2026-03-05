@@ -1428,6 +1428,96 @@ def init_db():
     except Exception:
         pass
 
+    # ===================================================================
+    # CONTRACTOR INTELLIGENCE MAPPING ENGINE — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS contractor_firms (
+            id TEXT PRIMARY KEY,
+            firm_name TEXT,
+            firm_type TEXT,
+            headquarters_city TEXT,
+            headquarters_state TEXT,
+            typical_project_type TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS contractor_activity (
+            id TEXT PRIMARY KEY,
+            firm_id TEXT,
+            parcel_id TEXT,
+            activity_type TEXT,
+            activity_date TIMESTAMP,
+            source TEXT,
+            metadata TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS contractor_developer_relationships (
+            id TEXT PRIMARY KEY,
+            contractor_id TEXT,
+            developer_id TEXT,
+            project_count INTEGER DEFAULT 0,
+            relationship_strength INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS contractor_intelligence_log (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            contractor_id TEXT,
+            activity_detected TEXT,
+            confidence INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cf_name ON contractor_firms(firm_name)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cf_type ON contractor_firms(firm_type)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ca_firm ON contractor_activity(firm_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ca_parcel ON contractor_activity(parcel_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ca_type ON contractor_activity(activity_type)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cdr_contractor ON contractor_developer_relationships(contractor_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cdr_developer ON contractor_developer_relationships(developer_id)')
+    except Exception:
+        pass
+
+    # Add contractor intelligence columns to predicted_projects and predicted_project_index
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'contractor_activity_detected', 'BOOLEAN DEFAULT FALSE')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'contractor_firms_list', 'TEXT')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'contractor_developer_inference', 'TEXT')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'contractor_confidence', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'contractor_activity_detected', 'BOOLEAN DEFAULT FALSE')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'contractor_firms_list', 'TEXT')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'contractor_developer_inference', 'TEXT')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'contractor_confidence', 'INTEGER DEFAULT 0')
+
     conn.commit()
     conn.close()
 
@@ -8181,6 +8271,21 @@ _scheduler.add_job(
     name='Developer DNA Modeling (weekly Sunday 3 AM)',
     replace_existing=True
 )
+def _scheduled_contractor_intelligence():
+    """Contractor intelligence scan: analyze activity, map relationships, infer developers."""
+    try:
+        from workers.analysis.contractor_intelligence_worker import run_contractor_intelligence_pipeline
+        run_contractor_intelligence_pipeline()
+    except Exception as e:
+        print(f"[Scheduler] Contractor intelligence error: {e}")
+
+_scheduler.add_job(
+    _scheduled_contractor_intelligence,
+    CronTrigger(hour='*/12', minute=45, timezone=pytz.timezone('America/Los_Angeles')),
+    id='contractor_intelligence_12h',
+    name='Contractor Intelligence Scan (every 12h)',
+    replace_existing=True
+)
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
 print("[Scheduler] Daily signal optimization at 6:45 AM PT")
@@ -8195,6 +8300,7 @@ print("[Scheduler] Lead Intelligence pipeline at 3:00 AM PT")
 print("[Scheduler] BTR Pattern Scan every 12 hours")
 print("[Scheduler] Predicted Project Optimizer every 12 hours (offset +30m)")
 print("[Scheduler] Developer DNA Modeling every Sunday 3:00 AM PT")
+print("[Scheduler] Contractor Intelligence Scan every 12 hours (offset +45m)")
 
 
 if __name__ == '__main__':
