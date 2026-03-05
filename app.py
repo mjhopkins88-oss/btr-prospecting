@@ -1649,6 +1649,63 @@ def init_db():
     c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dip_confidence ON developer_intent_predictions(confidence_score DESC)')
     c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dip_created ON developer_intent_predictions(created_at DESC)')
 
+    # Capital Events — financing events linked to development projects
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS capital_events (
+            id TEXT PRIMARY KEY,
+            developer_id TEXT,
+            company_name TEXT,
+            event_type TEXT,
+            city TEXT,
+            state TEXT,
+            loan_amount FLOAT,
+            lender_name TEXT,
+            related_project TEXT,
+            source TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ce_developer ON capital_events(developer_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ce_city_state ON capital_events(city, state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ce_event_type ON capital_events(event_type)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ce_created ON capital_events(created_at DESC)')
+
+    # Capital Signals — raw capital flow signals from various sources
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS capital_signals (
+            id TEXT PRIMARY KEY,
+            developer_id TEXT,
+            signal_type TEXT,
+            city TEXT,
+            state TEXT,
+            signal_strength INT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cs_developer ON capital_signals(developer_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cs_city_state ON capital_signals(city, state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cs_signal_type ON capital_signals(signal_type)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cs_created ON capital_signals(created_at DESC)')
+
+    # Capital Predictions — predicted capital deployment events
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS capital_predictions (
+            id TEXT PRIMARY KEY,
+            developer_id TEXT,
+            predicted_city TEXT,
+            predicted_state TEXT,
+            capital_event_type TEXT,
+            estimated_capital_amount FLOAT,
+            confidence_score INT,
+            reasoning TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cp_developer ON capital_predictions(developer_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cp_city_state ON capital_predictions(predicted_city, predicted_state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cp_confidence ON capital_predictions(confidence_score DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cp_created ON capital_predictions(created_at DESC)')
+
     conn.commit()
     conn.close()
 
@@ -1687,6 +1744,7 @@ from api.routes.pipeline import pipeline_bp
 from api.routes.predictions import predictions_bp
 from api.routes.markets import markets_bp
 from api.routes.developer_intent import developer_intent_bp
+from api.routes.capital_flow import capital_flow_bp
 
 app.register_blueprint(leads_bp)
 app.register_blueprint(projects_bp)
@@ -1695,6 +1753,7 @@ app.register_blueprint(pipeline_bp)
 app.register_blueprint(predictions_bp)
 app.register_blueprint(markets_bp)
 app.register_blueprint(developer_intent_bp)
+app.register_blueprint(capital_flow_bp)
 
 
 # ===================================================================
