@@ -1764,6 +1764,7 @@ from api.routes.markets import markets_bp
 from api.routes.developer_intent import developer_intent_bp
 from api.routes.capital_flow import capital_flow_bp
 from api.routes.sales_leads import sales_leads_bp
+from api.routes.developer_contacts import developer_contacts_bp
 
 app.register_blueprint(leads_bp)
 app.register_blueprint(projects_bp)
@@ -1774,6 +1775,7 @@ app.register_blueprint(markets_bp)
 app.register_blueprint(developer_intent_bp)
 app.register_blueprint(capital_flow_bp)
 app.register_blueprint(sales_leads_bp)
+app.register_blueprint(developer_contacts_bp)
 
 
 # ===================================================================
