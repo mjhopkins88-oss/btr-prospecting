@@ -8588,6 +8588,170 @@ print("[Scheduler] Contractor Intelligence Scan every 12 hours (offset +45m)")
 print("[Scheduler] Parcel Probability Scan every Monday 4:00 AM PT")
 
 
+# ---------------------------------------------------------------------------
+# Test Email Preview — renders email templates in-browser with sample data
+# ---------------------------------------------------------------------------
+
+@app.route('/api/test-email/opportunity', methods=['GET'])
+@require_auth
+def test_email_opportunity():
+    """Preview the opportunity alert email with sample data."""
+    developer = request.args.get('developer', 'Greystar Real Estate Partners')
+    city = request.args.get('city', 'Dallas')
+    state = request.args.get('state', 'TX')
+    confidence = int(request.args.get('confidence', 92))
+
+    sample_signals = {
+        "developer_intent": True,
+        "contractor_activity": True,
+        "parcel_probability": True,
+        "capital_deployment": True,
+        "developer_dna_match": True,
+    }
+
+    signal_items = []
+    if sample_signals.get("developer_intent"):
+        signal_items.append("<li>Developer Intent</li>")
+    if sample_signals.get("contractor_activity"):
+        signal_items.append("<li>Contractor Activity</li>")
+    if sample_signals.get("parcel_probability"):
+        signal_items.append("<li>Parcel Probability Spike</li>")
+    if sample_signals.get("capital_deployment"):
+        signal_items.append("<li>Capital Deployment Signal</li>")
+    if sample_signals.get("developer_dna_match"):
+        signal_items.append("<li>Developer DNA Match</li>")
+
+    signals_html = "\n".join(signal_items)
+    subject = "\U0001f6a8 New Development Opportunity Detected"
+
+    email_body = f"""
+<h2>New Development Opportunity</h2>
+<b>Developer:</b> {developer}<br>
+<b>Market:</b> {city}, {state}<br>
+<b>Confidence:</b> {confidence}%<br>
+<h3>Signals Detected</h3>
+<ul>
+{signals_html}
+</ul>
+"""
+
+    return _render_email_preview(subject, email_body)
+
+
+@app.route('/api/test-email/digest', methods=['GET'])
+@require_auth
+def test_email_digest():
+    """Preview the daily sales digest email with sample data."""
+    sample_leads = [
+        {"developer": "Greystar Real Estate Partners", "city": "Dallas", "state": "TX", "lead_score": 95, "confidence": 92},
+        {"developer": "NexMetro Communities", "city": "Phoenix", "state": "AZ", "lead_score": 88, "confidence": 85},
+        {"developer": "AHV Communities", "city": "Austin", "state": "TX", "lead_score": 82, "confidence": 79},
+        {"developer": "Wan Bridge Group", "city": "San Antonio", "state": "TX", "lead_score": 78, "confidence": 74},
+        {"developer": "Pretium Partners", "city": "Charlotte", "state": "NC", "lead_score": 75, "confidence": 71},
+    ]
+
+    total_new = len(sample_leads)
+
+    market_counts = {}
+    for lead in sample_leads:
+        market = f"{lead['city']}, {lead['state']}"
+        market_counts[market] = market_counts.get(market, 0) + 1
+    top_markets = sorted(market_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    top_lead = sample_leads[0]
+
+    markets_html = "".join(f"<li>{m} ({c} leads)</li>" for m, c in top_markets)
+
+    top_opp_html = (
+        f"<p><b>{top_lead['developer']}</b> &mdash; "
+        f"{top_lead['city']}, {top_lead['state']} "
+        f"(Score: {top_lead['lead_score']}, "
+        f"Confidence: {top_lead['confidence']}%)</p>"
+    )
+
+    leads_table_rows = ""
+    for lead in sample_leads:
+        leads_table_rows += (
+            f"<tr>"
+            f"<td>{lead['developer']}</td>"
+            f"<td>{lead['city']}, {lead['state']}</td>"
+            f"<td>{lead['lead_score']}</td>"
+            f"<td>{lead['confidence']}%</td>"
+            f"</tr>"
+        )
+
+    email_body = f"""
+<h2>Daily Development Intelligence Brief</h2>
+<p><b>New Leads Today:</b> {total_new}</p>
+
+<h3>Top Markets</h3>
+<ul>
+{markets_html}
+</ul>
+
+<h3>Highest Confidence Opportunity</h3>
+{top_opp_html}
+
+<h3>Recent Leads</h3>
+<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+<tr><th>Developer</th><th>Market</th><th>Score</th><th>Confidence</th></tr>
+{leads_table_rows}
+</table>
+"""
+
+    return _render_email_preview("Daily Development Intelligence Brief", email_body)
+
+
+def _render_email_preview(subject, body_html):
+    """Wrap email body in a preview shell that mimics the sent email."""
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Email Preview</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f4f4f5; margin: 0; padding: 40px 20px; }}
+  .envelope {{ max-width: 640px; margin: 0 auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); overflow: hidden; }}
+  .envelope-header {{ background: #1e293b; color: #fff; padding: 20px 28px; }}
+  .envelope-header .label {{ font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; margin-bottom: 4px; }}
+  .envelope-header .from {{ font-size: 14px; margin-bottom: 10px; }}
+  .envelope-header .to {{ font-size: 14px; margin-bottom: 10px; }}
+  .envelope-header .subject {{ font-size: 18px; font-weight: 600; }}
+  .envelope-body {{ padding: 28px; font-size: 15px; line-height: 1.6; color: #1e293b; }}
+  .envelope-body h2 {{ color: #0f172a; margin-top: 0; }}
+  .envelope-body h3 {{ color: #334155; }}
+  .envelope-body table {{ font-size: 14px; width: 100%; }}
+  .envelope-body th {{ background: #f1f5f9; text-align: left; }}
+  .test-banner {{ text-align: center; padding: 12px; background: #fef3c7; color: #92400e; font-weight: 600; font-size: 13px; letter-spacing: 0.5px; }}
+  .preview-links {{ max-width: 640px; margin: 16px auto 0; text-align: center; font-size: 13px; color: #64748b; }}
+  .preview-links a {{ color: #2563eb; text-decoration: none; margin: 0 10px; }}
+  .preview-links a:hover {{ text-decoration: underline; }}
+</style>
+</head>
+<body>
+  <div class="envelope">
+    <div class="test-banner">TEST PREVIEW — This email was not sent</div>
+    <div class="envelope-header">
+      <div class="label">From</div>
+      <div class="from">BTR Intelligence &lt;alerts@btrcommand.com&gt;</div>
+      <div class="label">To</div>
+      <div class="to">max@btrcommand.com</div>
+      <div class="label">Subject</div>
+      <div class="subject">{subject}</div>
+    </div>
+    <div class="envelope-body">
+      {body_html}
+    </div>
+  </div>
+  <div class="preview-links">
+    <a href="/api/test-email/opportunity">Opportunity Alert</a>
+    <a href="/api/test-email/digest">Daily Digest</a>
+  </div>
+</body>
+</html>"""
+    return make_response(html)
+
+
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
