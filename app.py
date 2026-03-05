@@ -1190,6 +1190,14 @@ def init_db():
     _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'pattern_name', 'TEXT')
     _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'pattern_confidence', 'INTEGER DEFAULT 0')
 
+    # Add developer DNA columns to predicted_projects and predicted_project_index
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'developer_dna_confidence', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'developer_expansion_signal', 'BOOLEAN DEFAULT FALSE')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'developer_expansion_reasoning', 'TEXT')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'developer_dna_confidence', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'developer_expansion_signal', 'BOOLEAN DEFAULT FALSE')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'developer_expansion_reasoning', 'TEXT')
+
     # ===================================================================
     # AUTONOMOUS MARKET EXPANSION — Tables
     # ===================================================================
@@ -1326,6 +1334,99 @@ def init_db():
                 180, 95,
                 'Full confirmed BTR development sequence with permit')
         ''', (str(_uuid.uuid4()),))
+
+    # ===================================================================
+    # DEVELOPER DNA MODELING ENGINE — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS developers (
+            id TEXT PRIMARY KEY,
+            developer_name TEXT,
+            headquarters_city TEXT,
+            headquarters_state TEXT,
+            total_projects INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS developer_project_history (
+            id TEXT PRIMARY KEY,
+            developer_id TEXT,
+            project_name TEXT,
+            city TEXT,
+            state TEXT,
+            parcel_id TEXT,
+            project_type TEXT,
+            unit_count INTEGER,
+            square_feet INTEGER,
+            project_stage TEXT,
+            first_detected TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS developer_dna_profiles (
+            id TEXT PRIMARY KEY,
+            developer_id TEXT,
+            preferred_states TEXT,
+            preferred_cities TEXT,
+            typical_unit_range TEXT,
+            typical_project_types TEXT,
+            average_project_size INTEGER,
+            expansion_rate REAL,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS developer_expansion_predictions (
+            id TEXT PRIMARY KEY,
+            developer_id TEXT,
+            predicted_city TEXT,
+            predicted_state TEXT,
+            confidence INTEGER,
+            reasoning TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS developer_dna_log (
+            id TEXT PRIMARY KEY,
+            developer_id TEXT,
+            prediction_city TEXT,
+            prediction_confidence INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_developers_name ON developers(developer_name)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dph_developer ON developer_project_history(developer_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dph_city ON developer_project_history(city, state)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ddna_developer ON developer_dna_profiles(developer_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dep_developer ON developer_expansion_predictions(developer_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dep_city ON developer_expansion_predictions(predicted_city, predicted_state)')
+    except Exception:
+        pass
 
     conn.commit()
     conn.close()
@@ -8065,6 +8166,21 @@ _scheduler.add_job(
     name='Market Expansion (weekly Monday 2 AM)',
     replace_existing=True
 )
+def _scheduled_developer_dna():
+    """Weekly developer DNA: analyze history, build profiles, predict expansions."""
+    try:
+        from workers.analysis.developer_dna_worker import run_developer_dna_pipeline
+        run_developer_dna_pipeline()
+    except Exception as e:
+        print(f"[Scheduler] Developer DNA error: {e}")
+
+_scheduler.add_job(
+    _scheduled_developer_dna,
+    CronTrigger(day_of_week='sun', hour=3, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='weekly_developer_dna',
+    name='Developer DNA Modeling (weekly Sunday 3 AM)',
+    replace_existing=True
+)
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
 print("[Scheduler] Daily signal optimization at 6:45 AM PT")
@@ -8078,6 +8194,7 @@ print("[Scheduler] Weekly city discovery every Wednesday 8:30 AM PT")
 print("[Scheduler] Lead Intelligence pipeline at 3:00 AM PT")
 print("[Scheduler] BTR Pattern Scan every 12 hours")
 print("[Scheduler] Predicted Project Optimizer every 12 hours (offset +30m)")
+print("[Scheduler] Developer DNA Modeling every Sunday 3:00 AM PT")
 
 
 if __name__ == '__main__':
