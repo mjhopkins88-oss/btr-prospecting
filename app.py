@@ -166,18 +166,21 @@ def init_db():
     _real_cursor = conn.cursor()
 
     class _SchemaExecProxy:
-        """Proxy that auto-adapts schema SQL for the target database engine.
-        On PostgreSQL, uses SAVEPOINTs so a failed statement does not abort
-        the entire transaction (psycopg2.errors.InFailedSqlTransaction)."""
+        """Proxy that auto-adapts schema SQL for the target database engine."""
         def execute(self, sql, params=None):
             adapted = _adapt_schema_sql(sql)
+            if params:
+                _real_cursor.execute(adapted, params)
+            else:
+                _real_cursor.execute(adapted)
+        def safe_execute(self, sql):
+            """Execute with SAVEPOINT protection on PostgreSQL.
+            Use this for statements inside try/except blocks (e.g. CREATE INDEX)
+            so a failure does not abort the PostgreSQL transaction."""
             if _is_postgres():
                 _real_cursor.execute('SAVEPOINT _schema_sp')
             try:
-                if params:
-                    _real_cursor.execute(adapted, params)
-                else:
-                    _real_cursor.execute(adapted)
+                self.execute(sql)
                 if _is_postgres():
                     _real_cursor.execute('RELEASE SAVEPOINT _schema_sp')
             except Exception:
@@ -186,7 +189,6 @@ def init_db():
                         _real_cursor.execute('ROLLBACK TO SAVEPOINT _schema_sp')
                     except Exception:
                         pass
-                raise
         def fetchone(self):
             return _real_cursor.fetchone()
         def fetchall(self):
@@ -281,7 +283,7 @@ def init_db():
     ''')
     # Add score_meta column if missing (migration for existing DBs)
     _safe_add_column(_real_cursor if _is_postgres() else c, 'run_prospects', 'score_meta', 'TEXT')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_score ON run_prospects(run_id, score DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_score ON run_prospects(run_id, score DESC)')
     c.execute('''
         CREATE TABLE IF NOT EXISTS discovery_signal_seen (
             fingerprint TEXT PRIMARY KEY,
@@ -352,7 +354,7 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_admin_events_ws ON admin_events(workspace_id, created_at DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_admin_events_ws ON admin_events(workspace_id, created_at DESC)')
     c.execute('''
         CREATE TABLE IF NOT EXISTS crm_companies (
             id TEXT PRIMARY KEY,
@@ -390,9 +392,9 @@ def init_db():
             next_followup_at TIMESTAMP
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_crm_leads_owner ON crm_leads(workspace_id, owner_user_id, status)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_crm_leads_followup ON crm_leads(workspace_id, next_followup_at)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_crm_companies_key ON crm_companies(workspace_id, prospect_key)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_crm_leads_owner ON crm_leads(workspace_id, owner_user_id, status)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_crm_leads_followup ON crm_leads(workspace_id, next_followup_at)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_crm_companies_key ON crm_companies(workspace_id, prospect_key)')
 
     # --- Lead Activity Log ---
     c.execute('''
@@ -406,8 +408,8 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_lead_activity_lead ON lead_activity(lead_id, created_at DESC)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_lead_activity_actor ON lead_activity(actor_user_id, created_at DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_lead_activity_lead ON lead_activity(lead_id, created_at DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_lead_activity_actor ON lead_activity(actor_user_id, created_at DESC)')
 
     # --- Trend Detection & Weekly Briefs Tables ---
     c.execute('''
@@ -424,8 +426,8 @@ def init_db():
             UNIQUE(state, city, topic, computed_at)
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_trend_signals_date ON trend_signals(computed_at)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_trend_signals_state ON trend_signals(state, computed_at)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_trend_signals_date ON trend_signals(computed_at)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_trend_signals_state ON trend_signals(state, computed_at)')
     c.execute('''
         CREATE TABLE IF NOT EXISTS weekly_briefs (
             id TEXT PRIMARY KEY,
@@ -453,8 +455,8 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_weighted_signals_state ON weighted_signals(state, city)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_weighted_signals_date ON weighted_signals(published_at)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_weighted_signals_state ON weighted_signals(state, city)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_weighted_signals_date ON weighted_signals(published_at)')
     # --- Market Momentum ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS market_momentum (
@@ -474,9 +476,9 @@ def init_db():
             UNIQUE(state, city, window_end_date)
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_state ON market_momentum(state, city, window_end_date)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_date ON market_momentum(window_end_date)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_st ON market_momentum(state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_state ON market_momentum(state, city, window_end_date)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_date ON market_momentum(window_end_date)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_st ON market_momentum(state)')
     # --- Sunbelt Sparknotes Summaries (cached LLM output) ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS sunbelt_summaries (
@@ -489,7 +491,7 @@ def init_db():
             UNIQUE(tab, window_days, date_bucket)
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_sunbelt_summaries_lookup ON sunbelt_summaries(tab, window_days, date_bucket)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_sunbelt_summaries_lookup ON sunbelt_summaries(tab, window_days, date_bucket)')
     # --- Article Summaries (per-article structured sparknotes) ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS article_summaries (
@@ -505,7 +507,7 @@ def init_db():
             UNIQUE(article_id)
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_article_summaries_article ON article_summaries(article_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_article_summaries_article ON article_summaries(article_id)')
     # --- Lead Timing Scores ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS lead_timing_scores (
@@ -527,8 +529,8 @@ def init_db():
             UNIQUE(workspace_id, prospect_key)
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_lead_timing_key ON lead_timing_scores(workspace_id, prospect_key)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_lead_timing_score ON lead_timing_scores(call_timing_score DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_lead_timing_key ON lead_timing_scores(workspace_id, prospect_key)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_lead_timing_score ON lead_timing_scores(call_timing_score DESC)')
 
     # ---- Quoting tables ----
     c.execute('''
@@ -550,7 +552,7 @@ def init_db():
             UNIQUE(state, county_name)
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_county_map_lookup ON county_group_map(state, county_name)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_county_map_lookup ON county_group_map(state, county_name)')
     c.execute('''
         CREATE TABLE IF NOT EXISTS quote_requests (
             id TEXT PRIMARY KEY,
@@ -685,11 +687,11 @@ def init_db():
         )
     ''')
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_gov_signals_city_date ON government_signals (state, city, filing_date DESC)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_gov_signals_city_date ON government_signals (state, city, filing_date DESC)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_gov_signals_type_date ON government_signals (signal_type, filing_date DESC)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_gov_signals_type_date ON government_signals (signal_type, filing_date DESC)')
     except Exception:
         pass
 
@@ -707,7 +709,7 @@ def init_db():
         )
     ''')
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_broker_saved_user ON broker_saved(user_id)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_broker_saved_user ON broker_saved(user_id)')
     except Exception:
         pass
 
@@ -736,7 +738,7 @@ def init_db():
         )
     ''')
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_uw_rows_community ON underwriting_rows(community_id)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_uw_rows_community ON underwriting_rows(community_id)')
     except Exception:
         pass
     # Migrate: add deleted_at to underwriting_communities if missing (for existing DBs)
@@ -793,8 +795,8 @@ def init_db():
             UNIQUE(city, state)
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_city_signal_score ON city_signal_metrics(composite_city_score DESC)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_city_signal_state ON city_signal_metrics(state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_city_signal_score ON city_signal_metrics(composite_city_score DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_city_signal_state ON city_signal_metrics(state)')
 
     # STEP 8: Search config (city boost, freshness decay, etc.)
     c.execute('''
@@ -826,43 +828,43 @@ def init_db():
 
     # STEP 5: Index optimization for search performance
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_prospects_city ON prospects(city)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prospects_city ON prospects(city)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_prospects_state ON prospects(state)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prospects_state ON prospects(state)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_prospects_score ON prospects(score DESC)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prospects_score ON prospects(score DESC)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_prospects_final_score ON prospects(final_score DESC)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prospects_final_score ON prospects(final_score DESC)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_prospects_created ON prospects(created_at DESC)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prospects_created ON prospects(created_at DESC)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_city ON run_prospects(city)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_city ON run_prospects(city)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_state ON run_prospects(state)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_state ON run_prospects(state)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_final_score ON run_prospects(final_score DESC)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_final_score ON run_prospects(final_score DESC)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_search_request_log_date ON search_request_log(created_at)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_search_request_log_date ON search_request_log(created_at)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_weighted_signals_entity ON weighted_signals(entity_name)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_weighted_signals_entity ON weighted_signals(entity_name)')
     except Exception:
         pass
 
@@ -991,35 +993,35 @@ def init_db():
 
     # Entity-graph indexes
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_li_projects_city ON li_projects(city, state)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_projects_city ON li_projects(city, state)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_li_signals_project ON li_signals(project_id)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_signals_project ON li_signals(project_id)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_li_signals_company ON li_signals(company_id)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_signals_company ON li_signals(company_id)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_li_signals_type ON li_signals(signal_type)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_signals_type ON li_signals(signal_type)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_li_leads_score ON li_leads(score DESC)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_leads_score ON li_leads(score DESC)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_li_leads_status ON li_leads(status)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_leads_status ON li_leads(status)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_li_contacts_company ON li_contacts(company_id)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_contacts_company ON li_contacts(company_id)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_li_outcomes_lead ON li_outcomes(lead_id)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_outcomes_lead ON li_outcomes(lead_id)')
     except Exception:
         pass
 
@@ -1058,27 +1060,27 @@ def init_db():
 
     # Development event indexes
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_dev_events_type ON development_events(event_type)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dev_events_type ON development_events(event_type)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_dev_events_city ON development_events(city, state)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dev_events_city ON development_events(city, state)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_dev_events_parcel ON development_events(parcel_id)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dev_events_parcel ON development_events(parcel_id)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_dev_events_date ON development_events(event_date)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dev_events_date ON development_events(event_date)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_predicted_projects_city ON predicted_projects(city, state)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_predicted_projects_city ON predicted_projects(city, state)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_predicted_projects_confidence ON predicted_projects(confidence DESC)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_predicted_projects_confidence ON predicted_projects(confidence DESC)')
     except Exception:
         pass
 
@@ -1120,15 +1122,15 @@ def init_db():
     ''')
 
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_ppi_confidence ON predicted_project_index(confidence DESC)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ppi_confidence ON predicted_project_index(confidence DESC)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_ppi_city ON predicted_project_index(city, state)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ppi_city ON predicted_project_index(city, state)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_dev_profiles_name ON developer_profiles(developer_name)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dev_profiles_name ON developer_profiles(developer_name)')
     except Exception:
         pass
 
@@ -1158,15 +1160,15 @@ def init_db():
     ''')
 
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_er_entity_a ON entity_relationships(entity_a)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_er_entity_a ON entity_relationships(entity_a)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_er_entity_b ON entity_relationships(entity_b)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_er_entity_b ON entity_relationships(entity_b)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_er_type ON entity_relationships(relationship_type)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_er_type ON entity_relationships(relationship_type)')
     except Exception:
         pass
 
@@ -1229,15 +1231,15 @@ def init_db():
     ''')
 
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_markets_score ON markets(market_score DESC)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_markets_score ON markets(market_score DESC)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_markets_city ON markets(city, state)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_markets_city ON markets(city, state)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_cgm_city ON city_growth_metrics(city, state)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cgm_city ON city_growth_metrics(city, state)')
     except Exception:
         pass
 
