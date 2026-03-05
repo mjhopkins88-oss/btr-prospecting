@@ -1571,20 +1571,6 @@
             PARCEL_ALERT: 'PARCEL',
         };
 
-        function timeAgo(dateStr) {
-            if (!dateStr) return '';
-            const now = new Date();
-            const then = new Date(dateStr);
-            const secs = Math.floor((now - then) / 1000);
-            if (secs < 60) return 'just now';
-            const mins = Math.floor(secs / 60);
-            if (mins < 60) return mins + ' minute' + (mins !== 1 ? 's' : '') + ' ago';
-            const hrs = Math.floor(mins / 60);
-            if (hrs < 24) return hrs + ' hour' + (hrs !== 1 ? 's' : '') + ' ago';
-            const days = Math.floor(hrs / 24);
-            return days + ' day' + (days !== 1 ? 's' : '') + ' ago';
-        }
-
         function FeedEventCard({ event, isNew }) {
             const colors = FEED_EVENT_COLORS[event.event_type] || FEED_EVENT_COLORS.SIGNAL;
             const label = FEED_EVENT_LABELS[event.event_type] || event.event_type;
