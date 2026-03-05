@@ -5170,13 +5170,14 @@
 
                 // Stats row
                 stats && React.createElement('div', {
-                    style: { display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.75rem', marginBottom: '1.5rem' }
+                    style: { display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '0.75rem', marginBottom: '1.5rem' }
                 },
                     statCard(stats.total?.count || 0, 'Predictions', '#22d3ee'),
                     statCard(stats.confirmed?.count || 0, 'Confirmed', '#10b981'),
                     statCard(stats.unconfirmed?.count || 0, 'Unconfirmed', '#f59e0b'),
                     statCard(stats.events_total?.count || 0, 'Dev Events', '#a78bfa'),
                     statCard(stats.clusters_detected?.count || 0, 'Clusters', '#f472b6'),
+                    statCard(stats.high_convergence?.count || 0, 'High Convergence', '#10b981'),
                 ),
 
                 // Prediction cards
@@ -5195,7 +5196,7 @@
                                         padding: '1.25rem',
                                     }
                                 },
-                                    // Top row: city/developer + confidence
+                                    // Top row: city/developer + convergence score + confidence
                                     React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' } },
                                         React.createElement('div', null,
                                             React.createElement('div', { style: { fontSize: '1.05rem', fontWeight: 600, color: '#f1f5f9' } },
@@ -5205,20 +5206,36 @@
                                                 `Developer: ${pred.developer || 'Unknown'}`
                                             ),
                                         ),
-                                        React.createElement('div', { style: { textAlign: 'center' } },
-                                            React.createElement('span', { style: confidenceBadge(pred.confidence) }, `${pred.confidence}%`),
-                                            React.createElement('div', { style: { fontSize: '0.6rem', color: '#64748b', marginTop: '0.2rem' } }, 'confidence')
+                                        React.createElement('div', { style: { display: 'flex', gap: '1rem', alignItems: 'flex-start' } },
+                                            pred.convergence_score > 0 && React.createElement('div', { style: { textAlign: 'center' } },
+                                                React.createElement('div', {
+                                                    style: {
+                                                        fontSize: '1.3rem', fontWeight: 700,
+                                                        color: pred.convergence_score >= 80 ? '#10b981' : pred.convergence_score >= 60 ? '#22d3ee' : pred.convergence_score >= 40 ? '#f59e0b' : '#94a3b8',
+                                                        fontFamily: "'Orbitron', sans-serif"
+                                                    }
+                                                }, pred.convergence_score),
+                                                React.createElement('div', { style: { fontSize: '0.55rem', color: '#64748b', marginTop: '0.1rem', textTransform: 'uppercase', letterSpacing: '0.05em' } }, 'Opportunity Score')
+                                            ),
+                                            React.createElement('div', { style: { textAlign: 'center' } },
+                                                React.createElement('span', { style: confidenceBadge(pred.confidence) }, `${pred.confidence}%`),
+                                                React.createElement('div', { style: { fontSize: '0.6rem', color: '#64748b', marginTop: '0.2rem' } }, 'confidence')
+                                            ),
                                         ),
                                     ),
 
                                     // Middle row: enriched data grid
                                     React.createElement('div', {
-                                        style: { display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.75rem', marginBottom: '0.75rem',
+                                        style: { display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '0.75rem', marginBottom: '0.75rem',
                                                  background: '#0f172a', borderRadius: '8px', padding: '0.75rem' }
                                     },
                                         React.createElement('div', null,
-                                            React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Signals'),
-                                            React.createElement('div', { style: { fontSize: '1.1rem', fontWeight: 700, color: '#e2e8f0' } }, pred.signal_count || 0)
+                                            React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Convergence'),
+                                            React.createElement('div', { style: { fontSize: '1.1rem', fontWeight: 700, color: pred.convergence_score >= 70 ? '#10b981' : pred.convergence_score >= 40 ? '#f59e0b' : '#475569' } }, pred.convergence_score || 0)
+                                        ),
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Signal Count'),
+                                            React.createElement('div', { style: { fontSize: '1.1rem', fontWeight: 700, color: '#e2e8f0' } }, pred.convergence_signal_count || pred.signal_count || 0)
                                         ),
                                         React.createElement('div', null,
                                             React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Relationships'),
@@ -5234,6 +5251,18 @@
                                             React.createElement('div', { style: { fontSize: '0.85rem', fontWeight: 600, color: '#22d3ee' } },
                                                 pred.expected_construction_window || 'Estimating...')
                                         ),
+                                    ),
+
+                                    // Convergence signal types
+                                    pred.convergence_signal_types && pred.convergence_signal_types.length > 0 && React.createElement('div', {
+                                        style: { display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginBottom: '0.75rem' }
+                                    },
+                                        React.createElement('span', { style: { fontSize: '0.6rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: '0.3rem', alignSelf: 'center' } }, 'Signals:'),
+                                        ...pred.convergence_signal_types.filter(Boolean).map((st, si) => React.createElement('span', {
+                                            key: si,
+                                            style: { fontSize: '0.65rem', color: '#22d3ee', background: 'rgba(34,211,238,0.1)',
+                                                     padding: '0.12rem 0.45rem', borderRadius: '0.25rem', fontWeight: 600 }
+                                        }, st))
                                     ),
 
                                     // Bottom row: pattern + badges
