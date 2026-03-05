@@ -51,7 +51,8 @@ def get_predicted_projects():
         sql = '''
             SELECT id, city, state, developer, prediction_date, confidence,
                    signal_count, cluster_detected, expected_construction_window,
-                   pattern_detected, confirmed, freshness_boost,
+                   pattern_detected, pattern_name, pattern_confidence,
+                   confirmed, freshness_boost,
                    contactability_score, developer_reputation_boost,
                    relationship_count, developer_linked, contractor_linked,
                    consultant_linked, relationship_boost, created_at
@@ -62,7 +63,8 @@ def get_predicted_projects():
         sql = '''
             SELECT id, city, state, developer, prediction_date, confidence,
                    signal_count, cluster_detected, expected_construction_window,
-                   pattern_detected, confirmed, created_at
+                   pattern_detected, pattern_name, pattern_confidence,
+                   confirmed, created_at
             FROM predicted_projects
             WHERE 1=1
         '''
@@ -93,6 +95,8 @@ def get_predicted_projects():
         row['cluster_detected'] = bool(row.get('cluster_detected'))
         row['signal_count'] = row.get('signal_count') or 0
         row['expected_construction_window'] = row.get('expected_construction_window') or None
+        row['pattern_name'] = row.get('pattern_name') or None
+        row['pattern_confidence'] = row.get('pattern_confidence') or 0
         if use_index:
             row['freshness_boost'] = row.get('freshness_boost') or 0
             row['contactability_score'] = row.get('contactability_score') or 0
@@ -153,8 +157,8 @@ def prediction_stats():
 
     stats = {
         'total': fetch_one(f"SELECT COUNT(*) as count FROM {table}"),
-        'confirmed': fetch_one(f"SELECT COUNT(*) as count FROM {table} WHERE confirmed = 1"),
-        'unconfirmed': fetch_one(f"SELECT COUNT(*) as count FROM {table} WHERE confirmed = 0"),
+        'confirmed': fetch_one(f"SELECT COUNT(*) as count FROM {table} WHERE confirmed = TRUE"),
+        'unconfirmed': fetch_one(f"SELECT COUNT(*) as count FROM {table} WHERE confirmed = FALSE"),
         'avg_confidence': fetch_one(f"SELECT ROUND(AVG(confidence), 1) as avg FROM {table}"),
         'by_state': fetch_all(
             f"SELECT state, COUNT(*) as count FROM {table} "
@@ -169,7 +173,7 @@ def prediction_stats():
 
     if use_index:
         stats['clusters_detected'] = fetch_one(
-            f"SELECT COUNT(*) as count FROM {table} WHERE cluster_detected = 1"
+            f"SELECT COUNT(*) as count FROM {table} WHERE cluster_detected = TRUE"
         )
         stats['avg_signal_count'] = fetch_one(
             f"SELECT ROUND(AVG(signal_count), 1) as avg FROM {table}"
