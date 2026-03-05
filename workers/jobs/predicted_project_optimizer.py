@@ -325,18 +325,18 @@ def run_optimizer():
             ''', (
                 pred['id'], city, state, developer,
                 final_confidence, signal_count,
-                1 if cluster else 0,
+                bool(cluster),
                 timeline,
                 pred.get('prediction_date'),
-                1 if pred.get('confirmed') else 0,
+                bool(pred.get('confirmed')),
                 pred.get('pattern_detected'),
                 freshness,
                 contactability,
                 dev_reputation + dev_multi,
                 rel_data.get('relationship_count', 0),
-                1 if rel_data.get('developer_linked') else 0,
-                1 if rel_data.get('contractor_linked') else 0,
-                1 if rel_data.get('consultant_linked') else 0,
+                bool(rel_data.get('developer_linked')),
+                bool(rel_data.get('contractor_linked')),
+                bool(rel_data.get('consultant_linked')),
                 relationship_boost,
             ))
 
@@ -349,7 +349,7 @@ def run_optimizer():
                 WHERE id = ?
             ''', (
                 final_confidence, signal_count,
-                1 if cluster else 0,
+                bool(cluster),
                 timeline,
                 pred['id'],
             ))
