@@ -1,0 +1,198 @@
+"""
+Development Probability Scoring Engine.
+Aggregates multiple signal sources into a single 0-100 development probability score.
+
+Scoring model:
+  land_purchase           → +30
+  zoning_application      → +25
+  permit_activity         → +25
+  engineering_activity    → +20
+  developer_intent        → +20
+  contractor_activity     → +15
+  capital_signal          → +25
+  parcel_signal_momentum  → +20
+  relationship_graph_match → +15
+
+Cap: 100
+"""
+import json
+import uuid
+from datetime import datetime, timedelta
+
+from db import get_db
+
+
+# Signal type scoring weights
+SIGNAL_SCORES = {
+    'LAND_PURCHASE': 30,
+    'ZONING_APPLICATION': 25,
+    'BUILDING_PERMIT': 25,
+    'SITE_PLAN_SUBMISSION': 20,
+    'ENGINEERING_ENGAGEMENT': 20,
+    'UTILITY_APPLICATION': 15,
+    'LLC_FORMATION': 15,
+    'DEVELOPER_EXPANSION': 20,
+    'NEWS_SIGNAL': 10,
+    'CONTRACTOR_ACTIVITY': 15,
+    'CAPITAL_SIGNAL': 25,
+}
+
+# Bonus scores for pattern matches and relationships
+PATTERN_MATCH_BONUS = 15
+RELATIONSHIP_GRAPH_BONUS = 15
+MOMENTUM_BONUS = 20
+
+
+def score_all_parcels():
+    """
+    Calculate development probability for all parcels by aggregating:
+    1. Signal type scores from property_signals
+    2. Pattern match bonuses
+    3. Relationship graph bonuses
+    4. Momentum bonuses
+    """
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Get all parcels
+    cur.execute('SELECT parcel_id, city, state FROM parcels WHERE parcel_id IS NOT NULL')
+    parcels = cur.fetchall()
+
+    scored = 0
+    cutoff_12m = (datetime.utcnow() - timedelta(days=365)).isoformat()
+
+    for parcel_id, city, state in parcels:
+        score = 0
+        reasoning = []
+
+        # 1. Signal type scores
+        cur.execute('''
+            SELECT DISTINCT signal_type FROM property_signals
+            WHERE parcel_id = ? AND created_at >= ?
+        ''', (parcel_id, cutoff_12m))
+        signal_types = [r[0] for r in cur.fetchall()]
+
+        for st in signal_types:
+            pts = SIGNAL_SCORES.get(st, 5)
+            score += pts
+            reasoning.append(f"{st}: +{pts}")
+
+        # 2. Also check development_events for this parcel
+        try:
+            cur.execute('''
+                SELECT DISTINCT event_type FROM development_events
+                WHERE parcel_id = ? AND created_at >= ?
+            ''', (parcel_id, cutoff_12m))
+            for (et,) in cur.fetchall():
+                mapped = SIGNAL_SCORES.get(et.upper(), 0)
+                if mapped and et.upper() not in [s.upper() for s in signal_types]:
+                    score += mapped
+                    reasoning.append(f"{et}: +{mapped}")
+        except Exception:
+            pass
+
+        # 3. Pattern match bonus
+        try:
+            cur.execute('''
+                SELECT COUNT(*) FROM pattern_matches WHERE parcel_id = ?
+            ''', (parcel_id,))
+            pattern_count = cur.fetchone()[0]
+            if pattern_count > 0:
+                bonus = min(pattern_count * PATTERN_MATCH_BONUS, 30)
+                score += bonus
+                reasoning.append(f"Pattern matches ({pattern_count}): +{bonus}")
+        except Exception:
+            pass
+
+        # 4. Relationship graph bonus
+        try:
+            cur.execute('''
+                SELECT COUNT(*) FROM entity_relationships
+                WHERE entity_b = ? OR entity_a = ?
+            ''', (parcel_id, parcel_id))
+            rel_count = cur.fetchone()[0]
+            if rel_count > 0:
+                bonus = min(rel_count * 5, RELATIONSHIP_GRAPH_BONUS)
+                score += bonus
+                reasoning.append(f"Relationship connections ({rel_count}): +{bonus}")
+        except Exception:
+            pass
+
+        # 5. Signal momentum bonus
+        cutoff_60 = (datetime.utcnow() - timedelta(days=60)).isoformat()
+        cur.execute('''
+            SELECT COUNT(*) FROM property_signals
+            WHERE parcel_id = ? AND created_at >= ?
+        ''', (parcel_id, cutoff_60))
+        recent_count = cur.fetchone()[0]
+        if recent_count >= 3:
+            score += MOMENTUM_BONUS
+            reasoning.append(f"Signal momentum ({recent_count} in 60d): +{MOMENTUM_BONUS}")
+        elif recent_count >= 1:
+            bonus = recent_count * 5
+            score += bonus
+            reasoning.append(f"Recent activity ({recent_count} in 60d): +{bonus}")
+
+        # Cap at 100
+        final_score = min(score, 100)
+
+        # Store score
+        try:
+            cur.execute('''
+                UPDATE parcels SET development_probability = ?
+                WHERE parcel_id = ?
+            ''', (final_score, parcel_id))
+
+            # Also update parcel_development_probability table
+            cur.execute('''
+                SELECT id FROM parcel_development_probability WHERE parcel_id = ?
+            ''', (parcel_id,))
+            existing = cur.fetchone()
+            reasoning_text = '; '.join(reasoning) if reasoning else 'No signals detected'
+
+            if existing:
+                cur.execute('''
+                    UPDATE parcel_development_probability
+                    SET probability_score = ?, reasoning = ?,
+                        created_at = CURRENT_TIMESTAMP
+                    WHERE parcel_id = ?
+                ''', (final_score, reasoning_text, parcel_id))
+            else:
+                cur.execute('''
+                    INSERT INTO parcel_development_probability
+                    (id, parcel_id, probability_score, reasoning)
+                    VALUES (?, ?, ?, ?)
+                ''', (str(uuid.uuid4()), parcel_id, final_score, reasoning_text))
+
+            scored += 1
+
+            # Emit event for high-probability parcels
+            if final_score >= 70:
+                try:
+                    from app import log_intelligence_event
+                    log_intelligence_event(
+                        event_type='HIGH_PROBABILITY',
+                        title=f"High development probability — {city or 'Unknown'}, {state or ''}",
+                        description=f"Score: {final_score}/100. {reasoning_text[:200]}",
+                        city=city,
+                        state=state,
+                        related_entity=parcel_id,
+                        entity_id=parcel_id,
+                    )
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"[ProbEngine] Error scoring {parcel_id}: {e}")
+
+    conn.commit()
+    conn.close()
+    print(f"[ProbEngine] Scored {scored} parcels")
+    return {'parcels_scored': scored}
+
+
+def run_probability_scoring():
+    """Full probability scoring cycle."""
+    print(f"[ProbEngine] START — {datetime.utcnow().isoformat()}")
+    result = score_all_parcels()
+    print(f"[ProbEngine] COMPLETE")
+    return result

@@ -1724,6 +1724,80 @@ def init_db():
     c.safe_execute('CREATE INDEX IF NOT EXISTS idx_sl_score ON sales_leads(lead_score DESC)')
     c.safe_execute('CREATE INDEX IF NOT EXISTS idx_sl_created ON sales_leads(created_at DESC)')
 
+    # Property Signals — normalized signals from free government data sources
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS property_signals (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            signal_type TEXT NOT NULL,
+            source TEXT,
+            entity_name TEXT,
+            address TEXT,
+            city TEXT,
+            state TEXT,
+            metadata TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ps_parcel ON property_signals(parcel_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ps_type ON property_signals(signal_type)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ps_city ON property_signals(city, state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ps_created ON property_signals(created_at DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ps_entity ON property_signals(entity_name)')
+
+    # Entities — resolved developer entities and LLCs
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS entities (
+            id TEXT PRIMARY KEY,
+            entity_name TEXT NOT NULL,
+            normalized_name TEXT,
+            entity_type TEXT,
+            parent_entity TEXT,
+            metadata TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ent_name ON entities(entity_name)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ent_normalized ON entities(normalized_name)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ent_parent ON entities(parent_entity)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ent_type ON entities(entity_type)')
+
+    # Market Acceleration — tracks signal acceleration per city
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS market_acceleration (
+            id TEXT PRIMARY KEY,
+            city TEXT NOT NULL,
+            state TEXT NOT NULL,
+            signals_90_days INTEGER DEFAULT 0,
+            signals_12_months INTEGER DEFAULT 0,
+            acceleration_ratio REAL DEFAULT 0,
+            is_emerging INTEGER DEFAULT 0,
+            last_calculated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ma_city ON market_acceleration(city, state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ma_emerging ON market_acceleration(is_emerging)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ma_ratio ON market_acceleration(acceleration_ratio DESC)')
+
+    # Collector Deployments — tracks which cities have active collectors
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS collector_deployments (
+            id TEXT PRIMARY KEY,
+            city TEXT NOT NULL,
+            state TEXT NOT NULL,
+            active INTEGER DEFAULT 1,
+            deployed_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+
+    # Add new columns to parcels table
+    _safe_add_column(c._cur if hasattr(c, '_cur') else _real_cursor, 'parcels', 'address', 'TEXT')
+    _safe_add_column(c._cur if hasattr(c, '_cur') else _real_cursor, 'parcels', 'latitude', 'REAL')
+    _safe_add_column(c._cur if hasattr(c, '_cur') else _real_cursor, 'parcels', 'longitude', 'REAL')
+    _safe_add_column(c._cur if hasattr(c, '_cur') else _real_cursor, 'parcels', 'development_probability', 'INTEGER DEFAULT 0')
+
     conn.commit()
     conn.close()
 
@@ -1765,6 +1839,7 @@ from api.routes.developer_intent import developer_intent_bp
 from api.routes.capital_flow import capital_flow_bp
 from api.routes.sales_leads import sales_leads_bp
 from api.routes.developer_contacts import developer_contacts_bp
+from api.routes.property_signals import property_signals_bp
 
 app.register_blueprint(leads_bp)
 app.register_blueprint(projects_bp)
@@ -1776,6 +1851,7 @@ app.register_blueprint(developer_intent_bp)
 app.register_blueprint(capital_flow_bp)
 app.register_blueprint(sales_leads_bp)
 app.register_blueprint(developer_contacts_bp)
+app.register_blueprint(property_signals_bp)
 
 
 # ===================================================================
@@ -8572,6 +8648,82 @@ _scheduler.add_job(
     name='Parcel Probability Scan (weekly Monday 4 AM)',
     replace_existing=True
 )
+def _scheduled_free_data_intelligence():
+    """Free data intelligence pipeline: collect signals, link parcels, resolve entities,
+    detect patterns, calculate momentum, score probability."""
+    # Phase 1: Collection
+    try:
+        from workers.collectors.news_parser import parse_news
+        parse_news()
+    except Exception as e:
+        print(f"[Scheduler] News parser error: {e}")
+    try:
+        from workers.collectors.entity_watcher import watch_entities
+        watch_entities()
+    except Exception as e:
+        print(f"[Scheduler] Entity watcher error: {e}")
+    try:
+        from workers.collectors.engineering_activity import collect_engineering_activity
+        collect_engineering_activity()
+    except Exception as e:
+        print(f"[Scheduler] Engineering activity error: {e}")
+
+    # Phase 2: Analysis
+    try:
+        from workers.analysis.parcel_linker import run_parcel_linker
+        run_parcel_linker()
+    except Exception as e:
+        print(f"[Scheduler] Parcel linker error: {e}")
+    try:
+        from workers.analysis.entity_resolution_engine import resolve_entities
+        resolve_entities()
+    except Exception as e:
+        print(f"[Scheduler] Entity resolution error: {e}")
+    try:
+        from workers.analysis.temporal_pattern_engine import run_temporal_engine
+        run_temporal_engine()
+    except Exception as e:
+        print(f"[Scheduler] Temporal pattern error: {e}")
+    try:
+        from workers.analysis.parcel_momentum_engine import run_momentum_engine
+        run_momentum_engine()
+    except Exception as e:
+        print(f"[Scheduler] Parcel momentum error: {e}")
+    try:
+        from workers.analysis.market_acceleration_engine import run_market_acceleration
+        run_market_acceleration()
+    except Exception as e:
+        print(f"[Scheduler] Market acceleration error: {e}")
+    try:
+        from workers.analysis.development_probability_engine import run_probability_scoring
+        run_probability_scoring()
+    except Exception as e:
+        print(f"[Scheduler] Development probability error: {e}")
+
+_scheduler.add_job(
+    _scheduled_free_data_intelligence,
+    CronTrigger(hour='*/8', minute=20, timezone=pytz.timezone('America/Los_Angeles')),
+    id='free_data_intelligence_8h',
+    name='Free Data Intelligence Pipeline (every 8h)',
+    replace_existing=True
+)
+
+def _scheduled_city_expansion():
+    """City expansion: detect emerging markets and deploy new collectors."""
+    try:
+        from workers.analysis.city_expansion_engine import run_city_expansion
+        run_city_expansion()
+    except Exception as e:
+        print(f"[Scheduler] City expansion error: {e}")
+
+_scheduler.add_job(
+    _scheduled_city_expansion,
+    CronTrigger(day_of_week='wed', hour=3, minute=30, timezone=pytz.timezone('America/Los_Angeles')),
+    id='weekly_city_expansion',
+    name='City Expansion Detection (weekly Wednesday 3:30 AM)',
+    replace_existing=True
+)
+
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
 print("[Scheduler] Daily signal optimization at 6:45 AM PT")
@@ -8588,6 +8740,8 @@ print("[Scheduler] Predicted Project Optimizer every 12 hours (offset +30m)")
 print("[Scheduler] Developer DNA Modeling every Sunday 3:00 AM PT")
 print("[Scheduler] Contractor Intelligence Scan every 12 hours (offset +45m)")
 print("[Scheduler] Parcel Probability Scan every Monday 4:00 AM PT")
+print("[Scheduler] Free Data Intelligence Pipeline every 8 hours")
+print("[Scheduler] City Expansion Detection every Wednesday 3:30 AM PT")
 
 
 # ---------------------------------------------------------------------------
