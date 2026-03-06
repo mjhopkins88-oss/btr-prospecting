@@ -45,18 +45,49 @@ GRADE_THRESHOLDS = [
 ]
 
 
-def _compute_signal_strength(signals):
-    """Weighted average of signal strengths, boosted by signal type."""
+def _load_source_accuracy_map():
+    """Load source accuracy scores for signal quality weighting."""
+    try:
+        rows = fetch_all("SELECT source_name, accuracy_score FROM signal_sources WHERE accuracy_score > 0")
+        return {r['source_name']: float(r['accuracy_score']) for r in rows}
+    except Exception:
+        return {}
+
+
+def _load_signal_type_accuracy_map():
+    """Load signal type accuracy scores for quality weighting."""
+    try:
+        rows = fetch_all("SELECT signal_type, accuracy_score FROM signal_type_performance WHERE accuracy_score > 0")
+        return {r['signal_type']: float(r['accuracy_score']) for r in rows}
+    except Exception:
+        return {}
+
+
+def _compute_signal_strength(signals, source_accuracy_map=None, type_accuracy_map=None):
+    """Weighted average of signal strengths, boosted by signal type.
+    When source/type accuracy data is available, adjusts base weights
+    using: adjusted_weight = base_weight * source_accuracy."""
     if not signals:
         return 0.0
     total = 0.0
     weight_sum = 0.0
     for sig in signals:
-        type_weight = SIGNAL_TYPE_WEIGHTS.get(sig.get('signal_type', 'other'), 0.3)
+        base_weight = SIGNAL_TYPE_WEIGHTS.get(sig.get('signal_type', 'other'), 0.3)
+
+        # Apply signal quality adjustment from source accuracy
+        source = sig.get('source') or sig.get('source_name')
+        if source and source_accuracy_map and source in source_accuracy_map:
+            base_weight = base_weight * source_accuracy_map[source]
+
+        # Apply signal type accuracy adjustment
+        sig_type = sig.get('signal_type', 'other')
+        if type_accuracy_map and sig_type in type_accuracy_map:
+            base_weight = base_weight * (0.5 + 0.5 * type_accuracy_map[sig_type])
+
         strength = float(sig.get('strength', 0.5))
-        w = type_weight * strength
+        w = base_weight * strength
         total += w
-        weight_sum += type_weight
+        weight_sum += base_weight
     return (total / weight_sum * 100) if weight_sum > 0 else 0.0
 
 
@@ -159,6 +190,10 @@ def score_leads(limit=100):
         if sig_type in SIGNAL_TYPE_WEIGHTS:
             SIGNAL_TYPE_WEIGHTS[sig_type] = w
 
+    # Load signal quality data for dynamic weight adjustment
+    source_accuracy_map = _load_source_accuracy_map()
+    type_accuracy_map = _load_signal_type_accuracy_map()
+
     # Get projects with signals
     projects = fetch_all(
         "SELECT DISTINCT p.id, p.name, p.city, p.state, p.project_type, "
@@ -196,8 +231,8 @@ def score_leads(limit=100):
             [proj['id']]
         )
 
-        # Compute component scores
-        sig_score = _compute_signal_strength(signals)
+        # Compute component scores (with signal quality adjustment)
+        sig_score = _compute_signal_strength(signals, source_accuracy_map, type_accuracy_map)
         fit_score = _compute_entity_fit(proj, company)
         timing_score = _compute_timing(proj)
         market_score = _compute_market(proj)

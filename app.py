@@ -1801,6 +1801,65 @@ def init_db():
     _safe_add_column(c._cur if hasattr(c, '_cur') else _real_cursor, 'parcels', 'longitude', 'REAL')
     _safe_add_column(c._cur if hasattr(c, '_cur') else _real_cursor, 'parcels', 'development_probability', 'INTEGER DEFAULT 0')
 
+    # ===================================================================
+    # SIGNAL QUALITY RANKING ENGINE — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS signal_sources (
+            id TEXT PRIMARY KEY,
+            source_name TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            city TEXT,
+            state TEXT,
+            signals_generated INTEGER DEFAULT 0,
+            signals_confirmed INTEGER DEFAULT 0,
+            accuracy_score REAL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_signal_sources_name ON signal_sources(source_name)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_signal_sources_type ON signal_sources(source_type)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_signal_sources_accuracy ON signal_sources(accuracy_score DESC)')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS signal_performance (
+            id TEXT PRIMARY KEY,
+            signal_id TEXT,
+            source_name TEXT,
+            signal_type TEXT,
+            parcel_id TEXT,
+            predicted_development BOOLEAN DEFAULT FALSE,
+            confirmed_development BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_signal_perf_source ON signal_performance(source_name)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_signal_perf_type ON signal_performance(signal_type)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_signal_perf_parcel ON signal_performance(parcel_id)')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS signal_type_performance (
+            id TEXT PRIMARY KEY,
+            signal_type TEXT NOT NULL UNIQUE,
+            signals_generated INTEGER DEFAULT 0,
+            signals_confirmed INTEGER DEFAULT 0,
+            accuracy_score REAL DEFAULT 0
+        )
+    ''')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_stp_accuracy ON signal_type_performance(accuracy_score DESC)')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS source_priority_index (
+            id TEXT PRIMARY KEY,
+            source_name TEXT NOT NULL UNIQUE,
+            priority_score REAL DEFAULT 0,
+            signals_last_30_days INTEGER DEFAULT 0,
+            accuracy_score REAL DEFAULT 0
+        )
+    ''')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_spi_priority ON source_priority_index(priority_score DESC)')
+
     conn.commit()
     conn.close()
 
@@ -1843,6 +1902,7 @@ from api.routes.capital_flow import capital_flow_bp
 from api.routes.sales_leads import sales_leads_bp
 from api.routes.developer_contacts import developer_contacts_bp
 from api.routes.property_signals import property_signals_bp
+from api.routes.signal_quality import signal_quality_bp
 
 app.register_blueprint(leads_bp)
 app.register_blueprint(projects_bp)
@@ -1855,6 +1915,7 @@ app.register_blueprint(capital_flow_bp)
 app.register_blueprint(sales_leads_bp)
 app.register_blueprint(developer_contacts_bp)
 app.register_blueprint(property_signals_bp)
+app.register_blueprint(signal_quality_bp)
 
 
 # ===================================================================
@@ -8773,6 +8834,39 @@ _scheduler.add_job(
     replace_existing=True
 )
 
+# --- Signal Quality Ranking Engine ---
+def _scheduled_signal_quality():
+    """Signal quality engine: recalculate source accuracy, type accuracy, priority index."""
+    try:
+        from workers.analysis.signal_quality_engine import run_signal_quality_worker
+        run_signal_quality_worker()
+    except Exception as e:
+        print(f"[Scheduler] Signal quality engine error: {e}")
+
+_scheduler.add_job(
+    _scheduled_signal_quality,
+    CronTrigger(hour='*/12', minute=20, timezone=pytz.timezone('America/Los_Angeles')),
+    id='signal_quality_12h',
+    name='Signal Quality Engine (every 12 hours)',
+    replace_existing=True
+)
+
+def _scheduled_development_confirmation():
+    """Development confirmation engine: detect confirmed developments."""
+    try:
+        from workers.analysis.development_confirmation_engine import run_development_confirmation_worker
+        run_development_confirmation_worker()
+    except Exception as e:
+        print(f"[Scheduler] Development confirmation error: {e}")
+
+_scheduler.add_job(
+    _scheduled_development_confirmation,
+    CronTrigger(hour=1, minute=30, timezone=pytz.timezone('America/Los_Angeles')),
+    id='dev_confirmation_daily',
+    name='Development Confirmation Engine (daily 1:30 AM)',
+    replace_existing=True
+)
+
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
 print("[Scheduler] Daily signal optimization at 6:45 AM PT")
@@ -8792,6 +8886,8 @@ print("[Scheduler] Parcel Probability Scan every Monday 4:00 AM PT")
 print("[Scheduler] Free Data Intelligence Pipeline every 8 hours")
 print("[Scheduler] City Expansion Detection every Wednesday 3:30 AM PT")
 print("[Scheduler] Supply Chain Intelligence Pipeline every 6 hours")
+print("[Scheduler] Signal Quality Engine every 12 hours (offset +20m)")
+print("[Scheduler] Development Confirmation Engine daily 1:30 AM PT")
 
 
 # ---------------------------------------------------------------------------

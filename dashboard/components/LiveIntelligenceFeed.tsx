@@ -36,7 +36,8 @@ type EventType =
   | 'CONTRACTOR_ACTIVITY'
   | 'PARCEL_ALERT'
   | 'SUPPLY_CHAIN'
-  | 'GRAPH_INFERENCE';
+  | 'GRAPH_INFERENCE'
+  | 'SIGNAL_QUALITY';
 
 interface EventColorScheme {
   accent: string;
@@ -58,6 +59,7 @@ export const FEED_EVENT_COLORS: Record<EventType, EventColorScheme> = {
   PARCEL_ALERT: { accent: '#facc15', bg: 'rgba(250,204,21,0.08)', border: 'rgba(250,204,21,0.2)' },
   SUPPLY_CHAIN: { accent: '#fb923c', bg: 'rgba(251,146,60,0.08)', border: 'rgba(251,146,60,0.2)' },
   GRAPH_INFERENCE: { accent: '#c084fc', bg: 'rgba(192,132,252,0.08)', border: 'rgba(192,132,252,0.2)' },
+  SIGNAL_QUALITY: { accent: '#06b6d4', bg: 'rgba(6,182,212,0.08)', border: 'rgba(6,182,212,0.2)' },
 };
 
 export const FEED_EVENT_LABELS: Record<EventType, string> = {
@@ -69,6 +71,7 @@ export const FEED_EVENT_LABELS: Record<EventType, string> = {
   PARCEL_ALERT: 'PARCEL',
   SUPPLY_CHAIN: 'SUPPLY CHAIN',
   GRAPH_INFERENCE: 'GRAPH',
+  SIGNAL_QUALITY: 'QUALITY',
 };
 
 // ---- Helpers ----
@@ -206,7 +209,7 @@ export default function LiveIntelligenceFeed() {
     }
   }, [newIds]);
 
-  const typeFilters: string[] = ['', 'SIGNAL', 'PERMIT', 'PATTERN', 'DEVELOPER_EXPANSION', 'CONTRACTOR_ACTIVITY', 'PARCEL_ALERT', 'SUPPLY_CHAIN', 'GRAPH_INFERENCE'];
+  const typeFilters: string[] = ['', 'SIGNAL', 'PERMIT', 'PATTERN', 'DEVELOPER_EXPANSION', 'CONTRACTOR_ACTIVITY', 'PARCEL_ALERT', 'SUPPLY_CHAIN', 'GRAPH_INFERENCE', 'SIGNAL_QUALITY'];
 
   return (
     <div style={{ maxWidth: '900px', margin: '0 auto' }}>
