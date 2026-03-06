@@ -34,7 +34,9 @@ type EventType =
   | 'PATTERN'
   | 'DEVELOPER_EXPANSION'
   | 'CONTRACTOR_ACTIVITY'
-  | 'PARCEL_ALERT';
+  | 'PARCEL_ALERT'
+  | 'SUPPLY_CHAIN'
+  | 'GRAPH_INFERENCE';
 
 interface EventColorScheme {
   accent: string;
@@ -54,6 +56,8 @@ export const FEED_EVENT_COLORS: Record<EventType, EventColorScheme> = {
   DEVELOPER_EXPANSION: { accent: '#34d399', bg: 'rgba(52,211,153,0.08)', border: 'rgba(52,211,153,0.2)' },
   CONTRACTOR_ACTIVITY: { accent: '#f97316', bg: 'rgba(249,115,22,0.08)', border: 'rgba(249,115,22,0.2)' },
   PARCEL_ALERT: { accent: '#facc15', bg: 'rgba(250,204,21,0.08)', border: 'rgba(250,204,21,0.2)' },
+  SUPPLY_CHAIN: { accent: '#fb923c', bg: 'rgba(251,146,60,0.08)', border: 'rgba(251,146,60,0.2)' },
+  GRAPH_INFERENCE: { accent: '#c084fc', bg: 'rgba(192,132,252,0.08)', border: 'rgba(192,132,252,0.2)' },
 };
 
 export const FEED_EVENT_LABELS: Record<EventType, string> = {
@@ -63,6 +67,8 @@ export const FEED_EVENT_LABELS: Record<EventType, string> = {
   DEVELOPER_EXPANSION: 'EXPANSION',
   CONTRACTOR_ACTIVITY: 'CONTRACTOR',
   PARCEL_ALERT: 'PARCEL',
+  SUPPLY_CHAIN: 'SUPPLY CHAIN',
+  GRAPH_INFERENCE: 'GRAPH',
 };
 
 // ---- Helpers ----
@@ -200,7 +206,7 @@ export default function LiveIntelligenceFeed() {
     }
   }, [newIds]);
 
-  const typeFilters: string[] = ['', 'SIGNAL', 'PERMIT', 'PATTERN', 'DEVELOPER_EXPANSION', 'CONTRACTOR_ACTIVITY', 'PARCEL_ALERT'];
+  const typeFilters: string[] = ['', 'SIGNAL', 'PERMIT', 'PATTERN', 'DEVELOPER_EXPANSION', 'CONTRACTOR_ACTIVITY', 'PARCEL_ALERT', 'SUPPLY_CHAIN', 'GRAPH_INFERENCE'];
 
   return (
     <div style={{ maxWidth: '900px', margin: '0 auto' }}>
