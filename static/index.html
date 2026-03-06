@@ -1025,6 +1025,7 @@
                     {activeTab === 'feed' && <LiveIntelligenceFeed />}
                     {activeTab === 'intent' && <DeveloperIntentPanel />}
                     {activeTab === 'capital' && <CapitalFlowPanel />}
+                    {activeTab === 'signal_quality' && <SignalIntelligencePanel />}
                     {activeTab === 'predictions' && user?.role !== 'broker' && <PredictedDevelopments />}
                     {activeTab === 'markets' && user?.role !== 'broker' && <MarketExpansion />}
                     {activeTab === 'dealboard' && <DealBoardPage user={user} />}
@@ -1132,6 +1133,7 @@
                     { id: 'feed', label: 'Live Feed' },
                     { id: 'intent', label: 'Developer Intent' },
                     { id: 'capital', label: 'Capital Flow' },
+                    { id: 'signal_quality', label: 'Signal Intelligence' },
                 ]},
             ],
             producer: [
@@ -1147,6 +1149,7 @@
                     { id: 'feed', label: 'Live Feed' },
                     { id: 'intent', label: 'Developer Intent' },
                     { id: 'capital', label: 'Capital Flow' },
+                    { id: 'signal_quality', label: 'Signal Intelligence' },
                 ]},
                 { label: 'Pipeline', items: [
                     { id: 'pipeline', label: 'My Pipeline' },
@@ -1166,6 +1169,7 @@
                     { id: 'feed', label: 'Live Feed' },
                     { id: 'intent', label: 'Developer Intent' },
                     { id: 'capital', label: 'Capital Flow' },
+                    { id: 'signal_quality', label: 'Signal Intelligence' },
                 ]},
                 { label: 'Pipeline', items: [
                     { id: 'pipeline', label: 'My Pipeline' },
@@ -1570,6 +1574,7 @@
             PARCEL_ALERT: { accent: '#facc15', bg: 'rgba(250,204,21,0.08)', border: 'rgba(250,204,21,0.2)' },
             DEVELOPER_INTENT: { accent: '#a855f7', bg: 'rgba(168,85,247,0.08)', border: 'rgba(168,85,247,0.2)' },
             CAPITAL_FLOW: { accent: '#eab308', bg: 'rgba(234,179,8,0.08)', border: 'rgba(234,179,8,0.2)' },
+            SIGNAL_QUALITY: { accent: '#06b6d4', bg: 'rgba(6,182,212,0.08)', border: 'rgba(6,182,212,0.2)' },
         };
 
         const FEED_EVENT_LABELS = {
@@ -1581,6 +1586,7 @@
             PARCEL_ALERT: 'PARCEL',
             DEVELOPER_INTENT: 'INTENT',
             CAPITAL_FLOW: 'CAPITAL',
+            SIGNAL_QUALITY: 'QUALITY',
         };
 
         function FeedEventCard({ event, isNew }) {
@@ -1627,6 +1633,125 @@
         // ===================================================================
         // CAPITAL FLOW PANEL
         // ===================================================================
+        // ===================================================================
+        // SIGNAL INTELLIGENCE PANEL
+        // ===================================================================
+        function SignalIntelligencePanel() {
+            const [data, setData] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [activePanel, setActivePanel] = useState('sources');
+
+            const fetchData = useCallback(async () => {
+                try {
+                    const res = await fetch('/api/signal-intelligence?limit=20');
+                    const json = await res.json();
+                    if (json.success) setData(json);
+                } catch (e) { console.error('[SignalIntelligence]', e); }
+                finally { setLoading(false); }
+            }, []);
+
+            useEffect(() => { fetchData(); const iv = setInterval(fetchData, 60000); return () => clearInterval(iv); }, [fetchData]);
+
+            function accColor(pct) { return pct >= 70 ? '#34d399' : pct >= 50 ? '#facc15' : pct >= 30 ? '#f97316' : '#ef4444'; }
+            function prioColor(s) { return s > 0.7 ? '#34d399' : s >= 0.4 ? '#facc15' : '#64748b'; }
+
+            if (loading && !data) return e('div', { style: { textAlign: 'center', padding: '3rem', color: '#34d399', fontFamily: "'Orbitron', sans-serif" } }, 'LOADING SIGNAL INTELLIGENCE...');
+            if (!data) return e('div', { style: { textAlign: 'center', padding: '3rem', color: '#64748b' } }, 'No signal intelligence data available yet.');
+
+            const { top_sources, type_rankings, city_rankings, priority_index, stats } = data;
+            const panels = [{ key: 'sources', label: 'TOP SOURCES' }, { key: 'types', label: 'SIGNAL TYPES' }, { key: 'cities', label: 'CITIES' }, { key: 'priority', label: 'PRIORITY INDEX' }];
+
+            return e('div', { style: { maxWidth: '1000px', margin: '0 auto' } },
+                // Header
+                e('div', { style: { marginBottom: '1.5rem' } },
+                    e('h2', { style: { fontFamily: "'Orbitron', sans-serif", fontSize: '1.3rem', fontWeight: 900, background: 'linear-gradient(135deg, #a78bfa 0%, #22d3ee 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 } }, 'SIGNAL INTELLIGENCE'),
+                    e('p', { style: { color: '#64748b', fontSize: '0.8rem', margin: '0.25rem 0 0' } }, 'Signal quality rankings and source accuracy analytics')
+                ),
+                // Stats row
+                e('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '1.5rem' } },
+                    [{ label: 'TRACKED SOURCES', value: stats.total_sources },
+                     { label: 'AVG ACCURACY', value: stats.avg_accuracy_pct + '%', color: accColor(stats.avg_accuracy_pct) },
+                     { label: 'SIGNALS TRACKED', value: stats.total_signals_tracked },
+                     { label: 'CONFIRMED', value: stats.total_confirmed, color: '#34d399' }
+                    ].map(c => e('div', { key: c.label, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px 16px', textAlign: 'center' } },
+                        e('div', { style: { fontSize: '0.6rem', color: '#64748b', fontFamily: "'Orbitron', sans-serif", marginBottom: '6px', letterSpacing: '0.05em' } }, c.label),
+                        e('div', { style: { fontSize: '1.4rem', fontWeight: 700, color: c.color || '#f1f5f9', fontFamily: "'Orbitron', sans-serif" } }, c.value)
+                    ))
+                ),
+                // Tab bar
+                e('div', { style: { display: 'flex', gap: '0.35rem', marginBottom: '1rem', flexWrap: 'wrap' } },
+                    panels.map(tab => e('button', { key: tab.key, onClick: () => setActivePanel(tab.key), style: {
+                        background: activePanel === tab.key ? 'rgba(167,139,250,0.08)' : 'transparent',
+                        border: '1px solid ' + (activePanel === tab.key ? 'rgba(167,139,250,0.3)' : 'rgba(255,255,255,0.06)'),
+                        color: activePanel === tab.key ? '#a78bfa' : '#64748b', padding: '0.35rem 0.75rem', borderRadius: '4px', cursor: 'pointer',
+                        fontSize: '0.65rem', fontWeight: 600, fontFamily: "'Orbitron', sans-serif",
+                    } }, tab.label))
+                ),
+                // Content
+                e('div', { style: { maxHeight: '55vh', overflowY: 'auto' } },
+                    // SOURCES tab
+                    activePanel === 'sources' && (top_sources.length === 0
+                        ? e('div', { style: { textAlign: 'center', padding: '2rem', color: '#475569' } }, 'No signal sources tracked yet.')
+                        : top_sources.map((src, i) => e('div', { key: src.source_name, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderLeft: '3px solid ' + accColor(src.accuracy_pct), borderRadius: '8px', padding: '12px 16px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                            e('div', null,
+                                e('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+                                    e('span', { style: { fontSize: '0.7rem', color: '#475569', fontWeight: 700 } }, '#' + (i + 1)),
+                                    e('span', { style: { fontSize: '0.95rem', fontWeight: 600, color: '#f1f5f9' } }, src.source_name),
+                                    e('span', { style: { fontSize: '0.55rem', fontFamily: "'Orbitron', sans-serif", background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.2)', borderRadius: '4px', padding: '2px 6px', color: '#a78bfa' } }, src.source_type)
+                                ),
+                                e('div', { style: { fontSize: '0.75rem', color: '#64748b', marginTop: '4px' } }, src.signals_confirmed + '/' + src.signals_generated + ' signals confirmed' + (src.city ? ' \u00B7 ' + src.city + (src.state ? ', ' + src.state : '') : ''))
+                            ),
+                            e('div', { style: { textAlign: 'right' } },
+                                e('div', { style: { fontSize: '1.2rem', fontWeight: 700, color: accColor(src.accuracy_pct), fontFamily: "'Orbitron', sans-serif" } }, src.accuracy_pct + '%'),
+                                e('div', { style: { fontSize: '0.6rem', color: '#475569' } }, 'ACCURACY')
+                            )
+                        ))
+                    ),
+                    // TYPES tab
+                    activePanel === 'types' && (type_rankings.length === 0
+                        ? e('div', { style: { textAlign: 'center', padding: '2rem', color: '#475569' } }, 'No signal type data available yet.')
+                        : type_rankings.map(t => e('div', { key: t.signal_type, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '12px 16px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                            e('div', null,
+                                e('div', { style: { fontSize: '0.95rem', fontWeight: 600, color: '#f1f5f9' } }, t.signal_type),
+                                e('div', { style: { fontSize: '0.75rem', color: '#64748b', marginTop: '2px' } }, t.signals_confirmed + '/' + t.signals_generated + ' confirmed')
+                            ),
+                            e('div', { style: { width: '60px', height: '60px', borderRadius: '50%', border: '3px solid ' + accColor(t.accuracy_pct), display: 'flex', alignItems: 'center', justifyContent: 'center' } },
+                                e('div', { style: { fontSize: '0.9rem', fontWeight: 700, color: accColor(t.accuracy_pct), fontFamily: "'Orbitron', sans-serif" } }, t.accuracy_pct + '%')
+                            )
+                        ))
+                    ),
+                    // CITIES tab
+                    activePanel === 'cities' && (city_rankings.length === 0
+                        ? e('div', { style: { textAlign: 'center', padding: '2rem', color: '#475569' } }, 'No city data available yet.')
+                        : city_rankings.map(c => e('div', { key: c.city + '-' + c.state, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '12px 16px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                            e('div', null,
+                                e('div', { style: { fontSize: '0.95rem', fontWeight: 600, color: '#f1f5f9' } }, c.city + ', ' + c.state),
+                                e('div', { style: { fontSize: '0.75rem', color: '#64748b', marginTop: '2px' } }, c.source_count + ' sources \u00B7 ' + c.total_confirmed + '/' + c.total_signals + ' confirmed')
+                            ),
+                            e('div', { style: { textAlign: 'right' } },
+                                e('div', { style: { fontSize: '1.2rem', fontWeight: 700, color: accColor(c.avg_accuracy_pct), fontFamily: "'Orbitron', sans-serif" } }, c.avg_accuracy_pct + '%'),
+                                e('div', { style: { fontSize: '0.6rem', color: '#475569' } }, 'AVG ACCURACY')
+                            )
+                        ))
+                    ),
+                    // PRIORITY tab
+                    activePanel === 'priority' && (priority_index.length === 0
+                        ? e('div', { style: { textAlign: 'center', padding: '2rem', color: '#475569' } }, 'No priority data available yet.')
+                        : priority_index.map(p => e('div', { key: p.source_name, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderLeft: '3px solid ' + prioColor(p.priority_score), borderRadius: '8px', padding: '12px 16px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                            e('div', null,
+                                e('div', { style: { fontSize: '0.95rem', fontWeight: 600, color: '#f1f5f9' } }, p.source_name),
+                                e('div', { style: { fontSize: '0.75rem', color: '#64748b', marginTop: '2px' } }, p.signals_last_30_days + ' signals (30d) \u00B7 Accuracy: ' + p.accuracy_pct + '%')
+                            ),
+                            e('div', { style: { textAlign: 'right' } },
+                                e('div', { style: { fontSize: '0.9rem', fontWeight: 700, color: prioColor(p.priority_score), fontFamily: "'Orbitron', sans-serif" } }, p.schedule_interval),
+                                e('div', { style: { fontSize: '0.6rem', color: '#475569' } }, 'PRIORITY: ' + (p.priority_score * 100).toFixed(0))
+                            )
+                        ))
+                    )
+                )
+            );
+        }
+
         function CapitalFlowPanel() {
             const [predictions, setPredictions] = useState([]);
             const [loading, setLoading] = useState(true);

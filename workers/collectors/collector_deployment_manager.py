@@ -7,6 +7,9 @@ When a new market is detected, activates signal collectors for:
 - planning agendas
 - bid boards
 Updates markets.collectors_active = TRUE and creates baseline records.
+
+Also supports priority-based scheduling: higher-quality sources
+(as determined by the Signal Quality Engine) run more frequently.
 """
 import uuid
 import json
@@ -23,6 +26,40 @@ COLLECTOR_TYPES = [
     'planning_agendas',
     'bid_boards',
 ]
+
+
+def get_collector_priority_schedule():
+    """
+    Return a dict mapping source_name -> interval_hours based on
+    the source_priority_index.
+
+    priority_score > 0.7  -> every 2 hours
+    priority_score 0.4-0.7 -> every 6 hours
+    priority_score < 0.4  -> every 24 hours
+    """
+    conn = get_db()
+    cur = conn.cursor()
+    schedule = {}
+    try:
+        cur.execute('''
+            SELECT source_name, priority_score
+            FROM source_priority_index
+            WHERE priority_score > 0
+        ''')
+        rows = cur.fetchall()
+        for row in rows:
+            source_name = row[0]
+            score = row[1] or 0
+            if score > 0.7:
+                schedule[source_name] = 2
+            elif score >= 0.4:
+                schedule[source_name] = 6
+            else:
+                schedule[source_name] = 24
+    except Exception:
+        pass
+    conn.close()
+    return schedule
 
 
 def deploy_collectors_for_new_markets():
