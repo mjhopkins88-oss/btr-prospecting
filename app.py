@@ -1172,6 +1172,9 @@ def init_db():
     except Exception:
         pass
 
+    # Add relationship_strength column to entity_relationships
+    _safe_add_column(_cur_for_migrate, 'entity_relationships', 'relationship_strength', 'INTEGER DEFAULT 0')
+
     # Add relationship columns to predicted_project_index and predicted_projects
     _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'relationship_count', 'INTEGER DEFAULT 0')
     _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'developer_linked', 'BOOLEAN DEFAULT FALSE')
@@ -8724,6 +8727,52 @@ _scheduler.add_job(
     replace_existing=True
 )
 
+def _scheduled_supply_chain_intelligence():
+    """Construction supply chain intelligence pipeline."""
+    # Phase 1: Collect supply chain signals
+    try:
+        from workers.collectors.construction.engineering_activity_collector import collect_engineering_plans
+        collect_engineering_plans()
+    except Exception as e:
+        print(f"[Scheduler] Engineering activity collector error: {e}")
+    try:
+        from workers.collectors.construction.utility_connection_collector import collect_utility_connections
+        collect_utility_connections()
+    except Exception as e:
+        print(f"[Scheduler] Utility connection collector error: {e}")
+    try:
+        from workers.collectors.construction.contractor_bid_collector import collect_contractor_bids
+        collect_contractor_bids()
+    except Exception as e:
+        print(f"[Scheduler] Contractor bid collector error: {e}")
+    try:
+        from workers.collectors.construction.site_prep_activity_collector import collect_site_prep
+        collect_site_prep()
+    except Exception as e:
+        print(f"[Scheduler] Site prep collector error: {e}")
+
+    # Phase 2: Run signal graph engine
+    try:
+        from workers.analysis.signal_graph_engine import run_signal_graph_engine
+        run_signal_graph_engine()
+    except Exception as e:
+        print(f"[Scheduler] Signal graph engine error: {e}")
+
+    # Phase 3: Detect supply chain patterns
+    try:
+        from workers.analysis.supply_chain_pattern_engine import run_supply_chain_engine
+        run_supply_chain_engine()
+    except Exception as e:
+        print(f"[Scheduler] Supply chain pattern engine error: {e}")
+
+_scheduler.add_job(
+    _scheduled_supply_chain_intelligence,
+    CronTrigger(hour='*/6', minute=45, timezone=pytz.timezone('America/Los_Angeles')),
+    id='supply_chain_intelligence_6h',
+    name='Supply Chain Intelligence Pipeline (every 6h)',
+    replace_existing=True
+)
+
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
 print("[Scheduler] Daily signal optimization at 6:45 AM PT")
@@ -8742,6 +8791,7 @@ print("[Scheduler] Contractor Intelligence Scan every 12 hours (offset +45m)")
 print("[Scheduler] Parcel Probability Scan every Monday 4:00 AM PT")
 print("[Scheduler] Free Data Intelligence Pipeline every 8 hours")
 print("[Scheduler] City Expansion Detection every Wednesday 3:30 AM PT")
+print("[Scheduler] Supply Chain Intelligence Pipeline every 6 hours")
 
 
 # ---------------------------------------------------------------------------

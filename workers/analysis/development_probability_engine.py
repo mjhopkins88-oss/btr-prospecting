@@ -3,15 +3,19 @@ Development Probability Scoring Engine.
 Aggregates multiple signal sources into a single 0-100 development probability score.
 
 Scoring model:
-  land_purchase           → +30
-  zoning_application      → +25
-  permit_activity         → +25
-  engineering_activity    → +20
-  developer_intent        → +20
-  contractor_activity     → +15
-  capital_signal          → +25
-  parcel_signal_momentum  → +20
-  relationship_graph_match → +15
+  land_purchase               → +30
+  zoning_application          → +25
+  permit_activity             → +25
+  engineering_activity        → +20
+  developer_intent            → +20
+  contractor_activity         → +15
+  capital_signal              → +25
+  parcel_signal_momentum      → +20
+  relationship_graph_match    → +20
+  civil_engineering_signal    → +20
+  site_prep_activity          → +25
+  utility_connection_request  → +25
+  contractor_bid_signal       → +15
 
 Cap: 100
 """
@@ -35,11 +39,18 @@ SIGNAL_SCORES = {
     'NEWS_SIGNAL': 10,
     'CONTRACTOR_ACTIVITY': 15,
     'CAPITAL_SIGNAL': 25,
+    # Construction supply chain signals
+    'CIVIL_ENGINEERING_PLAN': 20,
+    'SITE_PREP_ACTIVITY': 25,
+    'UTILITY_CONNECTION_REQUEST': 25,
+    'EARTHWORK_CONTRACTOR': 15,
+    'CONCRETE_SUPPLY_SIGNAL': 15,
+    'INFRASTRUCTURE_BID': 15,
 }
 
 # Bonus scores for pattern matches and relationships
 PATTERN_MATCH_BONUS = 15
-RELATIONSHIP_GRAPH_BONUS = 15
+RELATIONSHIP_GRAPH_BONUS = 20
 MOMENTUM_BONUS = 20
 
 
@@ -104,19 +115,40 @@ def score_all_parcels():
         except Exception:
             pass
 
-        # 4. Relationship graph bonus
+        # 4. Relationship graph bonus (includes signal graph engine scoring)
         try:
             cur.execute('''
-                SELECT COUNT(*) FROM entity_relationships
-                WHERE entity_b = ? OR entity_a = ?
+                SELECT COUNT(*),
+                       COALESCE(AVG(relationship_strength), 0),
+                       COALESCE(MAX(relationship_strength), 0)
+                FROM entity_relationships
+                WHERE (entity_b = ? OR entity_a = ?)
+                AND COALESCE(relationship_strength, 0) > 0
             ''', (parcel_id, parcel_id))
-            rel_count = cur.fetchone()[0]
+            row = cur.fetchone()
+            rel_count = row[0] if row else 0
+            avg_strength = row[1] if row else 0
             if rel_count > 0:
-                bonus = min(rel_count * 5, RELATIONSHIP_GRAPH_BONUS)
+                # Enhanced bonus: factor in relationship strength
+                base_bonus = min(rel_count * 5, RELATIONSHIP_GRAPH_BONUS)
+                strength_bonus = min(int(avg_strength * 0.1), 5)
+                bonus = min(base_bonus + strength_bonus, RELATIONSHIP_GRAPH_BONUS)
                 score += bonus
-                reasoning.append(f"Relationship connections ({rel_count}): +{bonus}")
+                reasoning.append(f"Relationship graph ({rel_count}, strength {avg_strength:.0f}): +{bonus}")
         except Exception:
-            pass
+            # Fallback to simple count
+            try:
+                cur.execute('''
+                    SELECT COUNT(*) FROM entity_relationships
+                    WHERE entity_b = ? OR entity_a = ?
+                ''', (parcel_id, parcel_id))
+                rel_count = cur.fetchone()[0]
+                if rel_count > 0:
+                    bonus = min(rel_count * 5, RELATIONSHIP_GRAPH_BONUS)
+                    score += bonus
+                    reasoning.append(f"Relationship connections ({rel_count}): +{bonus}")
+            except Exception:
+                pass
 
         # 5. Signal momentum bonus
         cutoff_60 = (datetime.utcnow() - timedelta(days=60)).isoformat()

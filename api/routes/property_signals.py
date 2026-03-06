@@ -125,7 +125,10 @@ def get_opportunities():
                (SELECT COUNT(*) FROM property_signals ps
                 WHERE ps.parcel_id = p.parcel_id) as signal_density,
                (SELECT COUNT(*) FROM pattern_matches pm
-                WHERE pm.parcel_id = p.parcel_id) as pattern_matches
+                WHERE pm.parcel_id = p.parcel_id) as pattern_matches,
+               (SELECT COUNT(*) FROM entity_relationships er
+                WHERE (er.entity_a = p.parcel_id OR er.entity_b = p.parcel_id)
+                AND COALESCE(er.relationship_strength, 0) > 0) as graph_connections
         FROM parcels p
         LEFT JOIN parcel_development_probability pdp ON pdp.parcel_id = p.parcel_id
         WHERE COALESCE(p.development_probability, 0) >= ?
@@ -139,7 +142,7 @@ def get_opportunities():
         sql += ' AND p.state = ?'
         params.append(state)
 
-    sql += ' ORDER BY development_probability DESC, signal_density DESC LIMIT ? OFFSET ?'
+    sql += ' ORDER BY development_probability DESC, signal_density DESC, graph_connections DESC LIMIT ? OFFSET ?'
     params.extend([limit, offset])
 
     rows = fetch_all(sql, params)
@@ -246,3 +249,177 @@ def get_market_acceleration():
         r['last_calculated'] = _safe_ts(r.get('last_calculated'))
 
     return jsonify({'markets': rows, 'count': len(rows)})
+
+
+# -----------------------------------------------------------------------
+# Construction Supply Chain Signals
+# -----------------------------------------------------------------------
+
+SUPPLY_CHAIN_TYPES = [
+    'CIVIL_ENGINEERING_PLAN', 'SITE_PREP_ACTIVITY',
+    'UTILITY_CONNECTION_REQUEST', 'EARTHWORK_CONTRACTOR',
+    'CONCRETE_SUPPLY_SIGNAL', 'INFRASTRUCTURE_BID',
+]
+
+
+@property_signals_bp.route('/api/supply-chain-signals', methods=['GET'])
+def get_supply_chain_signals():
+    """
+    GET /api/supply-chain-signals
+    Returns construction supply chain signals for the radar map.
+    Query params: city, state, limit, offset
+    """
+    city = request.args.get('city')
+    state = request.args.get('state')
+    limit = min(int(request.args.get('limit', 100)), 500)
+    offset = int(request.args.get('offset', 0))
+
+    placeholders = ','.join(['?' for _ in SUPPLY_CHAIN_TYPES])
+    sql = f'''
+        SELECT ps.id, ps.parcel_id, ps.signal_type, ps.source,
+               ps.entity_name, ps.address, ps.city, ps.state,
+               ps.metadata, ps.created_at,
+               p.latitude, p.longitude,
+               COALESCE(p.development_probability, 0) as development_probability
+        FROM property_signals ps
+        LEFT JOIN parcels p ON p.parcel_id = ps.parcel_id
+        WHERE ps.signal_type IN ({placeholders})
+    '''
+    params = list(SUPPLY_CHAIN_TYPES)
+
+    if city:
+        sql += ' AND ps.city = ?'
+        params.append(city)
+    if state:
+        sql += ' AND ps.state = ?'
+        params.append(state)
+
+    sql += ' ORDER BY ps.created_at DESC LIMIT ? OFFSET ?'
+    params.extend([limit, offset])
+
+    rows = fetch_all(sql, params)
+    for r in rows:
+        r['created_at'] = _safe_ts(r.get('created_at'))
+        if r.get('metadata'):
+            try:
+                r['metadata'] = json.loads(r['metadata']) if isinstance(r['metadata'], str) else r['metadata']
+            except Exception:
+                pass
+
+    return jsonify({'signals': rows, 'count': len(rows)})
+
+
+# -----------------------------------------------------------------------
+# Radar Map Data
+# -----------------------------------------------------------------------
+
+@property_signals_bp.route('/api/radar-map', methods=['GET'])
+def get_radar_map_data():
+    """
+    GET /api/radar-map
+    Returns geo-located signals for the development radar map.
+    Includes standard development signals and construction supply chain signals.
+    Query params: city, state, signal_category, min_probability, limit
+    """
+    city = request.args.get('city')
+    state = request.args.get('state')
+    signal_category = request.args.get('signal_category')
+    min_prob = request.args.get('min_probability', type=int, default=0)
+    limit = min(int(request.args.get('limit', 200)), 500)
+
+    sql = '''
+        SELECT ps.id, ps.parcel_id, ps.signal_type, ps.entity_name,
+               ps.address, ps.city, ps.state, ps.created_at,
+               p.latitude, p.longitude,
+               COALESCE(p.development_probability, 0) as development_probability
+        FROM property_signals ps
+        LEFT JOIN parcels p ON p.parcel_id = ps.parcel_id
+        WHERE 1=1
+    '''
+    params = []
+
+    if city:
+        sql += ' AND ps.city = ?'
+        params.append(city)
+    if state:
+        sql += ' AND ps.state = ?'
+        params.append(state)
+    if min_prob > 0:
+        sql += ' AND COALESCE(p.development_probability, 0) >= ?'
+        params.append(min_prob)
+
+    if signal_category == 'supply_chain':
+        placeholders = ','.join(['?' for _ in SUPPLY_CHAIN_TYPES])
+        sql += f' AND ps.signal_type IN ({placeholders})'
+        params.extend(SUPPLY_CHAIN_TYPES)
+    elif signal_category:
+        sql += ' AND ps.signal_type = ?'
+        params.append(signal_category)
+
+    sql += ' ORDER BY development_probability DESC, ps.created_at DESC LIMIT ?'
+    params.append(limit)
+
+    rows = fetch_all(sql, params)
+
+    # Format as map markers
+    markers = []
+    for r in rows:
+        marker_color = 'orange' if r.get('signal_type') in SUPPLY_CHAIN_TYPES else 'blue'
+        markers.append({
+            'id': r['id'],
+            'parcel_id': r.get('parcel_id'),
+            'signal_type': r['signal_type'],
+            'entity_name': r.get('entity_name'),
+            'address': r.get('address'),
+            'city': r.get('city'),
+            'state': r.get('state'),
+            'latitude': r.get('latitude'),
+            'longitude': r.get('longitude'),
+            'development_probability': r.get('development_probability', 0),
+            'marker_color': marker_color,
+            'created_at': _safe_ts(r.get('created_at')),
+        })
+
+    return jsonify({'markers': markers, 'count': len(markers)})
+
+
+# -----------------------------------------------------------------------
+# Signal Graph Intelligence
+# -----------------------------------------------------------------------
+
+@property_signals_bp.route('/api/signal-graph', methods=['GET'])
+def get_signal_graph():
+    """
+    GET /api/signal-graph
+    Returns entity relationship graph data.
+    Query params: entity, relationship_type, min_strength, limit
+    """
+    entity = request.args.get('entity')
+    rel_type = request.args.get('relationship_type')
+    min_strength = request.args.get('min_strength', type=int, default=0)
+    limit = min(int(request.args.get('limit', 100)), 500)
+
+    sql = '''
+        SELECT id, entity_a, entity_a_type, entity_b, entity_b_type,
+               relationship_type, confidence, relationship_strength,
+               source, created_at
+        FROM entity_relationships
+        WHERE COALESCE(relationship_strength, 0) >= ?
+    '''
+    params = [min_strength]
+
+    if entity:
+        sql += ' AND (entity_a = ? OR entity_b = ?)'
+        params.extend([entity, entity])
+    if rel_type:
+        sql += ' AND relationship_type = ?'
+        params.append(rel_type)
+
+    sql += ' ORDER BY relationship_strength DESC, confidence DESC LIMIT ?'
+    params.append(limit)
+
+    rows = fetch_all(sql, params)
+    for r in rows:
+        r['created_at'] = _safe_ts(r.get('created_at'))
+
+    return jsonify({'relationships': rows, 'count': len(rows)})
