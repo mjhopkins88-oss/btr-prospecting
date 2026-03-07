@@ -398,6 +398,10 @@ def get_radar_map_data():
         placeholders = ','.join(['?' for _ in FINANCING_SIGNAL_TYPES])
         sql += f' AND ps.signal_type IN ({placeholders})'
         params.extend(FINANCING_SIGNAL_TYPES)
+    elif signal_category == 'corridor':
+        sql += " AND ps.signal_type = 'DEVELOPMENT_CORRIDOR'"
+    elif signal_category == 'momentum':
+        sql += " AND ps.signal_type = 'MOMENTUM_SIGNAL'"
     elif signal_category:
         sql += ' AND ps.signal_type = ?'
         params.append(signal_category)
@@ -423,6 +427,10 @@ def get_radar_map_data():
             marker_color = 'purple'
         elif sig_type in FINANCING_SIGNAL_TYPES:
             marker_color = 'yellow'
+        elif sig_type == 'DEVELOPMENT_CORRIDOR':
+            marker_color = 'cyan'
+        elif sig_type == 'MOMENTUM_SIGNAL':
+            marker_color = 'amber'
         else:
             marker_color = 'blue'
         markers.append({
