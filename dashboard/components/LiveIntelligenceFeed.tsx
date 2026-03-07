@@ -38,7 +38,8 @@ type EventType =
   | 'SUPPLY_CHAIN'
   | 'GRAPH_INFERENCE'
   | 'SIGNAL_QUALITY'
-  | 'PLANNING_SIGNAL';
+  | 'PLANNING_SIGNAL'
+  | 'PERMIT_SIGNAL';
 
 interface EventColorScheme {
   accent: string;
@@ -62,6 +63,7 @@ export const FEED_EVENT_COLORS: Record<EventType, EventColorScheme> = {
   GRAPH_INFERENCE: { accent: '#c084fc', bg: 'rgba(192,132,252,0.08)', border: 'rgba(192,132,252,0.2)' },
   SIGNAL_QUALITY: { accent: '#06b6d4', bg: 'rgba(6,182,212,0.08)', border: 'rgba(6,182,212,0.2)' },
   PLANNING_SIGNAL: { accent: '#3b82f6', bg: 'rgba(59,130,246,0.08)', border: 'rgba(59,130,246,0.2)' },
+  PERMIT_SIGNAL: { accent: '#22c55e', bg: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.2)' },
 };
 
 export const FEED_EVENT_LABELS: Record<EventType, string> = {
@@ -75,6 +77,7 @@ export const FEED_EVENT_LABELS: Record<EventType, string> = {
   GRAPH_INFERENCE: 'GRAPH',
   SIGNAL_QUALITY: 'QUALITY',
   PLANNING_SIGNAL: 'PLANNING',
+  PERMIT_SIGNAL: 'PERMIT',
 };
 
 // ---- Helpers ----

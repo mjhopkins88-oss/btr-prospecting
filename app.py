@@ -8883,6 +8883,22 @@ _scheduler.add_job(
     replace_existing=True
 )
 
+def _scheduled_building_permits():
+    """Building permit intelligence: collect permit records every 6 hours."""
+    try:
+        from workers.collectors.building_permit_collector import collect_building_permits
+        collect_building_permits()
+    except Exception as e:
+        print(f"[Scheduler] Building permit collector error: {e}")
+
+_scheduler.add_job(
+    _scheduled_building_permits,
+    CronTrigger(hour='*/6', minute=35, timezone=pytz.timezone('America/Los_Angeles')),
+    id='building_permits_6h',
+    name='Building Permit Intelligence (every 6h)',
+    replace_existing=True
+)
+
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
 print("[Scheduler] Daily signal optimization at 6:45 AM PT")
@@ -8905,6 +8921,7 @@ print("[Scheduler] Supply Chain Intelligence Pipeline every 6 hours")
 print("[Scheduler] Signal Quality Engine every 12 hours (offset +20m)")
 print("[Scheduler] Development Confirmation Engine daily 1:30 AM PT")
 print("[Scheduler] Planning Agenda Intelligence every 6 hours")
+print("[Scheduler] Building Permit Intelligence every 6 hours")
 
 
 # ---------------------------------------------------------------------------

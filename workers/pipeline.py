@@ -34,6 +34,7 @@ def run_collection():
     from workers.collectors.construction.utility_connection_collector import collect_utility_connections
     from workers.collectors.construction.contractor_bid_collector import collect_contractor_bids
     from workers.collectors.planning_agenda_collector import collect_planning_agendas
+    from workers.collectors.building_permit_collector import collect_building_permits
     from shared.config import TARGET_CITIES
 
     print(f"[Pipeline] Stage 1: Collection — {datetime.utcnow().isoformat()}")
@@ -55,6 +56,7 @@ def run_collection():
         ('Utility connections', collect_utility_connections),
         ('Contractor bids', collect_contractor_bids),
         ('Planning agendas', collect_planning_agendas),
+        ('Building permits', collect_building_permits),
     ]
 
     counts = {}
@@ -268,6 +270,7 @@ def _log_daily_signal_summary(collection_total):
             'Supply chain signals': ('SITE_PREP_ACTIVITY', 'UTILITY_CONNECTION_REQUEST', 'CONCRETE_SUPPLY_SIGNAL', 'INFRASTRUCTURE_BID', 'EARTHWORK_CONTRACTOR'),
             'News signals': ('NEWS_SIGNAL',),
             'Planning signals': ('ZONING_AGENDA_ITEM', 'SITE_PLAN_SUBMISSION', 'SUBDIVISION_APPLICATION', 'REZONING_REQUEST', 'DEVELOPMENT_REVIEW_CASE'),
+            'Building permits': ('MULTIFAMILY_PERMIT', 'SUBDIVISION_PERMIT', 'SITE_DEVELOPMENT_PERMIT', 'RESIDENTIAL_COMPLEX_PERMIT'),
         }
 
         summary = {}

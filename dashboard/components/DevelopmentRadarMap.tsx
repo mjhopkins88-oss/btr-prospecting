@@ -54,6 +54,10 @@ const SIGNAL_TYPE_LABELS: Record<string, string> = {
   REZONING_REQUEST: 'Rezoning Request',
   SUBDIVISION_APPLICATION: 'Subdivision Application',
   DEVELOPMENT_REVIEW_CASE: 'Development Review Case',
+  MULTIFAMILY_PERMIT: 'Multifamily Permit',
+  SUBDIVISION_PERMIT: 'Subdivision Permit',
+  SITE_DEVELOPMENT_PERMIT: 'Site Development Permit',
+  RESIDENTIAL_COMPLEX_PERMIT: 'Residential Complex Permit',
 };
 
 const SUPPLY_CHAIN_TYPES = new Set([
@@ -66,6 +70,12 @@ const PLANNING_SIGNAL_TYPES = new Set([
   'ZONING_AGENDA_ITEM', 'SITE_PLAN_SUBMISSION',
   'SUBDIVISION_APPLICATION', 'REZONING_REQUEST',
   'DEVELOPMENT_REVIEW_CASE',
+]);
+
+const PERMIT_SIGNAL_TYPES = new Set([
+  'BUILDING_PERMIT', 'MULTIFAMILY_PERMIT',
+  'SUBDIVISION_PERMIT', 'SITE_DEVELOPMENT_PERMIT',
+  'RESIDENTIAL_COMPLEX_PERMIT',
 ]);
 
 // ---- Helpers ----
@@ -89,8 +99,10 @@ function getMarkerStyle(marker: RadarMarker) {
   const isHighProb = marker.development_probability >= 70;
 
   const isPlanningSignal = PLANNING_SIGNAL_TYPES.has(marker.signal_type);
+  const isPermitSignal = PERMIT_SIGNAL_TYPES.has(marker.signal_type);
 
   if (isSupplyChain) return { color: '#f97316', bg: 'rgba(249,115,22,0.15)', border: 'rgba(249,115,22,0.4)', label: 'SUPPLY CHAIN' };
+  if (isPermitSignal) return { color: '#22c55e', bg: 'rgba(34,197,94,0.15)', border: 'rgba(34,197,94,0.4)', label: 'PERMIT SIGNAL' };
   if (isPlanningSignal) return { color: '#3b82f6', bg: 'rgba(59,130,246,0.15)', border: 'rgba(59,130,246,0.4)', label: 'PLANNING SIGNAL' };
   if (isHighProb) return { color: '#34d399', bg: 'rgba(52,211,153,0.15)', border: 'rgba(52,211,153,0.4)', label: 'HIGH PROB' };
   return { color: '#3b82f6', bg: 'rgba(59,130,246,0.15)', border: 'rgba(59,130,246,0.4)', label: 'SIGNAL' };

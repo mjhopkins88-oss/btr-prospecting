@@ -267,6 +267,12 @@ PLANNING_SIGNAL_TYPES = [
     'DEVELOPMENT_REVIEW_CASE',
 ]
 
+PERMIT_SIGNAL_TYPES = [
+    'BUILDING_PERMIT', 'MULTIFAMILY_PERMIT',
+    'SUBDIVISION_PERMIT', 'SITE_DEVELOPMENT_PERMIT',
+    'RESIDENTIAL_COMPLEX_PERMIT',
+]
+
 
 @property_signals_bp.route('/api/supply-chain-signals', methods=['GET'])
 def get_supply_chain_signals():
@@ -362,6 +368,10 @@ def get_radar_map_data():
         placeholders = ','.join(['?' for _ in PLANNING_SIGNAL_TYPES])
         sql += f' AND ps.signal_type IN ({placeholders})'
         params.extend(PLANNING_SIGNAL_TYPES)
+    elif signal_category == 'permit':
+        placeholders = ','.join(['?' for _ in PERMIT_SIGNAL_TYPES])
+        sql += f' AND ps.signal_type IN ({placeholders})'
+        params.extend(PERMIT_SIGNAL_TYPES)
     elif signal_category:
         sql += ' AND ps.signal_type = ?'
         params.append(signal_category)
@@ -377,6 +387,8 @@ def get_radar_map_data():
         sig_type = r.get('signal_type')
         if sig_type in SUPPLY_CHAIN_TYPES:
             marker_color = 'orange'
+        elif sig_type in PERMIT_SIGNAL_TYPES:
+            marker_color = 'green'
         elif sig_type in PLANNING_SIGNAL_TYPES:
             marker_color = 'blue'
         else:

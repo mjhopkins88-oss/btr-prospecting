@@ -51,6 +51,11 @@ SIGNAL_SCORES = {
     'REZONING_REQUEST': 30,
     'SUBDIVISION_APPLICATION': 25,
     'DEVELOPMENT_REVIEW_CASE': 20,
+    # Building permit signals
+    'MULTIFAMILY_PERMIT': 40,
+    'SUBDIVISION_PERMIT': 35,
+    'SITE_DEVELOPMENT_PERMIT': 30,
+    'RESIDENTIAL_COMPLEX_PERMIT': 35,
 }
 
 # Bonus scores for pattern matches and relationships
