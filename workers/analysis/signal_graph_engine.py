@@ -237,8 +237,8 @@ def detect_partnerships():
         FROM entity_relationships
         WHERE relationship_type IN (?, ?, ?, ?, ?)
         GROUP BY entity_a, entity_b, relationship_type
-        HAVING co_occurrences >= 1
-        ORDER BY co_occurrences DESC
+        HAVING COUNT(*) >= 1
+        ORDER BY COUNT(*) DESC
     ''', (
         REL_DEVELOPER_ENGINEER, REL_DEVELOPER_CONTRACTOR,
         REL_DEVELOPER_ARCHITECT, REL_ENGINEER_CONTRACTOR,
