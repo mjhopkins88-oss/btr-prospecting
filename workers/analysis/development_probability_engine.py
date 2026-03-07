@@ -68,6 +68,27 @@ SIGNAL_SCORES = {
     'CONSTRUCTION_FINANCING': 45,
     'COMMERCIAL_MORTGAGE': 35,
     'SECURED_LOAN': 25,
+    # Utility connection intelligence signals
+    'UTILITY_CAPACITY_EXPANSION': 30,
+    'NEW_SERVICE_APPLICATION': 20,
+    # Civil engineering filing signals
+    'GRADING_PLAN': 20,
+    'DRAINAGE_REPORT': 15,
+    'ENGINEERING_REVIEW': 20,
+    # Infrastructure planning signals
+    'TRAFFIC_IMPACT_STUDY': 20,
+    'ROAD_EXPANSION_APPROVAL': 25,
+    'INFRASTRUCTURE_EXTENSION': 25,
+    # Entity formation signals
+    'DEVELOPMENT_ENTITY_FORMATION': 20,
+    # Builder pattern signals
+    'BUILDER_EXPANSION_PATTERN': 25,
+    # Land listing signals
+    'DEVELOPMENT_LAND_LISTING': 25,
+    # Construction hiring signals
+    'CONSTRUCTION_HIRING_SIGNAL': 15,
+    # Signal correlation signals
+    'SIGNAL_SEQUENCE_MATCH': 30,
 }
 
 # Bonus scores for pattern matches and relationships

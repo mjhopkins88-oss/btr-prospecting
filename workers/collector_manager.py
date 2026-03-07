@@ -43,6 +43,12 @@ RATE_LIMITS = {
     'site_prep_collector': 300,
     'utility_connection_collector': 300,
     'contractor_bid_collector': 300,
+    'utility_connection_intel_collector': 600,
+    'civil_engineering_collector': 600,
+    'infrastructure_collector': 600,
+    'entity_formation_collector': 600,
+    'land_listing_collector': 600,
+    'construction_hiring_collector': 600,
 }
 
 # Max retries per collector per cycle
