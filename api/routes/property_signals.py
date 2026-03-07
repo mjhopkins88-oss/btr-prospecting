@@ -273,6 +273,20 @@ PERMIT_SIGNAL_TYPES = [
     'RESIDENTIAL_COMPLEX_PERMIT',
 ]
 
+LAND_TRANSACTION_TYPES = [
+    'LAND_PURCHASE', 'DEED_TRANSFER', 'OWNER_CHANGE',
+]
+
+PLAT_FILING_TYPES = [
+    'SUBDIVISION_PLAT', 'PRELIMINARY_PLAT',
+    'FINAL_PLAT', 'LOT_SPLIT',
+]
+
+FINANCING_SIGNAL_TYPES = [
+    'CONSTRUCTION_FINANCING', 'COMMERCIAL_MORTGAGE',
+    'SECURED_LOAN',
+]
+
 
 @property_signals_bp.route('/api/supply-chain-signals', methods=['GET'])
 def get_supply_chain_signals():
@@ -372,6 +386,18 @@ def get_radar_map_data():
         placeholders = ','.join(['?' for _ in PERMIT_SIGNAL_TYPES])
         sql += f' AND ps.signal_type IN ({placeholders})'
         params.extend(PERMIT_SIGNAL_TYPES)
+    elif signal_category == 'land_transaction':
+        placeholders = ','.join(['?' for _ in LAND_TRANSACTION_TYPES])
+        sql += f' AND ps.signal_type IN ({placeholders})'
+        params.extend(LAND_TRANSACTION_TYPES)
+    elif signal_category == 'plat_filing':
+        placeholders = ','.join(['?' for _ in PLAT_FILING_TYPES])
+        sql += f' AND ps.signal_type IN ({placeholders})'
+        params.extend(PLAT_FILING_TYPES)
+    elif signal_category == 'financing':
+        placeholders = ','.join(['?' for _ in FINANCING_SIGNAL_TYPES])
+        sql += f' AND ps.signal_type IN ({placeholders})'
+        params.extend(FINANCING_SIGNAL_TYPES)
     elif signal_category:
         sql += ' AND ps.signal_type = ?'
         params.append(signal_category)
@@ -391,6 +417,12 @@ def get_radar_map_data():
             marker_color = 'green'
         elif sig_type in PLANNING_SIGNAL_TYPES:
             marker_color = 'blue'
+        elif sig_type in LAND_TRANSACTION_TYPES:
+            marker_color = 'red'
+        elif sig_type in PLAT_FILING_TYPES:
+            marker_color = 'purple'
+        elif sig_type in FINANCING_SIGNAL_TYPES:
+            marker_color = 'yellow'
         else:
             marker_color = 'blue'
         markers.append({

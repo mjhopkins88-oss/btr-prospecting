@@ -35,6 +35,9 @@ def run_collection():
     from workers.collectors.construction.contractor_bid_collector import collect_contractor_bids
     from workers.collectors.planning_agenda_collector import collect_planning_agendas
     from workers.collectors.building_permit_collector import collect_building_permits
+    from workers.collectors.land_transaction_collector import collect_land_transactions
+    from workers.collectors.plat_filing_collector import collect_plat_filings
+    from workers.collectors.construction_financing_collector import collect_construction_financing
     from shared.config import TARGET_CITIES
 
     print(f"[Pipeline] Stage 1: Collection — {datetime.utcnow().isoformat()}")
@@ -57,6 +60,9 @@ def run_collection():
         ('Contractor bids', collect_contractor_bids),
         ('Planning agendas', collect_planning_agendas),
         ('Building permits', collect_building_permits),
+        ('Land transactions', collect_land_transactions),
+        ('Plat filings', collect_plat_filings),
+        ('Construction financing', collect_construction_financing),
     ]
 
     counts = {}
@@ -271,6 +277,9 @@ def _log_daily_signal_summary(collection_total):
             'News signals': ('NEWS_SIGNAL',),
             'Planning signals': ('ZONING_AGENDA_ITEM', 'SITE_PLAN_SUBMISSION', 'SUBDIVISION_APPLICATION', 'REZONING_REQUEST', 'DEVELOPMENT_REVIEW_CASE'),
             'Building permits': ('MULTIFAMILY_PERMIT', 'SUBDIVISION_PERMIT', 'SITE_DEVELOPMENT_PERMIT', 'RESIDENTIAL_COMPLEX_PERMIT'),
+            'Land transactions': ('LAND_PURCHASE', 'DEED_TRANSFER', 'OWNER_CHANGE'),
+            'Plat filings': ('SUBDIVISION_PLAT', 'PRELIMINARY_PLAT', 'FINAL_PLAT', 'LOT_SPLIT'),
+            'Construction financing': ('CONSTRUCTION_FINANCING', 'COMMERCIAL_MORTGAGE', 'SECURED_LOAN'),
         }
 
         summary = {}
@@ -356,6 +365,34 @@ def _log_health_check(results):
     print(f"  Predictions generated: {predictions}")
 
 
+def _run_analysis_engines():
+    """Run all analysis engines after main pipeline stages."""
+    print(f"\n[Pipeline] Running analysis engines — {datetime.utcnow().isoformat()}")
+    analysis_results = {}
+
+    engines = [
+        ('Zoning intelligence', 'workers.analysis.zoning_intelligence_engine', 'run_zoning_intelligence'),
+        ('Parcel contiguity', 'workers.analysis.parcel_contiguity_engine', 'run_contiguity_engine'),
+        ('Developer expansion', 'workers.analysis.developer_expansion_engine', 'run_expansion_forecasting'),
+        ('Signal weight optimization', 'workers.analysis.signal_weight_optimizer', 'run_weight_optimization'),
+        ('Development probability', 'workers.analysis.development_probability_engine', 'run_probability_scoring'),
+    ]
+
+    for label, module_path, fn_name in engines:
+        try:
+            import importlib
+            mod = importlib.import_module(module_path)
+            fn = getattr(mod, fn_name)
+            result = fn()
+            analysis_results[label] = result
+            print(f"  {label}: complete")
+        except Exception as e:
+            print(f"  {label}: error — {e}")
+            analysis_results[label] = {'error': str(e)}
+
+    return analysis_results
+
+
 def run_full_pipeline():
     """
     Run the complete lead intelligence pipeline sequentially.
@@ -374,6 +411,9 @@ def run_full_pipeline():
     results['routing'] = run_routing()
     results['brief'] = run_brief() is not None
     results['learning'] = run_learning()
+
+    # --- Analysis engines ---
+    results['analysis'] = _run_analysis_engines()
 
     # --- Issue 6: Low signal warning ---
     if results.get('collection', 0) == 0:

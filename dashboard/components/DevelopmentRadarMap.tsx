@@ -32,7 +32,7 @@ interface RadarMarker {
   created_at: string;
 }
 
-type SignalCategory = '' | 'supply_chain' | 'BUILDING_PERMIT' | 'ZONING_APPLICATION' | 'LAND_PURCHASE';
+type SignalCategory = '' | 'supply_chain' | 'planning' | 'permit' | 'land_transaction' | 'plat_filing' | 'financing' | 'BUILDING_PERMIT' | 'ZONING_APPLICATION' | 'LAND_PURCHASE';
 
 // ---- Constants ----
 
@@ -58,6 +58,17 @@ const SIGNAL_TYPE_LABELS: Record<string, string> = {
   SUBDIVISION_PERMIT: 'Subdivision Permit',
   SITE_DEVELOPMENT_PERMIT: 'Site Development Permit',
   RESIDENTIAL_COMPLEX_PERMIT: 'Residential Complex Permit',
+  LAND_PURCHASE: 'Land Purchase',
+  DEED_TRANSFER: 'Deed Transfer',
+  OWNER_CHANGE: 'Ownership Change',
+  SUBDIVISION_PLAT: 'Subdivision Plat',
+  PRELIMINARY_PLAT: 'Preliminary Plat',
+  FINAL_PLAT: 'Final Plat',
+  LOT_SPLIT: 'Lot Split',
+  CONSTRUCTION_FINANCING: 'Construction Financing',
+  COMMERCIAL_MORTGAGE: 'Commercial Mortgage',
+  SECURED_LOAN: 'Secured Loan',
+  DEVELOPER_EXPANSION: 'Developer Expansion',
 };
 
 const SUPPLY_CHAIN_TYPES = new Set([
@@ -76,6 +87,20 @@ const PERMIT_SIGNAL_TYPES = new Set([
   'BUILDING_PERMIT', 'MULTIFAMILY_PERMIT',
   'SUBDIVISION_PERMIT', 'SITE_DEVELOPMENT_PERMIT',
   'RESIDENTIAL_COMPLEX_PERMIT',
+]);
+
+const LAND_TRANSACTION_TYPES = new Set([
+  'LAND_PURCHASE', 'DEED_TRANSFER', 'OWNER_CHANGE',
+]);
+
+const PLAT_FILING_TYPES = new Set([
+  'SUBDIVISION_PLAT', 'PRELIMINARY_PLAT',
+  'FINAL_PLAT', 'LOT_SPLIT',
+]);
+
+const FINANCING_SIGNAL_TYPES = new Set([
+  'CONSTRUCTION_FINANCING', 'COMMERCIAL_MORTGAGE',
+  'SECURED_LOAN',
 ]);
 
 // ---- Helpers ----
@@ -101,9 +126,16 @@ function getMarkerStyle(marker: RadarMarker) {
   const isPlanningSignal = PLANNING_SIGNAL_TYPES.has(marker.signal_type);
   const isPermitSignal = PERMIT_SIGNAL_TYPES.has(marker.signal_type);
 
+  const isLandTransaction = LAND_TRANSACTION_TYPES.has(marker.signal_type);
+  const isPlatFiling = PLAT_FILING_TYPES.has(marker.signal_type);
+  const isFinancing = FINANCING_SIGNAL_TYPES.has(marker.signal_type);
+
   if (isSupplyChain) return { color: '#f97316', bg: 'rgba(249,115,22,0.15)', border: 'rgba(249,115,22,0.4)', label: 'SUPPLY CHAIN' };
   if (isPermitSignal) return { color: '#22c55e', bg: 'rgba(34,197,94,0.15)', border: 'rgba(34,197,94,0.4)', label: 'PERMIT SIGNAL' };
   if (isPlanningSignal) return { color: '#3b82f6', bg: 'rgba(59,130,246,0.15)', border: 'rgba(59,130,246,0.4)', label: 'PLANNING SIGNAL' };
+  if (isLandTransaction) return { color: '#ef4444', bg: 'rgba(239,68,68,0.15)', border: 'rgba(239,68,68,0.4)', label: 'LAND TRANSACTION' };
+  if (isPlatFiling) return { color: '#a855f7', bg: 'rgba(168,85,247,0.15)', border: 'rgba(168,85,247,0.4)', label: 'PLAT FILING' };
+  if (isFinancing) return { color: '#eab308', bg: 'rgba(234,179,8,0.15)', border: 'rgba(234,179,8,0.4)', label: 'FINANCING' };
   if (isHighProb) return { color: '#34d399', bg: 'rgba(52,211,153,0.15)', border: 'rgba(52,211,153,0.4)', label: 'HIGH PROB' };
   return { color: '#3b82f6', bg: 'rgba(59,130,246,0.15)', border: 'rgba(59,130,246,0.4)', label: 'SIGNAL' };
 }
@@ -214,9 +246,11 @@ export default function DevelopmentRadarMap() {
   const categories: { value: SignalCategory; label: string }[] = [
     { value: '', label: 'ALL SIGNALS' },
     { value: 'supply_chain', label: 'SUPPLY CHAIN' },
-    { value: 'BUILDING_PERMIT', label: 'PERMITS' },
-    { value: 'ZONING_APPLICATION', label: 'ZONING' },
-    { value: 'LAND_PURCHASE', label: 'LAND' },
+    { value: 'permit', label: 'PERMITS' },
+    { value: 'planning', label: 'PLANNING' },
+    { value: 'land_transaction', label: 'LAND' },
+    { value: 'plat_filing', label: 'PLATS' },
+    { value: 'financing', label: 'FINANCING' },
   ];
 
   return (
