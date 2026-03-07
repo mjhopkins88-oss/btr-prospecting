@@ -38,6 +38,12 @@ def run_collection():
     from workers.collectors.land_transaction_collector import collect_land_transactions
     from workers.collectors.plat_filing_collector import collect_plat_filings
     from workers.collectors.construction_financing_collector import collect_construction_financing
+    from workers.collectors.utility_connection_collector import collect_utility_connections_intel
+    from workers.collectors.civil_engineering_collector import collect_civil_engineering
+    from workers.collectors.infrastructure_collector import collect_infrastructure
+    from workers.collectors.entity_formation_collector import collect_entity_formations
+    from workers.collectors.land_listing_collector import collect_land_listings
+    from workers.collectors.construction_hiring_collector import collect_construction_hiring
     from shared.config import TARGET_CITIES
 
     print(f"[Pipeline] Stage 1: Collection — {datetime.utcnow().isoformat()}")
@@ -63,6 +69,12 @@ def run_collection():
         ('Land transactions', collect_land_transactions),
         ('Plat filings', collect_plat_filings),
         ('Construction financing', collect_construction_financing),
+        ('Utility connections (intel)', collect_utility_connections_intel),
+        ('Civil engineering filings', collect_civil_engineering),
+        ('Infrastructure planning', collect_infrastructure),
+        ('Entity formations', collect_entity_formations),
+        ('Land listings', collect_land_listings),
+        ('Construction hiring', collect_construction_hiring),
     ]
 
     counts = {}
@@ -280,6 +292,14 @@ def _log_daily_signal_summary(collection_total):
             'Land transactions': ('LAND_PURCHASE', 'DEED_TRANSFER', 'OWNER_CHANGE'),
             'Plat filings': ('SUBDIVISION_PLAT', 'PRELIMINARY_PLAT', 'FINAL_PLAT', 'LOT_SPLIT'),
             'Construction financing': ('CONSTRUCTION_FINANCING', 'COMMERCIAL_MORTGAGE', 'SECURED_LOAN'),
+            'Utility connections': ('UTILITY_CONNECTION_REQUEST', 'UTILITY_CAPACITY_EXPANSION', 'NEW_SERVICE_APPLICATION'),
+            'Civil engineering': ('SITE_PLAN_SUBMISSION', 'GRADING_PLAN', 'DRAINAGE_REPORT', 'ENGINEERING_REVIEW'),
+            'Infrastructure planning': ('TRAFFIC_IMPACT_STUDY', 'ROAD_EXPANSION_APPROVAL', 'INFRASTRUCTURE_EXTENSION'),
+            'Entity formations': ('DEVELOPMENT_ENTITY_FORMATION',),
+            'Builder patterns': ('BUILDER_EXPANSION_PATTERN',),
+            'Land listings': ('DEVELOPMENT_LAND_LISTING',),
+            'Construction hiring': ('CONSTRUCTION_HIRING_SIGNAL',),
+            'Signal correlations': ('SIGNAL_SEQUENCE_MATCH',),
         }
 
         summary = {}
@@ -376,6 +396,8 @@ def _run_analysis_engines():
         ('Developer expansion', 'workers.analysis.developer_expansion_engine', 'run_expansion_forecasting'),
         ('Signal weight optimization', 'workers.analysis.signal_weight_optimizer', 'run_weight_optimization'),
         ('Development probability', 'workers.analysis.development_probability_engine', 'run_probability_scoring'),
+        ('Builder pattern detection', 'workers.analysis.builder_pattern_engine', 'run_builder_pattern_detection'),
+        ('Signal correlation', 'workers.analysis.signal_correlation_engine', 'run_signal_correlation'),
     ]
 
     for label, module_path, fn_name in engines:
