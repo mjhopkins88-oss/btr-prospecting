@@ -8883,6 +8883,150 @@ _scheduler.add_job(
     replace_existing=True
 )
 
+def _scheduled_building_permits():
+    """Building permit intelligence: collect permit records every 6 hours."""
+    try:
+        from workers.collectors.building_permit_collector import collect_building_permits
+        collect_building_permits()
+    except Exception as e:
+        print(f"[Scheduler] Building permit collector error: {e}")
+
+_scheduler.add_job(
+    _scheduled_building_permits,
+    CronTrigger(hour='*/6', minute=35, timezone=pytz.timezone('America/Los_Angeles')),
+    id='building_permits_6h',
+    name='Building Permit Intelligence (every 6h)',
+    replace_existing=True
+)
+
+def _scheduled_land_transactions():
+    """Land transaction intelligence: collect deed/ownership signals every 6 hours."""
+    try:
+        from workers.collectors.land_transaction_collector import collect_land_transactions
+        collect_land_transactions()
+    except Exception as e:
+        print(f"[Scheduler] Land transaction collector error: {e}")
+
+_scheduler.add_job(
+    _scheduled_land_transactions,
+    CronTrigger(hour='*/6', minute=50, timezone=pytz.timezone('America/Los_Angeles')),
+    id='land_transactions_6h',
+    name='Land Transaction Intelligence (every 6h)',
+    replace_existing=True
+)
+
+def _scheduled_plat_filings():
+    """Plat filing intelligence: collect subdivision/plat signals every 6 hours."""
+    try:
+        from workers.collectors.plat_filing_collector import collect_plat_filings
+        collect_plat_filings()
+    except Exception as e:
+        print(f"[Scheduler] Plat filing collector error: {e}")
+
+_scheduler.add_job(
+    _scheduled_plat_filings,
+    CronTrigger(hour='*/6', minute=55, timezone=pytz.timezone('America/Los_Angeles')),
+    id='plat_filings_6h',
+    name='Plat Filing Intelligence (every 6h)',
+    replace_existing=True
+)
+
+def _scheduled_construction_financing():
+    """Construction financing intelligence: collect loan/mortgage signals every 8 hours."""
+    try:
+        from workers.collectors.construction_financing_collector import collect_construction_financing
+        collect_construction_financing()
+    except Exception as e:
+        print(f"[Scheduler] Construction financing collector error: {e}")
+
+_scheduler.add_job(
+    _scheduled_construction_financing,
+    CronTrigger(hour='*/8', minute=40, timezone=pytz.timezone('America/Los_Angeles')),
+    id='construction_financing_8h',
+    name='Construction Financing Intelligence (every 8h)',
+    replace_existing=True
+)
+
+def _scheduled_zoning_intelligence():
+    """Zoning intelligence: analyze parcel zoning classifications daily."""
+    try:
+        from workers.analysis.zoning_intelligence_engine import run_zoning_intelligence
+        run_zoning_intelligence()
+    except Exception as e:
+        print(f"[Scheduler] Zoning intelligence engine error: {e}")
+
+_scheduler.add_job(
+    _scheduled_zoning_intelligence,
+    CronTrigger(hour=4, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='zoning_intelligence_daily',
+    name='Zoning Intelligence Engine (daily 4:00 AM)',
+    replace_existing=True
+)
+
+def _scheduled_parcel_contiguity():
+    """Parcel contiguity: detect development footprint patterns daily."""
+    try:
+        from workers.analysis.parcel_contiguity_engine import run_contiguity_engine
+        run_contiguity_engine()
+    except Exception as e:
+        print(f"[Scheduler] Parcel contiguity engine error: {e}")
+
+_scheduler.add_job(
+    _scheduled_parcel_contiguity,
+    CronTrigger(hour=4, minute=30, timezone=pytz.timezone('America/Los_Angeles')),
+    id='parcel_contiguity_daily',
+    name='Parcel Contiguity Engine (daily 4:30 AM)',
+    replace_existing=True
+)
+
+def _scheduled_expansion_forecasting():
+    """Developer expansion forecasting: predict expansion markets weekly."""
+    try:
+        from workers.analysis.developer_expansion_engine import run_expansion_forecasting
+        run_expansion_forecasting()
+    except Exception as e:
+        print(f"[Scheduler] Expansion forecasting error: {e}")
+
+_scheduler.add_job(
+    _scheduled_expansion_forecasting,
+    CronTrigger(day_of_week='tue', hour=3, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='expansion_forecasting_weekly',
+    name='Developer Expansion Forecasting (weekly Tue 3:00 AM)',
+    replace_existing=True
+)
+
+def _scheduled_weight_optimization():
+    """Signal weight optimization: adjust signal weights weekly."""
+    try:
+        from workers.analysis.signal_weight_optimizer import run_weight_optimization
+        run_weight_optimization()
+    except Exception as e:
+        print(f"[Scheduler] Weight optimization error: {e}")
+
+_scheduler.add_job(
+    _scheduled_weight_optimization,
+    CronTrigger(day_of_week='sun', hour=4, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='weight_optimization_weekly',
+    name='Signal Weight Optimization (weekly Sun 4:00 AM)',
+    replace_existing=True
+)
+
+def _scheduled_source_discovery():
+    """Autonomous source discovery: find new data sources weekly."""
+    try:
+        from workers.discovery.source_discovery_engine import run_source_discovery
+        run_source_discovery()
+    except Exception as e:
+        print(f"[Scheduler] Source discovery error: {e}")
+
+_scheduler.add_job(
+    _scheduled_source_discovery,
+    CronTrigger(day_of_week='sat', hour=2, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='source_discovery_weekly',
+    name='Autonomous Source Discovery (weekly Sat 2:00 AM)',
+    replace_existing=True
+)
+
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
 print("[Scheduler] Daily signal optimization at 6:45 AM PT")
@@ -8905,6 +9049,15 @@ print("[Scheduler] Supply Chain Intelligence Pipeline every 6 hours")
 print("[Scheduler] Signal Quality Engine every 12 hours (offset +20m)")
 print("[Scheduler] Development Confirmation Engine daily 1:30 AM PT")
 print("[Scheduler] Planning Agenda Intelligence every 6 hours")
+print("[Scheduler] Building Permit Intelligence every 6 hours")
+print("[Scheduler] Land Transaction Intelligence every 6 hours")
+print("[Scheduler] Plat Filing Intelligence every 6 hours")
+print("[Scheduler] Construction Financing Intelligence every 8 hours")
+print("[Scheduler] Zoning Intelligence Engine daily 4:00 AM PT")
+print("[Scheduler] Parcel Contiguity Engine daily 4:30 AM PT")
+print("[Scheduler] Developer Expansion Forecasting weekly Tue 3:00 AM PT")
+print("[Scheduler] Signal Weight Optimization weekly Sun 4:00 AM PT")
+print("[Scheduler] Autonomous Source Discovery weekly Sat 2:00 AM PT")
 
 
 # ---------------------------------------------------------------------------

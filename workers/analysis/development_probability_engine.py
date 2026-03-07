@@ -51,6 +51,23 @@ SIGNAL_SCORES = {
     'REZONING_REQUEST': 30,
     'SUBDIVISION_APPLICATION': 25,
     'DEVELOPMENT_REVIEW_CASE': 20,
+    # Building permit signals
+    'MULTIFAMILY_PERMIT': 40,
+    'SUBDIVISION_PERMIT': 35,
+    'SITE_DEVELOPMENT_PERMIT': 30,
+    'RESIDENTIAL_COMPLEX_PERMIT': 35,
+    # Land transaction signals
+    'DEED_TRANSFER': 25,
+    'OWNER_CHANGE': 15,
+    # Plat filing signals
+    'SUBDIVISION_PLAT': 30,
+    'PRELIMINARY_PLAT': 25,
+    'FINAL_PLAT': 35,
+    'LOT_SPLIT': 20,
+    # Construction financing signals
+    'CONSTRUCTION_FINANCING': 45,
+    'COMMERCIAL_MORTGAGE': 35,
+    'SECURED_LOAN': 25,
 }
 
 # Bonus scores for pattern matches and relationships

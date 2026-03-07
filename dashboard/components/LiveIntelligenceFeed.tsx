@@ -38,7 +38,11 @@ type EventType =
   | 'SUPPLY_CHAIN'
   | 'GRAPH_INFERENCE'
   | 'SIGNAL_QUALITY'
-  | 'PLANNING_SIGNAL';
+  | 'PLANNING_SIGNAL'
+  | 'PERMIT_SIGNAL'
+  | 'LAND_TRANSACTION'
+  | 'PLAT_FILING'
+  | 'CONSTRUCTION_FINANCING';
 
 interface EventColorScheme {
   accent: string;
@@ -62,6 +66,10 @@ export const FEED_EVENT_COLORS: Record<EventType, EventColorScheme> = {
   GRAPH_INFERENCE: { accent: '#c084fc', bg: 'rgba(192,132,252,0.08)', border: 'rgba(192,132,252,0.2)' },
   SIGNAL_QUALITY: { accent: '#06b6d4', bg: 'rgba(6,182,212,0.08)', border: 'rgba(6,182,212,0.2)' },
   PLANNING_SIGNAL: { accent: '#3b82f6', bg: 'rgba(59,130,246,0.08)', border: 'rgba(59,130,246,0.2)' },
+  PERMIT_SIGNAL: { accent: '#22c55e', bg: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.2)' },
+  LAND_TRANSACTION: { accent: '#ef4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.2)' },
+  PLAT_FILING: { accent: '#a855f7', bg: 'rgba(168,85,247,0.08)', border: 'rgba(168,85,247,0.2)' },
+  CONSTRUCTION_FINANCING: { accent: '#eab308', bg: 'rgba(234,179,8,0.08)', border: 'rgba(234,179,8,0.2)' },
 };
 
 export const FEED_EVENT_LABELS: Record<EventType, string> = {
@@ -75,6 +83,10 @@ export const FEED_EVENT_LABELS: Record<EventType, string> = {
   GRAPH_INFERENCE: 'GRAPH',
   SIGNAL_QUALITY: 'QUALITY',
   PLANNING_SIGNAL: 'PLANNING',
+  PERMIT_SIGNAL: 'PERMIT',
+  LAND_TRANSACTION: 'LAND',
+  PLAT_FILING: 'PLAT',
+  CONSTRUCTION_FINANCING: 'FINANCING',
 };
 
 // ---- Helpers ----
@@ -212,7 +224,7 @@ export default function LiveIntelligenceFeed() {
     }
   }, [newIds]);
 
-  const typeFilters: string[] = ['', 'SIGNAL', 'PERMIT', 'PATTERN', 'DEVELOPER_EXPANSION', 'CONTRACTOR_ACTIVITY', 'PARCEL_ALERT', 'SUPPLY_CHAIN', 'GRAPH_INFERENCE', 'SIGNAL_QUALITY'];
+  const typeFilters: string[] = ['', 'SIGNAL', 'PERMIT', 'PATTERN', 'DEVELOPER_EXPANSION', 'CONTRACTOR_ACTIVITY', 'PARCEL_ALERT', 'SUPPLY_CHAIN', 'GRAPH_INFERENCE', 'SIGNAL_QUALITY', 'LAND_TRANSACTION', 'PLAT_FILING', 'CONSTRUCTION_FINANCING'];
 
   return (
     <div style={{ maxWidth: '900px', margin: '0 auto' }}>
