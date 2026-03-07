@@ -32,7 +32,7 @@ interface RadarMarker {
   created_at: string;
 }
 
-type SignalCategory = '' | 'supply_chain' | 'planning' | 'permit' | 'land_transaction' | 'plat_filing' | 'financing' | 'BUILDING_PERMIT' | 'ZONING_APPLICATION' | 'LAND_PURCHASE';
+type SignalCategory = '' | 'supply_chain' | 'planning' | 'permit' | 'land_transaction' | 'plat_filing' | 'financing' | 'corridor' | 'momentum' | 'BUILDING_PERMIT' | 'ZONING_APPLICATION' | 'LAND_PURCHASE';
 
 // ---- Constants ----
 
@@ -69,6 +69,8 @@ const SIGNAL_TYPE_LABELS: Record<string, string> = {
   COMMERCIAL_MORTGAGE: 'Commercial Mortgage',
   SECURED_LOAN: 'Secured Loan',
   DEVELOPER_EXPANSION: 'Developer Expansion',
+  DEVELOPMENT_CORRIDOR: 'Development Corridor',
+  MOMENTUM_SIGNAL: 'Momentum Signal',
 };
 
 const SUPPLY_CHAIN_TYPES = new Set([
@@ -103,6 +105,14 @@ const FINANCING_SIGNAL_TYPES = new Set([
   'SECURED_LOAN',
 ]);
 
+const CORRIDOR_SIGNAL_TYPES = new Set([
+  'DEVELOPMENT_CORRIDOR',
+]);
+
+const MOMENTUM_SIGNAL_TYPES = new Set([
+  'MOMENTUM_SIGNAL',
+]);
+
 // ---- Helpers ----
 
 function timeAgo(dateStr: string): string {
@@ -130,6 +140,11 @@ function getMarkerStyle(marker: RadarMarker) {
   const isPlatFiling = PLAT_FILING_TYPES.has(marker.signal_type);
   const isFinancing = FINANCING_SIGNAL_TYPES.has(marker.signal_type);
 
+  const isCorridor = CORRIDOR_SIGNAL_TYPES.has(marker.signal_type);
+  const isMomentum = MOMENTUM_SIGNAL_TYPES.has(marker.signal_type);
+
+  if (isCorridor) return { color: '#06b6d4', bg: 'rgba(6,182,212,0.15)', border: 'rgba(6,182,212,0.4)', label: 'CORRIDOR' };
+  if (isMomentum) return { color: '#f59e0b', bg: 'rgba(245,158,11,0.15)', border: 'rgba(245,158,11,0.4)', label: 'MOMENTUM' };
   if (isSupplyChain) return { color: '#f97316', bg: 'rgba(249,115,22,0.15)', border: 'rgba(249,115,22,0.4)', label: 'SUPPLY CHAIN' };
   if (isPermitSignal) return { color: '#22c55e', bg: 'rgba(34,197,94,0.15)', border: 'rgba(34,197,94,0.4)', label: 'PERMIT SIGNAL' };
   if (isPlanningSignal) return { color: '#3b82f6', bg: 'rgba(59,130,246,0.15)', border: 'rgba(59,130,246,0.4)', label: 'PLANNING SIGNAL' };
@@ -251,6 +266,8 @@ export default function DevelopmentRadarMap() {
     { value: 'land_transaction', label: 'LAND' },
     { value: 'plat_filing', label: 'PLATS' },
     { value: 'financing', label: 'FINANCING' },
+    { value: 'corridor', label: 'CORRIDORS' },
+    { value: 'momentum', label: 'MOMENTUM' },
   ];
 
   return (

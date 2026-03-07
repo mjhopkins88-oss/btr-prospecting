@@ -1860,6 +1860,57 @@ def init_db():
     ''')
     c.safe_execute('CREATE INDEX IF NOT EXISTS idx_spi_priority ON source_priority_index(priority_score DESC)')
 
+    # ===================================================================
+    # DEVELOPER NETWORK INTELLIGENCE — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS developer_network_edges (
+            id TEXT PRIMARY KEY,
+            entity_a TEXT NOT NULL,
+            entity_b TEXT NOT NULL,
+            relationship_type TEXT NOT NULL,
+            co_occurrence_count INTEGER DEFAULT 1,
+            last_seen TIMESTAMP,
+            relationship_strength INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dne_entity_a ON developer_network_edges(entity_a)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dne_entity_b ON developer_network_edges(entity_b)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dne_strength ON developer_network_edges(relationship_strength DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dne_type ON developer_network_edges(relationship_type)')
+
+    # ===================================================================
+    # OPPORTUNITY MOMENTUM ENGINE — Columns on parcels
+    # ===================================================================
+
+    _safe_add_column(_cur_for_migrate, 'parcels', 'development_momentum_score', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'parcels', 'signal_sequence_length', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'parcels', 'signal_sequence_start', 'TIMESTAMP')
+
+    # ===================================================================
+    # DEVELOPMENT CORRIDOR INTELLIGENCE — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS development_corridors (
+            id TEXT PRIMARY KEY,
+            corridor_name TEXT NOT NULL,
+            city TEXT,
+            state TEXT,
+            signal_density INTEGER DEFAULT 0,
+            growth_rate REAL DEFAULT 0,
+            dominant_development_type TEXT,
+            metadata TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP
+        )
+    ''')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dc_name ON development_corridors(corridor_name)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dc_city ON development_corridors(city, state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dc_density ON development_corridors(signal_density DESC)')
+
     conn.commit()
     conn.close()
 
@@ -1903,6 +1954,10 @@ from api.routes.sales_leads import sales_leads_bp
 from api.routes.developer_contacts import developer_contacts_bp
 from api.routes.property_signals import property_signals_bp
 from api.routes.signal_quality import signal_quality_bp
+from api.routes.developer_network import developer_network_bp
+from api.routes.momentum import momentum_bp
+from api.routes.corridors import corridors_bp
+from api.routes.signal_discovery import signal_discovery_bp
 
 app.register_blueprint(leads_bp)
 app.register_blueprint(projects_bp)
@@ -1916,6 +1971,10 @@ app.register_blueprint(sales_leads_bp)
 app.register_blueprint(developer_contacts_bp)
 app.register_blueprint(property_signals_bp)
 app.register_blueprint(signal_quality_bp)
+app.register_blueprint(developer_network_bp)
+app.register_blueprint(momentum_bp)
+app.register_blueprint(corridors_bp)
+app.register_blueprint(signal_discovery_bp)
 
 
 # ===================================================================

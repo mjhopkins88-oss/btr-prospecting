@@ -1032,6 +1032,10 @@
                     {activeTab === 'admin' && user && user.is_super_admin && <AdminPage user={user} />}
                     {activeTab === 'quoting' && user && user.role === 'admin' && <QuotingPage user={user} />}
                     {activeTab === 'underwriting' && user && user.role === 'admin' && <UnderwritingSheet user={user} />}
+                    {activeTab === 'dev_network' && <DeveloperNetworkPanel />}
+                    {activeTab === 'corridors' && <DevelopmentCorridorsPanel />}
+                    {activeTab === 'dev_momentum' && <MomentumEnginePanel />}
+                    {activeTab === 'signal_discovery' && user && user.is_super_admin && <SignalDiscoveryPanel />}
                     {/* Route guards: redirect to default tab if user navigates to a tab they shouldn't see */}
                     {activeTab === 'quoting' && (!user || user.role !== 'admin') && (() => { setActiveTab(ROLE_DEFAULT_TAB[user?.role] || 'search'); return null; })()}
                     {activeTab === 'underwriting' && (!user || user.role !== 'admin') && (() => { setActiveTab(ROLE_DEFAULT_TAB[user?.role] || 'search'); return null; })()}
@@ -1134,6 +1138,9 @@
                     { id: 'intent', label: 'Developer Intent' },
                     { id: 'capital', label: 'Capital Flow' },
                     { id: 'signal_quality', label: 'Signal Intelligence' },
+                    { id: 'dev_network', label: 'Developer Networks' },
+                    { id: 'corridors', label: 'Dev Corridors' },
+                    { id: 'dev_momentum', label: 'Momentum Engine' },
                 ]},
             ],
             producer: [
@@ -1150,6 +1157,9 @@
                     { id: 'intent', label: 'Developer Intent' },
                     { id: 'capital', label: 'Capital Flow' },
                     { id: 'signal_quality', label: 'Signal Intelligence' },
+                    { id: 'dev_network', label: 'Developer Networks' },
+                    { id: 'corridors', label: 'Dev Corridors' },
+                    { id: 'dev_momentum', label: 'Momentum Engine' },
                 ]},
                 { label: 'Pipeline', items: [
                     { id: 'pipeline', label: 'My Pipeline' },
@@ -1170,6 +1180,10 @@
                     { id: 'intent', label: 'Developer Intent' },
                     { id: 'capital', label: 'Capital Flow' },
                     { id: 'signal_quality', label: 'Signal Intelligence' },
+                    { id: 'dev_network', label: 'Developer Networks' },
+                    { id: 'corridors', label: 'Dev Corridors' },
+                    { id: 'dev_momentum', label: 'Momentum Engine' },
+                    { id: 'signal_discovery', label: 'Signal Discovery' },
                 ]},
                 { label: 'Pipeline', items: [
                     { id: 'pipeline', label: 'My Pipeline' },
@@ -6643,6 +6657,258 @@
             emailBody: { background: '#0f172a', padding: '1.5rem', borderRadius: '8px', fontSize: '0.9rem', lineHeight: '1.7', marginBottom: '1rem', fontFamily: "'Inter', -apple-system, sans-serif", color: '#cbd5e1' },
             modalActions: { display: 'flex', gap: '1rem' },
         };
+
+        // ===================================================================
+        // DEVELOPER NETWORK PANEL
+        // ===================================================================
+        function DeveloperNetworkPanel() {
+            const e = React.createElement;
+            const [edges, setEdges] = useState([]);
+            const [stats, setStats] = useState(null);
+            const [searchEntity, setSearchEntity] = useState('');
+            const [connections, setConnections] = useState([]);
+            const [loading, setLoading] = useState(true);
+
+            const REL_COLORS = { DEVELOPER_CONTRACTOR: '#f97316', DEVELOPER_ENGINEER: '#3b82f6', DEVELOPER_ARCHITECT: '#a855f7', DEVELOPER_LENDER: '#eab308', CONTRACTOR_SUPPLIER: '#22c55e', DEVELOPER_SUPPLIER: '#06b6d4', CONTRACTOR_ENGINEER: '#ec4899' };
+            const REL_LABELS = { DEVELOPER_CONTRACTOR: 'Dev-Contractor', DEVELOPER_ENGINEER: 'Dev-Engineer', DEVELOPER_ARCHITECT: 'Dev-Architect', DEVELOPER_LENDER: 'Dev-Lender', CONTRACTOR_SUPPLIER: 'Contractor-Supplier', DEVELOPER_SUPPLIER: 'Dev-Supplier', CONTRACTOR_ENGINEER: 'Contractor-Engineer' };
+            function strColor(s) { return s >= 80 ? '#22c55e' : s >= 50 ? '#eab308' : s >= 25 ? '#f97316' : '#64748b'; }
+            function strLabel(s) { return s >= 80 ? 'STRONG' : s >= 50 ? 'MODERATE' : s >= 25 ? 'EMERGING' : 'WEAK'; }
+
+            const fetchData = useCallback(async () => {
+                try {
+                    const [cRes, sRes] = await Promise.all([fetch('/api/developer-network/clusters?limit=30'), fetch('/api/developer-network/stats')]);
+                    if (cRes.ok) { const d = await cRes.json(); setEdges(d.clusters || []); }
+                    if (sRes.ok) { const d = await sRes.json(); setStats(d); }
+                } catch (err) { console.error('[DevNetwork]', err); }
+                finally { setLoading(false); }
+            }, []);
+
+            const searchNet = useCallback(async () => {
+                if (!searchEntity.trim()) return;
+                try {
+                    const res = await fetch('/api/developer-network/' + encodeURIComponent(searchEntity));
+                    if (res.ok) { const d = await res.json(); setConnections(d.connections || []); }
+                } catch { setConnections([]); }
+            }, [searchEntity]);
+
+            useEffect(() => { fetchData(); const iv = setInterval(fetchData, 60000); return () => clearInterval(iv); }, [fetchData]);
+
+            if (loading) return e('div', { style: { textAlign: 'center', padding: '3rem', color: '#06b6d4', fontFamily: "'Orbitron', sans-serif" } }, 'LOADING DEVELOPER NETWORKS...');
+
+            return e('div', { style: { maxWidth: '1000px', margin: '0 auto' } },
+                e('div', { style: { marginBottom: '1.5rem' } },
+                    e('h2', { style: { fontFamily: "'Orbitron', sans-serif", fontSize: '1.3rem', fontWeight: 900, background: 'linear-gradient(135deg, #06b6d4 0%, #a855f7 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 } }, 'DEVELOPER NETWORK INTELLIGENCE'),
+                    e('p', { style: { color: '#64748b', fontSize: '0.8rem', margin: '0.25rem 0 0' } }, 'Relationship graph: developers, contractors, engineers, architects, lenders, suppliers')
+                ),
+                stats && e('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '1.5rem' } },
+                    [{ l: 'NETWORK EDGES', v: stats.total_edges, c: '#06b6d4' }, { l: 'STRONG LINKS', v: stats.strong_edges, c: '#22c55e' }, { l: 'REL TYPES', v: (stats.by_type || []).length, c: '#a855f7' }].map(s =>
+                        e('div', { key: s.l, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px', textAlign: 'center' } },
+                            e('div', { style: { fontSize: '1.4rem', fontWeight: 900, color: s.c, fontFamily: "'Orbitron', sans-serif" } }, s.v),
+                            e('div', { style: { fontSize: '0.6rem', color: '#64748b', fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.05em', marginTop: '4px' } }, s.l)
+                        )
+                    )
+                ),
+                e('div', { style: { display: 'flex', gap: '8px', marginBottom: '1rem' } },
+                    e('input', { type: 'text', value: searchEntity, onChange: ev => setSearchEntity(ev.target.value), onKeyDown: ev => ev.key === 'Enter' && searchNet(), placeholder: 'Search entity network...', style: { flex: 1, background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(100,116,139,0.3)', borderRadius: '6px', padding: '8px 12px', color: '#e2e8f0', fontSize: '0.85rem' } }),
+                    e('button', { onClick: searchNet, style: { background: 'rgba(6,182,212,0.2)', border: '1px solid rgba(6,182,212,0.4)', borderRadius: '6px', padding: '8px 16px', color: '#06b6d4', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700 } }, 'SEARCH')
+                ),
+                connections.length > 0 && e('div', { style: { marginBottom: '1rem' } },
+                    e('h3', { style: { color: '#06b6d4', fontSize: '0.85rem', fontWeight: 700, marginBottom: '8px', fontFamily: "'Orbitron', sans-serif" } }, 'CONNECTIONS: ' + searchEntity),
+                    connections.map((c, i) => e('div', { key: i, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid ' + (REL_COLORS[c.relationship_type] || '#64748b') + '40', borderLeft: '3px solid ' + (REL_COLORS[c.relationship_type] || '#64748b'), borderRadius: '6px', padding: '10px 14px', marginBottom: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                        e('div', null,
+                            e('div', { style: { color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 600 } }, c.partner),
+                            e('div', { style: { color: '#64748b', fontSize: '0.7rem' } }, (REL_LABELS[c.relationship_type] || c.relationship_type) + ' · ' + c.co_occurrence_count + ' co-occurrences')
+                        ),
+                        e('div', { style: { background: strColor(c.relationship_strength) + '20', border: '1px solid ' + strColor(c.relationship_strength) + '40', borderRadius: '4px', padding: '2px 8px', fontSize: '0.65rem', fontWeight: 700, color: strColor(c.relationship_strength), fontFamily: "'Orbitron', sans-serif" } }, strLabel(c.relationship_strength) + ' (' + c.relationship_strength + ')')
+                    ))
+                ),
+                e('h3', { style: { color: '#a855f7', fontSize: '0.85rem', fontWeight: 700, marginBottom: '8px', fontFamily: "'Orbitron', sans-serif" } }, 'TOP NETWORK CLUSTERS'),
+                edges.map((edge, i) => e('div', { key: i, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid ' + (REL_COLORS[edge.relationship_type] || '#64748b') + '40', borderLeft: '3px solid ' + (REL_COLORS[edge.relationship_type] || '#64748b'), borderRadius: '8px', padding: '12px 16px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                    e('div', null,
+                        e('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '4px' } },
+                            e('span', { style: { color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 600 } }, edge.entity_a),
+                            e('span', { style: { color: '#64748b', fontSize: '0.75rem' } }, '\u2194'),
+                            e('span', { style: { color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 600 } }, edge.entity_b)
+                        ),
+                        e('div', { style: { display: 'flex', gap: '12px' } },
+                            e('span', { style: { background: (REL_COLORS[edge.relationship_type] || '#64748b') + '20', border: '1px solid ' + (REL_COLORS[edge.relationship_type] || '#64748b') + '40', borderRadius: '4px', padding: '1px 6px', fontSize: '0.6rem', fontWeight: 700, color: REL_COLORS[edge.relationship_type] || '#64748b', fontFamily: "'Orbitron', sans-serif" } }, REL_LABELS[edge.relationship_type] || edge.relationship_type),
+                            e('span', { style: { color: '#64748b', fontSize: '0.7rem' } }, edge.co_occurrence_count + ' co-occurrences')
+                        )
+                    ),
+                    e('div', { style: { textAlign: 'right' } },
+                        e('div', { style: { color: strColor(edge.relationship_strength), fontSize: '1.1rem', fontWeight: 900, fontFamily: "'Orbitron', sans-serif" } }, edge.relationship_strength),
+                        e('div', { style: { color: strColor(edge.relationship_strength), fontSize: '0.6rem', fontWeight: 700, fontFamily: "'Orbitron', sans-serif" } }, strLabel(edge.relationship_strength))
+                    )
+                ))
+            );
+        }
+
+        // ===================================================================
+        // DEVELOPMENT CORRIDORS PANEL
+        // ===================================================================
+        function DevelopmentCorridorsPanel() {
+            const e = React.createElement;
+            const [corridors, setCorridors] = useState([]);
+            const [stats, setStats] = useState(null);
+            const [loading, setLoading] = useState(true);
+
+            const fetchData = useCallback(async () => {
+                try {
+                    const [cRes, sRes] = await Promise.all([fetch('/api/corridors?limit=30'), fetch('/api/corridors/stats')]);
+                    if (cRes.ok) { const d = await cRes.json(); setCorridors(d.corridors || []); }
+                    if (sRes.ok) { const d = await sRes.json(); setStats(d); }
+                } catch (err) { console.error('[Corridors]', err); }
+                finally { setLoading(false); }
+            }, []);
+
+            useEffect(() => { fetchData(); const iv = setInterval(fetchData, 60000); return () => clearInterval(iv); }, [fetchData]);
+
+            function growthColor(g) { return g > 50 ? '#22c55e' : g > 0 ? '#eab308' : g === 0 ? '#64748b' : '#ef4444'; }
+
+            if (loading) return e('div', { style: { textAlign: 'center', padding: '3rem', color: '#06b6d4', fontFamily: "'Orbitron', sans-serif" } }, 'SCANNING DEVELOPMENT CORRIDORS...');
+
+            return e('div', { style: { maxWidth: '1000px', margin: '0 auto' } },
+                e('div', { style: { marginBottom: '1.5rem' } },
+                    e('h2', { style: { fontFamily: "'Orbitron', sans-serif", fontSize: '1.3rem', fontWeight: 900, background: 'linear-gradient(135deg, #22c55e 0%, #06b6d4 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 } }, 'DEVELOPMENT CORRIDOR INTELLIGENCE'),
+                    e('p', { style: { color: '#64748b', fontSize: '0.8rem', margin: '0.25rem 0 0' } }, 'Geographic regions where development activity is clustering')
+                ),
+                stats && e('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '1.5rem' } },
+                    [{ l: 'CORRIDORS', v: stats.total_corridors, c: '#06b6d4' }, { l: 'GROWING', v: stats.growing_corridors, c: '#22c55e' }, { l: 'STATES', v: (stats.by_state || []).length, c: '#a855f7' }].map(s =>
+                        e('div', { key: s.l, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px', textAlign: 'center' } },
+                            e('div', { style: { fontSize: '1.4rem', fontWeight: 900, color: s.c, fontFamily: "'Orbitron', sans-serif" } }, s.v),
+                            e('div', { style: { fontSize: '0.6rem', color: '#64748b', fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.05em', marginTop: '4px' } }, s.l)
+                        )
+                    )
+                ),
+                corridors.length === 0 && e('div', { style: { textAlign: 'center', padding: '2rem', color: '#64748b' } }, 'No development corridors detected yet. Corridors are detected when signal clustering exceeds threshold.'),
+                corridors.map((c, i) => e('div', { key: i, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(6,182,212,0.3)', borderLeft: '3px solid #06b6d4', borderRadius: '8px', padding: '14px 18px', marginBottom: '10px' } },
+                    e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' } },
+                        e('div', null,
+                            e('div', { style: { color: '#e2e8f0', fontSize: '0.95rem', fontWeight: 700 } }, c.corridor_name),
+                            e('div', { style: { color: '#64748b', fontSize: '0.75rem' } }, (c.city || '') + ', ' + (c.state || ''))
+                        ),
+                        e('div', { style: { textAlign: 'right' } },
+                            e('div', { style: { color: growthColor(c.growth_rate), fontSize: '1rem', fontWeight: 900, fontFamily: "'Orbitron', sans-serif" } }, (c.growth_rate > 0 ? '+' : '') + c.growth_rate + '%'),
+                            e('div', { style: { color: '#64748b', fontSize: '0.6rem', fontFamily: "'Orbitron', sans-serif" } }, 'GROWTH RATE')
+                        )
+                    ),
+                    e('div', { style: { display: 'flex', gap: '16px' } },
+                        e('span', { style: { color: '#06b6d4', fontSize: '0.75rem', fontWeight: 600 } }, c.signal_density + ' signals'),
+                        e('span', { style: { background: 'rgba(6,182,212,0.15)', border: '1px solid rgba(6,182,212,0.3)', borderRadius: '4px', padding: '1px 6px', fontSize: '0.6rem', fontWeight: 700, color: '#06b6d4', fontFamily: "'Orbitron', sans-serif" } }, c.dominant_development_type || 'MIXED')
+                    )
+                ))
+            );
+        }
+
+        // ===================================================================
+        // MOMENTUM ENGINE PANEL
+        // ===================================================================
+        function MomentumEnginePanel() {
+            const e = React.createElement;
+            const [parcels, setParcels] = useState([]);
+            const [stats, setStats] = useState(null);
+            const [loading, setLoading] = useState(true);
+
+            const fetchData = useCallback(async () => {
+                try {
+                    const [pRes, sRes] = await Promise.all([fetch('/api/momentum?min_momentum=20&limit=30'), fetch('/api/momentum/stats')]);
+                    if (pRes.ok) { const d = await pRes.json(); setParcels(d.parcels || []); }
+                    if (sRes.ok) { const d = await sRes.json(); setStats(d); }
+                } catch (err) { console.error('[Momentum]', err); }
+                finally { setLoading(false); }
+            }, []);
+
+            useEffect(() => { fetchData(); const iv = setInterval(fetchData, 60000); return () => clearInterval(iv); }, [fetchData]);
+
+            function momColor(m) { return m >= 80 ? '#22c55e' : m >= 60 ? '#eab308' : m >= 40 ? '#f97316' : '#64748b'; }
+            function momLabel(m) { return m >= 80 ? 'ACCELERATING' : m >= 60 ? 'HIGH' : m >= 40 ? 'BUILDING' : 'LOW'; }
+
+            if (loading) return e('div', { style: { textAlign: 'center', padding: '3rem', color: '#f59e0b', fontFamily: "'Orbitron', sans-serif" } }, 'ANALYZING DEVELOPMENT MOMENTUM...');
+
+            return e('div', { style: { maxWidth: '1000px', margin: '0 auto' } },
+                e('div', { style: { marginBottom: '1.5rem' } },
+                    e('h2', { style: { fontFamily: "'Orbitron', sans-serif", fontSize: '1.3rem', fontWeight: 900, background: 'linear-gradient(135deg, #f59e0b 0%, #ef4444 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 } }, 'OPPORTUNITY MOMENTUM ENGINE'),
+                    e('p', { style: { color: '#64748b', fontSize: '0.8rem', margin: '0.25rem 0 0' } }, 'Signal accumulation velocity — parcels with accelerating development activity')
+                ),
+                stats && e('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '1.5rem' } },
+                    [{ l: 'TRACKED PARCELS', v: stats.parcels_with_momentum, c: '#f59e0b' }, { l: 'HIGH MOMENTUM', v: stats.high_momentum_count, c: '#ef4444' }, { l: 'AVG MOMENTUM', v: stats.avg_momentum_score, c: '#eab308' }].map(s =>
+                        e('div', { key: s.l, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px', textAlign: 'center' } },
+                            e('div', { style: { fontSize: '1.4rem', fontWeight: 900, color: s.c, fontFamily: "'Orbitron', sans-serif" } }, s.v),
+                            e('div', { style: { fontSize: '0.6rem', color: '#64748b', fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.05em', marginTop: '4px' } }, s.l)
+                        )
+                    )
+                ),
+                parcels.length === 0 && e('div', { style: { textAlign: 'center', padding: '2rem', color: '#64748b' } }, 'No parcels with significant momentum detected yet.'),
+                parcels.map((p, i) => e('div', { key: i, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid ' + momColor(p.development_momentum_score) + '40', borderLeft: '3px solid ' + momColor(p.development_momentum_score), borderRadius: '8px', padding: '12px 16px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                    e('div', null,
+                        e('div', { style: { color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 600 } }, p.address || p.parcel_id || 'Parcel'),
+                        e('div', { style: { color: '#64748b', fontSize: '0.7rem' } }, (p.city || '') + (p.state ? ', ' + p.state : '') + ' · ' + (p.signal_sequence_length || 0) + ' signals'),
+                        p.development_probability > 0 && e('div', { style: { color: '#06b6d4', fontSize: '0.7rem' } }, 'Dev probability: ' + p.development_probability + '%')
+                    ),
+                    e('div', { style: { textAlign: 'right' } },
+                        e('div', { style: { color: momColor(p.development_momentum_score), fontSize: '1.3rem', fontWeight: 900, fontFamily: "'Orbitron', sans-serif" } }, p.development_momentum_score),
+                        e('div', { style: { color: momColor(p.development_momentum_score), fontSize: '0.55rem', fontWeight: 700, fontFamily: "'Orbitron', sans-serif" } }, momLabel(p.development_momentum_score))
+                    )
+                ))
+            );
+        }
+
+        // ===================================================================
+        // SIGNAL DISCOVERY PANEL (Admin only)
+        // ===================================================================
+        function SignalDiscoveryPanel() {
+            const e = React.createElement;
+            const [sources, setSources] = useState([]);
+            const [stats, setStats] = useState(null);
+            const [loading, setLoading] = useState(true);
+
+            const fetchData = useCallback(async () => {
+                try {
+                    const [srcRes, stRes] = await Promise.all([fetch('/api/signal-discovery/sources?limit=30'), fetch('/api/signal-discovery/stats')]);
+                    if (srcRes.ok) { const d = await srcRes.json(); setSources(d.sources || []); }
+                    if (stRes.ok) { const d = await stRes.json(); setStats(d); }
+                } catch (err) { console.error('[SignalDiscovery]', err); }
+                finally { setLoading(false); }
+            }, []);
+
+            useEffect(() => { fetchData(); const iv = setInterval(fetchData, 60000); return () => clearInterval(iv); }, [fetchData]);
+
+            function statusColor(s) { return s === 'active' ? '#22c55e' : s === 'discovered' ? '#06b6d4' : '#64748b'; }
+
+            if (loading) return e('div', { style: { textAlign: 'center', padding: '3rem', color: '#a855f7', fontFamily: "'Orbitron', sans-serif" } }, 'SCANNING DATA SOURCES...');
+
+            return e('div', { style: { maxWidth: '1000px', margin: '0 auto' } },
+                e('div', { style: { marginBottom: '1.5rem' } },
+                    e('h2', { style: { fontFamily: "'Orbitron', sans-serif", fontSize: '1.3rem', fontWeight: 900, background: 'linear-gradient(135deg, #a855f7 0%, #ec4899 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 } }, 'AUTONOMOUS SIGNAL DISCOVERY AI'),
+                    e('p', { style: { color: '#64748b', fontSize: '0.8rem', margin: '0.25rem 0 0' } }, 'Auto-discovered government data sources for development intelligence')
+                ),
+                stats && e('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '1.5rem' } },
+                    [{ l: 'TOTAL SOURCES', v: stats.total_sources, c: '#a855f7' }, { l: 'SOURCE TYPES', v: (stats.by_type || []).length, c: '#ec4899' }, { l: 'CITIES COVERED', v: (stats.by_city || []).length, c: '#06b6d4' }].map(s =>
+                        e('div', { key: s.l, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px', textAlign: 'center' } },
+                            e('div', { style: { fontSize: '1.4rem', fontWeight: 900, color: s.c, fontFamily: "'Orbitron', sans-serif" } }, s.v),
+                            e('div', { style: { fontSize: '0.6rem', color: '#64748b', fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.05em', marginTop: '4px' } }, s.l)
+                        )
+                    )
+                ),
+                stats && stats.by_status && stats.by_status.length > 0 && e('div', { style: { display: 'flex', gap: '8px', marginBottom: '1rem', flexWrap: 'wrap' } },
+                    stats.by_status.map((s, i) => e('span', { key: i, style: { background: statusColor(s.status) + '15', border: '1px solid ' + statusColor(s.status) + '40', borderRadius: '20px', padding: '4px 12px', fontSize: '0.7rem', color: statusColor(s.status), fontWeight: 600 } }, s.status + ': ' + s.count))
+                ),
+                sources.length === 0 && e('div', { style: { textAlign: 'center', padding: '2rem', color: '#64748b' } }, 'No data sources discovered yet. The discovery AI will populate this automatically.'),
+                sources.map((s, i) => e('div', { key: i, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(168,85,247,0.2)', borderLeft: '3px solid ' + statusColor(s.status), borderRadius: '8px', padding: '12px 16px', marginBottom: '8px' } },
+                    e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' } },
+                        e('div', { style: { flex: 1, minWidth: 0 } },
+                            e('div', { style: { color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, s.title || s.url),
+                            e('div', { style: { color: '#64748b', fontSize: '0.7rem' } }, (s.city || '') + (s.state ? ', ' + s.state : '') + ' · ' + (s.source_type || ''))
+                        ),
+                        e('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 } },
+                            e('span', { style: { background: statusColor(s.status) + '15', border: '1px solid ' + statusColor(s.status) + '40', borderRadius: '4px', padding: '2px 8px', fontSize: '0.6rem', fontWeight: 700, color: statusColor(s.status), fontFamily: "'Orbitron', sans-serif" } }, s.status),
+                            e('span', { style: { color: '#f59e0b', fontSize: '0.75rem', fontWeight: 700, fontFamily: "'Orbitron', sans-serif" } }, 'P' + s.priority)
+                        )
+                    ),
+                    s.url && e('div', { style: { fontSize: '0.7rem', color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, s.url)
+                ))
+            );
+        }
 
         ReactDOM.render(<DensityProvider><Root /></DensityProvider>, document.getElementById('root'));
     </script>

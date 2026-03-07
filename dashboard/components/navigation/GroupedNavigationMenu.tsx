@@ -92,7 +92,12 @@ export const NAV_GROUPS: Record<string, NavGroup[]> = {
     },
     {
       label: 'Intelligence',
-      items: [{ id: 'intelligence', label: 'Sunbelt Intelligence' }],
+      items: [
+        { id: 'intelligence', label: 'Sunbelt Intelligence' },
+        { id: 'dev_network', label: 'Developer Networks' },
+        { id: 'corridors', label: 'Dev Corridors' },
+        { id: 'dev_momentum', label: 'Momentum Engine' },
+      ],
     },
   ],
   producer: [
@@ -108,7 +113,12 @@ export const NAV_GROUPS: Record<string, NavGroup[]> = {
     },
     {
       label: 'Intelligence',
-      items: [{ id: 'intelligence', label: 'Sunbelt Intelligence' }],
+      items: [
+        { id: 'intelligence', label: 'Sunbelt Intelligence' },
+        { id: 'dev_network', label: 'Developer Networks' },
+        { id: 'corridors', label: 'Dev Corridors' },
+        { id: 'dev_momentum', label: 'Momentum Engine' },
+      ],
     },
     {
       label: 'Pipeline',
@@ -131,7 +141,13 @@ export const NAV_GROUPS: Record<string, NavGroup[]> = {
     },
     {
       label: 'Intelligence',
-      items: [{ id: 'intelligence', label: 'Sunbelt Intelligence' }],
+      items: [
+        { id: 'intelligence', label: 'Sunbelt Intelligence' },
+        { id: 'dev_network', label: 'Developer Networks' },
+        { id: 'corridors', label: 'Dev Corridors' },
+        { id: 'dev_momentum', label: 'Momentum Engine' },
+        { id: 'signal_discovery', label: 'Signal Discovery' },
+      ],
     },
     {
       label: 'Pipeline',
