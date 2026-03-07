@@ -8867,6 +8867,22 @@ _scheduler.add_job(
     replace_existing=True
 )
 
+def _scheduled_planning_agenda():
+    """Planning agenda intelligence: scan city planning commission agendas every 6 hours."""
+    try:
+        from workers.collectors.planning_agenda_collector import collect_planning_agendas
+        collect_planning_agendas()
+    except Exception as e:
+        print(f"[Scheduler] Planning agenda collector error: {e}")
+
+_scheduler.add_job(
+    _scheduled_planning_agenda,
+    CronTrigger(hour='*/6', minute=10, timezone=pytz.timezone('America/Los_Angeles')),
+    id='planning_agenda_6h',
+    name='Planning Agenda Intelligence (every 6h)',
+    replace_existing=True
+)
+
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
 print("[Scheduler] Daily signal optimization at 6:45 AM PT")
@@ -8888,6 +8904,7 @@ print("[Scheduler] City Expansion Detection every Wednesday 3:30 AM PT")
 print("[Scheduler] Supply Chain Intelligence Pipeline every 6 hours")
 print("[Scheduler] Signal Quality Engine every 12 hours (offset +20m)")
 print("[Scheduler] Development Confirmation Engine daily 1:30 AM PT")
+print("[Scheduler] Planning Agenda Intelligence every 6 hours")
 
 
 # ---------------------------------------------------------------------------
