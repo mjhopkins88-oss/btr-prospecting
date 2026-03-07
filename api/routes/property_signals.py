@@ -261,6 +261,12 @@ SUPPLY_CHAIN_TYPES = [
     'CONCRETE_SUPPLY_SIGNAL', 'INFRASTRUCTURE_BID',
 ]
 
+PLANNING_SIGNAL_TYPES = [
+    'ZONING_AGENDA_ITEM', 'SITE_PLAN_SUBMISSION',
+    'SUBDIVISION_APPLICATION', 'REZONING_REQUEST',
+    'DEVELOPMENT_REVIEW_CASE',
+]
+
 
 @property_signals_bp.route('/api/supply-chain-signals', methods=['GET'])
 def get_supply_chain_signals():
@@ -352,6 +358,10 @@ def get_radar_map_data():
         placeholders = ','.join(['?' for _ in SUPPLY_CHAIN_TYPES])
         sql += f' AND ps.signal_type IN ({placeholders})'
         params.extend(SUPPLY_CHAIN_TYPES)
+    elif signal_category == 'planning':
+        placeholders = ','.join(['?' for _ in PLANNING_SIGNAL_TYPES])
+        sql += f' AND ps.signal_type IN ({placeholders})'
+        params.extend(PLANNING_SIGNAL_TYPES)
     elif signal_category:
         sql += ' AND ps.signal_type = ?'
         params.append(signal_category)
@@ -364,7 +374,13 @@ def get_radar_map_data():
     # Format as map markers
     markers = []
     for r in rows:
-        marker_color = 'orange' if r.get('signal_type') in SUPPLY_CHAIN_TYPES else 'blue'
+        sig_type = r.get('signal_type')
+        if sig_type in SUPPLY_CHAIN_TYPES:
+            marker_color = 'orange'
+        elif sig_type in PLANNING_SIGNAL_TYPES:
+            marker_color = 'blue'
+        else:
+            marker_color = 'blue'
         markers.append({
             'id': r['id'],
             'parcel_id': r.get('parcel_id'),

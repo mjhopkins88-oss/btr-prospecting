@@ -33,6 +33,7 @@ def run_collection():
     from workers.collectors.construction.engineering_activity_collector import collect_engineering_plans
     from workers.collectors.construction.utility_connection_collector import collect_utility_connections
     from workers.collectors.construction.contractor_bid_collector import collect_contractor_bids
+    from workers.collectors.planning_agenda_collector import collect_planning_agendas
     from shared.config import TARGET_CITIES
 
     print(f"[Pipeline] Stage 1: Collection — {datetime.utcnow().isoformat()}")
@@ -53,6 +54,7 @@ def run_collection():
         ('Engineering plans', collect_engineering_plans),
         ('Utility connections', collect_utility_connections),
         ('Contractor bids', collect_contractor_bids),
+        ('Planning agendas', collect_planning_agendas),
     ]
 
     counts = {}
@@ -265,6 +267,7 @@ def _log_daily_signal_summary(collection_total):
             'Engineering signals': ('ENGINEERING_ENGAGEMENT', 'CIVIL_ENGINEERING_PLAN', 'SITE_PLAN_SUBMISSION'),
             'Supply chain signals': ('SITE_PREP_ACTIVITY', 'UTILITY_CONNECTION_REQUEST', 'CONCRETE_SUPPLY_SIGNAL', 'INFRASTRUCTURE_BID', 'EARTHWORK_CONTRACTOR'),
             'News signals': ('NEWS_SIGNAL',),
+            'Planning signals': ('ZONING_AGENDA_ITEM', 'SITE_PLAN_SUBMISSION', 'SUBDIVISION_APPLICATION', 'REZONING_REQUEST', 'DEVELOPMENT_REVIEW_CASE'),
         }
 
         summary = {}

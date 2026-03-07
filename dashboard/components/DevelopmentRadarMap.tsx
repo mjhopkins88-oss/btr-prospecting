@@ -50,12 +50,22 @@ const SIGNAL_TYPE_LABELS: Record<string, string> = {
   LAND_PURCHASE: 'Land Purchase',
   ENGINEERING_ENGAGEMENT: 'Engineering Engagement',
   SITE_PLAN_SUBMISSION: 'Site Plan Submission',
+  ZONING_AGENDA_ITEM: 'Zoning Agenda Item',
+  REZONING_REQUEST: 'Rezoning Request',
+  SUBDIVISION_APPLICATION: 'Subdivision Application',
+  DEVELOPMENT_REVIEW_CASE: 'Development Review Case',
 };
 
 const SUPPLY_CHAIN_TYPES = new Set([
   'CIVIL_ENGINEERING_PLAN', 'SITE_PREP_ACTIVITY',
   'UTILITY_CONNECTION_REQUEST', 'EARTHWORK_CONTRACTOR',
   'CONCRETE_SUPPLY_SIGNAL', 'INFRASTRUCTURE_BID',
+]);
+
+const PLANNING_SIGNAL_TYPES = new Set([
+  'ZONING_AGENDA_ITEM', 'SITE_PLAN_SUBMISSION',
+  'SUBDIVISION_APPLICATION', 'REZONING_REQUEST',
+  'DEVELOPMENT_REVIEW_CASE',
 ]);
 
 // ---- Helpers ----
@@ -78,7 +88,10 @@ function getMarkerStyle(marker: RadarMarker) {
   const isSupplyChain = SUPPLY_CHAIN_TYPES.has(marker.signal_type);
   const isHighProb = marker.development_probability >= 70;
 
+  const isPlanningSignal = PLANNING_SIGNAL_TYPES.has(marker.signal_type);
+
   if (isSupplyChain) return { color: '#f97316', bg: 'rgba(249,115,22,0.15)', border: 'rgba(249,115,22,0.4)', label: 'SUPPLY CHAIN' };
+  if (isPlanningSignal) return { color: '#3b82f6', bg: 'rgba(59,130,246,0.15)', border: 'rgba(59,130,246,0.4)', label: 'PLANNING SIGNAL' };
   if (isHighProb) return { color: '#34d399', bg: 'rgba(52,211,153,0.15)', border: 'rgba(52,211,153,0.4)', label: 'HIGH PROB' };
   return { color: '#3b82f6', bg: 'rgba(59,130,246,0.15)', border: 'rgba(59,130,246,0.4)', label: 'SIGNAL' };
 }

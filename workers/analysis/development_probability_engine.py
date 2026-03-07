@@ -46,6 +46,11 @@ SIGNAL_SCORES = {
     'EARTHWORK_CONTRACTOR': 15,
     'CONCRETE_SUPPLY_SIGNAL': 15,
     'INFRASTRUCTURE_BID': 15,
+    # Planning agenda signals
+    'ZONING_AGENDA_ITEM': 20,
+    'REZONING_REQUEST': 30,
+    'SUBDIVISION_APPLICATION': 25,
+    'DEVELOPMENT_REVIEW_CASE': 20,
 }
 
 # Bonus scores for pattern matches and relationships
