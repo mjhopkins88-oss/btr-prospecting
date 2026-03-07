@@ -452,12 +452,95 @@ def trigger_entity_discovery(conn):
 
 
 # ---------------------------------------------------------------------------
-# Step 5 — Populate search_cache
+# Step 5 — Populate developer_network_edges and parcel_development_probability
+# ---------------------------------------------------------------------------
+
+def populate_network_and_probability(conn):
+    """Insert developer network edges and parcel probability records."""
+    print("\n[Step 5] Populating developer_network_edges and parcel_development_probability...")
+    cur = conn.cursor()
+
+    # Ensure tables exist
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS developer_network_edges (
+            id TEXT PRIMARY KEY,
+            entity_a TEXT NOT NULL,
+            entity_b TEXT NOT NULL,
+            relationship_type TEXT NOT NULL,
+            co_occurrence_count INTEGER DEFAULT 1,
+            last_seen TIMESTAMP,
+            relationship_strength INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS parcel_development_probability (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            probability_score REAL,
+            signal_count INTEGER DEFAULT 0,
+            top_signals TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Insert developer network edges (entity-to-entity relationships)
+    edges = [
+        ('Desert Vista Holdings LLC', 'Kimley-Horn', 'developer_contractor', 3, 75),
+        ('Desert Vista Holdings LLC', 'Desert Vista Development', 'llc_parent', 1, 90),
+        ('Lone Star BTR Capital LLC', 'Lone Star Residential Group', 'llc_parent', 1, 95),
+        ('Lone Star BTR Capital LLC', 'Meritage Homes Contracting', 'developer_contractor', 2, 60),
+        ('Peach State Communities', 'BHI Engineering', 'developer_contractor', 4, 80),
+        ('Trinity Residential Group', 'Southwest Earthworks', 'developer_contractor', 1, 40),
+    ]
+    edges_stored = 0
+    for entity_a, entity_b, rel_type, co_count, strength in edges:
+        try:
+            cur.execute('''
+                INSERT OR IGNORE INTO developer_network_edges
+                (id, entity_a, entity_b, relationship_type, co_occurrence_count,
+                 last_seen, relationship_strength, created_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP)
+            ''', (_new_id(), entity_a, entity_b, rel_type, co_count, strength))
+            edges_stored += 1
+        except Exception:
+            pass
+
+    # Insert parcel development probability scores
+    parcel_probs = [
+        ('PARCEL-PHX-001', 82.5, 5, ['ZONING_APPLICATION', 'CONTRACTOR_ACTIVITY_CLUSTER', 'LLC_FORMATION']),
+        ('PARCEL-PHX-002', 65.0, 2, ['GRADING_PLAN', 'SITE_SURVEY']),
+        ('PARCEL-DAL-001', 78.3, 4, ['REZONING_REQUEST', 'LLC_FORMATION', 'PERMIT_PULL']),
+        ('PARCEL-DAL-002', 55.0, 1, ['DEVELOPER_EXPANSION']),
+        ('PARCEL-ATL-001', 71.8, 3, ['ZONING_AGENDA_ITEM', 'ARCHITECTURE_PLAN', 'DEVELOPER_EXPANSION']),
+    ]
+    probs_stored = 0
+    for parcel_id, score, sig_count, top_sigs in parcel_probs:
+        try:
+            cur.execute('''
+                INSERT OR IGNORE INTO parcel_development_probability
+                (id, parcel_id, probability_score, signal_count, top_signals,
+                 created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ''', (_new_id(), parcel_id, score, sig_count, json.dumps(top_sigs)))
+            probs_stored += 1
+        except Exception:
+            pass
+
+    conn.commit()
+    print(f"  Network edges stored: {edges_stored}")
+    print(f"  Parcel probabilities stored: {probs_stored}")
+    return edges_stored, probs_stored
+
+
+# ---------------------------------------------------------------------------
+# Step 6 — Populate search_cache
 # ---------------------------------------------------------------------------
 
 def populate_search_cache(conn):
     """Insert search cache entries to verify the table."""
-    print("\n[Step 5] Populating search_cache...")
+    print("\n[Step 6] Populating search_cache...")
     cur = conn.cursor()
     cache_entries = [
         ('zoning:phoenix:az', json.dumps({'results': 3, 'type': 'zoning_signals'})),
@@ -487,7 +570,7 @@ def populate_search_cache(conn):
 
 def finalize_discovery_run(conn, run_id, total_signals):
     """Update the discovery_run with final counts."""
-    print(f"\n[Step 6] Finalizing discovery_run {run_id}...")
+    print(f"\n[Step 7] Finalizing discovery_run {run_id}...")
     cur = conn.cursor()
     cur.execute('''
         UPDATE discovery_runs
@@ -541,7 +624,8 @@ def verify_table_counts(conn):
     print("  TABLE ROW COUNT VERIFICATION")
     print("=" * 60)
 
-    tables = ['property_signals', 'entities', 'discovery_runs', 'search_cache']
+    tables = ['property_signals', 'entities', 'discovery_runs', 'search_cache',
+               'developer_network_edges', 'parcel_development_probability']
     counts = {}
     cur = conn.cursor()
 
@@ -603,24 +687,29 @@ def main():
     entities_count, entity_signals_count = trigger_entity_discovery(conn)
     conn.close()
 
-    # Step 5: Search cache
+    # Step 5: Developer network edges and parcel probabilities
+    conn = get_db()
+    populate_network_and_probability(conn)
+    conn.close()
+
+    # Step 6: Search cache
     conn = get_db()
     cache_count = populate_search_cache(conn)
     conn.close()
 
     total_signals = zoning_count + contractor_count + entity_signals_count
 
-    # Step 6: Finalize the discovery run
+    # Step 7: Finalize the discovery run
     conn = get_db()
     finalize_discovery_run(conn, run_id, total_signals)
     conn.close()
 
-    # Step 7: Log all signals
+    # Step 8: Log all signals
     conn = get_db()
     log_all_signals(conn)
     conn.close()
 
-    # Step 8: Verify counts
+    # Step 9: Verify counts
     conn = get_db()
     counts = verify_table_counts(conn)
     conn.close()

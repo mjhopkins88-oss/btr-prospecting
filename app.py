@@ -7667,7 +7667,13 @@ def api_sunbelt_trends():
                                'count_window': 0, 'count_baseline': 0, 'items_window': []}
             g = groups[key]
             g['count_baseline'] += 1
-            if s.get('date_str', '') >= window_cutoff:
+            # Normalize date_str to string for comparison (Fix: datetime vs str TypeError)
+            date_val = s.get('date_str', '')
+            if isinstance(date_val, datetime):
+                date_val = date_val.isoformat()
+            elif not isinstance(date_val, str):
+                date_val = str(date_val) if date_val else ''
+            if date_val >= window_cutoff:
                 g['count_window'] += 1
                 if len(g['items_window']) < 5:
                     g['items_window'].append({
@@ -7675,7 +7681,7 @@ def api_sunbelt_trends():
                         'source_url': s.get('url') or None,
                         'city': city,
                         'state': state,
-                        'date': s.get('date_str', ''),
+                        'date': date_val,
                     })
 
         # Compute trend ratio and classify
@@ -9117,6 +9123,264 @@ print("[Scheduler] Parcel Contiguity Engine daily 4:30 AM PT")
 print("[Scheduler] Developer Expansion Forecasting weekly Tue 3:00 AM PT")
 print("[Scheduler] Signal Weight Optimization weekly Sun 4:00 AM PT")
 print("[Scheduler] Autonomous Source Discovery weekly Sat 2:00 AM PT")
+
+
+# ===================================================================
+# FIX 1 & 2: STARTUP PIPELINE — Run intelligence cycle on server start
+# ===================================================================
+# Ensures intelligence tabs populate immediately after deploy instead
+# of waiting until the next scheduled cron window.
+# Also prevents missed cron windows: if the server starts after a job's
+# scheduled time for the day, the job runs once immediately.
+# ===================================================================
+
+import threading as _startup_threading
+
+
+def _run_startup_discovery_cycle():
+    """
+    Run a full initial discovery cycle on startup.
+    Triggers all key intelligence collectors once so dashboards
+    populate immediately instead of waiting for the next cron window.
+    """
+    import time as _time
+    # Brief delay to let the Flask app finish initializing
+    _time.sleep(5)
+
+    print("\n" + "=" * 60)
+    print("[Startup] INITIAL DISCOVERY CYCLE — BEGIN")
+    print(f"[Startup] {datetime.utcnow().isoformat()} UTC")
+    print("=" * 60 + "\n")
+
+    startup_results = {}
+
+    # --- Insert a discovery_run record ---
+    try:
+        conn = _get_db_conn()
+        c = conn.cursor()
+        c.execute('''
+            INSERT INTO discovery_runs
+            (run_at, results_json, digest_text, city_count, total_new, status, adapter_stats)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            datetime.utcnow().isoformat(),
+            json.dumps({}),
+            'Startup discovery cycle',
+            0, 0, 'running',
+            json.dumps({'trigger': 'startup'}),
+        ))
+        conn.commit()
+        # Retrieve the run_id
+        c.execute('SELECT MAX(id) FROM discovery_runs')
+        startup_run_id = c.fetchone()[0]
+        conn.close()
+        print(f"[Startup] Discovery run created: id={startup_run_id}")
+    except Exception as e:
+        print(f"[Startup] Discovery run insert error: {e}")
+        startup_run_id = None
+
+    total_signals = 0
+
+    # --- Planning Agenda Intelligence ---
+    print("[Startup] Starting Planning Agenda Intelligence...")
+    try:
+        from workers.collectors.planning_agenda_collector import collect_planning_agendas
+        count = collect_planning_agendas()
+        startup_results['planning_agendas'] = count or 0
+        total_signals += count or 0
+        print(f"[Startup] Planning Agenda Intelligence complete — signals discovered: {count or 0}")
+    except Exception as e:
+        print(f"[Startup] Planning Agenda Intelligence error: {e}")
+        startup_results['planning_agendas'] = 0
+
+    # --- Building Permit Intelligence ---
+    print("[Startup] Starting Building Permit Intelligence...")
+    try:
+        from workers.collectors.building_permit_collector import collect_building_permits
+        count = collect_building_permits()
+        startup_results['building_permits'] = count or 0
+        total_signals += count or 0
+        print(f"[Startup] Building Permit Intelligence complete — signals discovered: {count or 0}")
+    except Exception as e:
+        print(f"[Startup] Building Permit Intelligence error: {e}")
+        startup_results['building_permits'] = 0
+
+    # --- Land Transaction Intelligence ---
+    print("[Startup] Starting Land Transaction Intelligence...")
+    try:
+        from workers.collectors.land_transaction_collector import collect_land_transactions
+        count = collect_land_transactions()
+        startup_results['land_transactions'] = count or 0
+        total_signals += count or 0
+        print(f"[Startup] Land Transaction Intelligence complete — signals discovered: {count or 0}")
+    except Exception as e:
+        print(f"[Startup] Land Transaction Intelligence error: {e}")
+        startup_results['land_transactions'] = 0
+
+    # --- Plat Filing Intelligence ---
+    print("[Startup] Starting Plat Filing Intelligence...")
+    try:
+        from workers.collectors.plat_filing_collector import collect_plat_filings
+        count = collect_plat_filings()
+        startup_results['plat_filings'] = count or 0
+        total_signals += count or 0
+        print(f"[Startup] Plat Filing Intelligence complete — signals discovered: {count or 0}")
+    except Exception as e:
+        print(f"[Startup] Plat Filing Intelligence error: {e}")
+        startup_results['plat_filings'] = 0
+
+    # --- Construction Financing Intelligence ---
+    print("[Startup] Starting Construction Financing Intelligence...")
+    try:
+        from workers.collectors.construction_financing_collector import collect_construction_financing
+        count = collect_construction_financing()
+        startup_results['construction_financing'] = count or 0
+        total_signals += count or 0
+        print(f"[Startup] Construction Financing Intelligence complete — signals discovered: {count or 0}")
+    except Exception as e:
+        print(f"[Startup] Construction Financing Intelligence error: {e}")
+        startup_results['construction_financing'] = 0
+
+    # --- Zoning Intelligence Engine ---
+    print("[Startup] Starting Zoning Intelligence Engine...")
+    try:
+        from workers.analysis.zoning_intelligence_engine import run_zoning_intelligence
+        result = run_zoning_intelligence()
+        startup_results['zoning_intelligence'] = result
+        print(f"[Startup] Zoning Intelligence Engine complete — result: {result}")
+    except Exception as e:
+        print(f"[Startup] Zoning Intelligence Engine error: {e}")
+        startup_results['zoning_intelligence'] = {'error': str(e)}
+
+    # --- Contractor Intelligence ---
+    print("[Startup] Starting Contractor Intelligence...")
+    try:
+        from workers.analysis.contractor_intelligence_worker import run_contractor_intelligence_pipeline
+        result = run_contractor_intelligence_pipeline()
+        startup_results['contractor_intelligence'] = result
+        print(f"[Startup] Contractor Intelligence complete — result: {result}")
+    except Exception as e:
+        print(f"[Startup] Contractor Intelligence error: {e}")
+        startup_results['contractor_intelligence'] = {'error': str(e)}
+
+    # --- Lead Intelligence Pipeline (full 8-stage pipeline) ---
+    print("[Startup] Starting Lead Intelligence Pipeline...")
+    try:
+        from workers.pipeline import run_full_pipeline
+        result = run_full_pipeline()
+        startup_results['lead_intelligence'] = result
+        li_signals = result.get('collection', 0) if isinstance(result, dict) else 0
+        total_signals += li_signals
+        print(f"[Startup] Lead Intelligence Pipeline complete — signals: {li_signals}")
+    except Exception as e:
+        print(f"[Startup] Lead Intelligence Pipeline error: {e}")
+        startup_results['lead_intelligence'] = {'error': str(e)}
+
+    # --- Finalize the discovery_run ---
+    if startup_run_id:
+        try:
+            conn = _get_db_conn()
+            c = conn.cursor()
+            c.execute('''
+                UPDATE discovery_runs
+                SET status = 'completed',
+                    total_new = ?,
+                    results_json = ?,
+                    adapter_stats = ?
+                WHERE id = ?
+            ''', (
+                total_signals,
+                json.dumps(startup_results, default=str),
+                json.dumps({k: v if isinstance(v, (int, float)) else str(v)
+                            for k, v in startup_results.items()}),
+                startup_run_id,
+            ))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"[Startup] Discovery run finalization error: {e}")
+
+    # --- Log final summary ---
+    print("\n" + "=" * 60)
+    print("[Startup] INITIAL DISCOVERY CYCLE — COMPLETE")
+    print(f"[Startup] {datetime.utcnow().isoformat()} UTC")
+    print(f"[Startup] Total signals collected: {total_signals}")
+    for name, result in startup_results.items():
+        if isinstance(result, int):
+            print(f"[Startup]   {name}: {result} signals")
+        elif isinstance(result, dict) and 'error' not in result:
+            print(f"[Startup]   {name}: {result}")
+        elif isinstance(result, dict):
+            print(f"[Startup]   {name}: ERROR — {result.get('error', 'unknown')}")
+    print("[Startup] Discovery run completed — intelligence tabs should now populate")
+    print("=" * 60 + "\n")
+
+
+def _check_missed_cron_windows():
+    """
+    Fix 2: Check if any daily cron jobs were missed because the server
+    started after their scheduled time. If so, run them once immediately.
+    """
+    import time as _time
+    _time.sleep(8)  # Wait for startup cycle to begin first
+
+    _tz = pytz.timezone('America/Los_Angeles')
+    now_local = datetime.now(_tz)
+    current_hour = now_local.hour
+    current_minute = now_local.minute
+    current_weekday = now_local.strftime('%a').lower()[:3]
+
+    print(f"\n[Scheduler] Checking for missed cron windows — current time: {now_local.strftime('%H:%M %Z %A')}")
+
+    # Daily jobs with their scheduled (hour, minute) — only run if missed today
+    daily_missed_jobs = [
+        (1, 30, 'Development Confirmation', _scheduled_development_confirmation),
+        (3, 0, 'Lead Intelligence Pipeline', _scheduled_li_pipeline),
+        (4, 0, 'Zoning Intelligence', _scheduled_zoning_intelligence),
+        (4, 30, 'Parcel Contiguity', _scheduled_parcel_contiguity),
+        (5, 15, 'Permit Feed', _scheduled_permit_feed),
+        (5, 30, 'Government Signals', _scheduled_gov_signals),
+        (6, 45, 'Signal Optimization', _scheduled_optimization),
+        (7, 30, 'Trend Detection', _scheduled_trend_detection),
+    ]
+
+    missed_count = 0
+    for sched_hour, sched_minute, label, fn in daily_missed_jobs:
+        sched_time = sched_hour * 60 + sched_minute
+        now_time = current_hour * 60 + current_minute
+        if now_time > sched_time:
+            missed_count += 1
+            print(f"[Scheduler] Missed window for {label} (scheduled {sched_hour}:{sched_minute:02d} AM PT) — running now")
+            try:
+                fn()
+                print(f"[Scheduler] {label} catch-up complete")
+            except Exception as e:
+                print(f"[Scheduler] {label} catch-up error: {e}")
+
+    if missed_count == 0:
+        print("[Scheduler] No missed cron windows — all jobs will run at their scheduled times")
+    else:
+        print(f"[Scheduler] {missed_count} missed jobs executed")
+
+
+# Launch startup discovery cycle in a background thread so it doesn't
+# block the Flask app from starting and serving requests.
+_startup_thread = _startup_threading.Thread(
+    target=_run_startup_discovery_cycle,
+    name='startup-discovery-cycle',
+    daemon=True,
+)
+_startup_thread.start()
+print("[Startup] Initial discovery cycle launched in background thread")
+
+# Launch missed-cron-window check in a separate background thread
+_missed_cron_thread = _startup_threading.Thread(
+    target=_check_missed_cron_windows,
+    name='missed-cron-check',
+    daemon=True,
+)
+_missed_cron_thread.start()
+print("[Startup] Missed cron window check launched in background thread")
 
 
 # ---------------------------------------------------------------------------
