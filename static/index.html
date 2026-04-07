@@ -632,6 +632,20 @@
             );
         }
 
+        // ======= LINKEDIN HELPERS =======
+        function validLinkedIn(v) {
+            if (!v || typeof v !== 'string') return false;
+            const s = v.trim().toLowerCase();
+            if (!s) return false;
+            if (s.includes('not mentioned') || s.includes('not available') || s === 'n/a' || s === 'none' || s === 'null') return false;
+            return s.includes('linkedin.com/');
+        }
+        function normalizeLinkedIn(v) {
+            const s = v.trim();
+            if (/^https?:\/\//i.test(s)) return s;
+            return 'https://' + s.replace(/^\/+/, '');
+        }
+
         // ======= MAIN APP =======
         function App({ user, onLogout }) {
             const [activeTab, setActiveTab] = useState('search');
@@ -1394,8 +1408,8 @@
                     {/* Executive */}
                     <div style={styles.executive}>
                         <strong>{prospect.executive || 'Contact via company'}</strong> {prospect.title && `- ${prospect.title}`}
-                        {prospect.linkedin && (
-                            <a href={`https://${prospect.linkedin}`} target="_blank" style={styles.linkedinLink}>
+                        {validLinkedIn(prospect.linkedin) && (
+                            <a href={normalizeLinkedIn(prospect.linkedin)} target="_blank" rel="noopener noreferrer" style={styles.linkedinLink}>
                                 LinkedIn
                             </a>
                         )}
@@ -1614,8 +1628,8 @@
                                 <button className="action-btn" style={styles.actionBtn} onClick={() => setShowEmailOptions(!showEmailOptions)}>
                                     {showEmailOptions ? 'Cancel' : 'Generate Email'}
                                 </button>
-                                {prospect.linkedin ? (
-                                    <a href={`https://${prospect.linkedin}`} target="_blank" rel="noopener noreferrer" style={{...styles.actionBtn, textDecoration: 'none', textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center'}}>
+                                {validLinkedIn(prospect.linkedin) ? (
+                                    <a href={normalizeLinkedIn(prospect.linkedin)} target="_blank" rel="noopener noreferrer" style={{...styles.actionBtn, textDecoration: 'none', textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center'}}>
                                         LinkedIn DM
                                     </a>
                                 ) : (
@@ -1638,8 +1652,8 @@
                                 <button className="action-btn" style={styles.actionBtn} onClick={() => setShowEmailOptions(!showEmailOptions)}>
                                     {showEmailOptions ? 'Cancel' : 'Generate Email'}
                                 </button>
-                                {prospect.linkedin ? (
-                                    <a href={`https://${prospect.linkedin}`} target="_blank" rel="noopener noreferrer" style={{...styles.actionBtn, textDecoration: 'none', textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center'}}>
+                                {validLinkedIn(prospect.linkedin) ? (
+                                    <a href={normalizeLinkedIn(prospect.linkedin)} target="_blank" rel="noopener noreferrer" style={{...styles.actionBtn, textDecoration: 'none', textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center'}}>
                                         LinkedIn DM
                                     </a>
                                 ) : (
