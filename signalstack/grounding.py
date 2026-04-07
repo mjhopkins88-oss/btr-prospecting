@@ -55,7 +55,22 @@ def _matches_any(text: str, patterns: Iterable[str]) -> list:
     return found
 
 
-def validate_message(body: str, signals_used: list, facts_used: list) -> dict:
+GENERIC_OPENERS = [
+    r"\bi help (companies|businesses|teams) like yours\b",
+    r"\bwould love to connect\b",
+    r"\bsaw your profile and thought\b",
+    r"\bcongrats on your recent success\b",
+    r"\bi wanted to (reach out|introduce myself)\b",
+    r"\bhope you('| a)re (doing )?well\b",
+]
+
+
+def validate_message(
+    body: str,
+    signals_used: list,
+    facts_used: list,
+    profile_fields_used: list | None = None,
+) -> dict:
     """
     Validate a generated message against grounding + safety rules.
 
@@ -74,13 +89,18 @@ def validate_message(body: str, signals_used: list, facts_used: list) -> dict:
     if len(body) > MAX_MESSAGE_CHARS:
         violations.append(f"too_long:{len(body)}>{MAX_MESSAGE_CHARS}")
 
-    # Must reference at least one stored fact OR signal.
-    if not signals_used and not facts_used:
-        violations.append("ungrounded:no_signals_or_facts")
+    profile_fields_used = profile_fields_used or []
+    # Must reference at least one stored fact, signal, or profile field.
+    if not signals_used and not facts_used and not profile_fields_used:
+        violations.append("ungrounded:no_signals_facts_or_profile")
 
     banned = _matches_any(body, BANNED_PHRASES)
     if banned:
         violations.append(f"banned_phrases:{len(banned)}")
+
+    generic = _matches_any(body, GENERIC_OPENERS)
+    if generic:
+        violations.append(f"generic_opener:{len(generic)}")
 
     fake = _matches_any(body, FAKE_FAMILIARITY)
     if fake:
@@ -91,7 +111,7 @@ def validate_message(body: str, signals_used: list, facts_used: list) -> dict:
         violations.append(f"creepy:{len(creepy)}")
 
     # Light heuristic grounding score: evidence weight minus violations.
-    evidence = len(signals_used) + len(facts_used)
+    evidence = len(signals_used) + len(facts_used) + len(profile_fields_used)
     score = max(0.0, min(1.0, 0.4 + 0.15 * evidence - 0.25 * len(violations)))
 
     return {

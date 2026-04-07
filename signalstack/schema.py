@@ -16,6 +16,9 @@ Tables:
     ss_message_signals    — which signals each message used (grounding trail)
     ss_message_outcomes   — outcome events (one prospect can have many)
     ss_prompt_templates   — versioned prompt templates
+    ss_profile_context    — manually imported LinkedIn profile context
+    ss_social_principles  — social-selling knowledge layer
+    ss_message_metadata   — grounding/strategy metadata for messages
 """
 from db import get_db, is_postgres
 
@@ -122,6 +125,55 @@ SCHEMA_SQL = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS ss_profile_context (
+        id TEXT PRIMARY KEY,
+        prospect_id TEXT NOT NULL,
+        linkedin_url TEXT,
+        headline TEXT,
+        about_text TEXT,
+        current_role TEXT,
+        current_company TEXT,
+        prior_roles_summary TEXT,
+        featured_topics TEXT,
+        recent_posts_summary TEXT,
+        notable_language_patterns TEXT,
+        shared_context TEXT,
+        manual_observations TEXT,
+        safe_flags TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ss_social_principles (
+        id TEXT PRIMARY KEY,
+        category TEXT NOT NULL,
+        principle_name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        practical_use_case TEXT,
+        allowed_contexts TEXT,
+        disallowed_contexts TEXT,
+        example_pattern TEXT,
+        anti_pattern TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ss_message_metadata (
+        message_id TEXT PRIMARY KEY,
+        facts_used_json TEXT,
+        signals_used_json TEXT,
+        notes_used_json TEXT,
+        profile_fields_used_json TEXT,
+        grounding_score REAL,
+        unsafe_claims_json TEXT,
+        validator_notes TEXT,
+        strategy_json TEXT,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS ss_prompt_templates (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -140,6 +192,8 @@ INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS ix_ss_signals_company ON ss_signals(company_id)",
     "CREATE INDEX IF NOT EXISTS ix_ss_messages_prospect ON ss_messages(prospect_id)",
     "CREATE INDEX IF NOT EXISTS ix_ss_messages_status ON ss_messages(status)",
+    "CREATE INDEX IF NOT EXISTS ix_ss_profile_prospect ON ss_profile_context(prospect_id)",
+    "CREATE INDEX IF NOT EXISTS ix_ss_principles_active ON ss_social_principles(active)",
 ]
 
 
@@ -156,3 +210,9 @@ def init_schema() -> None:
         print(f"[SignalStack] Schema initialized ({'postgres' if is_postgres() else 'sqlite'})")
     finally:
         conn.close()
+    # Idempotent seeding of the social-selling knowledge layer.
+    try:
+        from .seed import seed_principles_if_empty
+        seed_principles_if_empty()
+    except Exception as e:
+        print(f"[SignalStack] principle seed skipped: {e}")

@@ -355,6 +355,33 @@ async function viewGenerator() {
   });
   const card = h("div",{class:"card"});
   card.append(h("label",{},"Prospect"), sel);
+
+  // LinkedIn profile context inputs (manual / lawful workflow).
+  const linkedinUrl = h("input",{placeholder:"LinkedIn profile URL"});
+  const headline = h("input",{placeholder:"Headline (optional)"});
+  const featuredTopics = h("input",{placeholder:"Featured topics (optional)"});
+  const aboutText = h("textarea",{placeholder:"Paste profile / about text (optional)"});
+  const instruction = h("textarea",{placeholder:"Custom instruction — e.g. 'keep it short, focus on credibility'"});
+
+  // Strategy override
+  const mtype = h("select"); mtype.append(h("option",{value:""},"— message type —"));
+  META.message_types.forEach(t => mtype.append(h("option",{value:t},t)));
+  const trigger = h("select"); trigger.append(h("option",{value:""},"— primary trigger —"));
+  META.primary_triggers.forEach(t => trigger.append(h("option",{value:t},t)));
+  const style = h("select"); style.append(h("option",{value:""},"— style —"));
+  META.communication_styles.forEach(t => style.append(h("option",{value:t},t)));
+  const goal = h("select"); goal.append(h("option",{value:""},"— goal —"));
+  META.outreach_goals.forEach(t => goal.append(h("option",{value:t},t)));
+
+  card.append(h("label",{},"LinkedIn URL"), linkedinUrl);
+  card.append(h("div",{class:"row"},
+    h("div",{},h("label",{},"Headline"), headline),
+    h("div",{},h("label",{},"Featured topics"), featuredTopics)));
+  card.append(h("label",{},"Pasted profile / about text"), aboutText);
+  card.append(h("label",{},"Custom instruction"), instruction);
+  card.append(h("label",{},"Strategy override"));
+  card.append(h("div",{class:"row"}, mtype, trigger, style, goal));
+
   const btn = h("button",{},"Generate");
   card.append(btn);
   v.append(card);
@@ -363,8 +390,25 @@ async function viewGenerator() {
   v.append(out);
 
   btn.onclick = async () => {
+    if (!sel.value) { out.innerHTML = ""; out.append(h("div",{class:"card"},"Pick a prospect first.")); return; }
     out.innerHTML = "Generating…";
-    const r = await api("/generate",{method:"POST", body:{prospect_id: sel.value, n: 4}});
+    const profile = {
+      linkedin_url: linkedinUrl.value || undefined,
+      headline: headline.value || undefined,
+      featured_topics: featuredTopics.value || undefined,
+      about_text: aboutText.value || undefined,
+    };
+    const strategy = {
+      message_type: mtype.value || undefined,
+      primary_trigger: trigger.value || undefined,
+      communication_style: style.value || undefined,
+      outreach_goal: goal.value || undefined,
+    };
+    const r = await api("/generate",{method:"POST", body:{
+      prospect_id: sel.value, n: 4,
+      instruction: instruction.value || undefined,
+      profile, strategy,
+    }});
     out.innerHTML = "";
     if (r.error) {
       out.append(h("div",{class:"card"}, r.message || r.error));
