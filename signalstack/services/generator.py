@@ -17,6 +17,8 @@ from .. import repo
 from ..ai.provider import get_provider
 from ..grounding import validate_message, filter_safe_signals
 from . import strategy as strategy_engine
+from .signal_interpreter import interpret_signals
+from .anti_copy import check_message as anti_copy_check, shorten as anti_copy_shorten
 
 
 def _merge_profile(stored: Optional[dict], override: Optional[dict]) -> dict:
@@ -55,10 +57,16 @@ def build_context(
     except Exception:
         principles = []
 
+    # Compress every raw signal into a short observation BEFORE the
+    # generator sees it. This is the key fix for the bug where long
+    # listing/post bodies were being pasted directly into messages.
+    observations = interpret_signals(signals)
+
     return {
         "prospect": prospect,
         "company": company,
         "signals": signals,
+        "observations": observations,
         "notes": notes,
         "profile": profile,
         "principles": principles,
@@ -117,16 +125,46 @@ def generate(
             "message": f"AI provider error: {e}",
         }
 
+    # Build the raw source corpus the anti-copy validator compares
+    # messages against. We include every raw signal body, note body,
+    # and pasted profile blob — these are the texts the generator is
+    # *forbidden* from copying into the final output.
+    raw_sources: list[str] = []
+    for s in context.get("signals") or []:
+        if s.get("text"):
+            raw_sources.append(s["text"])
+    for note in context.get("notes") or []:
+        if note.get("body"):
+            raw_sources.append(note["body"])
+    prof = context.get("profile") or {}
+    for k in ("about_text", "headline", "featured_topics"):
+        if prof.get(k):
+            raw_sources.append(prof[k])
+
     candidates, rejected = [], []
     for cand in raw or []:
+        body = cand.get("body", "") or ""
+
+        # 1) Anti-copy: auto-shorten, then check for raw-source overlap.
+        if len(body) > 450:
+            body = anti_copy_shorten(body, target=320)
+            cand["body"] = body
+        anti = anti_copy_check(body, raw_sources)
+        cand["anti_copy"] = anti
+
+        # 2) Grounding: banned phrases, fake familiarity, etc.
         verdict = validate_message(
-            body=cand.get("body", ""),
+            body=body,
             signals_used=cand.get("signal_ids") or [],
             facts_used=cand.get("facts_used") or [],
             profile_fields_used=cand.get("profile_fields_used") or [],
         )
         cand["grounding"] = verdict
-        (candidates if verdict["ok"] else rejected).append(cand)
+
+        ok = verdict["ok"] and anti["passes_anti_copy_check"]
+        if not anti["passes_anti_copy_check"]:
+            verdict.setdefault("violations", []).extend(anti["violations"])
+        (candidates if ok else rejected).append(cand)
 
     # Note: we deliberately do NOT return the full `context` here. It can
     # contain DB rows whose types (datetime, Decimal, bytes from Postgres)

@@ -35,22 +35,29 @@ def _first_name(prospect: dict) -> str:
     return (prospect.get("full_name") or "there").split(" ")[0] or "there"
 
 
-def _signal_phrase(signal: dict) -> str:
+def _signal_phrase(signal: dict, observation: Optional[dict] = None) -> str:
+    """
+    Return a SHORT, paraphrased anchor for a signal. We must never paste
+    the raw `signal["text"]` here — long source bodies (listings, posts,
+    news articles) would leak straight into the LinkedIn message.
+    Always prefer the compressed `observation.safe_reference_text`.
+    """
+    if observation and observation.get("safe_reference_text"):
+        return observation["safe_reference_text"]
     t = signal.get("type", "")
-    text = (signal.get("text") or "").strip().rstrip(".")
     if t == "company_expansion":
-        return f"the team's expansion — {text}"
+        return "the team's recent expansion"
     if t == "hiring_activity":
-        return f"the hiring push around {text}"
+        return "the recent hiring push"
     if t == "post_topic":
-        return f"your post on {text}"
+        return "your recent post"
     if t == "job_change":
-        return f"the move — {text}"
+        return "the recent move"
     if t == "company_news":
-        return f"the news on {text}"
+        return "the recent company update"
     if t == "role_change":
-        return f"the new role — {text}"
-    return text
+        return "the new role"
+    return "your recent activity"
 
 
 def _profile_anchor(profile: dict) -> tuple[Optional[str], Optional[str]]:
@@ -119,17 +126,31 @@ class MockAiProvider:
         signals = context.get("signals") or []
         notes = context.get("notes") or []
         profile = context.get("profile") or {}
+        # Pre-computed observations from the Signal Interpretation Layer.
+        # See signalstack/services/signal_interpreter.py — these are the
+        # ONLY source-derived strings the generator is allowed to use.
+        observations = context.get("observations") or []
+        obs_by_signal = {o.get("signal_id"): o for o in observations}
         first = _first_name(prospect)
 
         random.seed(prospect.get("id") or "seed")
 
         anchors: list[tuple[str, dict]] = []  # (anchor_text, source_meta)
         for s in signals:
-            anchors.append((_signal_phrase(s), {"signal_id": s.get("id")}))
+            obs = obs_by_signal.get(s.get("id"))
+            anchors.append((
+                _signal_phrase(s, observation=obs),
+                {"signal_id": s.get("id"), "observation": obs},
+            ))
         for note in notes[:2]:
-            t = (note.get("body") or "").strip().rstrip(".")
-            if t:
-                anchors.append((f"your note — {t}", {"note_id": note.get("id")}))
+            t = (note.get("body") or "").strip()
+            if not t:
+                continue
+            # Compress notes too — never paste a long note verbatim.
+            short = t.split(".")[0].strip()
+            if len(short) > 80:
+                short = short[:77].rsplit(" ", 1)[0] + "…"
+            anchors.append((f"your note about {short}", {"note_id": note.get("id")}))
 
         profile_anchor_text, profile_field = _profile_anchor(profile)
         if not anchors and profile_anchor_text:
@@ -180,7 +201,17 @@ class MockAiProvider:
                 prospect.get("location"),
             ) if f]
 
+            # Hard cap: LinkedIn first-touch should never exceed ~450 chars.
+            from ..services.anti_copy import shorten as _shorten
+            body = _shorten(body, target=320)
+
+            obs = src.get("observation") or {}
             results.append({
+                "observation": {
+                    "summary": obs.get("summary"),
+                    "safe_reference_text": obs.get("safe_reference_text"),
+                    "signal_id": obs.get("signal_id"),
+                } if obs else None,
                 "body": body,
                 "rationale": (
                     f"Angle: {angle}. Grounded in "
