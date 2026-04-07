@@ -95,7 +95,16 @@ async function api(path, opts={}) {
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
-  if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+  if (!r.ok) {
+    let msg = r.statusText || ("HTTP " + r.status);
+    try {
+      const j = await r.json();
+      msg = j.error || j.message || msg;
+    } catch (_) {
+      try { msg = (await r.text()).slice(0, 300) || msg; } catch (_) {}
+    }
+    throw new Error(msg);
+  }
   return r.json();
 }
 
@@ -392,31 +401,37 @@ async function viewGenerator() {
   btn.onclick = async () => {
     if (!sel.value) { out.innerHTML = ""; out.append(h("div",{class:"card"},"Pick a prospect first.")); return; }
     out.innerHTML = "Generating…";
-    const profile = {
-      linkedin_url: linkedinUrl.value || undefined,
-      headline: headline.value || undefined,
-      featured_topics: featuredTopics.value || undefined,
-      about_text: aboutText.value || undefined,
-    };
-    const strategy = {
-      message_type: mtype.value || undefined,
-      primary_trigger: trigger.value || undefined,
-      communication_style: style.value || undefined,
-      outreach_goal: goal.value || undefined,
-    };
-    const r = await api("/generate",{method:"POST", body:{
-      prospect_id: sel.value, n: 4,
-      instruction: instruction.value || undefined,
-      profile, strategy,
-    }});
-    out.innerHTML = "";
-    if (r.error) {
-      out.append(h("div",{class:"card"}, r.message || r.error));
-      return;
-    }
-    const okCard = h("div",{class:"card"});
-    okCard.append(h("h2",{},"Candidates"));
-    (r.candidates||[]).forEach(c => {
+    btn.disabled = true;
+    try {
+      const profile = {
+        linkedin_url: linkedinUrl.value || undefined,
+        headline: headline.value || undefined,
+        featured_topics: featuredTopics.value || undefined,
+        about_text: aboutText.value || undefined,
+      };
+      const strategy = {
+        message_type: mtype.value || undefined,
+        primary_trigger: trigger.value || undefined,
+        communication_style: style.value || undefined,
+        outreach_goal: goal.value || undefined,
+      };
+      const r = await api("/generate",{method:"POST", body:{
+        prospect_id: sel.value, n: 4,
+        instruction: instruction.value || undefined,
+        profile, strategy,
+      }});
+      out.innerHTML = "";
+      if (r.error) {
+        out.append(h("div",{class:"card"}, r.message || r.error));
+        return;
+      }
+      const okCard = h("div",{class:"card"});
+      okCard.append(h("h2",{},"Candidates"));
+      if (!(r.candidates||[]).length && !(r.rejected||[]).length) {
+        okCard.append(h("div",{class:"muted"},
+          "No candidates were generated. Add a signal, note, headline, featured topics, or paste profile/about text so the generator has something concrete to anchor on."));
+      }
+      (r.candidates||[]).forEach(c => {
       const wrap = h("div",{class:"candidate mb"});
       wrap.append(h("pre",{},c.body));
       wrap.append(h("div",{class:"muted"},
@@ -430,14 +445,20 @@ async function viewGenerator() {
       wrap.append(save);
       okCard.append(wrap);
     });
-    out.append(okCard);
-    if (r.rejected?.length) {
-      const rc = h("div",{class:"card rejected"});
-      rc.append(h("h2",{},"Rejected by grounding"));
-      r.rejected.forEach(c => rc.append(h("div",{class:"candidate mb"},
-        h("pre",{},c.body),
-        h("div",{class:"muted"},"Violations: "+ (c.grounding.violations.join(", "))))));
-      out.append(rc);
+      out.append(okCard);
+      if (r.rejected?.length) {
+        const rc = h("div",{class:"card rejected"});
+        rc.append(h("h2",{},"Rejected by grounding"));
+        r.rejected.forEach(c => rc.append(h("div",{class:"candidate mb"},
+          h("pre",{},c.body),
+          h("div",{class:"muted"},"Violations: "+ ((c.grounding&&c.grounding.violations||[]).join(", "))))));
+        out.append(rc);
+      }
+    } catch (err) {
+      out.innerHTML = "";
+      out.append(h("div",{class:"card"}, "Generation failed: " + (err && err.message || err)));
+    } finally {
+      btn.disabled = false;
     }
   };
 }

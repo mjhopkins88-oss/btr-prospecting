@@ -87,7 +87,6 @@ def generate(
 
     if not _has_any_grounding(context):
         return {
-            "context": context,
             "candidates": [],
             "rejected": [],
             "error": "no_grounding",
@@ -112,7 +111,6 @@ def generate(
         raw = provider.generate_messages(context, n=n)
     except Exception as e:
         return {
-            "context": context,
             "candidates": [],
             "rejected": [],
             "error": "provider_failed",
@@ -130,8 +128,17 @@ def generate(
         cand["grounding"] = verdict
         (candidates if verdict["ok"] else rejected).append(cand)
 
+    # Note: we deliberately do NOT return the full `context` here. It can
+    # contain DB rows whose types (datetime, Decimal, bytes from Postgres)
+    # are not always JSON-serializable, which previously caused the route
+    # to 500 and the UI to hang on "Generating…".
     return {
-        "context": context,
+        "context_summary": {
+            "signal_count": len(context.get("signals") or []),
+            "note_count": len(context.get("notes") or []),
+            "has_profile": bool(context.get("profile")),
+            "principle_count": len(context.get("principles") or []),
+        },
         "strategies": strategies,
         "instruction": instruction,
         "candidates": candidates,

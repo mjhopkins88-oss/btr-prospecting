@@ -135,6 +135,22 @@ class MockAiProvider:
         if not anchors and profile_anchor_text:
             anchors.append((profile_anchor_text, {"profile_field": profile_field}))
 
+        # Fallback: anchor on the prospect's stored role/company so the
+        # generator still produces something usable when only a LinkedIn
+        # URL was provided. We mark this as a "facts_used" anchor so the
+        # grounding validator still passes.
+        if not anchors:
+            title = prospect.get("title")
+            company = prospect.get("company_name")
+            if title and company:
+                anchors.append((f"your work as {title} at {company}", {"fact": "title+company"}))
+            elif title:
+                anchors.append((f"your work as {title}", {"fact": "title"}))
+            elif company:
+                anchors.append((f"your work at {company}", {"fact": "company"}))
+            elif profile.get("linkedin_url"):
+                anchors.append(("your LinkedIn profile", {"fact": "linkedin_url"}))
+
         if not anchors:
             return []
 
