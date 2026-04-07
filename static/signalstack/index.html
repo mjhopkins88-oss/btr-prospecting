@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>SignalStack</title>
+<style>
+  :root {
+    --bg: #0b0d10; --panel: #14181d; --line: #232a32;
+    --fg: #e6ecf2; --muted: #8a96a3; --accent: #6ee7b7; --warn: #fbbf24;
+    --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 -apple-system, system-ui, sans-serif; }
+  a { color: var(--accent); text-decoration: none; cursor: pointer; }
+  header { display: flex; align-items: center; gap: 18px;
+    padding: 14px 22px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 16px; letter-spacing: 0.04em; }
+  header nav a { color: var(--muted); margin-right: 14px; font-size: 13px; }
+  header nav a.active { color: var(--fg); }
+  main { padding: 22px; max-width: 1100px; margin: 0 auto; }
+  h2 { font-size: 18px; margin: 0 0 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 16px; margin-bottom: 14px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 200px; }
+  input, select, textarea, button {
+    background: #0f1318; color: var(--fg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 8px 10px; font: inherit; width: 100%;
+  }
+  textarea { min-height: 70px; resize: vertical; }
+  button { background: var(--accent); color: #0b0d10; border: none;
+    font-weight: 600; cursor: pointer; width: auto; padding: 8px 14px; }
+  button.ghost { background: transparent; color: var(--fg);
+    border: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px;
+    text-transform: uppercase; letter-spacing: 0.04em; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px;
+    background: #1c2530; color: var(--muted); font-size: 11px; }
+  .pill.warn { color: var(--warn); }
+  .pill.good { color: var(--accent); }
+  .pill.bad { color: var(--bad); }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); }
+  .stat { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 14px; }
+  .stat .n { font-size: 24px; font-weight: 600; }
+  .stat .l { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+  .muted { color: var(--muted); }
+  .candidate { border-left: 3px solid var(--accent); padding-left: 12px;
+    margin-bottom: 14px; }
+  .rejected .candidate { border-left-color: var(--bad); }
+  pre { white-space: pre-wrap; word-break: break-word; }
+  label { display: block; font-size: 12px; color: var(--muted);
+    margin-bottom: 4px; }
+  .mb { margin-bottom: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SignalStack</h1>
+  <nav id="nav">
+    <a data-route="/dashboard">Dashboard</a>
+    <a data-route="/prospects">Prospects</a>
+    <a data-route="/companies">Companies</a>
+    <a data-route="/generator">Generator</a>
+    <a data-route="/messages">Messages</a>
+    <a data-route="/settings">Settings</a>
+  </nav>
+</header>
+<main id="view">Loading…</main>
+
+<script>
+const API = "/api/signalstack";
+const $ = (s, el=document) => el.querySelector(s);
+const h = (tag, props={}, ...kids) => {
+  const el = document.createElement(tag);
+  for (const [k,v] of Object.entries(props||{})) {
+    if (k === "class") el.className = v;
+    else if (k === "html") el.innerHTML = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) el.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) {
+    if (k == null) continue;
+    el.append(k.nodeType ? k : document.createTextNode(k));
+  }
+  return el;
+};
+async function api(path, opts={}) {
+  const r = await fetch(API + path, {
+    headers: {"Content-Type": "application/json"},
+    ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+  return r.json();
+}
+
+let META = null;
+async function loadMeta() { if (!META) META = await api("/meta"); return META; }
+
+// ----------------- Router -----------------
+const routes = {
+  "/dashboard": viewDashboard,
+  "/prospects": viewProspects,
+  "/prospects/:id": viewProspect,
+  "/companies": viewCompanies,
+  "/companies/:id": viewCompany,
+  "/generator": viewGenerator,
+  "/messages": viewMessages,
+  "/settings": viewSettings,
+};
+
+function parseHash() {
+  const raw = (location.hash || "#/dashboard").slice(1);
+  for (const pat of Object.keys(routes)) {
+    const pp = pat.split("/"), rp = raw.split("/");
+    if (pp.length !== rp.length) continue;
+    const params = {};
+    let ok = true;
+    for (let i=0;i<pp.length;i++) {
+      if (pp[i].startsWith(":")) params[pp[i].slice(1)] = decodeURIComponent(rp[i]);
+      else if (pp[i] !== rp[i]) { ok = false; break; }
+    }
+    if (ok) return { fn: routes[pat], params };
+  }
+  return { fn: viewDashboard, params: {} };
+}
+
+async function render() {
+  await loadMeta();
+  const { fn, params } = parseHash();
+  $("#view").innerHTML = "";
+  document.querySelectorAll("#nav a").forEach(a =>
+    a.classList.toggle("active", location.hash.startsWith("#"+a.dataset.route)));
+  try { await fn(params); }
+  catch (e) { $("#view").append(h("div", {class:"card"}, "Error: " + e.message)); }
+}
+window.addEventListener("hashchange", render);
+document.querySelectorAll("#nav a").forEach(a => {
+  a.href = "#" + a.dataset.route;
+});
+
+// ----------------- Views -----------------
+async function viewDashboard() {
+  const v = $("#view");
+  v.append(h("h2", {}, "Dashboard"));
+  const a = await api("/analytics");
+  const stats = h("div", {class:"grid"});
+  const stat = (l,n) => stats.append(h("div",{class:"stat"},
+    h("div",{class:"n"}, String(n)), h("div",{class:"l"}, l)));
+  stat("Messages sent", a.messages_sent);
+  stat("Reply rate", (a.reply_rate*100).toFixed(0) + "%");
+  stat("Positive reply rate", (a.positive_reply_rate*100).toFixed(0) + "%");
+  stat("Meeting rate", (a.meeting_rate*100).toFixed(0) + "%");
+  v.append(stats);
+
+  const byStatus = h("div", {class:"card"});
+  byStatus.append(h("h2",{},"Prospects by status"));
+  const tbl = h("table");
+  tbl.append(h("tr",{},h("th",{},"Status"),h("th",{},"Count")));
+  for (const [k,n] of Object.entries(a.prospects_by_status||{}))
+    tbl.append(h("tr",{},h("td",{},k),h("td",{},String(n))));
+  byStatus.append(tbl);
+  v.append(byStatus);
+
+  const cards = h("div",{class:"row"});
+  cards.append(makeRanker("Top message types", a.top_message_types, "message_type"));
+  cards.append(makeRanker("Top signal types", a.top_signal_types, "signal_type"));
+  v.append(cards);
+}
+function makeRanker(title, rows, key) {
+  const c = h("div",{class:"card"});
+  c.append(h("h2",{},title));
+  const t = h("table");
+  t.append(h("tr",{},h("th",{},"Type"),h("th",{},"Used"),h("th",{},"Positive"),h("th",{},"Rate")));
+  (rows||[]).forEach(r => t.append(h("tr",{},
+    h("td",{}, r[key]),
+    h("td",{}, String(r.sent || r.used || 0)),
+    h("td",{}, String(r.positive || 0)),
+    h("td",{}, ((r.rate||0)*100).toFixed(0)+"%"))));
+  c.append(t);
+  return c;
+}
+
+async function viewProspects() {
+  const v = $("#view");
+  v.append(h("h2",{},"Prospects"));
+
+  // Create form
+  const form = h("div",{class:"card"});
+  form.append(h("h2",{},"Add prospect"));
+  const fields = ["full_name","linkedin_url","company_name","title","industry","location"];
+  const inputs = {};
+  const row = h("div",{class:"row"});
+  fields.forEach(f => {
+    const w = h("div");
+    w.append(h("label",{},f.replace(/_/g," ")));
+    const i = h("input",{placeholder:f});
+    inputs[f] = i; w.append(i); row.append(w);
+  });
+  form.append(row);
+  const btn = h("button",{},"Add");
+  btn.onclick = async () => {
+    const data = {}; for (const [k,i] of Object.entries(inputs)) if (i.value) data[k]=i.value;
+    if (!data.full_name) return alert("full_name required");
+    await api("/prospects",{method:"POST",body:data});
+    render();
+  };
+  form.append(btn);
+  v.append(form);
+
+  // List
+  const q = h("input",{placeholder:"search…"});
+  q.oninput = () => loadList();
+  const listCard = h("div",{class:"card"});
+  listCard.append(q);
+  const tbl = h("table");
+  listCard.append(tbl);
+  v.append(listCard);
+  async function loadList() {
+    const items = await api("/prospects?q=" + encodeURIComponent(q.value));
+    tbl.innerHTML = "";
+    tbl.append(h("tr",{},h("th",{},"Name"),h("th",{},"Company"),h("th",{},"Title"),h("th",{},"Status")));
+    items.forEach(p => {
+      const tr = h("tr");
+      tr.append(h("td",{},h("a",{href:"#/prospects/"+p.id},p.full_name)));
+      tr.append(h("td",{},p.company_name||""));
+      tr.append(h("td",{},p.title||""));
+      tr.append(h("td",{},h("span",{class:"pill"},p.status)));
+      tbl.append(tr);
+    });
+  }
+  loadList();
+}
+
+async function viewProspect({id}) {
+  const v = $("#view");
+  const p = await api("/prospects/"+id);
+  v.append(h("h2",{},p.full_name));
+  v.append(h("div",{class:"muted mb"},
+    [p.title, p.company_name, p.location].filter(Boolean).join(" • ")));
+
+  // Status / warmth
+  const meta = h("div",{class:"card"});
+  const statusSel = h("select");
+  META.prospect_status.forEach(s => {
+    const o = h("option",{value:s},s); if (p.status===s) o.selected = true;
+    statusSel.append(o);
+  });
+  statusSel.onchange = () => api("/prospects/"+id, {method:"PATCH", body:{status: statusSel.value}});
+  meta.append(h("label",{},"Status"), statusSel);
+  v.append(meta);
+
+  // Signals
+  const sigCard = h("div",{class:"card"});
+  sigCard.append(h("h2",{},"Signals"));
+  (p.signals||[]).forEach(s => {
+    sigCard.append(h("div",{class:"mb"},
+      h("span",{class:"pill " + (s.safe_to_reference ? "good":"warn")}, s.type),
+      " ", s.text));
+  });
+  // Add signal
+  const sigType = h("select"); META.signal_types.forEach(t => sigType.append(h("option",{value:t},t)));
+  const sigSrc = h("select"); META.signal_sources.forEach(t => sigSrc.append(h("option",{value:t},t)));
+  const sigTxt = h("textarea",{placeholder:"Observed fact (only what you actually saw)…"});
+  const sigSafe = h("input",{type:"checkbox"}); sigSafe.checked = true;
+  const safeWrap = h("label",{},sigSafe," safe to reference in outreach");
+  const addSig = h("button",{},"Add signal");
+  addSig.onclick = async () => {
+    if (!sigTxt.value) return;
+    await api("/signals",{method:"POST", body:{
+      prospect_id: id, type: sigType.value, source: sigSrc.value,
+      text: sigTxt.value, safe_to_reference: sigSafe.checked,
+    }});
+    render();
+  };
+  sigCard.append(h("div",{class:"row"}, sigType, sigSrc), sigTxt, safeWrap, addSig);
+  v.append(sigCard);
+
+  // Generator shortcut
+  const gen = h("button",{},"Generate messages");
+  gen.onclick = () => location.hash = "#/generator?prospect=" + id;
+  v.append(gen);
+
+  // Messages
+  const mCard = h("div",{class:"card"});
+  mCard.append(h("h2",{},"Messages"));
+  (p.messages||[]).forEach(m => {
+    mCard.append(h("div",{class:"candidate mb"},
+      h("div",{class:"muted"}, m.status + " • " + (m.message_type||"")),
+      h("pre",{},m.body)));
+  });
+  v.append(mCard);
+}
+
+async function viewCompanies() {
+  const v = $("#view");
+  v.append(h("h2",{},"Companies"));
+  const form = h("div",{class:"card"});
+  const name = h("input",{placeholder:"name"});
+  const ind = h("input",{placeholder:"industry"});
+  const loc = h("input",{placeholder:"location"});
+  const btn = h("button",{},"Add");
+  btn.onclick = async () => {
+    if (!name.value) return;
+    await api("/companies",{method:"POST",body:{name:name.value, industry:ind.value, location:loc.value}});
+    render();
+  };
+  form.append(h("div",{class:"row"},name,ind,loc), btn);
+  v.append(form);
+  const items = await api("/companies");
+  const tbl = h("table");
+  tbl.append(h("tr",{},h("th",{},"Name"),h("th",{},"Industry"),h("th",{},"Location")));
+  items.forEach(c => tbl.append(h("tr",{},
+    h("td",{},h("a",{href:"#/companies/"+c.id},c.name)),
+    h("td",{},c.industry||""),
+    h("td",{},c.location||""))));
+  v.append(h("div",{class:"card"},tbl));
+}
+
+async function viewCompany({id}) {
+  const v = $("#view");
+  const c = await api("/companies/"+id);
+  v.append(h("h2",{},c.name));
+  v.append(h("div",{class:"muted mb"},[c.industry,c.location].filter(Boolean).join(" • ")));
+  v.append(h("div",{class:"card"}, h("h2",{},"Notes"), h("pre",{},c.notes||"—")));
+  const sc = h("div",{class:"card"});
+  sc.append(h("h2",{},"Signals"));
+  (c.signals||[]).forEach(s => sc.append(h("div",{},
+    h("span",{class:"pill"},s.type)," ",s.text)));
+  v.append(sc);
+  const pc = h("div",{class:"card"});
+  pc.append(h("h2",{},"Prospects at this company"));
+  (c.prospects||[]).forEach(p => pc.append(h("div",{},
+    h("a",{href:"#/prospects/"+p.id},p.full_name),
+    " — ", h("span",{class:"muted"},p.title||""))));
+  v.append(pc);
+}
+
+async function viewGenerator() {
+  const v = $("#view");
+  v.append(h("h2",{},"Generator"));
+  const params = new URLSearchParams((location.hash.split("?")[1])||"");
+  const prospects = await api("/prospects");
+  const sel = h("select");
+  sel.append(h("option",{value:""},"— select prospect —"));
+  prospects.forEach(p => {
+    const o = h("option",{value:p.id}, p.full_name + (p.company_name? " ("+p.company_name+")":""));
+    if (params.get("prospect") === p.id) o.selected = true;
+    sel.append(o);
+  });
+  const card = h("div",{class:"card"});
+  card.append(h("label",{},"Prospect"), sel);
+  const btn = h("button",{},"Generate");
+  card.append(btn);
+  v.append(card);
+
+  const out = h("div");
+  v.append(out);
+
+  btn.onclick = async () => {
+    out.innerHTML = "Generating…";
+    const r = await api("/generate",{method:"POST", body:{prospect_id: sel.value, n: 4}});
+    out.innerHTML = "";
+    if (r.error) {
+      out.append(h("div",{class:"card"}, r.message || r.error));
+      return;
+    }
+    const okCard = h("div",{class:"card"});
+    okCard.append(h("h2",{},"Candidates"));
+    (r.candidates||[]).forEach(c => {
+      const wrap = h("div",{class:"candidate mb"});
+      wrap.append(h("pre",{},c.body));
+      wrap.append(h("div",{class:"muted"},
+        c.message_type+" • "+c.primary_trigger+" • grounding "+c.grounding.score));
+      wrap.append(h("div",{class:"muted"},"Rationale: "+c.rationale));
+      const save = h("button",{},"Save draft");
+      save.onclick = async () => {
+        await api("/messages",{method:"POST",body:{...c, prospect_id: sel.value}});
+        save.textContent = "Saved";
+      };
+      wrap.append(save);
+      okCard.append(wrap);
+    });
+    out.append(okCard);
+    if (r.rejected?.length) {
+      const rc = h("div",{class:"card rejected"});
+      rc.append(h("h2",{},"Rejected by grounding"));
+      r.rejected.forEach(c => rc.append(h("div",{class:"candidate mb"},
+        h("pre",{},c.body),
+        h("div",{class:"muted"},"Violations: "+ (c.grounding.violations.join(", "))))));
+      out.append(rc);
+    }
+  };
+}
+
+async function viewMessages() {
+  const v = $("#view");
+  v.append(h("h2",{},"Messages"));
+  const items = await api("/messages");
+  const tbl = h("table");
+  tbl.append(h("tr",{},h("th",{},"Created"),h("th",{},"Type"),h("th",{},"Status"),h("th",{},"Body"),h("th",{},"Outcome")));
+  items.forEach(m => {
+    const tr = h("tr");
+    tr.append(h("td",{},(m.created_at||"").slice(0,10)));
+    tr.append(h("td",{},m.message_type||""));
+    tr.append(h("td",{},m.status));
+    tr.append(h("td",{},m.body.slice(0,80)));
+    const sel = h("select");
+    sel.append(h("option",{value:""},"—"));
+    META.message_outcomes.forEach(o => sel.append(h("option",{value:o},o)));
+    sel.onchange = () => sel.value && api("/messages/"+m.id+"/outcome",{method:"POST",body:{outcome:sel.value}});
+    tr.append(h("td",{},sel));
+    tbl.append(tr);
+  });
+  v.append(h("div",{class:"card"},tbl));
+}
+
+async function viewSettings() {
+  const v = $("#view");
+  v.append(h("h2",{},"Settings"));
+  v.append(h("div",{class:"card"},
+    h("p",{},"AI provider: ", h("code",{},"mock"),
+      " (set ", h("code",{},"SIGNALSTACK_AI_PROVIDER=claude"), " to swap when wired)."),
+    h("p",{class:"muted"},"Prompt templates live in signalstack/ai/prompts/. Edit and redeploy.")));
+}
+
+render();
+</script>
+</body>
+</html>

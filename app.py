@@ -71,6 +71,15 @@ def _safe_ts(val):
 
 CORS(app, supports_credentials=True)
 
+# --- SignalStack module (LinkedIn sales intelligence + messaging) ---
+try:
+    from signalstack import bp as _signalstack_bp, init_schema as _signalstack_init_schema
+    app.register_blueprint(_signalstack_bp)
+    _signalstack_init_schema()
+    print("[SignalStack] Module registered at /signalstack")
+except Exception as _ss_err:
+    print(f"[SignalStack] Failed to register: {_ss_err}")
+
 # --- Login rate limiter (in-memory) ---
 _login_attempts = {}  # email -> { count, locked_until }
 _LOGIN_MAX_ATTEMPTS = 10
