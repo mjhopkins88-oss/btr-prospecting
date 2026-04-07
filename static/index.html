@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BTR Prospecting Engine - AI-Powered Lead Intelligence</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.25.6/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -198,9 +198,27 @@
     </style>
 </head>
 <body>
-    <div id="root"></div>
+    <div id="root">
+        <div id="boot-loader" style="min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1rem;color:#94a3b8;font-family:Inter,sans-serif;">
+            <div style="font-family:Orbitron,sans-serif;font-size:1.25rem;font-weight:900;background:linear-gradient(135deg,#34d399 0%,#22d3ee 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;">BTR INTELLIGENCE</div>
+            <div id="boot-status" style="font-size:0.85rem;">Loading application…</div>
+        </div>
+    </div>
+    <script>
+        (function(){
+            var s = document.getElementById('boot-status');
+            window.addEventListener('error', function(e){
+                if (s) { s.style.color = '#ef4444'; s.textContent = 'Load error: ' + (e.message || 'unknown') + ' — try a hard refresh (Ctrl+Shift+R)'; }
+            });
+            setTimeout(function(){
+                if (document.getElementById('boot-loader') && s) {
+                    s.textContent = 'Still loading… (compiling app, this can take 10–20s on first load)';
+                }
+            }, 8000);
+        })();
+    </script>
 
-    <script type="text/babel">
+    <script type="text/babel" data-presets="react">
         const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
         // Get API base URL (works both locally and on Railway)
