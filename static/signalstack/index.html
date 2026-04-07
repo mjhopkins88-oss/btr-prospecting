@@ -427,6 +427,25 @@ async function viewGenerator() {
       }
       const okCard = h("div",{class:"card"});
       okCard.append(h("h2",{},"Candidates"));
+      if (r.playbook && r.playbook.name) {
+        const pbCard = h("div",{class:"card"});
+        pbCard.append(h("h2",{},"Industry playbook: "+r.playbook.name));
+        if (r.playbook.description) pbCard.append(h("div",{class:"muted"},r.playbook.description));
+        if ((r.playbook.categories||[]).length) {
+          pbCard.append(h("div",{class:"muted"},"Categories loaded: "+r.playbook.categories.join(", ")));
+        }
+        if ((r.playbook.preferred_angles||[]).length) {
+          pbCard.append(h("div",{class:"muted"},"Preferred angles: "+r.playbook.preferred_angles.slice(0,5).join(", ")));
+        }
+        (r.playbook.entries||[]).forEach(e => {
+          pbCard.append(h("div",{class:"mb"},
+            h("div",{},"["+e.category+"] "+e.title+" ("+(e.confidence||"")+")"),
+            e.description ? h("div",{class:"muted"},e.description) : null,
+          ));
+        });
+        if (r.playbook.reasoning) pbCard.append(h("div",{class:"muted"},r.playbook.reasoning));
+        out.append(pbCard);
+      }
       if (!(r.candidates||[]).length && !(r.rejected||[]).length) {
         okCard.append(h("div",{class:"muted"},
           "No candidates were generated. Add a signal, note, headline, featured topics, or paste profile/about text so the generator has something concrete to anchor on."));
@@ -446,6 +465,17 @@ async function viewGenerator() {
           "Observation: "+c.observation.safe_reference_text));
       }
       wrap.append(h("div",{class:"muted"},"Rationale: "+c.rationale));
+      if (c.selected_angle) {
+        wrap.append(h("div",{class:"muted"},"Selected angle: "+c.selected_angle));
+      }
+      if ((c.playbook_entries_used||[]).length) {
+        wrap.append(h("div",{class:"muted"},
+          "Playbook entries used: " +
+          c.playbook_entries_used.map(e => "["+e.category+"] "+e.title).join(" • ")));
+      }
+      if (c.playbook_reasoning) {
+        wrap.append(h("div",{class:"muted"},"Why: "+c.playbook_reasoning));
+      }
       if ((c.signal_ids||[]).length) {
         wrap.append(h("div",{class:"muted"},"Signals: "+c.signal_ids.join(", ")));
       }

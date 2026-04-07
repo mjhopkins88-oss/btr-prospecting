@@ -76,6 +76,7 @@ def plan(
     quality: dict,
     n: int = 4,
     override: Optional[dict] = None,
+    playbook_preferred_angles: Optional[list[str]] = None,
 ) -> list[dict]:
     """
     Select n distinct angles. When the input quality is weak (tier 3),
@@ -103,6 +104,12 @@ def plan(
         else:
             preferred = ("curiosity", "timely_observation", "light_insight", "point_of_view")
         candidates.sort(key=lambda a: preferred.index(a["angle"]) if a["angle"] in preferred else 99)
+
+    # Playbook bias: if the industry playbook tells us which angles tend
+    # to land for this kind of prospect, push those toward the top.
+    if playbook_preferred_angles:
+        order = {a: i for i, a in enumerate(playbook_preferred_angles)}
+        candidates.sort(key=lambda a: order.get(a["angle"], 99))
 
     out: list[dict] = []
     seen = set()
