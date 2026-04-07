@@ -1,0 +1,261 @@
+"""
+API Routes: Predictions
+Flask Blueprint for predicted development projects.
+Queries predicted_project_index for fast, enriched results.
+Falls back to predicted_projects if the index is empty.
+"""
+from flask import Blueprint, request, jsonify
+import json
+
+from shared.database import fetch_all, fetch_one
+
+predictions_bp = Blueprint('predictions', __name__)
+
+
+def _safe_ts(val):
+    """Convert potential datetime to ISO string."""
+    if val is None:
+        return None
+    if hasattr(val, 'isoformat'):
+        return val.isoformat()
+    return str(val)
+
+
+def _index_has_data():
+    """Check if predicted_project_index has rows."""
+    try:
+        row = fetch_one("SELECT COUNT(*) as count FROM predicted_project_index")
+        return row and row.get('count', 0) > 0
+    except Exception:
+        return False
+
+
+@predictions_bp.route('/api/predicted-projects', methods=['GET'])
+def get_predicted_projects():
+    """
+    GET /api/predicted-projects
+    Returns predicted development projects with enriched scoring.
+    Queries predicted_project_index for speed; falls back to predicted_projects.
+    Query params: city, state, confirmed, min_confidence, limit, offset
+    """
+    city = request.args.get('city')
+    state = request.args.get('state')
+    confirmed = request.args.get('confirmed')
+    min_confidence = request.args.get('min_confidence', type=int)
+    limit = min(int(request.args.get('limit', 50)), 200)
+    offset = int(request.args.get('offset', 0))
+
+    use_index = _index_has_data()
+
+    if use_index:
+        sql = '''
+            SELECT id, city, state, developer, prediction_date, confidence,
+                   signal_count, cluster_detected, expected_construction_window,
+                   pattern_detected, pattern_name, pattern_confidence,
+                   confirmed, freshness_boost,
+                   contactability_score, developer_reputation_boost,
+                   relationship_count, developer_linked, contractor_linked,
+                   consultant_linked, relationship_boost,
+                   developer_dna_confidence, developer_expansion_signal,
+                   developer_expansion_reasoning,
+                   contractor_activity_detected, contractor_firms_list,
+                   contractor_developer_inference, contractor_confidence,
+                   parcel_probability_score, parcel_development_likelihood,
+                   convergence_score, convergence_signal_count,
+                   convergence_signal_types,
+                   temporal_boost, temporal_pattern_match,
+                   temporal_match_stage,
+                   created_at
+            FROM predicted_project_index
+            WHERE 1=1
+        '''
+    else:
+        sql = '''
+            SELECT id, city, state, developer, prediction_date, confidence,
+                   signal_count, cluster_detected, expected_construction_window,
+                   pattern_detected, pattern_name, pattern_confidence,
+                   developer_dna_confidence, developer_expansion_signal,
+                   developer_expansion_reasoning,
+                   contractor_activity_detected, contractor_firms_list,
+                   contractor_developer_inference, contractor_confidence,
+                   parcel_probability_score, parcel_development_likelihood,
+                   confirmed, created_at
+            FROM predicted_projects
+            WHERE 1=1
+        '''
+    params = []
+
+    if city:
+        sql += ' AND city = ?'
+        params.append(city)
+    if state:
+        sql += ' AND state = ?'
+        params.append(state)
+    if confirmed is not None:
+        sql += ' AND confirmed = ?'
+        params.append(confirmed.lower() in ('true', '1', 'yes'))
+    if min_confidence is not None:
+        sql += ' AND confidence >= ?'
+        params.append(min_confidence)
+
+    sql += ' ORDER BY convergence_score DESC, confidence DESC, relationship_count DESC, prediction_date DESC LIMIT ? OFFSET ?' if use_index else ' ORDER BY confidence DESC, prediction_date DESC LIMIT ? OFFSET ?'
+    params.extend([limit, offset])
+
+    rows = fetch_all(sql, params)
+
+    for row in rows:
+        row['prediction_date'] = _safe_ts(row.get('prediction_date'))
+        row['created_at'] = _safe_ts(row.get('created_at'))
+        row['confirmed'] = bool(row.get('confirmed'))
+        row['cluster_detected'] = bool(row.get('cluster_detected'))
+        row['signal_count'] = row.get('signal_count') or 0
+        row['expected_construction_window'] = row.get('expected_construction_window') or None
+        row['pattern_name'] = row.get('pattern_name') or None
+        row['pattern_confidence'] = row.get('pattern_confidence') or 0
+        row['developer_dna_confidence'] = row.get('developer_dna_confidence') or 0
+        row['developer_expansion_signal'] = bool(row.get('developer_expansion_signal'))
+        row['developer_expansion_reasoning'] = row.get('developer_expansion_reasoning') or None
+        row['contractor_activity_detected'] = bool(row.get('contractor_activity_detected'))
+        # Parse contractor_firms_list from JSON string to array
+        firms_raw = row.get('contractor_firms_list')
+        try:
+            row['contractor_firms'] = json.loads(firms_raw) if firms_raw else []
+        except Exception:
+            row['contractor_firms'] = []
+        row.pop('contractor_firms_list', None)
+        row['contractor_developer_inference'] = row.get('contractor_developer_inference') or None
+        row['contractor_confidence'] = row.get('contractor_confidence') or 0
+        row['parcel_probability_score'] = row.get('parcel_probability_score') or 0
+        row['parcel_development_likelihood'] = row.get('parcel_development_likelihood') or None
+        if use_index:
+            row['freshness_boost'] = row.get('freshness_boost') or 0
+            row['contactability_score'] = row.get('contactability_score') or 0
+            row['developer_reputation_boost'] = row.get('developer_reputation_boost') or 0
+            row['relationship_count'] = row.get('relationship_count') or 0
+            row['developer_linked'] = bool(row.get('developer_linked'))
+            row['contractor_linked'] = bool(row.get('contractor_linked'))
+            row['consultant_linked'] = bool(row.get('consultant_linked'))
+            row['relationship_boost'] = row.get('relationship_boost') or 0
+            row['convergence_score'] = row.get('convergence_score') or 0
+            row['convergence_signal_count'] = row.get('convergence_signal_count') or 0
+            row['convergence_signal_types'] = (row.get('convergence_signal_types') or '').split(', ') if row.get('convergence_signal_types') else []
+            row['temporal_boost'] = row.get('temporal_boost') or 0
+            row['temporal_pattern_match'] = row.get('temporal_pattern_match') or None
+            row['temporal_match_stage'] = row.get('temporal_match_stage') or None
+
+    return jsonify({'predictions': rows, 'count': len(rows)})
+
+
+@predictions_bp.route('/api/predicted-projects/<prediction_id>', methods=['GET'])
+def get_predicted_project(prediction_id):
+    """Get a single predicted project with its associated events."""
+    # Try index first for enriched data
+    prediction = fetch_one(
+        "SELECT * FROM predicted_project_index WHERE id = ?",
+        [prediction_id]
+    )
+    if not prediction:
+        prediction = fetch_one(
+            "SELECT * FROM predicted_projects WHERE id = ?",
+            [prediction_id]
+        )
+    if not prediction:
+        return jsonify({'error': 'Prediction not found'}), 404
+
+    prediction['prediction_date'] = _safe_ts(prediction.get('prediction_date'))
+    prediction['created_at'] = _safe_ts(prediction.get('created_at'))
+    prediction['confirmed'] = bool(prediction.get('confirmed'))
+    prediction['cluster_detected'] = bool(prediction.get('cluster_detected'))
+    prediction['signal_count'] = prediction.get('signal_count') or 0
+
+    # Get associated development events for this city/state
+    events = fetch_all('''
+        SELECT id, event_type, city, state, parcel_id, developer,
+               event_date, source, created_at
+        FROM development_events
+        WHERE city = ? AND state = ?
+        ORDER BY event_date ASC
+    ''', [prediction.get('city'), prediction.get('state')])
+
+    for e in events:
+        e['event_date'] = _safe_ts(e.get('event_date'))
+        e['created_at'] = _safe_ts(e.get('created_at'))
+
+    prediction['events'] = events
+    return jsonify(prediction)
+
+
+@predictions_bp.route('/api/predicted-projects/stats', methods=['GET'])
+def prediction_stats():
+    """Get prediction pipeline statistics."""
+    use_index = _index_has_data()
+    table = 'predicted_project_index' if use_index else 'predicted_projects'
+
+    stats = {
+        'total': fetch_one(f"SELECT COUNT(*) as count FROM {table}"),
+        'confirmed': fetch_one(f"SELECT COUNT(*) as count FROM {table} WHERE confirmed = TRUE"),
+        'unconfirmed': fetch_one(f"SELECT COUNT(*) as count FROM {table} WHERE confirmed = FALSE"),
+        'avg_confidence': fetch_one(f"SELECT ROUND(AVG(confidence), 1) as avg FROM {table}"),
+        'by_state': fetch_all(
+            f"SELECT state, COUNT(*) as count FROM {table} "
+            "GROUP BY state ORDER BY count DESC"
+        ),
+        'events_total': fetch_one("SELECT COUNT(*) as count FROM development_events"),
+        'events_by_type': fetch_all(
+            "SELECT event_type, COUNT(*) as count FROM development_events "
+            "GROUP BY event_type ORDER BY count DESC"
+        ),
+    }
+
+    if use_index:
+        stats['clusters_detected'] = fetch_one(
+            f"SELECT COUNT(*) as count FROM {table} WHERE cluster_detected = TRUE"
+        )
+        stats['avg_signal_count'] = fetch_one(
+            f"SELECT ROUND(AVG(signal_count), 1) as avg FROM {table}"
+        )
+        stats['avg_convergence_score'] = fetch_one(
+            f"SELECT ROUND(AVG(convergence_score), 1) as avg FROM {table} WHERE convergence_score > 0"
+        )
+        stats['high_convergence'] = fetch_one(
+            f"SELECT COUNT(*) as count FROM {table} WHERE convergence_score >= 70"
+        )
+
+    return jsonify(stats)
+
+
+@predictions_bp.route('/api/development-events', methods=['GET'])
+def get_development_events():
+    """Get development events with optional filtering."""
+    event_type = request.args.get('type')
+    city = request.args.get('city')
+    state = request.args.get('state')
+    limit = min(int(request.args.get('limit', 50)), 200)
+
+    sql = '''
+        SELECT id, event_type, city, state, parcel_id, developer,
+               event_date, source, created_at
+        FROM development_events
+        WHERE 1=1
+    '''
+    params = []
+
+    if event_type:
+        sql += ' AND event_type = ?'
+        params.append(event_type)
+    if city:
+        sql += ' AND city = ?'
+        params.append(city)
+    if state:
+        sql += ' AND state = ?'
+        params.append(state)
+
+    sql += ' ORDER BY event_date DESC LIMIT ?'
+    params.append(limit)
+
+    rows = fetch_all(sql, params)
+    for r in rows:
+        r['event_date'] = _safe_ts(r.get('event_date'))
+        r['created_at'] = _safe_ts(r.get('created_at'))
+
+    return jsonify({'events': rows, 'count': len(rows)})

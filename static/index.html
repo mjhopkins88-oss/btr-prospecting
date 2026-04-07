@@ -96,6 +96,35 @@
             50% { box-shadow: 0 0 20px rgba(16,185,129,0.5); }
         }
 
+        @keyframes navDropIn {
+            from { opacity: 0; transform: translateY(-8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes cmdPaletteIn {
+            from { opacity: 0; transform: scale(0.96); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes cmdPaletteOverlayIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes feedSlideIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Responsive navigation */
+        @media (max-width: 768px) {
+            .nav-desktop { display: none !important; }
+            .nav-mobile { display: block !important; }
+        }
+        @media (min-width: 769px) {
+            .nav-desktop { display: flex !important; }
+            .nav-mobile { display: none !important; }
+        }
+
         #root { position: relative; z-index: 1; }
 
         ::-webkit-scrollbar { width: 6px; }
@@ -700,9 +729,30 @@
                 } catch (e) { console.error('Call timing lookup error:', e); }
             }, []);
 
-            const loadProspects = async () => {
+            const loadProspects = async (dateOpt) => {
                 try {
-                    const response = await fetch(`${API_BASE}/api/prospects`);
+                    const df = dateOpt || dateFilter;
+                    let url = `${API_BASE}/api/prospects`;
+                    const params = new URLSearchParams();
+                    const now = new Date();
+                    if (df === 'today') {
+                        params.set('start_date', now.toISOString().slice(0, 10) + 'T00:00:00');
+                        params.set('end_date', now.toISOString());
+                    } else if (df === '7days') {
+                        const d = new Date(now); d.setDate(d.getDate() - 7);
+                        params.set('start_date', d.toISOString());
+                        params.set('end_date', now.toISOString());
+                    } else if (df === '30days') {
+                        const d = new Date(now); d.setDate(d.getDate() - 30);
+                        params.set('start_date', d.toISOString());
+                        params.set('end_date', now.toISOString());
+                    } else if (df === 'custom' && customDateStart && customDateEnd) {
+                        params.set('start_date', customDateStart + 'T00:00:00');
+                        params.set('end_date', customDateEnd + 'T23:59:59');
+                    }
+                    const qs = params.toString();
+                    if (qs) url += '?' + qs;
+                    const response = await fetch(url);
                     const data = await response.json();
                     if (data.success) {
                         setProspects(data.prospects);
@@ -865,6 +915,9 @@
             const [filterLowComp, setFilterLowComp] = useState(false);
             const [filterCallNow, setFilterCallNow] = useState(false);
             const [callTimingScores, setCallTimingScores] = useState({});
+            const [dateFilter, setDateFilter] = useState('all');
+            const [customDateStart, setCustomDateStart] = useState('');
+            const [customDateEnd, setCustomDateEnd] = useState('');
 
             const filteredProspects = prospects.filter(p => {
                 if (searchCity !== 'all' && searchCity !== 'Texas' && !p.city?.toLowerCase().includes(searchCity.toLowerCase())) return false;
@@ -927,6 +980,7 @@
             return (
                 <div style={styles.container}>
                     <Header user={user} onLogout={onLogout} />
+                    <CommandPalette activeTab={activeTab} setActiveTab={setActiveTab} user={user} prospects={prospects} />
                     <TabBar activeTab={activeTab} setActiveTab={setActiveTab} user={user} />
                     {activeTab === 'search' && (
                         <React.Fragment>
@@ -955,6 +1009,13 @@
                                 setFilterLowComp={setFilterLowComp}
                                 filterCallNow={filterCallNow}
                                 setFilterCallNow={setFilterCallNow}
+                                dateFilter={dateFilter}
+                                setDateFilter={setDateFilter}
+                                customDateStart={customDateStart}
+                                setCustomDateStart={setCustomDateStart}
+                                customDateEnd={customDateEnd}
+                                setCustomDateEnd={setCustomDateEnd}
+                                onDateFilterChange={(df) => loadProspects(df)}
                             />
                             {searchStatus && <SearchStatus message={searchStatus} />}
                             {loading && <Loading />}
@@ -975,11 +1036,21 @@
                     {activeTab === 'followups' && user?.role !== 'broker' && <FollowUpsPage user={user} />}
                     {activeTab === 'statewide' && user?.role !== 'broker' && <StatewideDiscovery />}
                     {activeTab === 'intelligence' && <SunbeltIntelligence user={user} />}
+                    {activeTab === 'feed' && <LiveIntelligenceFeed />}
+                    {activeTab === 'intent' && <DeveloperIntentPanel />}
+                    {activeTab === 'capital' && <CapitalFlowPanel />}
+                    {activeTab === 'signal_quality' && <SignalIntelligencePanel />}
+                    {activeTab === 'predictions' && user?.role !== 'broker' && <PredictedDevelopments />}
+                    {activeTab === 'markets' && user?.role !== 'broker' && <MarketExpansion />}
                     {activeTab === 'dealboard' && <DealBoardPage user={user} />}
                     {activeTab === 'linkedinhub' && <LinkedInHub user={user} />}
                     {activeTab === 'admin' && user && user.is_super_admin && <AdminPage user={user} />}
                     {activeTab === 'quoting' && user && user.role === 'admin' && <QuotingPage user={user} />}
                     {activeTab === 'underwriting' && user && user.role === 'admin' && <UnderwritingSheet user={user} />}
+                    {activeTab === 'dev_network' && <DeveloperNetworkPanel />}
+                    {activeTab === 'corridors' && <DevelopmentCorridorsPanel />}
+                    {activeTab === 'dev_momentum' && <MomentumEnginePanel />}
+                    {activeTab === 'signal_discovery' && user && user.is_super_admin && <SignalDiscoveryPanel />}
                     {/* Route guards: redirect to default tab if user navigates to a tab they shouldn't see */}
                     {activeTab === 'quoting' && (!user || user.role !== 'admin') && (() => { setActiveTab(ROLE_DEFAULT_TAB[user?.role] || 'search'); return null; })()}
                     {activeTab === 'underwriting' && (!user || user.role !== 'admin') && (() => { setActiveTab(ROLE_DEFAULT_TAB[user?.role] || 'search'); return null; })()}
@@ -1038,6 +1109,8 @@
                 { id: 'discovery', label: 'Daily Discovery' },
                 { id: 'statewide', label: 'Statewide' },
                 { id: 'intelligence', label: 'Sunbelt Intelligence' },
+                { id: 'predictions', label: 'Predicted Devs' },
+                { id: 'markets', label: 'Market Expansion' },
                 { id: 'pipeline', label: 'My Pipeline' },
                 { id: 'followups', label: 'Follow-ups Due' },
                 { id: 'linkedinhub', label: 'LinkedIn Hub' },
@@ -1047,6 +1120,8 @@
                 { id: 'discovery', label: 'Daily Discovery' },
                 { id: 'statewide', label: 'Statewide' },
                 { id: 'intelligence', label: 'Sunbelt Intelligence' },
+                { id: 'predictions', label: 'Predicted Devs' },
+                { id: 'markets', label: 'Market Expansion' },
                 { id: 'pipeline', label: 'My Pipeline' },
                 { id: 'followups', label: 'Follow-ups Due' },
                 { id: 'linkedinhub', label: 'LinkedIn Hub' },
@@ -1279,28 +1354,988 @@
 
         function TabBar({ activeTab, setActiveTab, user }) {
             const role = user?.role || 'producer';
-            const tabs = [...(ROLE_TABS[role] || ROLE_TABS.producer)];
-            if (role === 'admin') {
-                tabs.push({ id: 'quoting', label: 'Quoting' });
-                tabs.push({ id: 'underwriting', label: 'Underwriting Sheet' });
+            const [mobileOpen, setMobileOpen] = useState(false);
+
+            // Build groups based on role
+            let groups = [...(NAV_GROUPS[role] || NAV_GROUPS.producer)];
+
+            // For super_admin without admin role, add System group
+            if (user && user.is_super_admin && role !== 'admin') {
+                const hasSystem = groups.some(g => g.label === 'System');
+                if (!hasSystem) {
+                    groups.push({ label: 'System', items: [{ id: 'admin', label: 'Admin' }] });
+                }
             }
-            if (user && user.is_super_admin) {
-                tabs.push({ id: 'admin', label: 'Admin' });
+            // For admin, ensure admin tab is in System if super_admin
+            if (user && user.is_super_admin && role === 'admin') {
+                const sysGroup = groups.find(g => g.label === 'System');
+                if (sysGroup && !sysGroup.items.some(i => i.id === 'admin')) {
+                    // already there from NAV_GROUPS definition
+                }
             }
+
             return (
-                <div style={ds.tabBar}>
-                    {tabs.map(tab => (
-                        <button
-                            key={tab.id}
-                            style={{
-                                ...ds.tab,
-                                ...(activeTab === tab.id ? ds.tabActive : {})
-                            }}
-                            onClick={() => setActiveTab(tab.id)}
-                        >
-                            {tab.label}
+                <React.Fragment>
+                    {/* Desktop navigation */}
+                    <div style={{ ...ds.tabBar, display: 'flex', flexWrap: 'wrap' }} className="nav-desktop">
+                        {groups.map(group => (
+                            <NavDropdown key={group.label} group={group} activeTab={activeTab} setActiveTab={setActiveTab} />
+                        ))}
+                    </div>
+                    {/* Mobile hamburger */}
+                    <div className="nav-mobile" style={{ display: 'none', marginBottom: '1.5rem' }}>
+                        <button onClick={() => setMobileOpen(!mobileOpen)} style={{
+                            background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)',
+                            color: '#00FFC6', padding: '0.7rem 1rem', borderRadius: '0.5rem', cursor: 'pointer',
+                            fontSize: '1.1rem', fontFamily: "'Orbitron', sans-serif", fontWeight: 700,
+                            display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%', justifyContent: 'space-between',
+                        }}>
+                            <span>{mobileOpen ? 'Close Menu' : 'Menu'}</span>
+                            <span style={{ fontSize: '1.2rem' }}>{mobileOpen ? '\u2715' : '\u2630'}</span>
                         </button>
-                    ))}
+                        {mobileOpen && (
+                            <div style={{
+                                background: 'rgba(15,22,36,0.95)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+                                border: '1px solid rgba(255,255,255,0.08)', borderRadius: '0.5rem',
+                                marginTop: '0.5rem', padding: '0.5rem 0', animation: 'navDropIn 200ms ease-out forwards',
+                            }}>
+                                {groups.map(group => (
+                                    <div key={group.label}>
+                                        <div style={{ padding: '0.5rem 1rem', fontSize: '0.65rem', color: '#64748b',
+                                            textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700,
+                                            fontFamily: "'Orbitron', sans-serif", borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                            {group.label}
+                                        </div>
+                                        {group.items.map(item => (
+                                            <button key={item.id} onClick={() => { setActiveTab(item.id); setMobileOpen(false); }} style={{
+                                                display: 'block', width: '100%', textAlign: 'left',
+                                                background: activeTab === item.id ? 'rgba(0,255,198,0.08)' : 'transparent',
+                                                border: 'none', color: activeTab === item.id ? '#00FFC6' : '#cbd5e1',
+                                                padding: '0.65rem 1.5rem', fontSize: '0.85rem', fontWeight: 500,
+                                                cursor: 'pointer', fontFamily: "'Inter', sans-serif",
+                                            }}>
+                                                {item.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </React.Fragment>
+            );
+        }
+
+        // ===================================================================
+        // COMMAND PALETTE (Cmd+K / Ctrl+K)
+        // ===================================================================
+        function CommandPalette({ activeTab, setActiveTab, user, prospects }) {
+            const [open, setOpen] = useState(false);
+            const [query, setQuery] = useState('');
+            const [selectedIndex, setSelectedIndex] = useState(0);
+            const inputRef = useRef(null);
+            const resultsRef = useRef(null);
+            const debounceRef = useRef(null);
+            const [debouncedQuery, setDebouncedQuery] = useState('');
+
+            // Global Cmd+K / Ctrl+K listener
+            useEffect(() => {
+                const handler = (e) => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                        e.preventDefault();
+                        setOpen(prev => !prev);
+                        setQuery('');
+                        setDebouncedQuery('');
+                        setSelectedIndex(0);
+                    }
+                };
+                window.addEventListener('keydown', handler);
+                return () => window.removeEventListener('keydown', handler);
+            }, []);
+
+            // Focus input when opened
+            useEffect(() => { if (open && inputRef.current) inputRef.current.focus(); }, [open]);
+
+            // Debounce search at 120ms
+            useEffect(() => {
+                clearTimeout(debounceRef.current);
+                debounceRef.current = setTimeout(() => setDebouncedQuery(query), 120);
+                return () => clearTimeout(debounceRef.current);
+            }, [query]);
+
+            // Build searchable items
+            const allItems = React.useMemo(() => {
+                const items = [];
+                const role = user?.role || 'producer';
+
+                // Pages
+                const pages = [
+                    { id: 'search', label: 'Prospect Search' },
+                    { id: 'discovery', label: 'Daily Discovery' },
+                    { id: 'statewide', label: 'Statewide' },
+                    { id: 'intelligence', label: 'Sunbelt Intelligence' },
+                    { id: 'predictions', label: 'Predicted Devs' },
+                    { id: 'markets', label: 'Market Expansion' },
+                    { id: 'feed', label: 'Live Intelligence Feed' },
+                    { id: 'pipeline', label: 'My Pipeline' },
+                    { id: 'followups', label: 'Follow-ups Due' },
+                ];
+                if (role === 'admin') {
+                    pages.push({ id: 'quoting', label: 'Quoting' });
+                    pages.push({ id: 'underwriting', label: 'Underwriting Sheet' });
+                }
+                if (user && user.is_super_admin) {
+                    pages.push({ id: 'admin', label: 'Admin' });
+                }
+                // Filter pages by role for brokers
+                const brokerHidden = ['discovery', 'pipeline', 'followups', 'statewide', 'predictions', 'markets'];
+                pages.forEach(p => {
+                    if (role === 'broker' && brokerHidden.includes(p.id)) return;
+                    items.push({ ...p, category: 'pages', icon: '\uD83D\uDCC4' });
+                });
+
+                // Developers (from loaded prospects)
+                const devSet = new Set();
+                (prospects || []).forEach(p => {
+                    if (p.company && !devSet.has(p.company)) {
+                        devSet.add(p.company);
+                        items.push({ id: 'dev-' + p.company, label: p.company, category: 'developers', icon: '\uD83C\uDFD7', tabId: 'search' });
+                    }
+                });
+
+                // Cities / Markets (from loaded prospects)
+                const citySet = new Set();
+                (prospects || []).forEach(p => {
+                    const city = p.city && p.state ? p.city + ', ' + p.state : (p.city || '');
+                    if (city && !citySet.has(city)) {
+                        citySet.add(city);
+                        items.push({ id: 'city-' + city, label: city, category: 'cities', icon: '\uD83C\uDF06', tabId: 'markets' });
+                    }
+                });
+
+                // Static seed data for Projects, Parcels, Signals when no live data
+                const staticProjects = [
+                    'Greenville BTR Project', 'Austin Townhome Development', 'Phoenix Mesa BTR',
+                    'Charlotte SFR Expansion', 'Dallas Fort Worth BTR Portfolio',
+                ];
+                staticProjects.forEach(name => {
+                    items.push({ id: 'proj-' + name, label: name, category: 'projects', icon: '\uD83D\uDCCD', tabId: 'predictions' });
+                });
+
+                const staticParcels = [
+                    'APN 301-42-109 (Mesa, AZ)', 'APN 127-08-055 (Charlotte, NC)',
+                    'APN 442-19-320 (Dallas, TX)', 'APN 085-33-210 (Phoenix, AZ)',
+                ];
+                staticParcels.forEach(name => {
+                    items.push({ id: 'parcel-' + name, label: name, category: 'parcels', icon: '\uD83D\uDCD0', tabId: 'statewide' });
+                });
+
+                const staticSignals = [
+                    'Permit surge detected — Phoenix', 'Land acquisition cluster — Dallas',
+                    'Zoning change alert — Charlotte', 'Construction start signal — Austin',
+                    'Capital raise detected — Tampa',
+                ];
+                staticSignals.forEach(name => {
+                    items.push({ id: 'sig-' + name, label: name, category: 'signals', icon: '\uD83D\uDCE1', tabId: 'intelligence' });
+                });
+
+                // Tools (quick actions)
+                const tools = [
+                    { id: 'tool-create-prospect', label: 'Create Prospect', tabId: 'search' },
+                    { id: 'tool-open-pipeline', label: 'Open Pipeline', tabId: 'pipeline' },
+                    { id: 'tool-run-discovery', label: 'Run Discovery Scan', tabId: 'discovery' },
+                    { id: 'tool-intel-brief', label: 'Generate Intelligence Brief', tabId: 'intelligence' },
+                ];
+                tools.forEach(t => {
+                    items.push({ ...t, category: 'tools', icon: '\u26A1' });
+                });
+
+                return items;
+            }, [prospects, user]);
+
+            // Filter results
+            const q = debouncedQuery.toLowerCase();
+            const filtered = q ? allItems.filter(item => item.label.toLowerCase().includes(q)) : allItems.slice(0, 20);
+
+            // Group by category (maintain order)
+            const categoryOrder = ['pages', 'developers', 'cities', 'projects', 'parcels', 'signals', 'tools'];
+            const categoryLabels = { pages: 'Pages', developers: 'Developers', cities: 'Cities / Markets', projects: 'Projects', parcels: 'Parcels', signals: 'Signals', tools: 'Tools' };
+            const grouped = {};
+            categoryOrder.forEach(cat => {
+                const items = filtered.filter(i => i.category === cat);
+                if (items.length > 0) grouped[cat] = items;
+            });
+            const flatResults = categoryOrder.reduce((acc, cat) => acc.concat(grouped[cat] || []), []);
+
+            // Scroll selected into view
+            useEffect(() => {
+                if (resultsRef.current) {
+                    const el = resultsRef.current.querySelector('[data-selected="true"]');
+                    if (el) el.scrollIntoView({ block: 'nearest' });
+                }
+            }, [selectedIndex]);
+
+            // Keyboard navigation
+            const handleKeyDown = (e) => {
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setSelectedIndex(i => Math.min(i + 1, flatResults.length - 1));
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setSelectedIndex(i => Math.max(i - 1, 0));
+                } else if (e.key === 'Enter' && flatResults[selectedIndex]) {
+                    e.preventDefault();
+                    const item = flatResults[selectedIndex];
+                    setActiveTab(item.tabId || item.id);
+                    setOpen(false);
+                } else if (e.key === 'Escape') {
+                    setOpen(false);
+                }
+            };
+
+            if (!open) return null;
+
+            const kbdStyle = { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '4px', padding: '0.1rem 0.35rem', fontSize: '0.65rem', color: '#64748b', fontFamily: 'monospace' };
+
+            return (
+                <div style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                    background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
+                    display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: '15vh',
+                    zIndex: 9999, animation: 'cmdPaletteOverlayIn 180ms ease-out forwards',
+                }} onClick={() => setOpen(false)} role="dialog" aria-modal="true" aria-label="Command palette">
+                    <div style={{
+                        background: 'rgba(15,22,36,0.95)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+                        border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px',
+                        boxShadow: '0 30px 80px rgba(0,0,0,0.5)', width: '720px', maxWidth: '92vw',
+                        maxHeight: '70vh', display: 'flex', flexDirection: 'column',
+                        animation: 'cmdPaletteIn 180ms ease-out forwards', overflow: 'hidden',
+                    }} onClick={e => e.stopPropagation()} onKeyDown={handleKeyDown}>
+                        <input
+                            ref={inputRef}
+                            type="text"
+                            value={query}
+                            onChange={e => { setQuery(e.target.value); setSelectedIndex(0); }}
+                            placeholder="Search developers, markets, parcels, tools\u2026"
+                            style={{
+                                background: 'transparent', border: 'none', borderBottom: '1px solid rgba(255,255,255,0.06)',
+                                color: '#f1f5f9', padding: '1rem 1.25rem', fontSize: '1.05rem',
+                                fontFamily: "'Inter', sans-serif", outline: 'none', width: '100%',
+                            }}
+                            aria-label="Search command palette"
+                        />
+                        <div ref={resultsRef} style={{ overflowY: 'auto', padding: '0.5rem 0', flex: 1 }} role="listbox">
+                            {categoryOrder.map(cat => {
+                                const items = grouped[cat];
+                                if (!items) return null;
+                                return (
+                                    <div key={cat}>
+                                        <div style={{
+                                            padding: '0.5rem 1.25rem 0.25rem', fontSize: '0.65rem', color: '#64748b',
+                                            textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700,
+                                            fontFamily: "'Orbitron', sans-serif",
+                                        }}>
+                                            {items[0].icon} {categoryLabels[cat]}
+                                        </div>
+                                        {items.map(item => {
+                                            const idx = flatResults.indexOf(item);
+                                            const isSelected = idx === selectedIndex;
+                                            return (
+                                                <button
+                                                    key={item.id}
+                                                    role="option"
+                                                    aria-selected={isSelected}
+                                                    data-selected={isSelected}
+                                                    style={{
+                                                        display: 'flex', alignItems: 'center', gap: '0.75rem',
+                                                        padding: '0.55rem 1.25rem', cursor: 'pointer', fontSize: '0.9rem',
+                                                        color: isSelected ? '#00FFC6' : '#cbd5e1',
+                                                        fontFamily: "'Inter', sans-serif", transition: 'background 0.1s, color 0.1s',
+                                                        border: 'none', width: '100%', textAlign: 'left',
+                                                        background: isSelected ? 'rgba(0,255,180,0.08)' : 'transparent',
+                                                    }}
+                                                    onClick={() => { setActiveTab(item.tabId || item.id); setOpen(false); }}
+                                                    onMouseEnter={() => setSelectedIndex(idx)}
+                                                >
+                                                    {item.label}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                );
+                            })}
+                            {flatResults.length === 0 && (
+                                <div style={{ padding: '2rem', textAlign: 'center', color: '#475569', fontSize: '0.9rem' }}>
+                                    No results found
+                                </div>
+                            )}
+                        </div>
+                        <div style={{
+                            borderTop: '1px solid rgba(255,255,255,0.06)', padding: '0.5rem 1.25rem',
+                            display: 'flex', gap: '1rem', fontSize: '0.7rem', color: '#475569',
+                            fontFamily: "'Inter', sans-serif",
+                        }}>
+                            <span><span style={kbdStyle}>\u2191\u2193</span> navigate</span>
+                            <span><span style={kbdStyle}>Enter</span> select</span>
+                            <span><span style={kbdStyle}>Esc</span> close</span>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ===================================================================
+        // LIVE INTELLIGENCE FEED
+        // ===================================================================
+        const FEED_EVENT_COLORS = {
+            SIGNAL: { accent: '#22d3ee', bg: 'rgba(6,182,212,0.08)', border: 'rgba(6,182,212,0.2)' },
+            PERMIT: { accent: '#3b82f6', bg: 'rgba(59,130,246,0.08)', border: 'rgba(59,130,246,0.2)' },
+            PATTERN: { accent: '#a78bfa', bg: 'rgba(167,139,250,0.08)', border: 'rgba(167,139,250,0.2)' },
+            DEVELOPER_EXPANSION: { accent: '#34d399', bg: 'rgba(52,211,153,0.08)', border: 'rgba(52,211,153,0.2)' },
+            CONTRACTOR_ACTIVITY: { accent: '#f97316', bg: 'rgba(249,115,22,0.08)', border: 'rgba(249,115,22,0.2)' },
+            PARCEL_ALERT: { accent: '#facc15', bg: 'rgba(250,204,21,0.08)', border: 'rgba(250,204,21,0.2)' },
+            DEVELOPER_INTENT: { accent: '#a855f7', bg: 'rgba(168,85,247,0.08)', border: 'rgba(168,85,247,0.2)' },
+            CAPITAL_FLOW: { accent: '#eab308', bg: 'rgba(234,179,8,0.08)', border: 'rgba(234,179,8,0.2)' },
+            SIGNAL_QUALITY: { accent: '#06b6d4', bg: 'rgba(6,182,212,0.08)', border: 'rgba(6,182,212,0.2)' },
+            PLANNING_SIGNAL: { accent: '#3b82f6', bg: 'rgba(59,130,246,0.08)', border: 'rgba(59,130,246,0.2)' },
+            PERMIT_SIGNAL: { accent: '#22c55e', bg: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.2)' },
+            LAND_TRANSACTION: { accent: '#ef4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.2)' },
+            PLAT_FILING: { accent: '#a855f7', bg: 'rgba(168,85,247,0.08)', border: 'rgba(168,85,247,0.2)' },
+            CONSTRUCTION_FINANCING: { accent: '#eab308', bg: 'rgba(234,179,8,0.08)', border: 'rgba(234,179,8,0.2)' },
+        };
+
+        const FEED_EVENT_LABELS = {
+            SIGNAL: 'SIGNAL',
+            PERMIT: 'PERMIT',
+            PATTERN: 'PATTERN',
+            DEVELOPER_EXPANSION: 'EXPANSION',
+            CONTRACTOR_ACTIVITY: 'CONTRACTOR',
+            PARCEL_ALERT: 'PARCEL',
+            DEVELOPER_INTENT: 'INTENT',
+            CAPITAL_FLOW: 'CAPITAL',
+            SIGNAL_QUALITY: 'QUALITY',
+            PLANNING_SIGNAL: 'PLANNING',
+            PERMIT_SIGNAL: 'PERMIT',
+            LAND_TRANSACTION: 'LAND',
+            PLAT_FILING: 'PLAT',
+            CONSTRUCTION_FINANCING: 'FINANCING',
+        };
+
+        function FeedEventCard({ event, isNew }) {
+            const colors = FEED_EVENT_COLORS[event.event_type] || FEED_EVENT_COLORS.SIGNAL;
+            const label = FEED_EVENT_LABELS[event.event_type] || event.event_type;
+            return (
+                <div style={{
+                    background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: '8px', padding: '12px 16px', marginBottom: '8px',
+                    borderLeft: '3px solid ' + colors.accent,
+                    animation: isNew ? 'feedSlideIn 200ms ease-out' : 'none',
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{
+                                background: colors.bg, border: '1px solid ' + colors.border,
+                                borderRadius: '4px', padding: '2px 8px', fontSize: '0.6rem',
+                                fontWeight: 700, color: colors.accent, fontFamily: "'Orbitron', sans-serif",
+                                textTransform: 'uppercase', letterSpacing: '0.05em',
+                            }}>{label}</span>
+                            <span style={{ fontSize: '0.95rem', fontWeight: 600, color: '#f1f5f9', fontFamily: "'Inter', sans-serif" }}>
+                                {event.title}
+                            </span>
+                        </div>
+                        <span style={{ fontSize: '0.7rem', color: '#475569', fontFamily: "'Inter', sans-serif", whiteSpace: 'nowrap' }}>
+                            {timeAgo(event.created_at)}
+                        </span>
+                    </div>
+                    {event.description && (
+                        <div style={{ fontSize: '0.82rem', color: '#94a3b8', fontFamily: "'Inter', sans-serif", marginTop: '2px' }}>
+                            {event.description}
+                        </div>
+                    )}
+                    {(event.city || event.related_entity) && (
+                        <div style={{ display: 'flex', gap: '12px', marginTop: '6px', fontSize: '0.72rem', color: '#64748b' }}>
+                            {event.city && <span>{event.city}{event.state ? ', ' + event.state : ''}</span>}
+                            {event.related_entity && <span>{event.related_entity}</span>}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ===================================================================
+        // CAPITAL FLOW PANEL
+        // ===================================================================
+        // ===================================================================
+        // SIGNAL INTELLIGENCE PANEL
+        // ===================================================================
+        function SignalIntelligencePanel() {
+            const e = React.createElement;
+            const [data, setData] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [activePanel, setActivePanel] = useState('sources');
+
+            const fetchData = useCallback(async () => {
+                try {
+                    const res = await fetch('/api/signal-intelligence?limit=20');
+                    const json = await res.json();
+                    if (json.success) setData(json);
+                } catch (e) { console.error('[SignalIntelligence]', e); }
+                finally { setLoading(false); }
+            }, []);
+
+            useEffect(() => { fetchData(); const iv = setInterval(fetchData, 60000); return () => clearInterval(iv); }, [fetchData]);
+
+            function accColor(pct) { return pct >= 70 ? '#34d399' : pct >= 50 ? '#facc15' : pct >= 30 ? '#f97316' : '#ef4444'; }
+            function prioColor(s) { return s > 0.7 ? '#34d399' : s >= 0.4 ? '#facc15' : '#64748b'; }
+
+            if (loading && !data) return e('div', { style: { textAlign: 'center', padding: '3rem', color: '#34d399', fontFamily: "'Orbitron', sans-serif" } }, 'LOADING SIGNAL INTELLIGENCE...');
+            if (!data) return e('div', { style: { textAlign: 'center', padding: '3rem', color: '#64748b' } }, 'No signal intelligence data available yet.');
+
+            const { top_sources, type_rankings, city_rankings, priority_index, stats } = data;
+            const panels = [{ key: 'sources', label: 'TOP SOURCES' }, { key: 'types', label: 'SIGNAL TYPES' }, { key: 'cities', label: 'CITIES' }, { key: 'priority', label: 'PRIORITY INDEX' }];
+
+            return e('div', { style: { maxWidth: '1000px', margin: '0 auto' } },
+                // Header
+                e('div', { style: { marginBottom: '1.5rem' } },
+                    e('h2', { style: { fontFamily: "'Orbitron', sans-serif", fontSize: '1.3rem', fontWeight: 900, background: 'linear-gradient(135deg, #a78bfa 0%, #22d3ee 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 } }, 'SIGNAL INTELLIGENCE'),
+                    e('p', { style: { color: '#64748b', fontSize: '0.8rem', margin: '0.25rem 0 0' } }, 'Signal quality rankings and source accuracy analytics')
+                ),
+                // Stats row
+                e('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '1.5rem' } },
+                    [{ label: 'TRACKED SOURCES', value: stats.total_sources },
+                     { label: 'AVG ACCURACY', value: stats.avg_accuracy_pct + '%', color: accColor(stats.avg_accuracy_pct) },
+                     { label: 'SIGNALS TRACKED', value: stats.total_signals_tracked },
+                     { label: 'CONFIRMED', value: stats.total_confirmed, color: '#34d399' }
+                    ].map(c => e('div', { key: c.label, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px 16px', textAlign: 'center' } },
+                        e('div', { style: { fontSize: '0.6rem', color: '#64748b', fontFamily: "'Orbitron', sans-serif", marginBottom: '6px', letterSpacing: '0.05em' } }, c.label),
+                        e('div', { style: { fontSize: '1.4rem', fontWeight: 700, color: c.color || '#f1f5f9', fontFamily: "'Orbitron', sans-serif" } }, c.value)
+                    ))
+                ),
+                // Tab bar
+                e('div', { style: { display: 'flex', gap: '0.35rem', marginBottom: '1rem', flexWrap: 'wrap' } },
+                    panels.map(tab => e('button', { key: tab.key, onClick: () => setActivePanel(tab.key), style: {
+                        background: activePanel === tab.key ? 'rgba(167,139,250,0.08)' : 'transparent',
+                        border: '1px solid ' + (activePanel === tab.key ? 'rgba(167,139,250,0.3)' : 'rgba(255,255,255,0.06)'),
+                        color: activePanel === tab.key ? '#a78bfa' : '#64748b', padding: '0.35rem 0.75rem', borderRadius: '4px', cursor: 'pointer',
+                        fontSize: '0.65rem', fontWeight: 600, fontFamily: "'Orbitron', sans-serif",
+                    } }, tab.label))
+                ),
+                // Content
+                e('div', { style: { maxHeight: '55vh', overflowY: 'auto' } },
+                    // SOURCES tab
+                    activePanel === 'sources' && (top_sources.length === 0
+                        ? e('div', { style: { textAlign: 'center', padding: '2rem', color: '#475569' } }, 'No signal sources tracked yet.')
+                        : top_sources.map((src, i) => e('div', { key: src.source_name, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderLeft: '3px solid ' + accColor(src.accuracy_pct), borderRadius: '8px', padding: '12px 16px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                            e('div', null,
+                                e('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+                                    e('span', { style: { fontSize: '0.7rem', color: '#475569', fontWeight: 700 } }, '#' + (i + 1)),
+                                    e('span', { style: { fontSize: '0.95rem', fontWeight: 600, color: '#f1f5f9' } }, src.source_name),
+                                    e('span', { style: { fontSize: '0.55rem', fontFamily: "'Orbitron', sans-serif", background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.2)', borderRadius: '4px', padding: '2px 6px', color: '#a78bfa' } }, src.source_type)
+                                ),
+                                e('div', { style: { fontSize: '0.75rem', color: '#64748b', marginTop: '4px' } }, src.signals_confirmed + '/' + src.signals_generated + ' signals confirmed' + (src.city ? ' \u00B7 ' + src.city + (src.state ? ', ' + src.state : '') : ''))
+                            ),
+                            e('div', { style: { textAlign: 'right' } },
+                                e('div', { style: { fontSize: '1.2rem', fontWeight: 700, color: accColor(src.accuracy_pct), fontFamily: "'Orbitron', sans-serif" } }, src.accuracy_pct + '%'),
+                                e('div', { style: { fontSize: '0.6rem', color: '#475569' } }, 'ACCURACY')
+                            )
+                        ))
+                    ),
+                    // TYPES tab
+                    activePanel === 'types' && (type_rankings.length === 0
+                        ? e('div', { style: { textAlign: 'center', padding: '2rem', color: '#475569' } }, 'No signal type data available yet.')
+                        : type_rankings.map(t => e('div', { key: t.signal_type, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '12px 16px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                            e('div', null,
+                                e('div', { style: { fontSize: '0.95rem', fontWeight: 600, color: '#f1f5f9' } }, t.signal_type),
+                                e('div', { style: { fontSize: '0.75rem', color: '#64748b', marginTop: '2px' } }, t.signals_confirmed + '/' + t.signals_generated + ' confirmed')
+                            ),
+                            e('div', { style: { width: '60px', height: '60px', borderRadius: '50%', border: '3px solid ' + accColor(t.accuracy_pct), display: 'flex', alignItems: 'center', justifyContent: 'center' } },
+                                e('div', { style: { fontSize: '0.9rem', fontWeight: 700, color: accColor(t.accuracy_pct), fontFamily: "'Orbitron', sans-serif" } }, t.accuracy_pct + '%')
+                            )
+                        ))
+                    ),
+                    // CITIES tab
+                    activePanel === 'cities' && (city_rankings.length === 0
+                        ? e('div', { style: { textAlign: 'center', padding: '2rem', color: '#475569' } }, 'No city data available yet.')
+                        : city_rankings.map(c => e('div', { key: c.city + '-' + c.state, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '12px 16px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                            e('div', null,
+                                e('div', { style: { fontSize: '0.95rem', fontWeight: 600, color: '#f1f5f9' } }, c.city + ', ' + c.state),
+                                e('div', { style: { fontSize: '0.75rem', color: '#64748b', marginTop: '2px' } }, c.source_count + ' sources \u00B7 ' + c.total_confirmed + '/' + c.total_signals + ' confirmed')
+                            ),
+                            e('div', { style: { textAlign: 'right' } },
+                                e('div', { style: { fontSize: '1.2rem', fontWeight: 700, color: accColor(c.avg_accuracy_pct), fontFamily: "'Orbitron', sans-serif" } }, c.avg_accuracy_pct + '%'),
+                                e('div', { style: { fontSize: '0.6rem', color: '#475569' } }, 'AVG ACCURACY')
+                            )
+                        ))
+                    ),
+                    // PRIORITY tab
+                    activePanel === 'priority' && (priority_index.length === 0
+                        ? e('div', { style: { textAlign: 'center', padding: '2rem', color: '#475569' } }, 'No priority data available yet.')
+                        : priority_index.map(p => e('div', { key: p.source_name, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderLeft: '3px solid ' + prioColor(p.priority_score), borderRadius: '8px', padding: '12px 16px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                            e('div', null,
+                                e('div', { style: { fontSize: '0.95rem', fontWeight: 600, color: '#f1f5f9' } }, p.source_name),
+                                e('div', { style: { fontSize: '0.75rem', color: '#64748b', marginTop: '2px' } }, p.signals_last_30_days + ' signals (30d) \u00B7 Accuracy: ' + p.accuracy_pct + '%')
+                            ),
+                            e('div', { style: { textAlign: 'right' } },
+                                e('div', { style: { fontSize: '0.9rem', fontWeight: 700, color: prioColor(p.priority_score), fontFamily: "'Orbitron', sans-serif" } }, p.schedule_interval),
+                                e('div', { style: { fontSize: '0.6rem', color: '#475569' } }, 'PRIORITY: ' + (p.priority_score * 100).toFixed(0))
+                            )
+                        ))
+                    )
+                )
+            );
+        }
+
+        function CapitalFlowPanel() {
+            const [predictions, setPredictions] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [selectedPrediction, setSelectedPrediction] = useState(null);
+            const [filterState, setFilterState] = useState('');
+
+            useEffect(() => {
+                loadPredictions();
+            }, [filterState]);
+
+            const loadPredictions = async () => {
+                setLoading(true);
+                try {
+                    let url = '/api/capital-flow?limit=100';
+                    if (filterState) url += '&state=' + encodeURIComponent(filterState);
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    setPredictions(data.predictions || []);
+                } catch (e) {
+                    console.error('Failed to load capital predictions:', e);
+                }
+                setLoading(false);
+            };
+
+            const loadDetail = async (id) => {
+                try {
+                    const res = await fetch('/api/capital-flow/' + id);
+                    const data = await res.json();
+                    setSelectedPrediction(data);
+                } catch (e) {
+                    console.error('Failed to load capital detail:', e);
+                }
+            };
+
+            const eventTypeLabels = {
+                CONSTRUCTION_LOAN: 'Construction Loan',
+                LAND_ACQUISITION_LOAN: 'Land Acquisition Loan',
+                DEBT_PLACEMENT: 'Debt Placement',
+                EQUITY_INVESTMENT: 'Equity Investment',
+                JOINT_VENTURE: 'Joint Venture',
+                FUND_DEPLOYMENT: 'Fund Deployment',
+            };
+
+            const eventTypeColors = {
+                CONSTRUCTION_LOAN: '#eab308',
+                LAND_ACQUISITION_LOAN: '#f59e0b',
+                DEBT_PLACEMENT: '#3b82f6',
+                EQUITY_INVESTMENT: '#10b981',
+                JOINT_VENTURE: '#a855f7',
+                FUND_DEPLOYMENT: '#ef4444',
+            };
+
+            const confidenceColor = (score) => {
+                if (score >= 80) return '#10b981';
+                if (score >= 60) return '#f59e0b';
+                return '#ef4444';
+            };
+
+            const formatAmount = (amount) => {
+                if (!amount) return null;
+                if (amount >= 1000000) return '$' + (amount / 1000000).toFixed(0) + 'M';
+                if (amount >= 1000) return '$' + (amount / 1000).toFixed(0) + 'K';
+                return '$' + amount.toFixed(0);
+            };
+
+            const states = [...new Set(predictions.map(p => p.state).filter(Boolean))].sort();
+
+            return (
+                React.createElement('div', { style: { padding: '1.5rem' } },
+                    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' } },
+                        React.createElement('div', null,
+                            React.createElement('h2', { style: { color: '#e2e8f0', fontSize: '1.5rem', fontWeight: 700, fontFamily: "'Orbitron', sans-serif", margin: 0 } }, 'Capital Flow Signals'),
+                            React.createElement('p', { style: { color: '#64748b', fontSize: '0.85rem', marginTop: '0.3rem' } }, 'Financing signals indicating development projects are about to move forward')
+                        ),
+                        React.createElement('div', { style: { display: 'flex', gap: '0.75rem', alignItems: 'center' } },
+                            React.createElement('select', {
+                                value: filterState,
+                                onChange: (e) => setFilterState(e.target.value),
+                                style: { background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', borderRadius: '0.5rem', padding: '0.5rem 0.75rem', fontSize: '0.85rem' }
+                            },
+                                React.createElement('option', { value: '' }, 'All States'),
+                                states.map(s => React.createElement('option', { key: s, value: s }, s))
+                            ),
+                            React.createElement('button', {
+                                onClick: loadPredictions,
+                                style: { background: 'linear-gradient(135deg, #b45309, #eab308)', border: 'none', color: '#fff', borderRadius: '0.5rem', padding: '0.5rem 1rem', fontSize: '0.85rem', cursor: 'pointer', fontWeight: 600 }
+                            }, 'Refresh')
+                        )
+                    ),
+                    loading ? React.createElement('div', { style: { textAlign: 'center', padding: '3rem', color: '#94a3b8' } }, 'Scanning capital flow signals...') :
+                    predictions.length === 0 ? React.createElement('div', { style: { textAlign: 'center', padding: '3rem', color: '#64748b' } }, 'No capital predictions detected yet. The engine scans every 6 hours.') :
+                    React.createElement('div', { style: { display: 'grid', gridTemplateColumns: selectedPrediction ? '1fr 1fr' : '1fr', gap: '1.5rem' } },
+                        React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.75rem' } },
+                            predictions.map(p =>
+                                React.createElement('div', {
+                                    key: p.id,
+                                    onClick: () => loadDetail(p.id),
+                                    style: {
+                                        background: selectedPrediction && selectedPrediction.id === p.id ? 'rgba(234,179,8,0.12)' : 'rgba(30,41,59,0.6)',
+                                        border: selectedPrediction && selectedPrediction.id === p.id ? '1px solid rgba(234,179,8,0.4)' : '1px solid rgba(255,255,255,0.06)',
+                                        borderRadius: '0.75rem', padding: '1rem 1.25rem', cursor: 'pointer',
+                                        transition: 'all 0.2s',
+                                    }
+                                },
+                                    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { color: '#eab308', fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.05em', marginBottom: '0.3rem', fontFamily: "'Orbitron', sans-serif" } }, 'CAPITAL DEPLOYMENT DETECTED'),
+                                            React.createElement('div', { style: { color: '#e2e8f0', fontSize: '1rem', fontWeight: 600 } }, p.developer),
+                                            React.createElement('div', { style: { color: '#94a3b8', fontSize: '0.85rem', marginTop: '0.15rem' } }, (p.city || '') + (p.state ? ', ' + p.state : '')),
+                                            React.createElement('div', { style: { display: 'flex', gap: '0.5rem', marginTop: '0.4rem', alignItems: 'center' } },
+                                                React.createElement('span', { style: { background: eventTypeColors[p.capital_event] || '#eab308', color: '#000', padding: '0.15rem 0.5rem', borderRadius: '0.25rem', fontSize: '0.7rem', fontWeight: 700 } }, eventTypeLabels[p.capital_event] || p.capital_event),
+                                                p.estimated_amount && React.createElement('span', { style: { color: '#eab308', fontSize: '0.85rem', fontWeight: 700 } }, formatAmount(p.estimated_amount))
+                                            )
+                                        ),
+                                        React.createElement('div', { style: { textAlign: 'right' } },
+                                            React.createElement('div', { style: { color: confidenceColor(p.confidence), fontSize: '1.5rem', fontWeight: 700, fontFamily: "'Orbitron', sans-serif" } }, p.confidence + '%'),
+                                            React.createElement('div', { style: { color: '#64748b', fontSize: '0.7rem' } }, 'confidence')
+                                        )
+                                    ),
+                                    p.reasoning && React.createElement('div', { style: { color: '#94a3b8', fontSize: '0.8rem', marginTop: '0.5rem', lineHeight: 1.4 } }, p.reasoning)
+                                )
+                            )
+                        ),
+                        selectedPrediction && React.createElement('div', {
+                            style: { background: 'rgba(30,41,59,0.6)', border: '1px solid rgba(234,179,8,0.3)', borderRadius: '0.75rem', padding: '1.25rem', position: 'sticky', top: '1rem', alignSelf: 'start' }
+                        },
+                            React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' } },
+                                React.createElement('h3', { style: { color: '#e2e8f0', margin: 0, fontSize: '1.1rem' } }, 'Capital Details'),
+                                React.createElement('button', {
+                                    onClick: () => setSelectedPrediction(null),
+                                    style: { background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '1.2rem' }
+                                }, '\u00D7')
+                            ),
+                            React.createElement('div', { style: { marginBottom: '1rem' } },
+                                React.createElement('div', { style: { color: '#eab308', fontWeight: 700, fontSize: '0.9rem' } }, selectedPrediction.developer),
+                                React.createElement('div', { style: { color: '#94a3b8', fontSize: '0.85rem' } }, (selectedPrediction.city || '') + ', ' + (selectedPrediction.state || '')),
+                                selectedPrediction.estimated_amount && React.createElement('div', { style: { color: '#eab308', fontSize: '1.3rem', fontWeight: 700, marginTop: '0.5rem', fontFamily: "'Orbitron', sans-serif" } }, formatAmount(selectedPrediction.estimated_amount)),
+                                React.createElement('div', { style: { color: confidenceColor(selectedPrediction.confidence), fontSize: '1.1rem', fontWeight: 700, marginTop: '0.3rem', fontFamily: "'Orbitron', sans-serif" } }, 'Confidence: ' + selectedPrediction.confidence + '%')
+                            ),
+                            selectedPrediction.reasoning && React.createElement('div', { style: { color: '#cbd5e1', fontSize: '0.85rem', marginBottom: '1rem', padding: '0.75rem', background: 'rgba(234,179,8,0.08)', borderRadius: '0.5rem', lineHeight: 1.5 } }, selectedPrediction.reasoning),
+                            React.createElement('h4', { style: { color: '#94a3b8', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.5rem' } }, 'CAPITAL EVENTS'),
+                            (selectedPrediction.events || []).length === 0 ?
+                                React.createElement('div', { style: { color: '#64748b', fontSize: '0.8rem' } }, 'No event details available') :
+                                (selectedPrediction.events || []).map((ev, i) =>
+                                    React.createElement('div', {
+                                        key: ev.id || i,
+                                        style: { display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.5rem 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }
+                                    },
+                                        React.createElement('span', {
+                                            style: { display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: eventTypeColors[ev.event_type] || '#eab308', flexShrink: 0 }
+                                        }),
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 500 } }, eventTypeLabels[ev.event_type] || ev.event_type),
+                                            ev.lender_name && React.createElement('div', { style: { color: '#64748b', fontSize: '0.75rem' } }, 'Lender: ' + ev.lender_name),
+                                            ev.loan_amount && React.createElement('div', { style: { color: '#eab308', fontSize: '0.75rem', fontWeight: 600 } }, formatAmount(ev.loan_amount)),
+                                            React.createElement('div', { style: { color: '#475569', fontSize: '0.7rem' } }, timeAgo(ev.created_at))
+                                        )
+                                    )
+                                )
+                        )
+                    )
+                )
+            );
+        }
+
+        // ===================================================================
+        // DEVELOPER INTENT PANEL
+        // ===================================================================
+        function DeveloperIntentPanel() {
+            const [predictions, setPredictions] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [selectedPrediction, setSelectedPrediction] = useState(null);
+            const [filterState, setFilterState] = useState('');
+
+            useEffect(() => {
+                loadPredictions();
+            }, [filterState]);
+
+            const loadPredictions = async () => {
+                setLoading(true);
+                try {
+                    let url = '/api/developer-intent?limit=100';
+                    if (filterState) url += '&state=' + encodeURIComponent(filterState);
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    setPredictions(data.predictions || []);
+                } catch (e) {
+                    console.error('Failed to load intent predictions:', e);
+                }
+                setLoading(false);
+            };
+
+            const loadDetail = async (id) => {
+                try {
+                    const res = await fetch('/api/developer-intent/' + id);
+                    const data = await res.json();
+                    setSelectedPrediction(data);
+                } catch (e) {
+                    console.error('Failed to load prediction detail:', e);
+                }
+            };
+
+            const signalTypeLabels = {
+                CONSULTANT_HIRING: 'Consultant Hiring',
+                ENGINEERING_ENGAGEMENT: 'Engineering Engagement',
+                CONTRACTOR_PRECON: 'Contractor Consultation',
+                ENTITY_FORMATION: 'New LLC Formation',
+                MARKET_RESEARCH: 'Market Research',
+                HIRING_EXPANSION: 'Hiring Expansion',
+            };
+
+            const signalTypeColors = {
+                CONSULTANT_HIRING: '#f59e0b',
+                ENGINEERING_ENGAGEMENT: '#3b82f6',
+                CONTRACTOR_PRECON: '#ef4444',
+                ENTITY_FORMATION: '#a855f7',
+                MARKET_RESEARCH: '#06b6d4',
+                HIRING_EXPANSION: '#10b981',
+            };
+
+            const confidenceColor = (score) => {
+                if (score >= 80) return '#10b981';
+                if (score >= 60) return '#f59e0b';
+                return '#ef4444';
+            };
+
+            const states = [...new Set(predictions.map(p => p.state).filter(Boolean))].sort();
+
+            return (
+                React.createElement('div', { style: { padding: '1.5rem' } },
+                    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' } },
+                        React.createElement('div', null,
+                            React.createElement('h2', { style: { color: '#e2e8f0', fontSize: '1.5rem', fontWeight: 700, fontFamily: "'Orbitron', sans-serif", margin: 0 } }, 'Developer Intent Signals'),
+                            React.createElement('p', { style: { color: '#64748b', fontSize: '0.85rem', marginTop: '0.3rem' } }, 'Early detection of developer preparation activity before land acquisition')
+                        ),
+                        React.createElement('div', { style: { display: 'flex', gap: '0.75rem', alignItems: 'center' } },
+                            React.createElement('select', {
+                                value: filterState,
+                                onChange: (e) => setFilterState(e.target.value),
+                                style: { background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', borderRadius: '0.5rem', padding: '0.5rem 0.75rem', fontSize: '0.85rem' }
+                            },
+                                React.createElement('option', { value: '' }, 'All States'),
+                                states.map(s => React.createElement('option', { key: s, value: s }, s))
+                            ),
+                            React.createElement('button', {
+                                onClick: loadPredictions,
+                                style: { background: 'linear-gradient(135deg, #7c3aed, #a855f7)', border: 'none', color: '#fff', borderRadius: '0.5rem', padding: '0.5rem 1rem', fontSize: '0.85rem', cursor: 'pointer', fontWeight: 600 }
+                            }, 'Refresh')
+                        )
+                    ),
+                    loading ? React.createElement('div', { style: { textAlign: 'center', padding: '3rem', color: '#94a3b8' } }, 'Scanning developer intent signals...') :
+                    predictions.length === 0 ? React.createElement('div', { style: { textAlign: 'center', padding: '3rem', color: '#64748b' } }, 'No intent predictions detected yet. The engine scans every 4 hours.') :
+                    React.createElement('div', { style: { display: 'grid', gridTemplateColumns: selectedPrediction ? '1fr 1fr' : '1fr', gap: '1.5rem' } },
+                        React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.75rem' } },
+                            predictions.map(p =>
+                                React.createElement('div', {
+                                    key: p.id,
+                                    onClick: () => loadDetail(p.id),
+                                    style: {
+                                        background: selectedPrediction && selectedPrediction.id === p.id ? 'rgba(168,85,247,0.12)' : 'rgba(30,41,59,0.6)',
+                                        border: selectedPrediction && selectedPrediction.id === p.id ? '1px solid rgba(168,85,247,0.4)' : '1px solid rgba(255,255,255,0.06)',
+                                        borderRadius: '0.75rem', padding: '1rem 1.25rem', cursor: 'pointer',
+                                        transition: 'all 0.2s',
+                                    }
+                                },
+                                    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { color: '#a855f7', fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.05em', marginBottom: '0.3rem', fontFamily: "'Orbitron', sans-serif" } }, 'DEVELOPER INTENT DETECTED'),
+                                            React.createElement('div', { style: { color: '#e2e8f0', fontSize: '1rem', fontWeight: 600 } }, p.developer),
+                                            React.createElement('div', { style: { color: '#94a3b8', fontSize: '0.85rem', marginTop: '0.15rem' } }, (p.city || '') + (p.state ? ', ' + p.state : ''))
+                                        ),
+                                        React.createElement('div', { style: { textAlign: 'right' } },
+                                            React.createElement('div', { style: { color: confidenceColor(p.confidence), fontSize: '1.5rem', fontWeight: 700, fontFamily: "'Orbitron', sans-serif" } }, p.confidence + '%'),
+                                            React.createElement('div', { style: { color: '#64748b', fontSize: '0.7rem' } }, p.signal_count + ' signals')
+                                        )
+                                    ),
+                                    p.reasoning && React.createElement('div', { style: { color: '#94a3b8', fontSize: '0.8rem', marginTop: '0.5rem', lineHeight: 1.4 } }, p.reasoning)
+                                )
+                            )
+                        ),
+                        selectedPrediction && React.createElement('div', {
+                            style: { background: 'rgba(30,41,59,0.6)', border: '1px solid rgba(168,85,247,0.3)', borderRadius: '0.75rem', padding: '1.25rem', position: 'sticky', top: '1rem', alignSelf: 'start' }
+                        },
+                            React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' } },
+                                React.createElement('h3', { style: { color: '#e2e8f0', margin: 0, fontSize: '1.1rem' } }, 'Signal Details'),
+                                React.createElement('button', {
+                                    onClick: () => setSelectedPrediction(null),
+                                    style: { background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '1.2rem' }
+                                }, '\u00D7')
+                            ),
+                            React.createElement('div', { style: { marginBottom: '1rem' } },
+                                React.createElement('div', { style: { color: '#a855f7', fontWeight: 700, fontSize: '0.9rem' } }, selectedPrediction.developer),
+                                React.createElement('div', { style: { color: '#94a3b8', fontSize: '0.85rem' } }, (selectedPrediction.city || '') + ', ' + (selectedPrediction.state || '')),
+                                React.createElement('div', { style: { color: confidenceColor(selectedPrediction.confidence), fontSize: '1.3rem', fontWeight: 700, marginTop: '0.5rem', fontFamily: "'Orbitron', sans-serif" } }, 'Confidence: ' + selectedPrediction.confidence + '%')
+                            ),
+                            selectedPrediction.reasoning && React.createElement('div', { style: { color: '#cbd5e1', fontSize: '0.85rem', marginBottom: '1rem', padding: '0.75rem', background: 'rgba(168,85,247,0.08)', borderRadius: '0.5rem', lineHeight: 1.5 } }, selectedPrediction.reasoning),
+                            React.createElement('h4', { style: { color: '#94a3b8', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.5rem' } }, 'DETECTED SIGNALS'),
+                            (selectedPrediction.signals || []).length === 0 ?
+                                React.createElement('div', { style: { color: '#64748b', fontSize: '0.8rem' } }, 'No signal details available') :
+                                (selectedPrediction.signals || []).map((sig, i) =>
+                                    React.createElement('div', {
+                                        key: sig.id || i,
+                                        style: { display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.5rem 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }
+                                    },
+                                        React.createElement('span', {
+                                            style: { display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: signalTypeColors[sig.signal_type] || '#64748b', flexShrink: 0 }
+                                        }),
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 500 } }, signalTypeLabels[sig.signal_type] || sig.signal_type),
+                                            sig.related_entity && React.createElement('div', { style: { color: '#64748b', fontSize: '0.75rem' } }, sig.related_entity),
+                                            React.createElement('div', { style: { color: '#475569', fontSize: '0.7rem' } }, timeAgo(sig.created_at))
+                                        )
+                                    )
+                                )
+                        )
+                    )
+                )
+            );
+        }
+
+        function LiveIntelligenceFeed() {
+            const [events, setEvents] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [paused, setPaused] = useState(false);
+            const [filterType, setFilterType] = useState('');
+            const [newIds, setNewIds] = useState(new Set());
+            const previousIdsRef = useRef(new Set());
+            const feedRef = useRef(null);
+            const intervalRef = useRef(null);
+
+            const fetchFeed = useCallback(async () => {
+                try {
+                    let url = `${API_BASE}/api/intelligence-feed?limit=100`;
+                    if (filterType) url += `&type=${filterType}`;
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    if (data.success && data.events) {
+                        // Detect new events for animation
+                        const incoming = new Set(data.events.map(e => e.id));
+                        const fresh = new Set();
+                        data.events.forEach(e => {
+                            if (!previousIdsRef.current.has(e.id)) fresh.add(e.id);
+                        });
+                        previousIdsRef.current = incoming;
+                        setNewIds(fresh);
+                        setEvents(data.events);
+                        // Auto-scroll to top when not paused
+                        if (!paused && feedRef.current) feedRef.current.scrollTop = 0;
+                    }
+                } catch (e) {
+                    console.error('[Feed] Error:', e);
+                } finally {
+                    setLoading(false);
+                }
+            }, [filterType, paused]);
+
+            useEffect(() => {
+                fetchFeed();
+                intervalRef.current = setInterval(() => {
+                    if (!paused) fetchFeed();
+                }, 10000);
+                return () => clearInterval(intervalRef.current);
+            }, [fetchFeed, paused]);
+
+            // Clear new flags after animation
+            useEffect(() => {
+                if (newIds.size > 0) {
+                    const timer = setTimeout(() => setNewIds(new Set()), 500);
+                    return () => clearTimeout(timer);
+                }
+            }, [newIds]);
+
+            const typeFilters = ['', 'SIGNAL', 'PERMIT', 'PATTERN', 'DEVELOPER_EXPANSION', 'CONTRACTOR_ACTIVITY', 'PARCEL_ALERT'];
+
+            return (
+                <div style={{ maxWidth: '900px', margin: '0 auto' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                        <div>
+                            <h2 style={{
+                                fontFamily: "'Orbitron', sans-serif", fontSize: '1.3rem', fontWeight: 900,
+                                background: 'linear-gradient(135deg, #34d399 0%, #22d3ee 100%)',
+                                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0,
+                            }}>
+                                LIVE INTELLIGENCE FEED
+                            </h2>
+                            <p style={{ color: '#64748b', fontSize: '0.8rem', margin: '0.25rem 0 0' }}>
+                                Real-time development signals across all monitored markets
+                            </p>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                            <button
+                                onClick={() => setPaused(!paused)}
+                                style={{
+                                    background: paused ? 'rgba(239,68,68,0.1)' : 'rgba(52,211,153,0.1)',
+                                    border: '1px solid ' + (paused ? 'rgba(239,68,68,0.3)' : 'rgba(52,211,153,0.3)'),
+                                    color: paused ? '#f87171' : '#34d399',
+                                    padding: '0.4rem 0.85rem', borderRadius: '6px', cursor: 'pointer',
+                                    fontSize: '0.75rem', fontWeight: 600, fontFamily: "'Orbitron', sans-serif",
+                                }}
+                            >
+                                {paused ? 'PAUSED' : 'LIVE'}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Type filter bar */}
+                    <div style={{ display: 'flex', gap: '0.35rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+                        {typeFilters.map(t => {
+                            const colors = FEED_EVENT_COLORS[t] || { accent: '#94a3b8', bg: 'transparent', border: 'rgba(255,255,255,0.08)' };
+                            const active = filterType === t;
+                            return (
+                                <button key={t || 'all'} onClick={() => setFilterType(t)} style={{
+                                    background: active ? colors.bg : 'transparent',
+                                    border: '1px solid ' + (active ? colors.border : 'rgba(255,255,255,0.06)'),
+                                    color: active ? colors.accent : '#64748b',
+                                    padding: '0.3rem 0.65rem', borderRadius: '4px', cursor: 'pointer',
+                                    fontSize: '0.65rem', fontWeight: 600, fontFamily: "'Orbitron', sans-serif",
+                                    textTransform: 'uppercase',
+                                }}>
+                                    {t ? (FEED_EVENT_LABELS[t] || t) : 'ALL'}
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {/* Feed container */}
+                    <div ref={feedRef} style={{
+                        maxHeight: '65vh', overflowY: 'auto', padding: '2px',
+                        scrollBehavior: 'smooth',
+                    }}>
+                        {loading && events.length === 0 && (
+                            <div style={{ textAlign: 'center', padding: '3rem', color: '#34d399', fontFamily: "'Orbitron', sans-serif", animation: 'pulse 1.5s ease-in-out infinite' }}>
+                                INITIALIZING FEED...
+                            </div>
+                        )}
+                        {!loading && events.length === 0 && (
+                            <div style={{ textAlign: 'center', padding: '3rem' }}>
+                                <div style={{ fontSize: '1.2rem', color: '#64748b', fontFamily: "'Orbitron', sans-serif", marginBottom: '0.5rem' }}>NO EVENTS YET</div>
+                                <div style={{ fontSize: '0.85rem', color: '#475569' }}>Intelligence events will appear here as they are detected by the system.</div>
+                            </div>
+                        )}
+                        {events.map(event => (
+                            <FeedEventCard key={event.id} event={event} isNew={newIds.has(event.id)} />
+                        ))}
+                    </div>
+
+                    {events.length > 0 && (
+                        <div style={{ textAlign: 'center', padding: '0.5rem', fontSize: '0.7rem', color: '#475569', marginTop: '0.5rem' }}>
+                            Showing {events.length} events {'\u00B7'} Polling every 10s {paused ? ' (paused)' : ''}
+                        </div>
+                    )}
                 </div>
             );
         }
@@ -1333,7 +2368,7 @@
             );
         }
 
-        function Controls({ searchCity, setSearchCity, filterScore, setFilterScore, filterTrigger, setFilterTrigger, filterSwimLane, setFilterSwimLane, sortBy, setSortBy, onSearch, onExport, loading, hasProspects, cooldown, filterEightyPlus, setFilterEightyPlus, filterCapitalEvents, setFilterCapitalEvents, filterLowComp, setFilterLowComp, filterCallNow, setFilterCallNow }) {
+        function Controls({ searchCity, setSearchCity, filterScore, setFilterScore, filterTrigger, setFilterTrigger, filterSwimLane, setFilterSwimLane, sortBy, setSortBy, onSearch, onExport, loading, hasProspects, cooldown, filterEightyPlus, setFilterEightyPlus, filterCapitalEvents, setFilterCapitalEvents, filterLowComp, setFilterLowComp, filterCallNow, setFilterCallNow, dateFilter, setDateFilter, customDateStart, setCustomDateStart, customDateEnd, setCustomDateEnd, onDateFilterChange }) {
             const isDisabled = loading || cooldown > 0;
             let btnLabel = 'Search Prospects';
             if (loading) btnLabel = 'Searching...';
@@ -1389,6 +2424,21 @@
                             <option value="swim_lane">Sort: Swim Lane Fit</option>
                             <option value="call_timing">Sort: Call Timing</option>
                         </select>
+                        <select style={styles.select} value={dateFilter} onChange={(e) => { setDateFilter(e.target.value); if (e.target.value !== 'custom') onDateFilterChange(e.target.value); }}>
+                            <option value="all">Date: All Time</option>
+                            <option value="today">Date: Today</option>
+                            <option value="7days">Date: Last 7 Days</option>
+                            <option value="30days">Date: Last 30 Days</option>
+                            <option value="custom">Date: Custom Range</option>
+                        </select>
+                        {dateFilter === 'custom' && (
+                            <React.Fragment>
+                                <input type="date" style={{...styles.input, width: '140px'}} value={customDateStart} onChange={e => setCustomDateStart(e.target.value)} />
+                                <span style={{color:'#94a3b8', fontSize:'0.8rem'}}>to</span>
+                                <input type="date" style={{...styles.input, width: '140px'}} value={customDateEnd} onChange={e => setCustomDateEnd(e.target.value)} />
+                                <button style={styles.btn} onClick={() => onDateFilterChange('custom')}>Apply</button>
+                            </React.Fragment>
+                        )}
                         {hasProspects && (
                             <button className="action-btn" style={styles.btn} onClick={onExport}>
                                 Download CSV
@@ -3615,26 +4665,33 @@
             const [columns, setColumns] = useState([]);
             const [rows, setRows] = useState([]);
             const [loading, setLoading] = useState(true);
+            const [loadError, setLoadError] = useState('');
             const [showHistory, setShowHistory] = useState(false);
             const [showNewForm, setShowNewForm] = useState(false);
-            const [addUnitsTarget, setAddUnitsTarget] = useState(null); // {community_id, row}
+            const [addUnitsTarget, setAddUnitsTarget] = useState(null);
             const [editRow, setEditRow] = useState(null);
+            const [showImportModal, setShowImportModal] = useState(false);
+            const [deleteTarget, setDeleteTarget] = useState(null); // {community_id, name}
+            const [deleting, setDeleting] = useState(false);
+            const [hoveredRow, setHoveredRow] = useState(null);
 
             const loadColumns = async () => {
                 try {
                     const res = await fetch(`${API_BASE}/api/underwriting/columns`);
                     const d = await res.json();
                     if (d.ok) setColumns(d.columns);
-                } catch(e) { console.error('Failed to load columns', e); }
+                    else setLoadError(d.error || d.message || 'Failed to load columns');
+                } catch(e) { console.error('Failed to load columns', e); setLoadError('Failed to load columns: ' + e.message); }
             };
 
             const loadRows = async () => {
-                setLoading(true);
+                setLoading(true); setLoadError('');
                 try {
                     const res = await fetch(`${API_BASE}/api/underwriting/rows?latest=${!showHistory}`);
                     const d = await res.json();
-                    if (d.ok) setRows(d.data);
-                } catch(e) { console.error('Failed to load rows', e); }
+                    if (d.ok) { setRows(d.data); }
+                    else { setRows([]); setLoadError(d.error || d.message || 'Failed to load rows'); }
+                } catch(e) { console.error('Failed to load rows', e); setRows([]); setLoadError('Failed to load rows: ' + e.message); }
                 setLoading(false);
             };
 
@@ -3645,17 +4702,90 @@
                 window.open(`${API_BASE}/api/underwriting/export?mode=${mode}`, '_blank');
             };
 
-            // ── Inline editing ──
-            const saveInlineEdit = async (rowId, key, value) => {
+            const deleteCommunity = async () => {
+                if (!deleteTarget) return;
+                setDeleting(true);
                 try {
-                    await fetch(`${API_BASE}/api/underwriting/rows/${rowId}`, {
-                        method: 'PATCH', headers: {'Content-Type':'application/json'},
-                        body: JSON.stringify({ [key]: value }),
-                    });
-                } catch(e) { alert('Save failed: ' + e.message); }
+                    const res = await fetch(`${API_BASE}/api/underwriting/communities/${deleteTarget.community_id}?mode=soft`, { method: 'DELETE' });
+                    const d = await res.json();
+                    if (d.ok) {
+                        setDeleteTarget(null);
+                        loadRows();
+                    } else {
+                        alert(d.error || 'Delete failed');
+                    }
+                } catch(e) { alert('Network error: ' + e.message); }
+                setDeleting(false);
             };
 
+            // ── Sticky column config ──
             const stickyKeys = ['location_name', 'city', 'state_province_district'];
+            const stickyWidths = [160, 120, 100]; // px widths for each sticky col
+            const actionsWidth = 130;
+            const versionWidth = 60;
+            const stickyLeftOffsets = stickyKeys.map((_, i) => {
+                let offset = actionsWidth;
+                if (showHistory) offset += versionWidth;
+                for (let j = 0; j < i; j++) offset += stickyWidths[j];
+                return offset;
+            });
+
+            // ── Section grouping for header row ──
+            const sectionOrder = ['location', 'values', 'construction', 'building', 'structure', 'premium'];
+            const sectionColors = {
+                location: '#6366f1', values: '#10b981', construction: '#f59e0b',
+                building: '#3b82f6', structure: '#8b5cf6', premium: '#ef4444',
+            };
+
+            const buildSectionGroups = () => {
+                if (!columns.length) return [];
+                const groups = [];
+                let curSection = null;
+                let curCount = 0;
+                columns.forEach(col => {
+                    const sec = col.section || 'other';
+                    if (sec !== curSection) {
+                        if (curSection !== null) groups.push({ section: curSection, count: curCount });
+                        curSection = sec;
+                        curCount = 1;
+                    } else {
+                        curCount++;
+                    }
+                });
+                if (curSection !== null) groups.push({ section: curSection, count: curCount });
+                return groups;
+            };
+
+            // ── Cell formatter ──
+            const formatCell = (col, value) => {
+                if (!value && value !== 0) return '';
+                const v = String(value);
+                if (!v) return '';
+                if (col.type === 'currency') {
+                    const n = Number(v);
+                    if (isNaN(n)) return v;
+                    return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+                }
+                if (col.type === 'percent') {
+                    const n = Number(v);
+                    if (isNaN(n)) return v;
+                    return n.toFixed(1) + '%';
+                }
+                if (col.type === 'date' && v.match(/^\d{4}-\d{2}-\d{2}/)) {
+                    const parts = v.split('-');
+                    return parts[1] + '/' + parts[2].substring(0,2) + '/' + parts[0];
+                }
+                return v;
+            };
+
+            // ── Color scheme ──
+            const rowBgEven = '#0b1220';
+            const rowBgOdd = '#0f172a';
+            const rowBgHover = '#162032';
+            const headerBg = '#080e1a';
+            const groupHeaderBg = '#0a1020';
+
+            const sectionGroups = buildSectionGroups();
 
             return (
                 <div>
@@ -3667,61 +4797,119 @@
                         </div>
                         <div style={{display:'flex',gap:'0.5rem',flexWrap:'wrap'}}>
                             <button className="action-btn" style={{...styles.actionBtn,borderColor:'#10b981',color:'#34d399'}} onClick={() => setShowNewForm(true)}>+ New Community</button>
+                            <button className="action-btn" style={{...styles.actionBtn,borderColor:'#6366f1',color:'#818cf8'}} onClick={() => setShowImportModal(true)}>Import Spreadsheet</button>
                             <button className="action-btn" style={styles.actionBtn} onClick={() => setShowHistory(!showHistory)}>{showHistory ? 'Latest Only' : 'Show History'}</button>
                             <button className="action-btn" style={styles.actionBtn} onClick={() => exportXlsx('latest')}>Export Latest XLSX</button>
                             {showHistory && <button className="action-btn" style={styles.actionBtn} onClick={() => exportXlsx('all')}>Export All XLSX</button>}
                         </div>
                     </div>
 
+                    {/* Error banner */}
+                    {loadError && (
+                        <div style={{padding:'0.75rem 1rem',background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:'0.5rem',color:'#f87171',fontSize:'0.85rem',marginBottom:'1rem',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                            <span>{loadError}</span>
+                            <button onClick={() => { setLoadError(''); loadRows(); }} style={{background:'none',border:'1px solid #f87171',color:'#f87171',borderRadius:'4px',padding:'0.25rem 0.75rem',cursor:'pointer',fontSize:'0.78rem',whiteSpace:'nowrap',marginLeft:'1rem'}}>Retry</button>
+                        </div>
+                    )}
+
                     {/* Spreadsheet Grid */}
-                    {loading ? <div style={{textAlign:'center',padding:'3rem',color:'#64748b'}}>Loading...</div> : rows.length === 0 ? (
+                    {loading ? <div style={{textAlign:'center',padding:'3rem',color:'#64748b'}}>Loading...</div> : rows.length === 0 && !loadError ? (
                         <EmptyState title="No underwriting records" subtitle='Click "+ New Community" to add the first record' icon={<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-slate-600"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>} />
-                    ) : (
-                        <div style={{overflowX:'auto',border:'1px solid #1e293b',borderRadius:'0.5rem',maxHeight:'70vh',overflowY:'auto'}}>
-                            <table style={{borderCollapse:'collapse',width:'max-content',minWidth:'100%',fontSize:'0.78rem'}}>
+                    ) : rows.length === 0 ? null : (
+                        <div style={{overflowX:'auto',border:'1px solid #1e293b',borderRadius:'0.5rem',maxHeight:'74vh',overflowY:'auto'}}>
+                            <table style={{borderCollapse:'collapse',width:'max-content',minWidth:'100%',fontSize:'0.76rem'}}>
                                 <thead>
-                                    <tr style={{position:'sticky',top:0,zIndex:20,background:'#0f172a'}}>
-                                        <th style={{position:'sticky',left:0,zIndex:30,background:'#0f172a',padding:'0.5rem 0.75rem',borderBottom:'2px solid #334155',color:'#94a3b8',fontWeight:700,textAlign:'left',whiteSpace:'nowrap',fontSize:'0.7rem',textTransform:'uppercase',letterSpacing:'0.05em',minWidth:'100px'}}>Actions</th>
-                                        {showHistory && <th style={{position:'sticky',top:0,zIndex:20,background:'#0f172a',padding:'0.5rem 0.75rem',borderBottom:'2px solid #334155',color:'#94a3b8',fontWeight:700,textAlign:'left',whiteSpace:'nowrap',fontSize:'0.7rem',textTransform:'uppercase',letterSpacing:'0.05em'}}>Version</th>}
-                                        {columns.map((col, ci) => (
-                                            <th key={col.key} style={{
-                                                position: stickyKeys.includes(col.key) ? 'sticky' : 'relative',
-                                                left: stickyKeys.includes(col.key) ? (stickyKeys.indexOf(col.key) === 0 ? '100px' : stickyKeys.indexOf(col.key) === 1 ? '260px' : '360px') : 'auto',
-                                                zIndex: stickyKeys.includes(col.key) ? 25 : 20,
-                                                background:'#0f172a',padding:'0.5rem 0.75rem',borderBottom:'2px solid #334155',color:'#94a3b8',
-                                                fontWeight:700,textAlign:'left',whiteSpace:'nowrap',fontSize:'0.7rem',textTransform:'uppercase',letterSpacing:'0.05em',
-                                                minWidth: col.type === 'currency' ? '120px' : '100px',
-                                            }}>{col.header}</th>
+                                    {/* ── Group header row ── */}
+                                    <tr style={{position:'sticky',top:0,zIndex:40,background:groupHeaderBg}}>
+                                        <th style={{position:'sticky',left:0,zIndex:50,background:groupHeaderBg,borderBottom:'1px solid #1e293b',padding:0,minWidth:actionsWidth+'px'}} rowSpan="1"></th>
+                                        {showHistory && <th style={{position:'sticky',top:0,zIndex:40,background:groupHeaderBg,borderBottom:'1px solid #1e293b',padding:0,minWidth:versionWidth+'px'}}></th>}
+                                        {stickyKeys.map((sk,si) => (
+                                            <th key={sk} style={{position:'sticky',left:stickyLeftOffsets[si]+'px',zIndex:45,background:groupHeaderBg,borderBottom:'1px solid #1e293b',padding:0,minWidth:stickyWidths[si]+'px'}}></th>
                                         ))}
+                                        {sectionGroups.map(g => {
+                                            // subtract sticky columns that belong to this section
+                                            const stickyInSection = stickyKeys.filter((sk,si) => {
+                                                const col = columns.find(c => c.key === sk);
+                                                return col && col.section === g.section;
+                                            }).length;
+                                            const span = g.count - stickyInSection;
+                                            if (span <= 0) return null;
+                                            const color = sectionColors[g.section] || '#64748b';
+                                            const label = UW_SECTIONS[g.section] || g.section;
+                                            return (
+                                                <th key={g.section} colSpan={span} style={{
+                                                    background:groupHeaderBg, padding:'0.35rem 0.5rem', borderBottom:`2px solid ${color}`,
+                                                    color, fontSize:'0.65rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em',
+                                                    textAlign:'center', whiteSpace:'nowrap',
+                                                }}>{label}</th>
+                                            );
+                                        })}
+                                    </tr>
+                                    {/* ── Column header row ── */}
+                                    <tr style={{position:'sticky',top:'26px',zIndex:38,background:headerBg}}>
+                                        <th style={{position:'sticky',left:0,zIndex:48,background:headerBg,padding:'0.4rem 0.5rem',borderBottom:'2px solid #334155',color:'#94a3b8',fontWeight:700,textAlign:'left',whiteSpace:'nowrap',fontSize:'0.68rem',textTransform:'uppercase',letterSpacing:'0.05em',minWidth:actionsWidth+'px'}}>Actions</th>
+                                        {showHistory && <th style={{position:'sticky',top:'26px',zIndex:38,background:headerBg,padding:'0.4rem 0.5rem',borderBottom:'2px solid #334155',color:'#94a3b8',fontWeight:700,textAlign:'left',whiteSpace:'nowrap',fontSize:'0.68rem',textTransform:'uppercase',letterSpacing:'0.05em',minWidth:versionWidth+'px'}}>Ver</th>}
+                                        {columns.map((col, ci) => {
+                                            const si = stickyKeys.indexOf(col.key);
+                                            const isSticky = si >= 0;
+                                            const isNumeric = ['currency','numeric','integer','percent'].includes(col.type);
+                                            return (
+                                                <th key={col.key} style={{
+                                                    position: isSticky ? 'sticky' : 'relative',
+                                                    left: isSticky ? stickyLeftOffsets[si]+'px' : 'auto',
+                                                    zIndex: isSticky ? 42 : 38,
+                                                    background: headerBg, padding:'0.4rem 0.5rem', borderBottom:'2px solid #334155',
+                                                    color:'#94a3b8', fontWeight:700, textAlign: isNumeric ? 'right' : 'left',
+                                                    whiteSpace:'nowrap', fontSize:'0.68rem', textTransform:'uppercase', letterSpacing:'0.05em',
+                                                    minWidth: isSticky ? stickyWidths[si]+'px' : (col.type === 'currency' ? '115px' : '95px'),
+                                                }}>{col.header}</th>
+                                            );
+                                        })}
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {rows.map((row, ri) => (
-                                        <tr key={row.id} style={{borderBottom:'1px solid #1e293b',background: ri % 2 === 0 ? 'transparent' : 'rgba(15,23,42,0.5)'}}>
-                                            <td style={{position:'sticky',left:0,zIndex:10,background: ri % 2 === 0 ? '#0b1220' : '#0f172a',padding:'0.4rem 0.5rem',whiteSpace:'nowrap'}}>
-                                                <div style={{display:'flex',gap:'0.3rem'}}>
-                                                    <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.65rem',padding:'0.15rem 0.4rem'}} onClick={() => setEditRow(row)}>Edit</button>
-                                                    <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.65rem',padding:'0.15rem 0.4rem',borderColor:'#f59e0b',color:'#fcd34d'}} onClick={() => setAddUnitsTarget({community_id: row.community_id, row})}>+Units</button>
-                                                </div>
-                                            </td>
-                                            {showHistory && <td style={{padding:'0.4rem 0.5rem',color:'#64748b'}}>{row.row_version}</td>}
-                                            {columns.map(col => (
-                                                <td key={col.key} style={{
-                                                    position: stickyKeys.includes(col.key) ? 'sticky' : 'relative',
-                                                    left: stickyKeys.includes(col.key) ? (stickyKeys.indexOf(col.key) === 0 ? '100px' : stickyKeys.indexOf(col.key) === 1 ? '260px' : '360px') : 'auto',
-                                                    zIndex: stickyKeys.includes(col.key) ? 10 : 1,
-                                                    background: stickyKeys.includes(col.key) ? (ri % 2 === 0 ? '#0b1220' : '#0f172a') : 'transparent',
-                                                    padding:'0.4rem 0.5rem',color:'#e2e8f0',maxWidth:'200px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
-                                                    textAlign: ['currency','numeric','integer','percent'].includes(col.type) ? 'right' : 'left',
-                                                    fontFamily: ['currency','numeric','integer','percent'].includes(col.type) ? "'Orbitron', monospace" : 'inherit',
-                                                }}>
-                                                    {col.type === 'currency' && row[col.key] ? `$${Number(row[col.key]).toLocaleString()}` :
-                                                     col.type === 'percent' && row[col.key] ? `${row[col.key]}%` :
-                                                     row[col.key] || ''}
+                                    {rows.map((row, ri) => {
+                                        const isHovered = hoveredRow === ri;
+                                        const baseBg = ri % 2 === 0 ? rowBgEven : rowBgOdd;
+                                        const bg = isHovered ? rowBgHover : baseBg;
+                                        const stickyBg = isHovered ? rowBgHover : baseBg;
+                                        return (
+                                            <tr key={row.id}
+                                                onMouseEnter={() => setHoveredRow(ri)}
+                                                onMouseLeave={() => setHoveredRow(null)}
+                                                style={{borderBottom:'1px solid #1e293b', background: bg, transition:'background 0.1s'}}>
+                                                <td style={{position:'sticky',left:0,zIndex:10,background:stickyBg,padding:'0.35rem 0.4rem',whiteSpace:'nowrap',transition:'background 0.1s'}}>
+                                                    <div style={{display:'flex',gap:'0.25rem'}}>
+                                                        <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.63rem',padding:'0.12rem 0.35rem'}} onClick={() => setEditRow(row)}>Edit</button>
+                                                        <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.63rem',padding:'0.12rem 0.35rem',borderColor:'#f59e0b',color:'#fcd34d'}} onClick={() => setAddUnitsTarget({community_id: row.community_id, row})}>+Units</button>
+                                                        <button className="action-btn" style={{...styles.actionBtn,fontSize:'0.63rem',padding:'0.12rem 0.35rem',borderColor:'#ef4444',color:'#f87171'}} onClick={() => setDeleteTarget({community_id: row.community_id, name: row.location_name || row._community_name || 'this community'})}>Del</button>
+                                                    </div>
                                                 </td>
-                                            ))}
-                                        </tr>
-                                    ))}
+                                                {showHistory && <td style={{padding:'0.35rem 0.4rem',color:'#475569',fontSize:'0.72rem',background:bg,transition:'background 0.1s'}}>{row.row_version}</td>}
+                                                {columns.map(col => {
+                                                    const si = stickyKeys.indexOf(col.key);
+                                                    const isSticky = si >= 0;
+                                                    const isNumeric = ['currency','numeric','integer','percent'].includes(col.type);
+                                                    return (
+                                                        <td key={col.key} style={{
+                                                            position: isSticky ? 'sticky' : 'relative',
+                                                            left: isSticky ? stickyLeftOffsets[si]+'px' : 'auto',
+                                                            zIndex: isSticky ? 10 : 1,
+                                                            background: isSticky ? stickyBg : bg,
+                                                            padding:'0.35rem 0.5rem', color: isNumeric ? '#93c5fd' : '#e2e8f0',
+                                                            maxWidth:'200px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+                                                            textAlign: isNumeric ? 'right' : 'left',
+                                                            fontFamily: isNumeric ? "'Orbitron', monospace" : 'inherit',
+                                                            fontSize: isNumeric ? '0.73rem' : '0.76rem',
+                                                            transition:'background 0.1s',
+                                                        }}>
+                                                            {formatCell(col, row[col.key])}
+                                                        </td>
+                                                    );
+                                                })}
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         </div>
@@ -3733,6 +4921,295 @@
                     {editRow && <UWFormModal columns={columns} onClose={() => setEditRow(null)} onSaved={() => { setEditRow(null); loadRows(); }} mode="edit" initialData={editRow} />}
                     {/* Add Units Modal */}
                     {addUnitsTarget && <UWFormModal columns={columns} onClose={() => setAddUnitsTarget(null)} onSaved={() => { setAddUnitsTarget(null); loadRows(); }} mode="add-units" initialData={addUnitsTarget.row} communityId={addUnitsTarget.community_id} />}
+                    {/* Import Modal */}
+                    {showImportModal && <UWImportModal onClose={() => setShowImportModal(false)} onImported={() => { setShowImportModal(false); loadRows(); }} />}
+
+                    {/* Delete Community Confirm Modal */}
+                    {deleteTarget && (
+                        <div style={{position:'fixed',inset:0,zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.7)'}}>
+                            <div style={{background:'#0f172a',border:'1px solid #334155',borderRadius:'1rem',width:'95vw',maxWidth:'440px',padding:'1.5rem'}}>
+                                <h3 style={{margin:'0 0 0.75rem',color:'#f1f5f9',fontSize:'1.05rem'}}>Delete Community</h3>
+                                <p style={{color:'#94a3b8',fontSize:'0.88rem',margin:'0 0 0.5rem',lineHeight:1.5}}>
+                                    Are you sure you want to delete <strong style={{color:'#f87171'}}>{deleteTarget.name}</strong> and all its rows?
+                                </p>
+                                <p style={{color:'#64748b',fontSize:'0.78rem',margin:'0 0 1.25rem'}}>
+                                    This is a soft delete. Records can be recovered by an administrator.
+                                </p>
+                                <div style={{display:'flex',justifyContent:'flex-end',gap:'0.5rem'}}>
+                                    <button className="action-btn" style={styles.actionBtn} onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</button>
+                                    <button className="action-btn" style={{...styles.actionBtn,borderColor:'#ef4444',color:'#f87171'}} onClick={deleteCommunity} disabled={deleting}>
+                                        {deleting ? 'Deleting...' : 'Delete Community'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ── Import Spreadsheet Modal ──
+        function UWImportModal({ onClose, onImported }) {
+            const [file, setFile] = useState(null);
+            const [mode, setMode] = useState('merge');
+            const [dryRun, setDryRun] = useState(false);
+            const [uploading, setUploading] = useState(false);
+            const [result, setResult] = useState(null);
+            const [error, setError] = useState('');
+
+            const handleFileChange = (e) => {
+                const f = e.target.files[0];
+                if (f) {
+                    const ext = f.name.split('.').pop().toLowerCase();
+                    if (!['xlsx', 'csv'].includes(ext)) {
+                        setError('Please select an .xlsx or .csv file');
+                        setFile(null);
+                        return;
+                    }
+                    if (f.size > 25 * 1024 * 1024) {
+                        setError('File too large (max 25MB)');
+                        setFile(null);
+                        return;
+                    }
+                    setError('');
+                    setFile(f);
+                }
+            };
+
+            const doImport = async () => {
+                if (!file) { setError('Please select a file'); return; }
+                setUploading(true);
+                setError('');
+                setResult(null);
+                try {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('mode', mode);
+                    formData.append('dry_run', dryRun ? 'true' : 'false');
+                    formData.append('strict_headers', mode === 'strict' ? 'true' : 'false');
+
+                    const res = await fetch(`${API_BASE}/api/underwriting/import`, {
+                        method: 'POST',
+                        body: formData,
+                    });
+                    const d = await res.json();
+                    if (d.ok) {
+                        setResult(d.data);
+                    } else {
+                        setError(d.error || 'Import failed');
+                        if (d.data) setResult(d.data);
+                    }
+                } catch(e) {
+                    setError('Network error: ' + e.message);
+                }
+                setUploading(false);
+            };
+
+            const downloadErrorReport = () => {
+                if (!result || !result.errors || result.errors.length === 0) return;
+                const rows = [['Row', 'Field', 'Message']];
+                result.errors.forEach(e => {
+                    rows.push([e.rowIndex || '', e.field || '', e.message || '']);
+                });
+                if (result.warnings) {
+                    result.warnings.forEach(w => {
+                        rows.push([w.rowIndex || '', 'WARNING', w.message || '']);
+                    });
+                }
+                const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'import_errors.csv';
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            const downloadTemplate = () => {
+                window.open(`${API_BASE}/api/underwriting/import/template`, '_blank');
+            };
+
+            const modalBg = {position:'fixed',inset:0,zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.7)'};
+            const modalBox = {background:'#0f172a',border:'1px solid #334155',borderRadius:'1rem',width:'95vw',maxWidth:'640px',maxHeight:'90vh',display:'flex',flexDirection:'column'};
+            const labelStyle = {display:'block',fontSize:'0.72rem',color:'#94a3b8',fontWeight:600,marginBottom:'0.35rem',textTransform:'uppercase',letterSpacing:'0.03em'};
+            const summaryCard = {background:'#0b1220',border:'1px solid #1e293b',borderRadius:'0.5rem',padding:'0.75rem 1rem',marginBottom:'0.75rem'};
+            const summaryRow = {display:'flex',justifyContent:'space-between',padding:'0.25rem 0',fontSize:'0.85rem'};
+            const summaryLabel = {color:'#64748b'};
+            const summaryValue = {color:'#f1f5f9',fontWeight:600,fontFamily:"'Orbitron', monospace"};
+
+            return (
+                <div style={modalBg}>
+                    <div style={modalBox}>
+                        {/* Header */}
+                        <div style={{padding:'1.25rem 1.5rem',borderBottom:'1px solid #1e293b',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                            <h3 style={{margin:0,color:'#f1f5f9',fontSize:'1.1rem'}}>Import Spreadsheet</h3>
+                            <button onClick={onClose} style={{background:'none',border:'none',color:'#64748b',fontSize:'1.5rem',cursor:'pointer'}}>×</button>
+                        </div>
+
+                        {/* Body */}
+                        <div style={{padding:'1.25rem 1.5rem',overflowY:'auto',flex:1}}>
+                            {error && <div style={{padding:'0.5rem 0.75rem',background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:'6px',color:'#f87171',fontSize:'0.85rem',marginBottom:'1rem'}}>{error}</div>}
+
+                            {!result ? (
+                                <div>
+                                    {/* File Upload */}
+                                    <div style={{marginBottom:'1rem'}}>
+                                        <label style={labelStyle}>Upload File (.xlsx or .csv)</label>
+                                        <div style={{
+                                            border: '2px dashed #334155', borderRadius:'0.5rem', padding:'1.5rem',
+                                            textAlign:'center', cursor:'pointer', background:'#0b1220',
+                                            transition:'border-color 0.2s',
+                                        }}
+                                        onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor='#6366f1'; }}
+                                        onDragLeave={e => { e.currentTarget.style.borderColor='#334155'; }}
+                                        onDrop={e => { e.preventDefault(); e.currentTarget.style.borderColor='#334155'; const f = e.dataTransfer.files[0]; if(f) { const inp = {target:{files:[f]}}; handleFileChange(inp); } }}
+                                        onClick={() => document.getElementById('uw-import-file').click()}
+                                        >
+                                            <input id="uw-import-file" type="file" accept=".xlsx,.csv" onChange={handleFileChange} style={{display:'none'}} />
+                                            {file ? (
+                                                <div>
+                                                    <div style={{color:'#818cf8',fontSize:'0.9rem',fontWeight:600}}>{file.name}</div>
+                                                    <div style={{color:'#64748b',fontSize:'0.78rem',marginTop:'0.25rem'}}>{(file.size / 1024).toFixed(1)} KB</div>
+                                                </div>
+                                            ) : (
+                                                <div>
+                                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="1.5" style={{margin:'0 auto 0.5rem'}}>
+                                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                                                    </svg>
+                                                    <div style={{color:'#64748b',fontSize:'0.85rem'}}>Click or drag & drop</div>
+                                                    <div style={{color:'#475569',fontSize:'0.75rem',marginTop:'0.25rem'}}>Accepts .xlsx and .csv (max 25MB)</div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Mode Selector */}
+                                    <div style={{marginBottom:'1rem'}}>
+                                        <label style={labelStyle}>Import Mode</label>
+                                        <div style={{display:'flex',gap:'0.5rem'}}>
+                                            <button onClick={() => setMode('merge')} style={{
+                                                flex:1, padding:'0.6rem 0.75rem', borderRadius:'0.5rem', fontSize:'0.82rem',
+                                                border: mode==='merge' ? '1px solid #6366f1' : '1px solid #334155',
+                                                background: mode==='merge' ? 'rgba(99,102,241,0.1)' : '#0b1220',
+                                                color: mode==='merge' ? '#818cf8' : '#64748b', cursor:'pointer', textAlign:'left',
+                                            }}>
+                                                <div style={{fontWeight:600,marginBottom:'0.15rem'}}>Create + Merge</div>
+                                                <div style={{fontSize:'0.72rem',opacity:0.8}}>Normalize headers, create communities as needed</div>
+                                            </button>
+                                            <button onClick={() => setMode('strict')} style={{
+                                                flex:1, padding:'0.6rem 0.75rem', borderRadius:'0.5rem', fontSize:'0.82rem',
+                                                border: mode==='strict' ? '1px solid #f59e0b' : '1px solid #334155',
+                                                background: mode==='strict' ? 'rgba(245,158,11,0.1)' : '#0b1220',
+                                                color: mode==='strict' ? '#fcd34d' : '#64748b', cursor:'pointer', textAlign:'left',
+                                            }}>
+                                                <div style={{fontWeight:600,marginBottom:'0.15rem'}}>Strict Match</div>
+                                                <div style={{fontSize:'0.72rem',opacity:0.8}}>Headers must match exactly</div>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Dry Run */}
+                                    <div style={{marginBottom:'1rem'}}>
+                                        <label style={{display:'flex',alignItems:'center',gap:'0.5rem',cursor:'pointer',fontSize:'0.85rem',color:'#94a3b8'}}>
+                                            <input type="checkbox" checked={dryRun} onChange={e => setDryRun(e.target.checked)}
+                                                style={{accentColor:'#6366f1',width:'16px',height:'16px'}} />
+                                            Dry run (validate only, no writes)
+                                        </label>
+                                    </div>
+
+                                    {/* Template download */}
+                                    <div style={{padding:'0.6rem 0.75rem',background:'rgba(99,102,241,0.06)',border:'1px solid rgba(99,102,241,0.2)',borderRadius:'6px',fontSize:'0.8rem',color:'#94a3b8'}}>
+                                        Need the correct format? <button onClick={downloadTemplate} style={{background:'none',border:'none',color:'#818cf8',cursor:'pointer',textDecoration:'underline',fontSize:'0.8rem',padding:0}}>Download blank template</button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div>
+                                    {/* Import Results Summary */}
+                                    <div style={summaryCard}>
+                                        <div style={{...summaryRow,paddingBottom:'0.5rem',borderBottom:'1px solid #1e293b',marginBottom:'0.35rem'}}>
+                                            <span style={{color:'#f1f5f9',fontWeight:700,fontSize:'0.9rem'}}>{dryRun ? 'Dry Run Results' : 'Import Complete'}</span>
+                                            <span style={{color: error ? '#f87171' : '#34d399',fontWeight:600,fontSize:'0.85rem'}}>{error ? 'With Errors' : 'Success'}</span>
+                                        </div>
+                                        <div style={summaryRow}>
+                                            <span style={summaryLabel}>Rows Imported</span>
+                                            <span style={{...summaryValue,color:'#34d399'}}>{result.imported_rows}</span>
+                                        </div>
+                                        <div style={summaryRow}>
+                                            <span style={summaryLabel}>Communities Created</span>
+                                            <span style={{...summaryValue,color:'#818cf8'}}>{result.created_communities}</span>
+                                        </div>
+                                        <div style={summaryRow}>
+                                            <span style={summaryLabel}>Communities Matched</span>
+                                            <span style={summaryValue}>{result.matched_communities}</span>
+                                        </div>
+                                        <div style={summaryRow}>
+                                            <span style={summaryLabel}>Rows Skipped</span>
+                                            <span style={{...summaryValue,color: result.skipped_rows > 0 ? '#f87171' : '#64748b'}}>{result.skipped_rows}</span>
+                                        </div>
+                                    </div>
+
+                                    {/* Errors */}
+                                    {result.errors && result.errors.length > 0 && (
+                                        <div style={{marginBottom:'0.75rem'}}>
+                                            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.5rem'}}>
+                                                <span style={{color:'#f87171',fontSize:'0.85rem',fontWeight:600}}>Errors ({result.errors.length})</span>
+                                                <button onClick={downloadErrorReport} className="action-btn" style={{...styles.actionBtn,fontSize:'0.7rem',padding:'0.2rem 0.5rem',borderColor:'#f87171',color:'#f87171'}}>Download Error CSV</button>
+                                            </div>
+                                            <div style={{maxHeight:'150px',overflowY:'auto',background:'#0b1220',border:'1px solid #1e293b',borderRadius:'0.5rem',fontSize:'0.78rem'}}>
+                                                {result.errors.slice(0, 50).map((err, i) => (
+                                                    <div key={i} style={{padding:'0.35rem 0.75rem',borderBottom:'1px solid #0f172a',color:'#f1a1a1',display:'flex',gap:'0.5rem'}}>
+                                                        <span style={{color:'#f87171',fontWeight:600,whiteSpace:'nowrap'}}>Row {err.rowIndex}:</span>
+                                                        <span>{err.message}</span>
+                                                    </div>
+                                                ))}
+                                                {result.errors.length > 50 && <div style={{padding:'0.35rem 0.75rem',color:'#64748b',fontStyle:'italic'}}>...and {result.errors.length - 50} more (download CSV for full list)</div>}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Warnings */}
+                                    {result.warnings && result.warnings.length > 0 && (
+                                        <div style={{marginBottom:'0.75rem'}}>
+                                            <span style={{color:'#fcd34d',fontSize:'0.85rem',fontWeight:600,display:'block',marginBottom:'0.5rem'}}>Warnings ({result.warnings.length})</span>
+                                            <div style={{maxHeight:'120px',overflowY:'auto',background:'#0b1220',border:'1px solid #1e293b',borderRadius:'0.5rem',fontSize:'0.78rem'}}>
+                                                {result.warnings.slice(0, 30).map((w, i) => (
+                                                    <div key={i} style={{padding:'0.35rem 0.75rem',borderBottom:'1px solid #0f172a',color:'#fde68a'}}>
+                                                        {w.rowIndex ? <span style={{color:'#f59e0b',fontWeight:600}}>Row {w.rowIndex}: </span> : null}
+                                                        {w.message}
+                                                    </div>
+                                                ))}
+                                                {result.warnings.length > 30 && <div style={{padding:'0.35rem 0.75rem',color:'#64748b',fontStyle:'italic'}}>...and {result.warnings.length - 30} more</div>}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Footer */}
+                        <div style={{padding:'1rem 1.5rem',borderTop:'1px solid #1e293b',display:'flex',justifyContent:'flex-end',gap:'0.5rem'}}>
+                            {result ? (
+                                <React.Fragment>
+                                    <button className="action-btn" style={styles.actionBtn} onClick={() => { setResult(null); setFile(null); setError(''); }}>Import Another</button>
+                                    {!dryRun && result.imported_rows > 0 ? (
+                                        <button className="action-btn" style={{...styles.actionBtn,borderColor:'#10b981',color:'#34d399'}} onClick={onImported}>Done - View Data</button>
+                                    ) : dryRun && !error ? (
+                                        <button className="action-btn" style={{...styles.actionBtn,borderColor:'#6366f1',color:'#818cf8'}} onClick={() => { setDryRun(false); setResult(null); }}>Run Actual Import</button>
+                                    ) : (
+                                        <button className="action-btn" style={styles.actionBtn} onClick={onClose}>Close</button>
+                                    )}
+                                </React.Fragment>
+                            ) : (
+                                <React.Fragment>
+                                    <button className="action-btn" style={styles.actionBtn} onClick={onClose}>Cancel</button>
+                                    <button className="action-btn" style={{...styles.actionBtn,borderColor:'#6366f1',color:'#818cf8',opacity:uploading||!file?0.5:1}} onClick={doImport} disabled={uploading || !file}>
+                                        {uploading ? 'Importing...' : dryRun ? 'Validate' : 'Import'}
+                                    </button>
+                                </React.Fragment>
+                            )}
+                        </div>
+                    </div>
                 </div>
             );
         }
@@ -3773,8 +5250,8 @@
                     });
                     const d = await res.json();
                     if (d.ok) { onSaved(); }
-                    else { setError(d.error || 'Failed to save'); }
-                } catch(e) { setError('Network error: ' + e.message); }
+                    else { setError(d.error || d.message || `Save failed (HTTP ${res.status})`); }
+                } catch(e) { setError('Request failed: ' + e.message); }
                 setSaving(false);
             };
 
@@ -3844,6 +5321,511 @@
         }
 
         // ======= DEAL BOARD PAGE (Broker) =======
+        // ===================================================================
+        // PREDICTED DEVELOPMENTS — Dashboard Component
+        // ===================================================================
+        function PredictedDevelopments() {
+            const [predictions, setPredictions] = useState([]);
+            const [stats, setStats] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [filter, setFilter] = useState('all');
+
+            const loadPredictions = async () => {
+                setLoading(true);
+                try {
+                    const params = new URLSearchParams();
+                    if (filter === 'confirmed') params.set('confirmed', 'true');
+                    if (filter === 'unconfirmed') params.set('confirmed', 'false');
+                    params.set('limit', '100');
+                    const resp = await fetch(`/api/predicted-projects?${params}`, { credentials: 'include' });
+                    const data = await resp.json();
+                    setPredictions(data.predictions || []);
+                } catch (e) {
+                    console.error('Error loading predictions:', e);
+                }
+                setLoading(false);
+            };
+
+            const loadStats = async () => {
+                try {
+                    const resp = await fetch('/api/predicted-projects/stats', { credentials: 'include' });
+                    const data = await resp.json();
+                    setStats(data);
+                } catch (e) {
+                    console.error('Error loading prediction stats:', e);
+                }
+            };
+
+            useEffect(() => { loadPredictions(); loadStats(); }, [filter]);
+
+            const confidenceColor = (c) => {
+                if (c >= 80) return '#10b981';
+                if (c >= 60) return '#f59e0b';
+                if (c >= 40) return '#f97316';
+                return '#ef4444';
+            };
+
+            const confidenceBadge = (c) => ({
+                display: 'inline-block',
+                padding: '0.2rem 0.6rem',
+                borderRadius: '9999px',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                color: '#fff',
+                background: confidenceColor(c),
+            });
+
+            const smallBadge = (label, color, bgAlpha) => React.createElement('span', {
+                style: {
+                    display: 'inline-block', padding: '0.15rem 0.5rem', borderRadius: '9999px',
+                    fontSize: '0.65rem', fontWeight: 600, color: color,
+                    background: `rgba(${bgAlpha})`, border: `1px solid ${color}22`,
+                    marginRight: '0.35rem',
+                }
+            }, label);
+
+            const patternStyle = { display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem', color: '#94a3b8', fontFamily: 'monospace' };
+            const arrowStyle = { color: '#22d3ee', fontWeight: 700 };
+
+            const formatPattern = (p) => {
+                if (!p) return '\u2014';
+                const parts = p.split(' -> ');
+                return React.createElement('span', { style: patternStyle },
+                    ...parts.flatMap((part, i) => {
+                        const elements = [React.createElement('span', { key: `p${i}`, style: { color: '#e2e8f0' } }, part)];
+                        if (i < parts.length - 1) elements.push(React.createElement('span', { key: `a${i}`, style: arrowStyle }, ' \u2192 '));
+                        return elements;
+                    })
+                );
+            };
+
+            const statCard = (val, label, color) => React.createElement('div', {
+                style: { background: '#1e293b', border: '1px solid #334155', borderRadius: '0.75rem', padding: '0.85rem', textAlign: 'center' }
+            },
+                React.createElement('div', { style: { fontSize: '1.4rem', fontWeight: 700, color } }, val),
+                React.createElement('div', { style: { fontSize: '0.7rem', color: '#94a3b8', marginTop: '0.2rem' } }, label)
+            );
+
+            return React.createElement('div', { style: { padding: '1.5rem' } },
+                // Header
+                React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' } },
+                    React.createElement('h2', { style: { fontSize: '1.4rem', fontWeight: 700, color: '#f1f5f9', margin: 0 } }, 'Predicted Developments'),
+                    React.createElement('div', { style: { display: 'flex', gap: '0.5rem' } },
+                        ['all', 'unconfirmed', 'confirmed'].map(f =>
+                            React.createElement('button', {
+                                key: f, onClick: () => setFilter(f),
+                                style: {
+                                    padding: '0.4rem 0.8rem', borderRadius: '6px', cursor: 'pointer',
+                                    border: filter === f ? '1px solid #22d3ee' : '1px solid #475569',
+                                    background: filter === f ? 'rgba(34,211,238,0.1)' : 'transparent',
+                                    color: filter === f ? '#22d3ee' : '#94a3b8',
+                                    fontSize: '0.8rem', fontWeight: 500, textTransform: 'capitalize',
+                                }
+                            }, f)
+                        )
+                    )
+                ),
+
+                // Stats row
+                stats && React.createElement('div', {
+                    style: { display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '0.75rem', marginBottom: '1.5rem' }
+                },
+                    statCard(stats.total?.count || 0, 'Predictions', '#22d3ee'),
+                    statCard(stats.confirmed?.count || 0, 'Confirmed', '#10b981'),
+                    statCard(stats.unconfirmed?.count || 0, 'Unconfirmed', '#f59e0b'),
+                    statCard(stats.events_total?.count || 0, 'Dev Events', '#a78bfa'),
+                    statCard(stats.clusters_detected?.count || 0, 'Clusters', '#f472b6'),
+                    statCard(stats.high_convergence?.count || 0, 'High Convergence', '#10b981'),
+                ),
+
+                // Prediction cards
+                loading
+                    ? React.createElement('div', { style: { textAlign: 'center', padding: '3rem', color: '#94a3b8' } }, 'Loading predictions...')
+                    : predictions.length === 0
+                        ? React.createElement('div', { style: { textAlign: 'center', padding: '3rem', color: '#64748b' } }, 'No predicted developments yet. The pattern engine scans every 12 hours.')
+                        : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.75rem' } },
+                            predictions.map(pred =>
+                                React.createElement('div', {
+                                    key: pred.id,
+                                    style: {
+                                        background: '#1e293b',
+                                        border: pred.confirmed ? '1px solid #10b981' : '1px solid #334155',
+                                        borderRadius: '0.75rem',
+                                        padding: '1.25rem',
+                                    }
+                                },
+                                    // Top row: city/developer + convergence score + confidence
+                                    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' } },
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { fontSize: '1.05rem', fontWeight: 600, color: '#f1f5f9' } },
+                                                `${pred.city || '?'}, ${pred.state || '?'}`
+                                            ),
+                                            React.createElement('div', { style: { fontSize: '0.85rem', color: '#94a3b8', marginTop: '0.15rem' } },
+                                                `Developer: ${pred.developer || 'Unknown'}`
+                                            ),
+                                        ),
+                                        React.createElement('div', { style: { display: 'flex', gap: '1rem', alignItems: 'flex-start' } },
+                                            pred.convergence_score > 0 && React.createElement('div', { style: { textAlign: 'center' } },
+                                                React.createElement('div', {
+                                                    style: {
+                                                        fontSize: '1.3rem', fontWeight: 700,
+                                                        color: pred.convergence_score >= 80 ? '#10b981' : pred.convergence_score >= 60 ? '#22d3ee' : pred.convergence_score >= 40 ? '#f59e0b' : '#94a3b8',
+                                                        fontFamily: "'Orbitron', sans-serif"
+                                                    }
+                                                }, pred.convergence_score),
+                                                React.createElement('div', { style: { fontSize: '0.55rem', color: '#64748b', marginTop: '0.1rem', textTransform: 'uppercase', letterSpacing: '0.05em' } }, 'Opportunity Score')
+                                            ),
+                                            React.createElement('div', { style: { textAlign: 'center' } },
+                                                React.createElement('span', { style: confidenceBadge(pred.confidence) }, `${pred.confidence}%`),
+                                                React.createElement('div', { style: { fontSize: '0.6rem', color: '#64748b', marginTop: '0.2rem' } }, 'confidence')
+                                            ),
+                                        ),
+                                    ),
+
+                                    // Middle row: enriched data grid
+                                    React.createElement('div', {
+                                        style: { display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '0.75rem', marginBottom: '0.75rem',
+                                                 background: '#0f172a', borderRadius: '8px', padding: '0.75rem' }
+                                    },
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Convergence'),
+                                            React.createElement('div', { style: { fontSize: '1.1rem', fontWeight: 700, color: pred.convergence_score >= 70 ? '#10b981' : pred.convergence_score >= 40 ? '#f59e0b' : '#475569' } }, pred.convergence_score || 0)
+                                        ),
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Signal Count'),
+                                            React.createElement('div', { style: { fontSize: '1.1rem', fontWeight: 700, color: '#e2e8f0' } }, pred.convergence_signal_count || pred.signal_count || 0)
+                                        ),
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Relationships'),
+                                            React.createElement('div', { style: { fontSize: '1.1rem', fontWeight: 700, color: (pred.relationship_count > 0) ? '#a78bfa' : '#475569' } }, pred.relationship_count || 0)
+                                        ),
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Cluster'),
+                                            React.createElement('div', { style: { fontSize: '1.1rem', fontWeight: 700, color: pred.cluster_detected ? '#10b981' : '#475569' } },
+                                                pred.cluster_detected ? 'Yes' : 'No')
+                                        ),
+                                        React.createElement('div', { style: { gridColumn: 'span 2' } },
+                                            React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Construction Timeline'),
+                                            React.createElement('div', { style: { fontSize: '0.85rem', fontWeight: 600, color: '#22d3ee' } },
+                                                pred.expected_construction_window || 'Estimating...')
+                                        ),
+                                    ),
+
+                                    // Convergence signal types
+                                    pred.convergence_signal_types && pred.convergence_signal_types.length > 0 && React.createElement('div', {
+                                        style: { display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginBottom: '0.75rem' }
+                                    },
+                                        React.createElement('span', { style: { fontSize: '0.6rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: '0.3rem', alignSelf: 'center' } }, 'Signals:'),
+                                        ...pred.convergence_signal_types.filter(Boolean).map((st, si) => React.createElement('span', {
+                                            key: si,
+                                            style: { fontSize: '0.65rem', color: '#22d3ee', background: 'rgba(34,211,238,0.1)',
+                                                     padding: '0.12rem 0.45rem', borderRadius: '0.25rem', fontWeight: 600 }
+                                        }, st))
+                                    ),
+
+                                    // Bottom row: pattern + badges
+                                    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                                        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } },
+                                            formatPattern(pred.pattern_detected),
+                                            pred.pattern_name && React.createElement('span', {
+                                                style: { fontSize: '0.65rem', color: '#22d3ee', background: 'rgba(34,211,238,0.1)', padding: '0.1rem 0.4rem', borderRadius: '0.25rem', fontFamily: 'monospace' }
+                                            }, pred.pattern_name),
+                                            pred.pattern_confidence > 0 && React.createElement('span', {
+                                                style: { fontSize: '0.65rem', color: '#a78bfa', fontWeight: 600 }
+                                            }, pred.pattern_confidence + '%'),
+                                        ),
+                                        React.createElement('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.25rem' } },
+                                            pred.confirmed && smallBadge('CONFIRMED', '#10b981', '16,185,129,0.15'),
+                                            pred.cluster_detected && smallBadge('CLUSTER', '#f472b6', '244,114,182,0.15'),
+                                            (pred.freshness_boost > 0) && smallBadge('FRESH', '#22d3ee', '34,211,238,0.15'),
+                                            pred.developer_linked && smallBadge('DEV LINKED', '#a78bfa', '167,139,250,0.15'),
+                                            pred.contractor_linked && smallBadge('CONTRACTOR', '#fb923c', '251,146,60,0.15'),
+                                            pred.consultant_linked && smallBadge('CONSULTANT', '#2dd4bf', '45,212,191,0.15'),
+                                            pred.developer_expansion_signal && smallBadge('DNA MATCH', '#f59e0b', '245,158,11,0.15'),
+                                            pred.contractor_activity_detected && smallBadge('CONTRACTOR INTEL', '#ef4444', '239,68,68,0.15'),
+                                            pred.temporal_boost > 0 && smallBadge('TEMPORAL +' + pred.temporal_boost, '#8b5cf6', '139,92,246,0.15'),
+                                            React.createElement('span', { style: { fontSize: '0.7rem', color: '#64748b' } },
+                                                pred.prediction_date ? new Date(pred.prediction_date).toLocaleDateString() : '')
+                                        ),
+                                    ),
+
+                                    // Developer Intelligence section
+                                    pred.developer_expansion_signal && React.createElement('div', {
+                                        style: { marginTop: '0.6rem', padding: '0.6rem', background: 'rgba(245,158,11,0.08)',
+                                                 border: '1px solid rgba(245,158,11,0.2)', borderRadius: '0.5rem' }
+                                    },
+                                        React.createElement('div', {
+                                            style: { fontSize: '0.6rem', color: '#f59e0b', textTransform: 'uppercase',
+                                                     letterSpacing: '0.08em', fontWeight: 700, marginBottom: '0.3rem' }
+                                        }, 'Developer Intelligence'),
+                                        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                                            React.createElement('div', { style: { fontSize: '0.75rem', color: '#e2e8f0' } },
+                                                pred.developer_expansion_reasoning || 'Expansion signal detected'),
+                                            pred.developer_dna_confidence > 0 && React.createElement('div', {
+                                                style: { fontSize: '0.85rem', fontWeight: 700, color: '#f59e0b' }
+                                            }, pred.developer_dna_confidence + '%')
+                                        )
+                                    ),
+
+                                    // Contractor Intelligence section
+                                    pred.contractor_activity_detected && React.createElement('div', {
+                                        style: { marginTop: '0.6rem', padding: '0.6rem', background: 'rgba(239,68,68,0.08)',
+                                                 border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0.5rem' }
+                                    },
+                                        React.createElement('div', {
+                                            style: { fontSize: '0.6rem', color: '#ef4444', textTransform: 'uppercase',
+                                                     letterSpacing: '0.08em', fontWeight: 700, marginBottom: '0.4rem' }
+                                        }, 'Contractor Intelligence'),
+                                        pred.contractor_firms && pred.contractor_firms.length > 0 && React.createElement('div', {
+                                            style: { display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginBottom: '0.3rem' }
+                                        },
+                                            ...pred.contractor_firms.map((firm, i) => React.createElement('span', {
+                                                key: i,
+                                                style: { fontSize: '0.65rem', color: '#fca5a5', background: 'rgba(239,68,68,0.12)',
+                                                         padding: '0.1rem 0.4rem', borderRadius: '0.25rem', fontFamily: 'monospace' }
+                                            }, firm))
+                                        ),
+                                        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                                            pred.contractor_developer_inference && React.createElement('div', {
+                                                style: { fontSize: '0.75rem', color: '#e2e8f0' }
+                                            }, 'Developer Likely: ', React.createElement('span', {
+                                                style: { fontWeight: 700, color: '#fca5a5' }
+                                            }, pred.contractor_developer_inference)),
+                                            pred.contractor_confidence > 0 && React.createElement('div', {
+                                                style: { fontSize: '0.85rem', fontWeight: 700, color: '#ef4444' }
+                                            }, pred.contractor_confidence + '%')
+                                        )
+                                    ),
+
+                                    // Parcel Intelligence section
+                                    pred.parcel_probability_score > 0 && React.createElement('div', {
+                                        style: { marginTop: '0.6rem', padding: '0.6rem', background: 'rgba(16,185,129,0.08)',
+                                                 border: '1px solid rgba(16,185,129,0.2)', borderRadius: '0.5rem' }
+                                    },
+                                        React.createElement('div', {
+                                            style: { fontSize: '0.6rem', color: '#10b981', textTransform: 'uppercase',
+                                                     letterSpacing: '0.08em', fontWeight: 700, marginBottom: '0.4rem' }
+                                        }, 'Parcel Intelligence'),
+                                        React.createElement('div', {
+                                            style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' }
+                                        },
+                                            React.createElement('div', { style: { display: 'flex', gap: '0.8rem', alignItems: 'center' } },
+                                                React.createElement('div', null,
+                                                    React.createElement('div', { style: { fontSize: '0.55rem', color: '#64748b', textTransform: 'uppercase' } }, 'Probability'),
+                                                    React.createElement('div', { style: { fontSize: '1rem', fontWeight: 700, color: '#10b981' } }, pred.parcel_probability_score + '%')
+                                                ),
+                                                React.createElement('div', null,
+                                                    React.createElement('div', { style: { fontSize: '0.55rem', color: '#64748b', textTransform: 'uppercase' } }, 'Likelihood'),
+                                                    React.createElement('div', {
+                                                        style: { fontSize: '0.8rem', fontWeight: 600, color: pred.parcel_development_likelihood === 'Very High' ? '#10b981' : pred.parcel_development_likelihood === 'High' ? '#22d3ee' : '#f59e0b' }
+                                                    }, pred.parcel_development_likelihood || 'Pending')
+                                                )
+                                            ),
+                                            pred.parcel_probability_score >= 70 && React.createElement('span', {
+                                                style: { fontSize: '0.6rem', color: '#10b981', background: 'rgba(16,185,129,0.12)',
+                                                         padding: '0.15rem 0.5rem', borderRadius: '0.25rem', fontWeight: 600 }
+                                            }, 'HIGH PROBABILITY')
+                                        )
+                                    ),
+
+                                    // Temporal Pattern section
+                                    pred.temporal_boost > 0 && React.createElement('div', {
+                                        style: { marginTop: '0.6rem', padding: '0.6rem', background: 'rgba(139,92,246,0.08)',
+                                                 border: '1px solid rgba(139,92,246,0.2)', borderRadius: '0.5rem' }
+                                    },
+                                        React.createElement('div', {
+                                            style: { fontSize: '0.6rem', color: '#8b5cf6', textTransform: 'uppercase',
+                                                     letterSpacing: '0.08em', fontWeight: 700, marginBottom: '0.4rem' }
+                                        }, 'Temporal Pattern Match'),
+                                        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' } },
+                                            React.createElement('div', { style: { display: 'flex', gap: '0.8rem', alignItems: 'center' } },
+                                                React.createElement('div', null,
+                                                    React.createElement('div', { style: { fontSize: '0.55rem', color: '#64748b', textTransform: 'uppercase' } }, 'Boost'),
+                                                    React.createElement('div', { style: { fontSize: '1rem', fontWeight: 700, color: '#8b5cf6' } }, '+' + pred.temporal_boost)
+                                                ),
+                                                pred.temporal_match_stage && React.createElement('div', null,
+                                                    React.createElement('div', { style: { fontSize: '0.55rem', color: '#64748b', textTransform: 'uppercase' } }, 'Stage'),
+                                                    React.createElement('div', { style: { fontSize: '0.8rem', fontWeight: 600, color: '#c4b5fd' } }, pred.temporal_match_stage)
+                                                )
+                                            ),
+                                            pred.temporal_boost >= 30 && React.createElement('span', {
+                                                style: { fontSize: '0.6rem', color: '#8b5cf6', background: 'rgba(139,92,246,0.12)',
+                                                         padding: '0.15rem 0.5rem', borderRadius: '0.25rem', fontWeight: 600 }
+                                            }, 'STRONG PATTERN')
+                                        ),
+                                        pred.temporal_pattern_match && React.createElement('div', {
+                                            style: { marginTop: '0.3rem', fontSize: '0.7rem', color: '#a78bfa', fontFamily: 'monospace',
+                                                     background: 'rgba(139,92,246,0.06)', padding: '0.3rem 0.5rem', borderRadius: '0.25rem' }
+                                        },
+                                            ...pred.temporal_pattern_match.split(' -> ').flatMap((step, si, arr) => {
+                                                const els = [React.createElement('span', { key: 's' + si, style: { color: '#e2e8f0' } }, step)];
+                                                if (si < arr.length - 1) els.push(React.createElement('span', { key: 'a' + si, style: { color: '#8b5cf6', fontWeight: 700 } }, ' \u2192 '));
+                                                return els;
+                                            })
+                                        )
+                                    ),
+                                )
+                            )
+                        )
+            );
+        }
+
+        // ===================================================================
+        // MARKET EXPANSION — Dashboard Component
+        // ===================================================================
+        function MarketExpansion() {
+            const [markets, setMarkets] = useState([]);
+            const [stats, setStats] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [filterState, setFilterState] = useState('');
+
+            const loadMarkets = async () => {
+                setLoading(true);
+                try {
+                    const params = new URLSearchParams();
+                    if (filterState) params.set('state', filterState);
+                    params.set('limit', '100');
+                    const resp = await fetch(`/api/markets?${params}`, { credentials: 'include' });
+                    const data = await resp.json();
+                    setMarkets(data.markets || []);
+                } catch (e) {
+                    console.error('Error loading markets:', e);
+                }
+                setLoading(false);
+            };
+
+            const loadStats = async () => {
+                try {
+                    const resp = await fetch('/api/markets/stats', { credentials: 'include' });
+                    const data = await resp.json();
+                    setStats(data);
+                } catch (e) {
+                    console.error('Error loading market stats:', e);
+                }
+            };
+
+            useEffect(() => { loadMarkets(); loadStats(); }, [filterState]);
+
+            const scoreColor = (s) => {
+                if (s >= 85) return '#10b981';
+                if (s >= 70) return '#f59e0b';
+                if (s >= 50) return '#f97316';
+                return '#ef4444';
+            };
+
+            const scoreBadge = (s) => ({
+                display: 'inline-block',
+                padding: '0.2rem 0.6rem',
+                borderRadius: '9999px',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                color: '#fff',
+                background: scoreColor(s),
+            });
+
+            const pctDisplay = (val, suffix) => {
+                if (val == null) return '\u2014';
+                return `${Number(val).toFixed(1)}${suffix || '%'}`;
+            };
+
+            const statCard = (val, label, color) => React.createElement('div', {
+                style: { background: '#1e293b', border: '1px solid #334155', borderRadius: '0.75rem', padding: '0.85rem', textAlign: 'center' }
+            },
+                React.createElement('div', { style: { fontSize: '1.4rem', fontWeight: 700, color } }, val),
+                React.createElement('div', { style: { fontSize: '0.7rem', color: '#94a3b8', marginTop: '0.2rem' } }, label)
+            );
+
+            return React.createElement('div', { style: { padding: '1.5rem' } },
+                // Header
+                React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' } },
+                    React.createElement('h2', { style: { fontSize: '1.4rem', fontWeight: 700, color: '#f1f5f9', margin: 0 } }, 'Market Expansion'),
+                    React.createElement('div', { style: { display: 'flex', gap: '0.5rem', alignItems: 'center' } },
+                        React.createElement('span', { style: { fontSize: '0.75rem', color: '#94a3b8' } }, 'Filter State:'),
+                        React.createElement('input', {
+                            type: 'text',
+                            placeholder: 'e.g. AZ',
+                            value: filterState,
+                            onChange: (e) => setFilterState(e.target.value.toUpperCase()),
+                            style: {
+                                padding: '0.35rem 0.6rem', borderRadius: '6px', width: '60px',
+                                border: '1px solid #475569', background: '#0f172a', color: '#e2e8f0',
+                                fontSize: '0.8rem', textAlign: 'center',
+                            }
+                        })
+                    )
+                ),
+
+                // Stats row
+                stats && React.createElement('div', {
+                    style: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem', marginBottom: '1.5rem' }
+                },
+                    statCard(stats.total_markets?.count || 0, 'Total Markets', '#22d3ee'),
+                    statCard(stats.active_markets?.count || 0, 'Active', '#10b981'),
+                    statCard(stats.pending_markets?.count || 0, 'Pending', '#f59e0b'),
+                    statCard(stats.avg_score?.avg || 0, 'Avg Score', '#a78bfa'),
+                ),
+
+                // Market cards
+                loading
+                    ? React.createElement('div', { style: { textAlign: 'center', padding: '3rem', color: '#94a3b8' } }, 'Loading markets...')
+                    : markets.length === 0
+                        ? React.createElement('div', { style: { textAlign: 'center', padding: '3rem', color: '#64748b' } }, 'No markets detected yet. The expansion engine scans weekly.')
+                        : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.75rem' } },
+                            markets.map(m =>
+                                React.createElement('div', {
+                                    key: m.id,
+                                    style: {
+                                        background: '#1e293b',
+                                        border: m.collectors_active ? '1px solid #10b981' : '1px solid #334155',
+                                        borderRadius: '0.75rem',
+                                        padding: '1.25rem',
+                                    }
+                                },
+                                    // Top row: city + score
+                                    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' } },
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { fontSize: '1.05rem', fontWeight: 600, color: '#f1f5f9' } },
+                                                `${m.city || '?'}, ${m.state || '?'}`
+                                            ),
+                                            React.createElement('div', { style: { fontSize: '0.8rem', color: '#94a3b8', marginTop: '0.15rem' } },
+                                                m.population ? `Pop: ${Number(m.population).toLocaleString()}` : ''
+                                            ),
+                                        ),
+                                        React.createElement('div', { style: { textAlign: 'center' } },
+                                            React.createElement('span', { style: scoreBadge(m.market_score) }, m.market_score),
+                                            React.createElement('div', { style: { fontSize: '0.6rem', color: '#64748b', marginTop: '0.2rem' } }, 'market score')
+                                        ),
+                                    ),
+
+                                    // Metrics grid
+                                    React.createElement('div', {
+                                        style: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem', marginBottom: '0.75rem',
+                                                 background: '#0f172a', borderRadius: '8px', padding: '0.75rem' }
+                                    },
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Pop Growth'),
+                                            React.createElement('div', { style: { fontSize: '1.1rem', fontWeight: 700, color: m.population_growth > 2 ? '#10b981' : '#e2e8f0' } }, pctDisplay(m.population_growth))
+                                        ),
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Permit Growth'),
+                                            React.createElement('div', { style: { fontSize: '1.1rem', fontWeight: 700, color: m.permit_growth > 15 ? '#10b981' : '#e2e8f0' } }, pctDisplay(m.permit_growth))
+                                        ),
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Rent Growth'),
+                                            React.createElement('div', { style: { fontSize: '1.1rem', fontWeight: 700, color: m.rent_growth > 5 ? '#10b981' : '#e2e8f0' } }, pctDisplay(m.rent_growth))
+                                        ),
+                                        React.createElement('div', null,
+                                            React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' } }, 'Collectors'),
+                                            React.createElement('div', { style: { fontSize: '1.1rem', fontWeight: 700, color: m.collectors_active ? '#10b981' : '#f59e0b' } },
+                                                m.collectors_active ? 'Active' : 'Pending')
+                                        ),
+                                    ),
+                                )
+                            )
+                        )
+            );
+        }
+
         function DealBoardPage({ user }) {
             const [items, setItems] = useState([]);
             const [loading, setLoading] = useState(true);
@@ -4783,6 +6765,258 @@
             emailBody: { background: '#0f172a', padding: '1.5rem', borderRadius: '8px', fontSize: '0.9rem', lineHeight: '1.7', marginBottom: '1rem', fontFamily: "'Inter', -apple-system, sans-serif", color: '#cbd5e1' },
             modalActions: { display: 'flex', gap: '1rem' },
         };
+
+        // ===================================================================
+        // DEVELOPER NETWORK PANEL
+        // ===================================================================
+        function DeveloperNetworkPanel() {
+            const e = React.createElement;
+            const [edges, setEdges] = useState([]);
+            const [stats, setStats] = useState(null);
+            const [searchEntity, setSearchEntity] = useState('');
+            const [connections, setConnections] = useState([]);
+            const [loading, setLoading] = useState(true);
+
+            const REL_COLORS = { DEVELOPER_CONTRACTOR: '#f97316', DEVELOPER_ENGINEER: '#3b82f6', DEVELOPER_ARCHITECT: '#a855f7', DEVELOPER_LENDER: '#eab308', CONTRACTOR_SUPPLIER: '#22c55e', DEVELOPER_SUPPLIER: '#06b6d4', CONTRACTOR_ENGINEER: '#ec4899' };
+            const REL_LABELS = { DEVELOPER_CONTRACTOR: 'Dev-Contractor', DEVELOPER_ENGINEER: 'Dev-Engineer', DEVELOPER_ARCHITECT: 'Dev-Architect', DEVELOPER_LENDER: 'Dev-Lender', CONTRACTOR_SUPPLIER: 'Contractor-Supplier', DEVELOPER_SUPPLIER: 'Dev-Supplier', CONTRACTOR_ENGINEER: 'Contractor-Engineer' };
+            function strColor(s) { return s >= 80 ? '#22c55e' : s >= 50 ? '#eab308' : s >= 25 ? '#f97316' : '#64748b'; }
+            function strLabel(s) { return s >= 80 ? 'STRONG' : s >= 50 ? 'MODERATE' : s >= 25 ? 'EMERGING' : 'WEAK'; }
+
+            const fetchData = useCallback(async () => {
+                try {
+                    const [cRes, sRes] = await Promise.all([fetch('/api/developer-network/clusters?limit=30'), fetch('/api/developer-network/stats')]);
+                    if (cRes.ok) { const d = await cRes.json(); setEdges(d.clusters || []); }
+                    if (sRes.ok) { const d = await sRes.json(); setStats(d); }
+                } catch (err) { console.error('[DevNetwork]', err); }
+                finally { setLoading(false); }
+            }, []);
+
+            const searchNet = useCallback(async () => {
+                if (!searchEntity.trim()) return;
+                try {
+                    const res = await fetch('/api/developer-network/' + encodeURIComponent(searchEntity));
+                    if (res.ok) { const d = await res.json(); setConnections(d.connections || []); }
+                } catch { setConnections([]); }
+            }, [searchEntity]);
+
+            useEffect(() => { fetchData(); const iv = setInterval(fetchData, 60000); return () => clearInterval(iv); }, [fetchData]);
+
+            if (loading) return e('div', { style: { textAlign: 'center', padding: '3rem', color: '#06b6d4', fontFamily: "'Orbitron', sans-serif" } }, 'LOADING DEVELOPER NETWORKS...');
+
+            return e('div', { style: { maxWidth: '1000px', margin: '0 auto' } },
+                e('div', { style: { marginBottom: '1.5rem' } },
+                    e('h2', { style: { fontFamily: "'Orbitron', sans-serif", fontSize: '1.3rem', fontWeight: 900, background: 'linear-gradient(135deg, #06b6d4 0%, #a855f7 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 } }, 'DEVELOPER NETWORK INTELLIGENCE'),
+                    e('p', { style: { color: '#64748b', fontSize: '0.8rem', margin: '0.25rem 0 0' } }, 'Relationship graph: developers, contractors, engineers, architects, lenders, suppliers')
+                ),
+                stats && e('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '1.5rem' } },
+                    [{ l: 'NETWORK EDGES', v: stats.total_edges, c: '#06b6d4' }, { l: 'STRONG LINKS', v: stats.strong_edges, c: '#22c55e' }, { l: 'REL TYPES', v: (stats.by_type || []).length, c: '#a855f7' }].map(s =>
+                        e('div', { key: s.l, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px', textAlign: 'center' } },
+                            e('div', { style: { fontSize: '1.4rem', fontWeight: 900, color: s.c, fontFamily: "'Orbitron', sans-serif" } }, s.v),
+                            e('div', { style: { fontSize: '0.6rem', color: '#64748b', fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.05em', marginTop: '4px' } }, s.l)
+                        )
+                    )
+                ),
+                e('div', { style: { display: 'flex', gap: '8px', marginBottom: '1rem' } },
+                    e('input', { type: 'text', value: searchEntity, onChange: ev => setSearchEntity(ev.target.value), onKeyDown: ev => ev.key === 'Enter' && searchNet(), placeholder: 'Search entity network...', style: { flex: 1, background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(100,116,139,0.3)', borderRadius: '6px', padding: '8px 12px', color: '#e2e8f0', fontSize: '0.85rem' } }),
+                    e('button', { onClick: searchNet, style: { background: 'rgba(6,182,212,0.2)', border: '1px solid rgba(6,182,212,0.4)', borderRadius: '6px', padding: '8px 16px', color: '#06b6d4', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700 } }, 'SEARCH')
+                ),
+                connections.length > 0 && e('div', { style: { marginBottom: '1rem' } },
+                    e('h3', { style: { color: '#06b6d4', fontSize: '0.85rem', fontWeight: 700, marginBottom: '8px', fontFamily: "'Orbitron', sans-serif" } }, 'CONNECTIONS: ' + searchEntity),
+                    connections.map((c, i) => e('div', { key: i, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid ' + (REL_COLORS[c.relationship_type] || '#64748b') + '40', borderLeft: '3px solid ' + (REL_COLORS[c.relationship_type] || '#64748b'), borderRadius: '6px', padding: '10px 14px', marginBottom: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                        e('div', null,
+                            e('div', { style: { color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 600 } }, c.partner),
+                            e('div', { style: { color: '#64748b', fontSize: '0.7rem' } }, (REL_LABELS[c.relationship_type] || c.relationship_type) + ' · ' + c.co_occurrence_count + ' co-occurrences')
+                        ),
+                        e('div', { style: { background: strColor(c.relationship_strength) + '20', border: '1px solid ' + strColor(c.relationship_strength) + '40', borderRadius: '4px', padding: '2px 8px', fontSize: '0.65rem', fontWeight: 700, color: strColor(c.relationship_strength), fontFamily: "'Orbitron', sans-serif" } }, strLabel(c.relationship_strength) + ' (' + c.relationship_strength + ')')
+                    ))
+                ),
+                e('h3', { style: { color: '#a855f7', fontSize: '0.85rem', fontWeight: 700, marginBottom: '8px', fontFamily: "'Orbitron', sans-serif" } }, 'TOP NETWORK CLUSTERS'),
+                edges.map((edge, i) => e('div', { key: i, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid ' + (REL_COLORS[edge.relationship_type] || '#64748b') + '40', borderLeft: '3px solid ' + (REL_COLORS[edge.relationship_type] || '#64748b'), borderRadius: '8px', padding: '12px 16px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                    e('div', null,
+                        e('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '4px' } },
+                            e('span', { style: { color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 600 } }, edge.entity_a),
+                            e('span', { style: { color: '#64748b', fontSize: '0.75rem' } }, '\u2194'),
+                            e('span', { style: { color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 600 } }, edge.entity_b)
+                        ),
+                        e('div', { style: { display: 'flex', gap: '12px' } },
+                            e('span', { style: { background: (REL_COLORS[edge.relationship_type] || '#64748b') + '20', border: '1px solid ' + (REL_COLORS[edge.relationship_type] || '#64748b') + '40', borderRadius: '4px', padding: '1px 6px', fontSize: '0.6rem', fontWeight: 700, color: REL_COLORS[edge.relationship_type] || '#64748b', fontFamily: "'Orbitron', sans-serif" } }, REL_LABELS[edge.relationship_type] || edge.relationship_type),
+                            e('span', { style: { color: '#64748b', fontSize: '0.7rem' } }, edge.co_occurrence_count + ' co-occurrences')
+                        )
+                    ),
+                    e('div', { style: { textAlign: 'right' } },
+                        e('div', { style: { color: strColor(edge.relationship_strength), fontSize: '1.1rem', fontWeight: 900, fontFamily: "'Orbitron', sans-serif" } }, edge.relationship_strength),
+                        e('div', { style: { color: strColor(edge.relationship_strength), fontSize: '0.6rem', fontWeight: 700, fontFamily: "'Orbitron', sans-serif" } }, strLabel(edge.relationship_strength))
+                    )
+                ))
+            );
+        }
+
+        // ===================================================================
+        // DEVELOPMENT CORRIDORS PANEL
+        // ===================================================================
+        function DevelopmentCorridorsPanel() {
+            const e = React.createElement;
+            const [corridors, setCorridors] = useState([]);
+            const [stats, setStats] = useState(null);
+            const [loading, setLoading] = useState(true);
+
+            const fetchData = useCallback(async () => {
+                try {
+                    const [cRes, sRes] = await Promise.all([fetch('/api/corridors?limit=30'), fetch('/api/corridors/stats')]);
+                    if (cRes.ok) { const d = await cRes.json(); setCorridors(d.corridors || []); }
+                    if (sRes.ok) { const d = await sRes.json(); setStats(d); }
+                } catch (err) { console.error('[Corridors]', err); }
+                finally { setLoading(false); }
+            }, []);
+
+            useEffect(() => { fetchData(); const iv = setInterval(fetchData, 60000); return () => clearInterval(iv); }, [fetchData]);
+
+            function growthColor(g) { return g > 50 ? '#22c55e' : g > 0 ? '#eab308' : g === 0 ? '#64748b' : '#ef4444'; }
+
+            if (loading) return e('div', { style: { textAlign: 'center', padding: '3rem', color: '#06b6d4', fontFamily: "'Orbitron', sans-serif" } }, 'SCANNING DEVELOPMENT CORRIDORS...');
+
+            return e('div', { style: { maxWidth: '1000px', margin: '0 auto' } },
+                e('div', { style: { marginBottom: '1.5rem' } },
+                    e('h2', { style: { fontFamily: "'Orbitron', sans-serif", fontSize: '1.3rem', fontWeight: 900, background: 'linear-gradient(135deg, #22c55e 0%, #06b6d4 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 } }, 'DEVELOPMENT CORRIDOR INTELLIGENCE'),
+                    e('p', { style: { color: '#64748b', fontSize: '0.8rem', margin: '0.25rem 0 0' } }, 'Geographic regions where development activity is clustering')
+                ),
+                stats && e('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '1.5rem' } },
+                    [{ l: 'CORRIDORS', v: stats.total_corridors, c: '#06b6d4' }, { l: 'GROWING', v: stats.growing_corridors, c: '#22c55e' }, { l: 'STATES', v: (stats.by_state || []).length, c: '#a855f7' }].map(s =>
+                        e('div', { key: s.l, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px', textAlign: 'center' } },
+                            e('div', { style: { fontSize: '1.4rem', fontWeight: 900, color: s.c, fontFamily: "'Orbitron', sans-serif" } }, s.v),
+                            e('div', { style: { fontSize: '0.6rem', color: '#64748b', fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.05em', marginTop: '4px' } }, s.l)
+                        )
+                    )
+                ),
+                corridors.length === 0 && e('div', { style: { textAlign: 'center', padding: '2rem', color: '#64748b' } }, 'No development corridors detected yet. Corridors are detected when signal clustering exceeds threshold.'),
+                corridors.map((c, i) => e('div', { key: i, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(6,182,212,0.3)', borderLeft: '3px solid #06b6d4', borderRadius: '8px', padding: '14px 18px', marginBottom: '10px' } },
+                    e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' } },
+                        e('div', null,
+                            e('div', { style: { color: '#e2e8f0', fontSize: '0.95rem', fontWeight: 700 } }, c.corridor_name),
+                            e('div', { style: { color: '#64748b', fontSize: '0.75rem' } }, (c.city || '') + ', ' + (c.state || ''))
+                        ),
+                        e('div', { style: { textAlign: 'right' } },
+                            e('div', { style: { color: growthColor(c.growth_rate), fontSize: '1rem', fontWeight: 900, fontFamily: "'Orbitron', sans-serif" } }, (c.growth_rate > 0 ? '+' : '') + c.growth_rate + '%'),
+                            e('div', { style: { color: '#64748b', fontSize: '0.6rem', fontFamily: "'Orbitron', sans-serif" } }, 'GROWTH RATE')
+                        )
+                    ),
+                    e('div', { style: { display: 'flex', gap: '16px' } },
+                        e('span', { style: { color: '#06b6d4', fontSize: '0.75rem', fontWeight: 600 } }, c.signal_density + ' signals'),
+                        e('span', { style: { background: 'rgba(6,182,212,0.15)', border: '1px solid rgba(6,182,212,0.3)', borderRadius: '4px', padding: '1px 6px', fontSize: '0.6rem', fontWeight: 700, color: '#06b6d4', fontFamily: "'Orbitron', sans-serif" } }, c.dominant_development_type || 'MIXED')
+                    )
+                ))
+            );
+        }
+
+        // ===================================================================
+        // MOMENTUM ENGINE PANEL
+        // ===================================================================
+        function MomentumEnginePanel() {
+            const e = React.createElement;
+            const [parcels, setParcels] = useState([]);
+            const [stats, setStats] = useState(null);
+            const [loading, setLoading] = useState(true);
+
+            const fetchData = useCallback(async () => {
+                try {
+                    const [pRes, sRes] = await Promise.all([fetch('/api/momentum?min_momentum=20&limit=30'), fetch('/api/momentum/stats')]);
+                    if (pRes.ok) { const d = await pRes.json(); setParcels(d.parcels || []); }
+                    if (sRes.ok) { const d = await sRes.json(); setStats(d); }
+                } catch (err) { console.error('[Momentum]', err); }
+                finally { setLoading(false); }
+            }, []);
+
+            useEffect(() => { fetchData(); const iv = setInterval(fetchData, 60000); return () => clearInterval(iv); }, [fetchData]);
+
+            function momColor(m) { return m >= 80 ? '#22c55e' : m >= 60 ? '#eab308' : m >= 40 ? '#f97316' : '#64748b'; }
+            function momLabel(m) { return m >= 80 ? 'ACCELERATING' : m >= 60 ? 'HIGH' : m >= 40 ? 'BUILDING' : 'LOW'; }
+
+            if (loading) return e('div', { style: { textAlign: 'center', padding: '3rem', color: '#f59e0b', fontFamily: "'Orbitron', sans-serif" } }, 'ANALYZING DEVELOPMENT MOMENTUM...');
+
+            return e('div', { style: { maxWidth: '1000px', margin: '0 auto' } },
+                e('div', { style: { marginBottom: '1.5rem' } },
+                    e('h2', { style: { fontFamily: "'Orbitron', sans-serif", fontSize: '1.3rem', fontWeight: 900, background: 'linear-gradient(135deg, #f59e0b 0%, #ef4444 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 } }, 'OPPORTUNITY MOMENTUM ENGINE'),
+                    e('p', { style: { color: '#64748b', fontSize: '0.8rem', margin: '0.25rem 0 0' } }, 'Signal accumulation velocity — parcels with accelerating development activity')
+                ),
+                stats && e('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '1.5rem' } },
+                    [{ l: 'TRACKED PARCELS', v: stats.parcels_with_momentum, c: '#f59e0b' }, { l: 'HIGH MOMENTUM', v: stats.high_momentum_count, c: '#ef4444' }, { l: 'AVG MOMENTUM', v: stats.avg_momentum_score, c: '#eab308' }].map(s =>
+                        e('div', { key: s.l, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px', textAlign: 'center' } },
+                            e('div', { style: { fontSize: '1.4rem', fontWeight: 900, color: s.c, fontFamily: "'Orbitron', sans-serif" } }, s.v),
+                            e('div', { style: { fontSize: '0.6rem', color: '#64748b', fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.05em', marginTop: '4px' } }, s.l)
+                        )
+                    )
+                ),
+                parcels.length === 0 && e('div', { style: { textAlign: 'center', padding: '2rem', color: '#64748b' } }, 'No parcels with significant momentum detected yet.'),
+                parcels.map((p, i) => e('div', { key: i, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid ' + momColor(p.development_momentum_score) + '40', borderLeft: '3px solid ' + momColor(p.development_momentum_score), borderRadius: '8px', padding: '12px 16px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                    e('div', null,
+                        e('div', { style: { color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 600 } }, p.address || p.parcel_id || 'Parcel'),
+                        e('div', { style: { color: '#64748b', fontSize: '0.7rem' } }, (p.city || '') + (p.state ? ', ' + p.state : '') + ' · ' + (p.signal_sequence_length || 0) + ' signals'),
+                        p.development_probability > 0 && e('div', { style: { color: '#06b6d4', fontSize: '0.7rem' } }, 'Dev probability: ' + p.development_probability + '%')
+                    ),
+                    e('div', { style: { textAlign: 'right' } },
+                        e('div', { style: { color: momColor(p.development_momentum_score), fontSize: '1.3rem', fontWeight: 900, fontFamily: "'Orbitron', sans-serif" } }, p.development_momentum_score),
+                        e('div', { style: { color: momColor(p.development_momentum_score), fontSize: '0.55rem', fontWeight: 700, fontFamily: "'Orbitron', sans-serif" } }, momLabel(p.development_momentum_score))
+                    )
+                ))
+            );
+        }
+
+        // ===================================================================
+        // SIGNAL DISCOVERY PANEL (Admin only)
+        // ===================================================================
+        function SignalDiscoveryPanel() {
+            const e = React.createElement;
+            const [sources, setSources] = useState([]);
+            const [stats, setStats] = useState(null);
+            const [loading, setLoading] = useState(true);
+
+            const fetchData = useCallback(async () => {
+                try {
+                    const [srcRes, stRes] = await Promise.all([fetch('/api/signal-discovery/sources?limit=30'), fetch('/api/signal-discovery/stats')]);
+                    if (srcRes.ok) { const d = await srcRes.json(); setSources(d.sources || []); }
+                    if (stRes.ok) { const d = await stRes.json(); setStats(d); }
+                } catch (err) { console.error('[SignalDiscovery]', err); }
+                finally { setLoading(false); }
+            }, []);
+
+            useEffect(() => { fetchData(); const iv = setInterval(fetchData, 60000); return () => clearInterval(iv); }, [fetchData]);
+
+            function statusColor(s) { return s === 'active' ? '#22c55e' : s === 'discovered' ? '#06b6d4' : '#64748b'; }
+
+            if (loading) return e('div', { style: { textAlign: 'center', padding: '3rem', color: '#a855f7', fontFamily: "'Orbitron', sans-serif" } }, 'SCANNING DATA SOURCES...');
+
+            return e('div', { style: { maxWidth: '1000px', margin: '0 auto' } },
+                e('div', { style: { marginBottom: '1.5rem' } },
+                    e('h2', { style: { fontFamily: "'Orbitron', sans-serif", fontSize: '1.3rem', fontWeight: 900, background: 'linear-gradient(135deg, #a855f7 0%, #ec4899 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 } }, 'AUTONOMOUS SIGNAL DISCOVERY AI'),
+                    e('p', { style: { color: '#64748b', fontSize: '0.8rem', margin: '0.25rem 0 0' } }, 'Auto-discovered government data sources for development intelligence')
+                ),
+                stats && e('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '1.5rem' } },
+                    [{ l: 'TOTAL SOURCES', v: stats.total_sources, c: '#a855f7' }, { l: 'SOURCE TYPES', v: (stats.by_type || []).length, c: '#ec4899' }, { l: 'CITIES COVERED', v: (stats.by_city || []).length, c: '#06b6d4' }].map(s =>
+                        e('div', { key: s.l, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px', textAlign: 'center' } },
+                            e('div', { style: { fontSize: '1.4rem', fontWeight: 900, color: s.c, fontFamily: "'Orbitron', sans-serif" } }, s.v),
+                            e('div', { style: { fontSize: '0.6rem', color: '#64748b', fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.05em', marginTop: '4px' } }, s.l)
+                        )
+                    )
+                ),
+                stats && stats.by_status && stats.by_status.length > 0 && e('div', { style: { display: 'flex', gap: '8px', marginBottom: '1rem', flexWrap: 'wrap' } },
+                    stats.by_status.map((s, i) => e('span', { key: i, style: { background: statusColor(s.status) + '15', border: '1px solid ' + statusColor(s.status) + '40', borderRadius: '20px', padding: '4px 12px', fontSize: '0.7rem', color: statusColor(s.status), fontWeight: 600 } }, s.status + ': ' + s.count))
+                ),
+                sources.length === 0 && e('div', { style: { textAlign: 'center', padding: '2rem', color: '#64748b' } }, 'No data sources discovered yet. The discovery AI will populate this automatically.'),
+                sources.map((s, i) => e('div', { key: i, style: { background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(168,85,247,0.2)', borderLeft: '3px solid ' + statusColor(s.status), borderRadius: '8px', padding: '12px 16px', marginBottom: '8px' } },
+                    e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' } },
+                        e('div', { style: { flex: 1, minWidth: 0 } },
+                            e('div', { style: { color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, s.title || s.url),
+                            e('div', { style: { color: '#64748b', fontSize: '0.7rem' } }, (s.city || '') + (s.state ? ', ' + s.state : '') + ' · ' + (s.source_type || ''))
+                        ),
+                        e('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 } },
+                            e('span', { style: { background: statusColor(s.status) + '15', border: '1px solid ' + statusColor(s.status) + '40', borderRadius: '4px', padding: '2px 8px', fontSize: '0.6rem', fontWeight: 700, color: statusColor(s.status), fontFamily: "'Orbitron', sans-serif" } }, s.status),
+                            e('span', { style: { color: '#f59e0b', fontSize: '0.75rem', fontWeight: 700, fontFamily: "'Orbitron', sans-serif" } }, 'P' + s.priority)
+                        )
+                    ),
+                    s.url && e('div', { style: { fontSize: '0.7rem', color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, s.url)
+                ))
+            );
+        }
 
         ReactDOM.render(<DensityProvider><Root /></DensityProvider>, document.getElementById('root'));
     </script>

@@ -9,7 +9,7 @@ from functools import wraps
 import os
 import secrets
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date as _date_type
 import json
 import time
 import csv
@@ -36,6 +36,39 @@ SESSION_DURATION_HOURS = 720  # 30 days
 SUPER_ADMIN_EMAIL = os.getenv('SUPER_ADMIN_EMAIL', 'mjhopkins88@gmail.com').strip().lower()
 
 app = Flask(__name__, static_folder='static')
+
+# Custom JSON provider: auto-serialize datetime objects from Postgres
+from flask.json.provider import DefaultJSONProvider
+class _DTJSONProvider(DefaultJSONProvider):
+    @staticmethod
+    def default(o):
+        if isinstance(o, (datetime, _date_type)):
+            return o.isoformat()
+        if hasattr(o, 'isoformat'):
+            return o.isoformat()
+        if isinstance(o, set):
+            return list(o)
+        return DefaultJSONProvider.default(o)
+
+    def dumps(self, obj, **kwargs):
+        kwargs.setdefault("default", self.default)
+        kwargs.setdefault("ensure_ascii", self.ensure_ascii)
+        kwargs.setdefault("sort_keys", self.sort_keys)
+        return json.dumps(obj, **kwargs)
+app.json_provider_class = _DTJSONProvider
+app.json = _DTJSONProvider(app)
+
+
+def _safe_ts(val):
+    """Convert a potential datetime/date value to an ISO string safely.
+    Postgres returns datetime objects; SQLite returns strings. This normalizes both."""
+    if val is None:
+        return None
+    if hasattr(val, 'isoformat'):
+        return val.isoformat()
+    return str(val)
+
+
 CORS(app, supports_credentials=True)
 
 # --- SignalStack module (LinkedIn sales intelligence + messaging) ---
@@ -117,14 +150,21 @@ def _adapt_schema_sql(sql):
     return sql
 
 def _safe_add_column(cursor, table, column, definition):
-    """Add a column if it doesn't exist. Works on both SQLite and PostgreSQL."""
+    """Add a column if it doesn't exist. Works on both SQLite and PostgreSQL.
+    Uses SAVEPOINT on PostgreSQL to prevent transaction abort on failure."""
     try:
         if _is_postgres():
+            cursor.execute('SAVEPOINT _safe_col')
             cursor.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}")
+            cursor.execute('RELEASE SAVEPOINT _safe_col')
         else:
             cursor.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
     except Exception:
-        pass  # column already exists
+        if _is_postgres():
+            try:
+                cursor.execute('ROLLBACK TO SAVEPOINT _safe_col')
+            except Exception:
+                pass
 
 def init_db():
     """Initialize database schema (non-destructive, additive only).
@@ -142,6 +182,22 @@ def init_db():
                 _real_cursor.execute(adapted, params)
             else:
                 _real_cursor.execute(adapted)
+        def safe_execute(self, sql):
+            """Execute with SAVEPOINT protection on PostgreSQL.
+            Use this for statements inside try/except blocks (e.g. CREATE INDEX)
+            so a failure does not abort the PostgreSQL transaction."""
+            if _is_postgres():
+                _real_cursor.execute('SAVEPOINT _schema_sp')
+            try:
+                self.execute(sql)
+                if _is_postgres():
+                    _real_cursor.execute('RELEASE SAVEPOINT _schema_sp')
+            except Exception:
+                if _is_postgres():
+                    try:
+                        _real_cursor.execute('ROLLBACK TO SAVEPOINT _schema_sp')
+                    except Exception:
+                        pass
         def fetchone(self):
             return _real_cursor.fetchone()
         def fetchall(self):
@@ -236,7 +292,7 @@ def init_db():
     ''')
     # Add score_meta column if missing (migration for existing DBs)
     _safe_add_column(_real_cursor if _is_postgres() else c, 'run_prospects', 'score_meta', 'TEXT')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_score ON run_prospects(run_id, score DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_score ON run_prospects(run_id, score DESC)')
     c.execute('''
         CREATE TABLE IF NOT EXISTS discovery_signal_seen (
             fingerprint TEXT PRIMARY KEY,
@@ -307,7 +363,7 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_admin_events_ws ON admin_events(workspace_id, created_at DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_admin_events_ws ON admin_events(workspace_id, created_at DESC)')
     c.execute('''
         CREATE TABLE IF NOT EXISTS crm_companies (
             id TEXT PRIMARY KEY,
@@ -345,9 +401,9 @@ def init_db():
             next_followup_at TIMESTAMP
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_crm_leads_owner ON crm_leads(workspace_id, owner_user_id, status)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_crm_leads_followup ON crm_leads(workspace_id, next_followup_at)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_crm_companies_key ON crm_companies(workspace_id, prospect_key)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_crm_leads_owner ON crm_leads(workspace_id, owner_user_id, status)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_crm_leads_followup ON crm_leads(workspace_id, next_followup_at)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_crm_companies_key ON crm_companies(workspace_id, prospect_key)')
 
     # --- Lead Activity Log ---
     c.execute('''
@@ -361,8 +417,8 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_lead_activity_lead ON lead_activity(lead_id, created_at DESC)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_lead_activity_actor ON lead_activity(actor_user_id, created_at DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_lead_activity_lead ON lead_activity(lead_id, created_at DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_lead_activity_actor ON lead_activity(actor_user_id, created_at DESC)')
 
     # --- Trend Detection & Weekly Briefs Tables ---
     c.execute('''
@@ -379,8 +435,8 @@ def init_db():
             UNIQUE(state, city, topic, computed_at)
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_trend_signals_date ON trend_signals(computed_at)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_trend_signals_state ON trend_signals(state, computed_at)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_trend_signals_date ON trend_signals(computed_at)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_trend_signals_state ON trend_signals(state, computed_at)')
     c.execute('''
         CREATE TABLE IF NOT EXISTS weekly_briefs (
             id TEXT PRIMARY KEY,
@@ -408,8 +464,8 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_weighted_signals_state ON weighted_signals(state, city)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_weighted_signals_date ON weighted_signals(published_at)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_weighted_signals_state ON weighted_signals(state, city)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_weighted_signals_date ON weighted_signals(published_at)')
     # --- Market Momentum ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS market_momentum (
@@ -429,9 +485,9 @@ def init_db():
             UNIQUE(state, city, window_end_date)
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_state ON market_momentum(state, city, window_end_date)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_date ON market_momentum(window_end_date)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_st ON market_momentum(state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_state ON market_momentum(state, city, window_end_date)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_date ON market_momentum(window_end_date)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_market_momentum_st ON market_momentum(state)')
     # --- Sunbelt Sparknotes Summaries (cached LLM output) ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS sunbelt_summaries (
@@ -444,7 +500,23 @@ def init_db():
             UNIQUE(tab, window_days, date_bucket)
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_sunbelt_summaries_lookup ON sunbelt_summaries(tab, window_days, date_bucket)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_sunbelt_summaries_lookup ON sunbelt_summaries(tab, window_days, date_bucket)')
+    # --- Article Summaries (per-article structured sparknotes) ---
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS article_summaries (
+            id TEXT PRIMARY KEY,
+            article_id TEXT NOT NULL,
+            summary TEXT,
+            entities TEXT,
+            deal_type TEXT,
+            location TEXT,
+            capital TEXT,
+            timeline TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(article_id)
+        )
+    ''')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_article_summaries_article ON article_summaries(article_id)')
     # --- Lead Timing Scores ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS lead_timing_scores (
@@ -466,8 +538,8 @@ def init_db():
             UNIQUE(workspace_id, prospect_key)
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_lead_timing_key ON lead_timing_scores(workspace_id, prospect_key)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_lead_timing_score ON lead_timing_scores(call_timing_score DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_lead_timing_key ON lead_timing_scores(workspace_id, prospect_key)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_lead_timing_score ON lead_timing_scores(call_timing_score DESC)')
 
     # ---- Quoting tables ----
     c.execute('''
@@ -489,7 +561,7 @@ def init_db():
             UNIQUE(state, county_name)
         )
     ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_county_map_lookup ON county_group_map(state, county_name)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_county_map_lookup ON county_group_map(state, county_name)')
     c.execute('''
         CREATE TABLE IF NOT EXISTS quote_requests (
             id TEXT PRIMARY KEY,
@@ -624,11 +696,11 @@ def init_db():
         )
     ''')
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_gov_signals_city_date ON government_signals (state, city, filing_date DESC)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_gov_signals_city_date ON government_signals (state, city, filing_date DESC)')
     except Exception:
         pass
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_gov_signals_type_date ON government_signals (signal_type, filing_date DESC)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_gov_signals_type_date ON government_signals (signal_type, filing_date DESC)')
     except Exception:
         pass
 
@@ -646,7 +718,7 @@ def init_db():
         )
     ''')
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_broker_saved_user ON broker_saved(user_id)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_broker_saved_user ON broker_saved(user_id)')
     except Exception:
         pass
 
@@ -657,7 +729,8 @@ def init_db():
             community_key TEXT UNIQUE,
             location_name TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            deleted_at TIMESTAMP DEFAULT NULL
         )
     ''')
     # Build underwriting_rows table with all canonical columns
@@ -669,18 +742,1248 @@ def init_db():
             community_id TEXT NOT NULL,
             row_version INTEGER NOT NULL DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            deleted_at TIMESTAMP DEFAULT NULL,
             {_uw_data_cols}
         )
     ''')
     try:
-        c.execute('CREATE INDEX IF NOT EXISTS idx_uw_rows_community ON underwriting_rows(community_id)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_uw_rows_community ON underwriting_rows(community_id)')
     except Exception:
         pass
+    # Migrate: add deleted_at to underwriting_communities if missing (for existing DBs)
+    _safe_add_column(_real_cursor, 'underwriting_communities', 'deleted_at', 'TIMESTAMP DEFAULT NULL')
+    # Migrate: add deleted_at to underwriting_rows if missing (for existing DBs)
+    _safe_add_column(_real_cursor, 'underwriting_rows', 'deleted_at', 'TIMESTAMP DEFAULT NULL')
+
+    # ---- Search Performance & City Discovery Engine tables ----
+
+    # STEP 1: Search metrics instrumentation
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS search_metrics_daily (
+            id TEXT PRIMARY KEY,
+            date TEXT NOT NULL UNIQUE,
+            avg_response_time_ms REAL DEFAULT 0,
+            p95_response_time_ms REAL DEFAULT 0,
+            time_to_first_result_ms REAL DEFAULT 0,
+            null_result_rate REAL DEFAULT 0,
+            avg_results_returned REAL DEFAULT 0,
+            total_searches INTEGER DEFAULT 0,
+            cache_hit_rate REAL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Raw search timing log (individual requests, aggregated daily)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS search_request_log (
+            id TEXT PRIMARY KEY,
+            endpoint TEXT NOT NULL,
+            response_time_ms REAL NOT NULL,
+            result_count INTEGER DEFAULT 0,
+            cache_hit BOOLEAN DEFAULT 0,
+            city TEXT,
+            state TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # STEP 6: City discovery model
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS city_signal_metrics (
+            id TEXT PRIMARY KEY,
+            city TEXT NOT NULL,
+            state TEXT NOT NULL,
+            permit_growth_rate REAL DEFAULT 0,
+            article_velocity REAL DEFAULT 0,
+            capital_event_count REAL DEFAULT 0,
+            land_transaction_count REAL DEFAULT 0,
+            population_growth_proxy REAL DEFAULT 0,
+            composite_city_score REAL DEFAULT 0,
+            status TEXT DEFAULT 'tracked',
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(city, state)
+        )
+    ''')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_city_signal_score ON city_signal_metrics(composite_city_score DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_city_signal_state ON city_signal_metrics(state)')
+
+    # STEP 8: Search config (city boost, freshness decay, etc.)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS search_config (
+            id TEXT PRIMARY KEY,
+            recency_multiplier REAL DEFAULT 1.0,
+            freshness_decay_rate REAL DEFAULT 0.03,
+            city_boost TEXT DEFAULT '{}',
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # PART 3: Config version history for safety guardrails
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS search_config_versions (
+            id TEXT PRIMARY KEY,
+            config_snapshot TEXT NOT NULL,
+            avg_response_time_ms REAL,
+            p95_response_time_ms REAL,
+            change_reason TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Migrate: add final_score column to run_prospects for precomputed scores (STEP 3)
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'run_prospects', 'final_score', 'REAL DEFAULT 0')
+    # Migrate: add final_score column to prospects table
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospects', 'final_score', 'REAL DEFAULT 0')
+
+    # STEP 5: Index optimization for search performance
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prospects_city ON prospects(city)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prospects_state ON prospects(state)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prospects_score ON prospects(score DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prospects_final_score ON prospects(final_score DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prospects_created ON prospects(created_at DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_city ON run_prospects(city)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_state ON run_prospects(state)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_run_prospects_final_score ON run_prospects(final_score DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_search_request_log_date ON search_request_log(created_at)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_weighted_signals_entity ON weighted_signals(entity_name)')
+    except Exception:
+        pass
+
+    # Migrate: add SPI score columns to search_metrics_daily
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'search_metrics_daily', 'spi_score', 'REAL DEFAULT 0')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'search_metrics_daily', 'speed_score', 'REAL DEFAULT 0')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'search_metrics_daily', 'signal_density_score', 'REAL DEFAULT 0')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'search_metrics_daily', 'freshness_score', 'REAL DEFAULT 0')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'search_metrics_daily', 'city_coverage_score', 'REAL DEFAULT 0')
+
+    # ===================================================================
+    # LEAD INTELLIGENCE PLATFORM — Entity Graph Tables
+    # These tables extend the system without touching existing tables.
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS li_projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            city TEXT,
+            state TEXT,
+            project_type TEXT DEFAULT 'BTR',
+            status TEXT DEFAULT 'rumored',
+            unit_count INTEGER,
+            estimated_value REAL,
+            source_url TEXT,
+            raw_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(name, city, state)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS li_companies (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            domain TEXT,
+            company_type TEXT DEFAULT 'developer',
+            hq_city TEXT,
+            hq_state TEXT,
+            employee_count INTEGER,
+            raw_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(name)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS li_contacts (
+            id TEXT PRIMARY KEY,
+            company_id TEXT,
+            full_name TEXT NOT NULL,
+            title TEXT,
+            email TEXT,
+            phone TEXT,
+            linkedin_url TEXT,
+            role_tag TEXT DEFAULT 'unknown',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(full_name, company_id)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS li_signals (
+            id TEXT PRIMARY KEY,
+            source_type TEXT NOT NULL,
+            headline TEXT,
+            body TEXT,
+            url TEXT,
+            published_at TIMESTAMP,
+            city TEXT,
+            state TEXT,
+            raw_json TEXT,
+            project_id TEXT,
+            company_id TEXT,
+            signal_type TEXT DEFAULT 'news',
+            strength REAL DEFAULT 0.5,
+            normalized BOOLEAN DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(url, headline)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS li_leads (
+            id TEXT PRIMARY KEY,
+            project_id TEXT,
+            company_id TEXT,
+            contact_id TEXT,
+            score REAL DEFAULT 0.0,
+            score_components TEXT,
+            grade TEXT DEFAULT 'C',
+            status TEXT DEFAULT 'new',
+            assigned_to TEXT,
+            region TEXT,
+            next_action TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(project_id, company_id)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS li_outcomes (
+            id TEXT PRIMARY KEY,
+            lead_id TEXT NOT NULL,
+            outcome_type TEXT NOT NULL,
+            notes TEXT,
+            revenue REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS li_score_weights (
+            id TEXT PRIMARY KEY,
+            signal_type TEXT NOT NULL,
+            weight REAL DEFAULT 1.0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(signal_type)
+        )
+    ''')
+
+    # Entity-graph indexes
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_projects_city ON li_projects(city, state)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_signals_project ON li_signals(project_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_signals_company ON li_signals(company_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_signals_type ON li_signals(signal_type)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_leads_score ON li_leads(score DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_leads_status ON li_leads(status)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_contacts_company ON li_contacts(company_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_outcomes_lead ON li_outcomes(lead_id)')
+    except Exception:
+        pass
+
+    # ===================================================================
+    # DEVELOPMENT EVENT PATTERN DETECTION — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS development_events (
+            id TEXT PRIMARY KEY,
+            event_type TEXT,
+            city TEXT,
+            state TEXT,
+            parcel_id TEXT,
+            developer TEXT,
+            event_date TIMESTAMP,
+            source TEXT,
+            metadata TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS predicted_projects (
+            id TEXT PRIMARY KEY,
+            city TEXT,
+            state TEXT,
+            developer TEXT,
+            prediction_date TIMESTAMP,
+            confidence INTEGER,
+            pattern_detected TEXT,
+            confirmed BOOLEAN DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Development event indexes
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dev_events_type ON development_events(event_type)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dev_events_city ON development_events(city, state)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dev_events_parcel ON development_events(parcel_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dev_events_date ON development_events(event_date)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_predicted_projects_city ON predicted_projects(city, state)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_predicted_projects_confidence ON predicted_projects(confidence DESC)')
+    except Exception:
+        pass
+
+    # ===================================================================
+    # PREDICTION OPTIMIZER — Additional Tables & Columns
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS developer_profiles (
+            id TEXT PRIMARY KEY,
+            developer_name TEXT NOT NULL,
+            historical_projects INTEGER DEFAULT 0,
+            known_btr_builder BOOLEAN DEFAULT 0,
+            primary_markets TEXT,
+            avg_project_size INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(developer_name)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS predicted_project_index (
+            id TEXT PRIMARY KEY,
+            city TEXT,
+            state TEXT,
+            developer TEXT,
+            confidence INTEGER,
+            signal_count INTEGER DEFAULT 0,
+            cluster_detected BOOLEAN DEFAULT 0,
+            expected_construction_window TEXT,
+            prediction_date TIMESTAMP,
+            confirmed BOOLEAN DEFAULT 0,
+            pattern_detected TEXT,
+            freshness_boost INTEGER DEFAULT 0,
+            contactability_score INTEGER DEFAULT 0,
+            developer_reputation_boost INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ppi_confidence ON predicted_project_index(confidence DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ppi_city ON predicted_project_index(city, state)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dev_profiles_name ON developer_profiles(developer_name)')
+    except Exception:
+        pass
+
+    # Add new columns to predicted_projects (non-destructive migration)
+    _cur_for_migrate = _real_cursor if _is_postgres() else c
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'signal_count', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'cluster_detected', 'BOOLEAN DEFAULT FALSE')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'expected_construction_window', 'TEXT')
+
+    # ===================================================================
+    # RELATIONSHIP GRAPH — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS entity_relationships (
+            id TEXT PRIMARY KEY,
+            entity_a TEXT NOT NULL,
+            entity_a_type TEXT,
+            entity_b TEXT NOT NULL,
+            entity_b_type TEXT,
+            relationship_type TEXT NOT NULL,
+            source TEXT,
+            confidence INTEGER DEFAULT 50,
+            metadata TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_er_entity_a ON entity_relationships(entity_a)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_er_entity_b ON entity_relationships(entity_b)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_er_type ON entity_relationships(relationship_type)')
+    except Exception:
+        pass
+
+    # Add relationship_strength column to entity_relationships
+    _safe_add_column(_cur_for_migrate, 'entity_relationships', 'relationship_strength', 'INTEGER DEFAULT 0')
+
+    # Add relationship columns to predicted_project_index and predicted_projects
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'relationship_count', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'developer_linked', 'BOOLEAN DEFAULT FALSE')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'contractor_linked', 'BOOLEAN DEFAULT FALSE')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'consultant_linked', 'BOOLEAN DEFAULT FALSE')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'relationship_boost', 'INTEGER DEFAULT 0')
+
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'relationship_count', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'developer_linked', 'BOOLEAN DEFAULT FALSE')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'contractor_linked', 'BOOLEAN DEFAULT FALSE')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'consultant_linked', 'BOOLEAN DEFAULT FALSE')
+
+    # Add pattern engine columns to predicted_projects and predicted_project_index
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'pattern_name', 'TEXT')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'pattern_confidence', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'pattern_name', 'TEXT')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'pattern_confidence', 'INTEGER DEFAULT 0')
+
+    # Add developer DNA columns to predicted_projects and predicted_project_index
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'developer_dna_confidence', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'developer_expansion_signal', 'BOOLEAN DEFAULT FALSE')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'developer_expansion_reasoning', 'TEXT')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'developer_dna_confidence', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'developer_expansion_signal', 'BOOLEAN DEFAULT FALSE')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'developer_expansion_reasoning', 'TEXT')
+
+    # ===================================================================
+    # AUTONOMOUS MARKET EXPANSION — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS markets (
+            id TEXT PRIMARY KEY,
+            city TEXT,
+            state TEXT,
+            population INTEGER,
+            population_growth REAL,
+            permit_growth REAL,
+            rent_growth REAL,
+            market_score INTEGER,
+            collectors_active BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS city_growth_metrics (
+            id TEXT PRIMARY KEY,
+            city TEXT,
+            state TEXT,
+            population INTEGER,
+            population_growth REAL,
+            housing_permits INTEGER,
+            permit_growth REAL,
+            median_rent REAL,
+            rent_growth REAL,
+            last_updated TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS market_expansion_log (
+            id TEXT PRIMARY KEY,
+            city TEXT,
+            state TEXT,
+            action TEXT,
+            market_score INTEGER,
+            details TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_markets_score ON markets(market_score DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_markets_city ON markets(city, state)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cgm_city ON city_growth_metrics(city, state)')
+    except Exception:
+        pass
+
+    # ===================================================================
+    # PREDICTIVE DEVELOPMENT PATTERN ENGINE — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS development_patterns (
+            id TEXT PRIMARY KEY,
+            pattern_name TEXT,
+            signal_sequence TEXT,
+            time_window_days INTEGER,
+            base_confidence INTEGER,
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS pattern_signal_history (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            signal_type TEXT,
+            signal_date TIMESTAMP,
+            source TEXT,
+            metadata TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS pattern_matches (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            pattern_id TEXT,
+            match_confidence INTEGER,
+            signals_detected INTEGER,
+            first_signal_date TIMESTAMP,
+            last_signal_date TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS pattern_engine_log (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            pattern_id TEXT,
+            detection_time TIMESTAMP,
+            confidence INTEGER,
+            notes TEXT
+        )
+    ''')
+
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_psh_parcel ON pattern_signal_history(parcel_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_psh_type ON pattern_signal_history(signal_type)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_pm_parcel ON pattern_matches(parcel_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_pm_pattern ON pattern_matches(pattern_id)')
+
+    # Seed default BTR pattern if development_patterns is empty
+    c.execute('SELECT COUNT(*) FROM development_patterns')
+    if c.fetchone()[0] == 0:
+        import uuid as _uuid
+        c.execute('''
+            INSERT INTO development_patterns (id, pattern_name, signal_sequence,
+                time_window_days, base_confidence, description)
+            VALUES (?, 'BTR_EARLY_DEVELOPMENT',
+                'LAND_PURCHASE,ZONING_CASE,SUBDIVISION_PLAT',
+                90, 85,
+                'Typical early signal sequence preceding build-to-rent development')
+        ''', (str(_uuid.uuid4()),))
+        c.execute('''
+            INSERT INTO development_patterns (id, pattern_name, signal_sequence,
+                time_window_days, base_confidence, description)
+            VALUES (?, 'BTR_CONFIRMED_DEVELOPMENT',
+                'LAND_PURCHASE,ZONING_CASE,SUBDIVISION_PLAT,PERMIT_APPLICATION',
+                180, 95,
+                'Full confirmed BTR development sequence with permit')
+        ''', (str(_uuid.uuid4()),))
+
+    # ===================================================================
+    # DEVELOPER DNA MODELING ENGINE — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS developers (
+            id TEXT PRIMARY KEY,
+            developer_name TEXT,
+            headquarters_city TEXT,
+            headquarters_state TEXT,
+            total_projects INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS developer_project_history (
+            id TEXT PRIMARY KEY,
+            developer_id TEXT,
+            project_name TEXT,
+            city TEXT,
+            state TEXT,
+            parcel_id TEXT,
+            project_type TEXT,
+            unit_count INTEGER,
+            square_feet INTEGER,
+            project_stage TEXT,
+            first_detected TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS developer_dna_profiles (
+            id TEXT PRIMARY KEY,
+            developer_id TEXT,
+            preferred_states TEXT,
+            preferred_cities TEXT,
+            typical_unit_range TEXT,
+            typical_project_types TEXT,
+            average_project_size INTEGER,
+            expansion_rate REAL,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS developer_expansion_predictions (
+            id TEXT PRIMARY KEY,
+            developer_id TEXT,
+            predicted_city TEXT,
+            predicted_state TEXT,
+            confidence INTEGER,
+            reasoning TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS developer_dna_log (
+            id TEXT PRIMARY KEY,
+            developer_id TEXT,
+            prediction_city TEXT,
+            prediction_confidence INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_developers_name ON developers(developer_name)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dph_developer ON developer_project_history(developer_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dph_city ON developer_project_history(city, state)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ddna_developer ON developer_dna_profiles(developer_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dep_developer ON developer_expansion_predictions(developer_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dep_city ON developer_expansion_predictions(predicted_city, predicted_state)')
+    except Exception:
+        pass
+
+    # ===================================================================
+    # CONTRACTOR INTELLIGENCE MAPPING ENGINE — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS contractor_firms (
+            id TEXT PRIMARY KEY,
+            firm_name TEXT,
+            firm_type TEXT,
+            headquarters_city TEXT,
+            headquarters_state TEXT,
+            typical_project_type TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS contractor_activity (
+            id TEXT PRIMARY KEY,
+            firm_id TEXT,
+            parcel_id TEXT,
+            activity_type TEXT,
+            activity_date TIMESTAMP,
+            source TEXT,
+            metadata TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS contractor_developer_relationships (
+            id TEXT PRIMARY KEY,
+            contractor_id TEXT,
+            developer_id TEXT,
+            project_count INTEGER DEFAULT 0,
+            relationship_strength INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS contractor_intelligence_log (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            contractor_id TEXT,
+            activity_detected TEXT,
+            confidence INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cf_name ON contractor_firms(firm_name)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cf_type ON contractor_firms(firm_type)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ca_firm ON contractor_activity(firm_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ca_parcel ON contractor_activity(parcel_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ca_type ON contractor_activity(activity_type)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cdr_contractor ON contractor_developer_relationships(contractor_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cdr_developer ON contractor_developer_relationships(developer_id)')
+    except Exception:
+        pass
+
+    # Add contractor intelligence columns to predicted_projects and predicted_project_index
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'contractor_activity_detected', 'BOOLEAN DEFAULT FALSE')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'contractor_firms_list', 'TEXT')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'contractor_developer_inference', 'TEXT')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'contractor_confidence', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'contractor_activity_detected', 'BOOLEAN DEFAULT FALSE')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'contractor_firms_list', 'TEXT')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'contractor_developer_inference', 'TEXT')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'contractor_confidence', 'INTEGER DEFAULT 0')
+
+    # ===================================================================
+    # PARCEL DEVELOPMENT PROBABILITY ENGINE — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS parcels (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            city TEXT,
+            state TEXT,
+            acreage REAL,
+            zoning TEXT,
+            owner_name TEXT,
+            owner_type TEXT,
+            last_sale_date TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS parcel_context (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            nearby_developments INTEGER,
+            population_growth REAL,
+            permit_growth REAL,
+            infrastructure_projects INTEGER,
+            development_pressure_score INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS parcel_development_probability (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            probability_score INTEGER,
+            likely_development_type TEXT,
+            reasoning TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS parcel_probability_log (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            probability_score INTEGER,
+            analysis_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            notes TEXT
+        )
+    ''')
+
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_parcels_parcel_id ON parcels(parcel_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_parcels_city ON parcels(city, state)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_pc_parcel ON parcel_context(parcel_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_pdp_parcel ON parcel_development_probability(parcel_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_pdp_score ON parcel_development_probability(probability_score DESC)')
+    except Exception:
+        pass
+
+    # Add parcel probability columns to predicted_projects and predicted_project_index
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'parcel_probability_score', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_projects', 'parcel_development_likelihood', 'TEXT')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'parcel_probability_score', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'predicted_project_index', 'parcel_development_likelihood', 'TEXT')
+
+    # Intelligence Events — live feed table
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS intelligence_events (
+            id TEXT PRIMARY KEY,
+            event_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            city TEXT,
+            state TEXT,
+            related_entity TEXT,
+            entity_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+
+    # Developer Intent Signals — early preparation signals before land acquisition
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS developer_intent_signals (
+            id TEXT PRIMARY KEY,
+            developer_id TEXT,
+            signal_type TEXT,
+            city TEXT,
+            state TEXT,
+            related_entity TEXT,
+            signal_strength INT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dis_developer ON developer_intent_signals(developer_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dis_city_state ON developer_intent_signals(city, state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dis_signal_type ON developer_intent_signals(signal_type)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dis_created ON developer_intent_signals(created_at DESC)')
+
+    # Developer Intent Predictions — predicted future project launches
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS developer_intent_predictions (
+            id TEXT PRIMARY KEY,
+            developer_id TEXT,
+            predicted_city TEXT,
+            predicted_state TEXT,
+            signal_count INT,
+            confidence_score INT,
+            reasoning TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dip_developer ON developer_intent_predictions(developer_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dip_city_state ON developer_intent_predictions(predicted_city, predicted_state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dip_confidence ON developer_intent_predictions(confidence_score DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dip_created ON developer_intent_predictions(created_at DESC)')
+
+    # Capital Events — financing events linked to development projects
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS capital_events (
+            id TEXT PRIMARY KEY,
+            developer_id TEXT,
+            company_name TEXT,
+            event_type TEXT,
+            city TEXT,
+            state TEXT,
+            loan_amount FLOAT,
+            lender_name TEXT,
+            related_project TEXT,
+            source TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ce_developer ON capital_events(developer_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ce_city_state ON capital_events(city, state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ce_event_type ON capital_events(event_type)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ce_created ON capital_events(created_at DESC)')
+
+    # Capital Signals — raw capital flow signals from various sources
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS capital_signals (
+            id TEXT PRIMARY KEY,
+            developer_id TEXT,
+            signal_type TEXT,
+            city TEXT,
+            state TEXT,
+            signal_strength INT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cs_developer ON capital_signals(developer_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cs_city_state ON capital_signals(city, state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cs_signal_type ON capital_signals(signal_type)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cs_created ON capital_signals(created_at DESC)')
+
+    # Capital Predictions — predicted capital deployment events
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS capital_predictions (
+            id TEXT PRIMARY KEY,
+            developer_id TEXT,
+            predicted_city TEXT,
+            predicted_state TEXT,
+            capital_event_type TEXT,
+            estimated_capital_amount FLOAT,
+            confidence_score INT,
+            reasoning TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cp_developer ON capital_predictions(developer_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cp_city_state ON capital_predictions(predicted_city, predicted_state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cp_confidence ON capital_predictions(confidence_score DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cp_created ON capital_predictions(created_at DESC)')
+
+    # Inside Sales Leads
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS sales_leads (
+            id TEXT PRIMARY KEY,
+            developer TEXT,
+            city TEXT,
+            state TEXT,
+            lead_score INT,
+            lead_summary TEXT,
+            source_signal TEXT,
+            confidence INT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_sl_developer_city ON sales_leads(developer, city)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_sl_score ON sales_leads(lead_score DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_sl_created ON sales_leads(created_at DESC)')
+
+    # Property Signals — normalized signals from free government data sources
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS property_signals (
+            id TEXT PRIMARY KEY,
+            parcel_id TEXT,
+            signal_type TEXT NOT NULL,
+            source TEXT,
+            entity_name TEXT,
+            address TEXT,
+            city TEXT,
+            state TEXT,
+            metadata TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ps_parcel ON property_signals(parcel_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ps_type ON property_signals(signal_type)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ps_city ON property_signals(city, state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ps_created ON property_signals(created_at DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ps_entity ON property_signals(entity_name)')
+
+    # Entities — resolved developer entities and LLCs
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS entities (
+            id TEXT PRIMARY KEY,
+            entity_name TEXT NOT NULL,
+            normalized_name TEXT,
+            entity_type TEXT,
+            parent_entity TEXT,
+            metadata TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ent_name ON entities(entity_name)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ent_normalized ON entities(normalized_name)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ent_parent ON entities(parent_entity)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ent_type ON entities(entity_type)')
+
+    # Market Acceleration — tracks signal acceleration per city
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS market_acceleration (
+            id TEXT PRIMARY KEY,
+            city TEXT NOT NULL,
+            state TEXT NOT NULL,
+            signals_90_days INTEGER DEFAULT 0,
+            signals_12_months INTEGER DEFAULT 0,
+            acceleration_ratio REAL DEFAULT 0,
+            is_emerging INTEGER DEFAULT 0,
+            last_calculated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ma_city ON market_acceleration(city, state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ma_emerging ON market_acceleration(is_emerging)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_ma_ratio ON market_acceleration(acceleration_ratio DESC)')
+
+    # Collector Deployments — tracks which cities have active collectors
+    c.execute(_adapt_schema_sql('''
+        CREATE TABLE IF NOT EXISTS collector_deployments (
+            id TEXT PRIMARY KEY,
+            city TEXT NOT NULL,
+            state TEXT NOT NULL,
+            active INTEGER DEFAULT 1,
+            deployed_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+
+    # Add new columns to parcels table
+    _safe_add_column(c._cur if hasattr(c, '_cur') else _real_cursor, 'parcels', 'address', 'TEXT')
+    _safe_add_column(c._cur if hasattr(c, '_cur') else _real_cursor, 'parcels', 'latitude', 'REAL')
+    _safe_add_column(c._cur if hasattr(c, '_cur') else _real_cursor, 'parcels', 'longitude', 'REAL')
+    _safe_add_column(c._cur if hasattr(c, '_cur') else _real_cursor, 'parcels', 'development_probability', 'INTEGER DEFAULT 0')
+
+    # ===================================================================
+    # SIGNAL QUALITY RANKING ENGINE — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS signal_sources (
+            id TEXT PRIMARY KEY,
+            source_name TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            city TEXT,
+            state TEXT,
+            signals_generated INTEGER DEFAULT 0,
+            signals_confirmed INTEGER DEFAULT 0,
+            accuracy_score REAL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_signal_sources_name ON signal_sources(source_name)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_signal_sources_type ON signal_sources(source_type)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_signal_sources_accuracy ON signal_sources(accuracy_score DESC)')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS signal_performance (
+            id TEXT PRIMARY KEY,
+            signal_id TEXT,
+            source_name TEXT,
+            signal_type TEXT,
+            parcel_id TEXT,
+            predicted_development BOOLEAN DEFAULT FALSE,
+            confirmed_development BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_signal_perf_source ON signal_performance(source_name)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_signal_perf_type ON signal_performance(signal_type)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_signal_perf_parcel ON signal_performance(parcel_id)')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS signal_type_performance (
+            id TEXT PRIMARY KEY,
+            signal_type TEXT NOT NULL UNIQUE,
+            signals_generated INTEGER DEFAULT 0,
+            signals_confirmed INTEGER DEFAULT 0,
+            accuracy_score REAL DEFAULT 0
+        )
+    ''')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_stp_accuracy ON signal_type_performance(accuracy_score DESC)')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS source_priority_index (
+            id TEXT PRIMARY KEY,
+            source_name TEXT NOT NULL UNIQUE,
+            priority_score REAL DEFAULT 0,
+            signals_last_30_days INTEGER DEFAULT 0,
+            accuracy_score REAL DEFAULT 0
+        )
+    ''')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_spi_priority ON source_priority_index(priority_score DESC)')
+
+    # ===================================================================
+    # DEVELOPER NETWORK INTELLIGENCE — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS developer_network_edges (
+            id TEXT PRIMARY KEY,
+            entity_a TEXT NOT NULL,
+            entity_b TEXT NOT NULL,
+            relationship_type TEXT NOT NULL,
+            co_occurrence_count INTEGER DEFAULT 1,
+            last_seen TIMESTAMP,
+            relationship_strength INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dne_entity_a ON developer_network_edges(entity_a)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dne_entity_b ON developer_network_edges(entity_b)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dne_strength ON developer_network_edges(relationship_strength DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dne_type ON developer_network_edges(relationship_type)')
+
+    # ===================================================================
+    # OPPORTUNITY MOMENTUM ENGINE — Columns on parcels
+    # ===================================================================
+
+    _safe_add_column(_cur_for_migrate, 'parcels', 'development_momentum_score', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'parcels', 'signal_sequence_length', 'INTEGER DEFAULT 0')
+    _safe_add_column(_cur_for_migrate, 'parcels', 'signal_sequence_start', 'TIMESTAMP')
+
+    # ===================================================================
+    # DEVELOPMENT CORRIDOR INTELLIGENCE — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS development_corridors (
+            id TEXT PRIMARY KEY,
+            corridor_name TEXT NOT NULL,
+            city TEXT,
+            state TEXT,
+            signal_density INTEGER DEFAULT 0,
+            growth_rate REAL DEFAULT 0,
+            dominant_development_type TEXT,
+            metadata TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP
+        )
+    ''')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dc_name ON development_corridors(corridor_name)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dc_city ON development_corridors(city, state)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dc_density ON development_corridors(signal_density DESC)')
 
     conn.commit()
     conn.close()
 
 init_db()
+
+
+# ===================================================================
+# INTELLIGENCE EVENT LOGGING HELPER
+# ===================================================================
+def log_intelligence_event(event_type, title, description=None, city=None, state=None, related_entity=None, entity_id=None):
+    """Insert an event into intelligence_events for the live feed.
+    Safe to call from any engine — failures are silently caught so they
+    never break the calling code."""
+    try:
+        conn = _get_db_conn()
+        c = conn.cursor()
+        eid = str(uuid.uuid4())
+        c.execute(
+            'INSERT INTO intelligence_events (id, event_type, title, description, city, state, related_entity, entity_id) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (eid, event_type, title, description, city, state, related_entity, entity_id)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[IntelFeed] Failed to log event: {e}")
+
+
+# ===================================================================
+# LEAD INTELLIGENCE PLATFORM — Blueprint Registration
+# ===================================================================
+from api.routes.leads import leads_bp
+from api.routes.projects import projects_bp
+from api.routes.signals import signals_bp
+from api.routes.pipeline import pipeline_bp
+from api.routes.predictions import predictions_bp
+from api.routes.markets import markets_bp
+from api.routes.developer_intent import developer_intent_bp
+from api.routes.capital_flow import capital_flow_bp
+from api.routes.sales_leads import sales_leads_bp
+from api.routes.developer_contacts import developer_contacts_bp
+from api.routes.property_signals import property_signals_bp
+from api.routes.signal_quality import signal_quality_bp
+from api.routes.developer_network import developer_network_bp
+from api.routes.momentum import momentum_bp
+from api.routes.corridors import corridors_bp
+from api.routes.signal_discovery import signal_discovery_bp
+
+app.register_blueprint(leads_bp)
+app.register_blueprint(projects_bp)
+app.register_blueprint(signals_bp)
+app.register_blueprint(pipeline_bp)
+app.register_blueprint(predictions_bp)
+app.register_blueprint(markets_bp)
+app.register_blueprint(developer_intent_bp)
+app.register_blueprint(capital_flow_bp)
+app.register_blueprint(sales_leads_bp)
+app.register_blueprint(developer_contacts_bp)
+app.register_blueprint(property_signals_bp)
+app.register_blueprint(signal_quality_bp)
+app.register_blueprint(developer_network_bp)
+app.register_blueprint(momentum_bp)
+app.register_blueprint(corridors_bp)
+app.register_blueprint(signal_discovery_bp)
 
 
 # ===================================================================
@@ -756,7 +2059,7 @@ def require_auth(f):
             return f(*args, **kwargs)
         user, workspace_id = _get_session_user()
         if not user:
-            return jsonify({'success': False, 'message': 'Authentication required', 'auth_required': True}), 401
+            return jsonify({'success': False, 'ok': False, 'message': 'Authentication required', 'error': 'Authentication required', 'auth_required': True}), 401
         g.user = user
         g.workspace_id = workspace_id
         return f(*args, **kwargs)
@@ -768,7 +2071,7 @@ def require_role(role):
         @wraps(f)
         def decorated(*args, **kwargs):
             if g.user and g.user.get('role') != role:
-                return jsonify({'success': False, 'message': 'Insufficient permissions'}), 403
+                return jsonify({'success': False, 'ok': False, 'message': 'Insufficient permissions', 'error': 'Insufficient permissions'}), 403
             return f(*args, **kwargs)
         return decorated
     return decorator
@@ -781,7 +2084,7 @@ def require_any_role(*roles):
         @wraps(f)
         def decorated(*args, **kwargs):
             if g.user and g.user.get('role') not in roles:
-                return jsonify({'success': False, 'message': 'Insufficient permissions'}), 403
+                return jsonify({'success': False, 'ok': False, 'message': 'Insufficient permissions', 'error': 'Insufficient permissions'}), 403
             return f(*args, **kwargs)
         return decorated
     return decorator
@@ -1012,7 +2315,7 @@ def api_auth_list_users():
     conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id, name, email, role, created_at FROM users WHERE workspace_id = ?', (g.workspace_id,))
-    users = [{'id': r[0], 'name': r[1], 'email': r[2], 'role': r[3], 'created_at': r[4]} for r in c.fetchall()]
+    users = [{'id': r[0], 'name': r[1], 'email': r[2], 'role': r[3], 'created_at': _safe_ts(r[4])} for r in c.fetchall()]
     conn.close()
     return jsonify({'success': True, 'users': users})
 
@@ -1074,7 +2377,7 @@ def api_admin_list_users():
         users.append({
             'id': r[0], 'name': r[1], 'email': r[2], 'role': r[3],
             'is_super_admin': bool(r[4]), 'is_disabled': bool(r[5]),
-            'last_login_at': r[6], 'created_at': r[7]
+            'last_login_at': _safe_ts(r[6]), 'created_at': _safe_ts(r[7])
         })
     conn.close()
     return jsonify({'success': True, 'users': users})
@@ -1474,7 +2777,7 @@ def api_quotes_property():
                   grouping_name, rate_x100, aop_buydown, replacement_cost, total_tiv, base_premium, taxes, total_premium, warnings)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
               (quote_id, ws, uid, sqft, rc_per_sf, loss_rents, city, state, county,
-               group_name, quote['effective_rate_x100'], 1 if aop_buydown else 0,
+               group_name, quote['effective_rate_x100'], bool(aop_buydown),
                quote['replacement_cost'], quote['total_tiv'], quote['base_premium'],
                quote['taxes'], quote['total_premium'], json.dumps(warnings)))
     conn.commit()
@@ -1513,7 +2816,7 @@ def api_quotes_history():
             'rate_x100': r[8], 'aop_buydown': bool(r[9]),
             'replacement_cost': r[10], 'total_tiv': r[11],
             'base_premium': r[12], 'taxes': r[13], 'total_premium': r[14],
-            'warnings': json.loads(r[15]) if r[15] else [], 'created_at': r[16],
+            'warnings': json.loads(r[15]) if r[15] else [], 'created_at': _safe_ts(r[16]),
         })
     conn.close()
     return jsonify({'success': True, 'quotes': quotes})
@@ -1528,7 +2831,7 @@ def api_admin_rate_groups_list():
     conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id, name, rate, rate_x100, created_at FROM rate_groups ORDER BY name')
-    groups = [{'id': r[0], 'name': r[1], 'rate': r[2], 'rate_x100': r[3], 'created_at': r[4]} for r in c.fetchall()]
+    groups = [{'id': r[0], 'name': r[1], 'rate': r[2], 'rate_x100': r[3], 'created_at': _safe_ts(r[4])} for r in c.fetchall()]
     conn.close()
     return jsonify({'success': True, 'groups': groups})
 
@@ -1605,7 +2908,7 @@ def api_admin_county_mapping_list():
         c.execute('SELECT id, state, county_name, group_name, created_at FROM county_group_map WHERE state = ? ORDER BY county_name', (state_filter,))
     else:
         c.execute('SELECT id, state, county_name, group_name, created_at FROM county_group_map ORDER BY state, county_name')
-    mappings = [{'id': r[0], 'state': r[1], 'county_name': r[2], 'group_name': r[3], 'created_at': r[4]} for r in c.fetchall()]
+    mappings = [{'id': r[0], 'state': r[1], 'county_name': r[2], 'group_name': r[3], 'created_at': _safe_ts(r[4])} for r in c.fetchall()]
     conn.close()
     return jsonify({'success': True, 'mappings': mappings})
 
@@ -1777,8 +3080,8 @@ def api_crm_list_leads():
     for r in c.fetchall():
         leads.append({
             'id': r[0], 'status': r[1], 'owner_user_id': r[2],
-            'last_touch_at': r[3], 'next_followup_at': r[4], 'priority': r[5],
-            'created_at': r[6], 'company_name': r[7], 'prospect_key': r[8],
+            'last_touch_at': _safe_ts(r[3]), 'next_followup_at': _safe_ts(r[4]), 'priority': r[5],
+            'created_at': _safe_ts(r[6]), 'company_name': r[7], 'prospect_key': r[8],
             'website': r[9], 'owner_name': r[10],
             'last_action_type': r[11], 'last_activity_at': r[12],
         })
@@ -1930,7 +3233,7 @@ def api_crm_list_touchpoints(lead_id):
     for r in c.fetchall():
         touchpoints.append({
             'id': r[0], 'type': r[1], 'outcome': r[2], 'notes': r[3],
-            'occurred_at': r[4], 'next_followup_at': r[5], 'user_name': r[6],
+            'occurred_at': _safe_ts(r[4]), 'next_followup_at': _safe_ts(r[5]), 'user_name': r[6],
         })
     conn.close()
     return jsonify({'success': True, 'touchpoints': touchpoints})
@@ -2031,7 +3334,7 @@ def api_crm_lead_activity(lead_id):
         new_val = json.loads(r[3]) if r[3] else None
         activities.append({
             'id': r[0], 'action_type': r[1], 'old_value': old_val,
-            'new_value': new_val, 'created_at': r[4],
+            'new_value': new_val, 'created_at': _safe_ts(r[4]),
             'actor': {'id': r[5], 'name': r[6], 'email': r[7], 'role': r[8]},
         })
     conn.close()
@@ -2090,7 +3393,7 @@ def api_admin_activity_overview():
         new_val = json.loads(r[4]) if r[4] else None
         activities.append({
             'id': r[0], 'lead_id': r[1], 'action_type': r[2],
-            'old_value': old_val, 'new_value': new_val, 'created_at': r[5],
+            'old_value': old_val, 'new_value': new_val, 'created_at': _safe_ts(r[5]),
             'actor': {'id': r[6], 'name': r[7], 'email': r[8], 'role': r[9]},
             'company_name': r[10], 'prospect_key': r[11],
         })
@@ -2127,7 +3430,7 @@ def api_crm_bulk_status():
     for r in c.fetchall():
         statuses[r[0]] = {
             'lead_id': r[1], 'status': r[2], 'owner_user_id': r[3],
-            'next_followup_at': r[4], 'owner_name': r[5],
+            'next_followup_at': _safe_ts(r[4]), 'owner_name': r[5],
         }
     conn.close()
     return jsonify({'success': True, 'statuses': statuses})
@@ -2542,12 +3845,30 @@ def save_prospects_to_db(prospects):
     conn.close()
     return saved_count
 
-def get_all_prospects_from_db():
-    """Retrieve all prospects from database"""
+def get_all_prospects_from_db(start_date='', end_date=''):
+    """Retrieve all prospects from database. Uses final_score (precomputed) for sort order.
+    Optional start_date/end_date (ISO strings) filter by created_at range.
+    """
     conn = _get_db_conn()
     c = conn.cursor()
-    c.execute('SELECT * FROM prospects ORDER BY score DESC, created_at DESC')
-    
+    # Use precomputed final_score (includes city boost + freshness decay) with fallback to raw score
+    query = '''SELECT id, company, executive, title, linkedin, email, phone,
+                      city, state, score, tiv, units, project_name, project_status,
+                      signals, why_now, created_at, final_score
+               FROM prospects'''
+    params = []
+    conditions = []
+    if start_date:
+        conditions.append('created_at >= ?')
+        params.append(start_date)
+    if end_date:
+        conditions.append('created_at <= ?')
+        params.append(end_date)
+    if conditions:
+        query += ' WHERE ' + ' AND '.join(conditions)
+    query += ' ORDER BY COALESCE(NULLIF(final_score, 0), score) DESC, created_at DESC'
+    c.execute(query, params)
+
     prospects = []
     for row in c.fetchall():
         prospects.append({
@@ -2567,9 +3888,10 @@ def get_all_prospects_from_db():
             'projectStatus': row[13],
             'signals': json.loads(row[14]) if row[14] else [],
             'whyNow': row[15],
-            'createdAt': row[16]
+            'createdAt': row[16].isoformat() if hasattr(row[16], 'isoformat') else (row[16] or ''),
+            'finalScore': row[17],
         })
-    
+
     conn.close()
     return prospects
 
@@ -2635,12 +3957,12 @@ def run_daily_discovery(is_scheduled=False):
             INSERT INTO discovery_runs (results_json, digest_text, city_count, total_new, status, adapter_stats)
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (
-            json.dumps(results),
+            json.dumps(results, default=str),
             digest,
             len(config['cities']),
             total_new,
             'completed',
-            json.dumps(adapter_stats)
+            json.dumps(adapter_stats, default=str)
         ))
         conn.commit()
         conn.close()
@@ -2656,7 +3978,7 @@ def run_daily_discovery(is_scheduled=False):
                     'results': results,
                     'digest': digest,
                     'adapter_stats': adapter_stats
-                }).encode('utf-8')
+                }, default=str).encode('utf-8')
                 req = urllib.request.Request(
                     config['webhook_url'],
                     data=payload,
@@ -2890,11 +4212,11 @@ def api_uw_add_units(community_id):
     conn = _get_db_conn()
     c = conn.cursor()
 
-    # Load base row
+    # Load base row (exclude soft-deleted)
     if base_row_id:
-        c.execute(f'SELECT row_version, {", ".join(COLUMN_KEYS)} FROM underwriting_rows WHERE id = ? AND community_id = ?', (base_row_id, community_id))
+        c.execute(f'SELECT row_version, {", ".join(COLUMN_KEYS)} FROM underwriting_rows WHERE id = ? AND community_id = ? AND deleted_at IS NULL', (base_row_id, community_id))
     else:
-        c.execute(f'SELECT row_version, {", ".join(COLUMN_KEYS)} FROM underwriting_rows WHERE community_id = ? ORDER BY row_version DESC LIMIT 1', (community_id,))
+        c.execute(f'SELECT row_version, {", ".join(COLUMN_KEYS)} FROM underwriting_rows WHERE community_id = ? AND deleted_at IS NULL ORDER BY row_version DESC LIMIT 1', (community_id,))
     base = c.fetchone()
     if not base:
         conn.close()
@@ -2914,11 +4236,16 @@ def api_uw_add_units(community_id):
     placeholders = ', '.join(['?'] * len(COLUMN_KEYS))
     values = [merged[k] for k in COLUMN_KEYS]
 
-    c.execute(f'INSERT INTO underwriting_rows (id, community_id, row_version, created_at, {col_names}) VALUES (?, ?, ?, ?, {placeholders})',
-              [row_id, community_id, new_version, now] + values)
-    # Update community timestamp
-    c.execute('UPDATE underwriting_communities SET updated_at = ? WHERE id = ?', (now, community_id))
-    conn.commit()
+    try:
+        c.execute(f'INSERT INTO underwriting_rows (id, community_id, row_version, created_at, {col_names}) VALUES (?, ?, ?, ?, {placeholders})',
+                  [row_id, community_id, new_version, now] + values)
+        # Update community timestamp
+        c.execute('UPDATE underwriting_communities SET updated_at = ? WHERE id = ?', (now, community_id))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify({'ok': False, 'error': f'Database error: {e}'}), 500
     conn.close()
     return jsonify({'ok': True, 'row_id': row_id, 'row_version': new_version})
 
@@ -2944,13 +4271,55 @@ def api_uw_update_row(row_id):
     params.append(row_id)
     conn = _get_db_conn()
     c = conn.cursor()
-    c.execute(f'UPDATE underwriting_rows SET {", ".join(updates)} WHERE id = ?', params)
-    if c.rowcount == 0:
+    try:
+        c.execute(f'UPDATE underwriting_rows SET {", ".join(updates)} WHERE id = ?', params)
+        if c.rowcount == 0:
+            conn.close()
+            return jsonify({'ok': False, 'error': 'Row not found'}), 404
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
         conn.close()
-        return jsonify({'ok': False, 'error': 'Row not found'}), 404
-    conn.commit()
+        return jsonify({'ok': False, 'error': f'Database error: {e}'}), 500
     conn.close()
     return jsonify({'ok': True})
+
+
+@app.route('/api/underwriting/communities/<community_id>', methods=['DELETE'])
+@require_auth
+@require_role('admin')
+def api_uw_delete_community(community_id):
+    """Soft-delete or hard-delete a community and all its rows. Admin-only."""
+    mode = request.args.get('mode', 'soft')
+    if mode not in ('soft', 'hard'):
+        mode = 'soft'
+
+    conn = _get_db_conn()
+    c = conn.cursor()
+
+    # Verify community exists
+    c.execute('SELECT id, location_name FROM underwriting_communities WHERE id = ?', (community_id,))
+    community = c.fetchone()
+    if not community:
+        conn.close()
+        return jsonify({'ok': False, 'error': 'Community not found'}), 404
+
+    try:
+        if mode == 'hard':
+            c.execute('DELETE FROM underwriting_rows WHERE community_id = ?', (community_id,))
+            c.execute('DELETE FROM underwriting_communities WHERE id = ?', (community_id,))
+        else:
+            now = datetime.utcnow().isoformat()
+            c.execute('UPDATE underwriting_communities SET deleted_at = ? WHERE id = ?', (now, community_id))
+            c.execute('UPDATE underwriting_rows SET deleted_at = ? WHERE community_id = ?', (now, community_id))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+    conn.close()
+    return jsonify({'ok': True, 'mode': mode, 'community_id': community_id})
 
 
 @app.route('/api/underwriting/rows', methods=['GET'])
@@ -2966,32 +4335,38 @@ def api_uw_list_rows():
 
     col_select = ', '.join(f'r.{k}' for k in COLUMN_KEYS)
 
-    if latest_only:
-        # Subquery: max row_version per community
-        sql = f'''SELECT r.id, r.community_id, r.row_version, r.created_at,
-                         uc.community_key, uc.location_name as uc_name, {col_select}
-                  FROM underwriting_rows r
-                  JOIN underwriting_communities uc ON uc.id = r.community_id
-                  INNER JOIN (
-                      SELECT community_id, MAX(row_version) as max_v FROM underwriting_rows GROUP BY community_id
-                  ) latest ON r.community_id = latest.community_id AND r.row_version = latest.max_v'''
-        if community_id:
-            sql += ' WHERE r.community_id = ?'
-            c.execute(sql + ' ORDER BY uc.location_name', (community_id,))
+    try:
+        if latest_only:
+            # Subquery: max row_version per community (exclude soft-deleted)
+            sql = f'''SELECT r.id, r.community_id, r.row_version, r.created_at,
+                             uc.community_key, uc.location_name as uc_name, {col_select}
+                      FROM underwriting_rows r
+                      JOIN underwriting_communities uc ON uc.id = r.community_id
+                      INNER JOIN (
+                          SELECT community_id, MAX(row_version) as max_v FROM underwriting_rows WHERE deleted_at IS NULL GROUP BY community_id
+                      ) latest ON r.community_id = latest.community_id AND r.row_version = latest.max_v
+                      WHERE r.deleted_at IS NULL AND uc.deleted_at IS NULL'''
+            if community_id:
+                sql += ' AND r.community_id = ?'
+                c.execute(sql + ' ORDER BY uc.location_name', (community_id,))
+            else:
+                c.execute(sql + ' ORDER BY uc.location_name')
         else:
-            c.execute(sql + ' ORDER BY uc.location_name')
-    else:
-        sql = f'''SELECT r.id, r.community_id, r.row_version, r.created_at,
-                         uc.community_key, uc.location_name as uc_name, {col_select}
-                  FROM underwriting_rows r
-                  JOIN underwriting_communities uc ON uc.id = r.community_id'''
-        if community_id:
-            sql += ' WHERE r.community_id = ?'
-            c.execute(sql + ' ORDER BY uc.location_name, r.row_version', (community_id,))
-        else:
-            c.execute(sql + ' ORDER BY uc.location_name, r.row_version')
+            sql = f'''SELECT r.id, r.community_id, r.row_version, r.created_at,
+                             uc.community_key, uc.location_name as uc_name, {col_select}
+                      FROM underwriting_rows r
+                      JOIN underwriting_communities uc ON uc.id = r.community_id
+                      WHERE r.deleted_at IS NULL AND uc.deleted_at IS NULL'''
+            if community_id:
+                sql += ' AND r.community_id = ?'
+                c.execute(sql + ' ORDER BY uc.location_name, r.row_version', (community_id,))
+            else:
+                c.execute(sql + ' ORDER BY uc.location_name, r.row_version')
 
-    rows_raw = c.fetchall()
+        rows_raw = c.fetchall()
+    except Exception as e:
+        conn.close()
+        return jsonify({'ok': False, 'error': f'Database query failed: {e}'}), 500
     conn.close()
 
     rows = []
@@ -3031,15 +4406,17 @@ def api_uw_export():
                   FROM underwriting_rows r
                   JOIN underwriting_communities uc ON uc.id = r.community_id
                   INNER JOIN (
-                      SELECT community_id, MAX(row_version) as max_v FROM underwriting_rows GROUP BY community_id
-                  ) latest ON r.community_id = latest.community_id AND r.row_version = latest.max_v'''
+                      SELECT community_id, MAX(row_version) as max_v FROM underwriting_rows WHERE deleted_at IS NULL GROUP BY community_id
+                  ) latest ON r.community_id = latest.community_id AND r.row_version = latest.max_v
+                  WHERE r.deleted_at IS NULL AND uc.deleted_at IS NULL'''
     else:
         sql = f'''SELECT r.row_version, {col_select}
                   FROM underwriting_rows r
-                  JOIN underwriting_communities uc ON uc.id = r.community_id'''
+                  JOIN underwriting_communities uc ON uc.id = r.community_id
+                  WHERE r.deleted_at IS NULL AND uc.deleted_at IS NULL'''
 
     if community_id:
-        sql += ' WHERE r.community_id = ?'
+        sql += ' AND r.community_id = ?'
         c.execute(sql + ' ORDER BY uc.location_name, r.row_version', (community_id,))
     else:
         c.execute(sql + ' ORDER BY uc.location_name, r.row_version')
@@ -3119,6 +4496,86 @@ def api_uw_columns():
     return jsonify({'ok': True, 'columns': UNDERWRITING_COLUMNS})
 
 
+# ── Underwriting Import ──────────────────────────────────────────
+from underwriting_import import process_import, MAX_FILE_SIZE
+
+@app.route('/api/underwriting/import', methods=['POST'])
+@require_auth
+@require_role('admin')
+def api_uw_import():
+    """Import underwriting spreadsheet (XLSX/CSV). Admin-only."""
+    if 'file' not in request.files:
+        return jsonify({'ok': False, 'error': 'No file uploaded'}), 400
+
+    file = request.files['file']
+    if not file.filename:
+        return jsonify({'ok': False, 'error': 'No file selected'}), 400
+
+    dry_run = request.form.get('dry_run', 'false').lower() == 'true'
+    strict_headers = request.form.get('strict_headers', 'false').lower() == 'true'
+    mode = request.form.get('mode', 'merge')
+    if mode not in ('merge', 'strict'):
+        mode = 'merge'
+
+    try:
+        file_bytes = file.read()
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'Failed to read file: {str(e)}'}), 400
+
+    if len(file_bytes) > MAX_FILE_SIZE:
+        return jsonify({'ok': False, 'error': f'File too large. Maximum is {MAX_FILE_SIZE // (1024*1024)}MB.'}), 413
+
+    import logging
+    logging.info(f"[UW Import] file={file.filename}, size={len(file_bytes)}, dry_run={dry_run}, mode={mode}")
+
+    result = process_import(
+        file_bytes=file_bytes,
+        filename=file.filename,
+        dry_run=dry_run,
+        strict_headers=strict_headers,
+        mode=mode,
+        db_connector=_get_db_conn,
+    )
+
+    status = 200 if result.get('ok') else 400
+    return jsonify(result), status
+
+
+@app.route('/api/underwriting/import/template', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_uw_import_template():
+    """Download a blank XLSX template with canonical headers."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Underwriting SOV Template'
+
+    headers = [col['header'] for col in UNDERWRITING_COLUMNS]
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True, size=11)
+        cell.alignment = Alignment(horizontal='center', wrap_text=True)
+
+    for col_idx, col in enumerate(UNDERWRITING_COLUMNS, 1):
+        letter = get_column_letter(col_idx)
+        ws.column_dimensions[letter].width = max(14, min(len(col['header']) + 4, 30))
+
+    ws.freeze_panes = 'A2'
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    resp = make_response(output.getvalue())
+    resp.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    resp.headers['Content-Disposition'] = 'attachment; filename=underwriting_import_template.xlsx'
+    return resp
+
+
 # API Routes
 
 @app.route('/')
@@ -3174,6 +4631,7 @@ def api_health():
 @require_auth
 def api_search():
     """Search for new BTR prospects"""
+    _t0 = time.time()
     try:
         data = request.json
         city = data.get('city', 'Texas')
@@ -3187,6 +4645,7 @@ def api_search():
         if error_msg:
             # On rate limit or API failure, return existing DB results so UI isn't empty
             db_prospects = get_all_prospects_from_db()
+            _log_search_request('/api/search', (time.time() - _t0) * 1000, len(db_prospects), True, city=city)
             return jsonify({
                 'success': False,
                 'message': error_msg,
@@ -3195,6 +4654,7 @@ def api_search():
             }), 200
 
         if not prospects:
+            _log_search_request('/api/search', (time.time() - _t0) * 1000, 0, False, city=city)
             return jsonify({
                 'success': False,
                 'message': 'No prospects found. Try a different city or state.',
@@ -3207,6 +4667,7 @@ def api_search():
         # Auto-update master spreadsheet
         total = generate_master_csv()
 
+        _log_search_request('/api/search', (time.time() - _t0) * 1000, len(prospects), False, city=city)
         return jsonify({
             'success': True,
             'message': f'Found {len(prospects)} prospects, saved {saved_count} new ones. Master spreadsheet updated ({total} total).',
@@ -3216,6 +4677,7 @@ def api_search():
         })
 
     except Exception as e:
+        _log_search_request('/api/search', (time.time() - _t0) * 1000, 0, False)
         print(f"API Error: {str(e)}")
         return jsonify({
             'success': False,
@@ -3226,9 +4688,15 @@ def api_search():
 @app.route('/api/prospects', methods=['GET'])
 @require_auth
 def api_get_prospects():
-    """Get all prospects from database"""
+    """Get all prospects from database with optional date filtering.
+    Query params: start_date, end_date (ISO strings) for date range filtering.
+    """
+    _t0 = time.time()
     try:
-        prospects = get_all_prospects_from_db()
+        start_date = request.args.get('start_date', '').strip()
+        end_date = request.args.get('end_date', '').strip()
+        prospects = get_all_prospects_from_db(start_date=start_date, end_date=end_date)
+        _log_search_request('/api/prospects', (time.time() - _t0) * 1000, len(prospects), False)
         return jsonify({
             'success': True,
             'prospects': prospects
@@ -3547,8 +5015,8 @@ def api_prospecting_run_status(run_id):
         'status': row[0],
         'total_prospects': row[1] or 0,
         'error': row[2],
-        'created_at': row[3],
-        'completed_at': row[4],
+        'created_at': _safe_ts(row[3]),
+        'completed_at': _safe_ts(row[4]),
     })
 
 
@@ -3606,7 +5074,7 @@ def api_prospecting_run_results(run_id):
             'linkedin': row[11],
             'units': row[12],
             'projectName': row[13],
-            'createdAt': row[14],
+            'createdAt': _safe_ts(row[14]),
         }
 
         # Merge score_meta fields into prospect
@@ -3681,7 +5149,7 @@ def api_discovery_latest():
     return jsonify({
         'success': True,
         'run': {
-            'id': row[0], 'run_at': row[1],
+            'id': row[0], 'run_at': _safe_ts(row[1]),
             'results': json.loads(row[2]) if row[2] else {},
             'digest': row[3], 'city_count': row[4],
             'total_new': row[5], 'status': row[6],
@@ -3735,7 +5203,7 @@ def api_discovery_history():
     runs = []
     for row in c.fetchall():
         runs.append({
-            'id': row[0], 'run_at': row[1],
+            'id': row[0], 'run_at': _safe_ts(row[1]),
             'city_count': row[2], 'total_new': row[3], 'status': row[4]
         })
     conn.close()
@@ -3762,7 +5230,7 @@ def api_discovery_run_detail(run_id):
     return jsonify({
         'success': True,
         'run': {
-            'id': row[0], 'run_at': row[1],
+            'id': row[0], 'run_at': _safe_ts(row[1]),
             'results': json.loads(row[2]) if row[2] else {},
             'digest': row[3], 'city_count': row[4],
             'total_new': row[5], 'status': row[6],
@@ -4169,76 +5637,85 @@ def compute_market_momentum():
     Reads from weighted_signals table. No SerpAPI calls.
     """
     print("[Momentum] Computing market momentum...")
-    now = datetime.utcnow()
-    window_end = now.strftime('%Y-%m-%d')
-    cutoff_7d = (now - timedelta(days=7)).isoformat()
-    cutoff_14d = (now - timedelta(days=14)).isoformat()
-    cutoff_30d = (now - timedelta(days=30)).isoformat()
+    try:
+        now = datetime.utcnow()
+        window_end = now.strftime('%Y-%m-%d')
+        cutoff_7d = (now - timedelta(days=7)).isoformat()
+        cutoff_14d = (now - timedelta(days=14)).isoformat()
+        cutoff_30d = (now - timedelta(days=30)).isoformat()
 
-    conn = _get_db_conn()
-    c = conn.cursor()
+        conn = _get_db_conn()
+        c = conn.cursor()
 
-    # Get all unique (state, city) pairs from weighted_signals in the 5 states
-    # Filter out NULL/empty/Unknown cities to keep rankings clean
-    c.execute('''
-        SELECT DISTINCT state, city FROM weighted_signals
-        WHERE state IN ('TX','AZ','GA','NC','FL') AND published_at >= ?
-        AND city IS NOT NULL AND city != '' AND city != 'Unknown'
-    ''', (cutoff_30d,))
-    markets = c.fetchall()
-
-    inserted = 0
-    for state, city in markets:
-        # Unweighted counts
-        c.execute('SELECT COUNT(*) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_7d))
-        sig_7d = c.fetchone()[0]
-        c.execute('SELECT COUNT(*) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_14d))
-        sig_14d = c.fetchone()[0]
-        c.execute('SELECT COUNT(*) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_30d))
-        sig_30d = c.fetchone()[0]
-
-        # Weighted counts
-        c.execute('SELECT COALESCE(SUM(signal_weight),0) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_7d))
-        wsig_7d = c.fetchone()[0]
-        c.execute('SELECT COALESCE(SUM(signal_weight),0) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_14d))
-        wsig_14d = c.fetchone()[0]
-        c.execute('SELECT COALESCE(SUM(signal_weight),0) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_30d))
-        wsig_30d = c.fetchone()[0]
-
-        # Momentum score
-        baseline = wsig_30d / 4.0
-        ratio_7d = wsig_7d / max(1, baseline)
-        ratio_14d = wsig_14d / max(1, baseline * 2)
-        momentum_score = max(0, min(100, ratio_7d * 60 + ratio_14d * 40))
-
-        if momentum_score >= 65:
-            momentum_label = 'Accelerating'
-        elif momentum_score >= 40:
-            momentum_label = 'Stable'
-        else:
-            momentum_label = 'Cooling'
-
-        mid = str(uuid.uuid4())
+        # Get all unique (state, city) pairs from weighted_signals in the 5 states
+        # Filter out NULL/empty/Unknown cities to keep rankings clean
         c.execute('''
-            INSERT INTO market_momentum
-            (id, state, city, window_end_date, signals_7d, signals_14d, signals_30d,
-             weighted_signals_7d, weighted_signals_14d, weighted_signals_30d,
-             momentum_score, momentum_label, computed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT (state, city, window_end_date) DO UPDATE SET
-                id = EXCLUDED.id, signals_7d = EXCLUDED.signals_7d, signals_14d = EXCLUDED.signals_14d,
-                signals_30d = EXCLUDED.signals_30d, weighted_signals_7d = EXCLUDED.weighted_signals_7d,
-                weighted_signals_14d = EXCLUDED.weighted_signals_14d, weighted_signals_30d = EXCLUDED.weighted_signals_30d,
-                momentum_score = EXCLUDED.momentum_score, momentum_label = EXCLUDED.momentum_label
-        ''', (mid, state, city, window_end, sig_7d, sig_14d, sig_30d,
-              wsig_7d, wsig_14d, wsig_30d,
-              round(momentum_score, 1), momentum_label))
-        inserted += 1
+            SELECT DISTINCT state, city FROM weighted_signals
+            WHERE state IN ('TX','AZ','GA','NC','FL') AND published_at >= ?
+            AND city IS NOT NULL AND city != '' AND city != 'Unknown'
+        ''', (cutoff_30d,))
+        markets = c.fetchall()
 
-    conn.commit()
-    conn.close()
-    print(f"[Momentum] Computed momentum for {inserted} markets.")
-    return inserted
+        inserted = 0
+        for state, city in markets:
+            try:
+                # Unweighted counts
+                c.execute('SELECT COUNT(*) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_7d))
+                sig_7d = c.fetchone()[0]
+                c.execute('SELECT COUNT(*) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_14d))
+                sig_14d = c.fetchone()[0]
+                c.execute('SELECT COUNT(*) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_30d))
+                sig_30d = c.fetchone()[0]
+
+                # Weighted counts
+                c.execute('SELECT COALESCE(SUM(signal_weight),0) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_7d))
+                wsig_7d = c.fetchone()[0] or 0
+                c.execute('SELECT COALESCE(SUM(signal_weight),0) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_14d))
+                wsig_14d = c.fetchone()[0] or 0
+                c.execute('SELECT COALESCE(SUM(signal_weight),0) FROM weighted_signals WHERE state=? AND city=? AND published_at>=?', (state, city, cutoff_30d))
+                wsig_30d = c.fetchone()[0] or 0
+
+                # Safe momentum score: prevent division by zero
+                baseline = float(wsig_30d) / 4.0
+                ratio_7d = float(wsig_7d) / max(1.0, baseline)
+                ratio_14d = float(wsig_14d) / max(1.0, baseline * 2)
+                momentum_score = max(0, min(100, ratio_7d * 60 + ratio_14d * 40))
+
+                if momentum_score >= 65:
+                    momentum_label = 'Accelerating'
+                elif momentum_score >= 40:
+                    momentum_label = 'Stable'
+                else:
+                    momentum_label = 'Cooling'
+
+                mid = str(uuid.uuid4())
+                c.execute('''
+                    INSERT INTO market_momentum
+                    (id, state, city, window_end_date, signals_7d, signals_14d, signals_30d,
+                     weighted_signals_7d, weighted_signals_14d, weighted_signals_30d,
+                     momentum_score, momentum_label, computed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT (state, city, window_end_date) DO UPDATE SET
+                        id = EXCLUDED.id, signals_7d = EXCLUDED.signals_7d, signals_14d = EXCLUDED.signals_14d,
+                        signals_30d = EXCLUDED.signals_30d, weighted_signals_7d = EXCLUDED.weighted_signals_7d,
+                        weighted_signals_14d = EXCLUDED.weighted_signals_14d, weighted_signals_30d = EXCLUDED.weighted_signals_30d,
+                        momentum_score = EXCLUDED.momentum_score, momentum_label = EXCLUDED.momentum_label
+                ''', (mid, state, city, window_end, sig_7d, sig_14d, sig_30d,
+                      wsig_7d, wsig_14d, wsig_30d,
+                      round(momentum_score, 1), momentum_label))
+                inserted += 1
+            except Exception as e:
+                print(f"[Momentum] Error computing for {city}, {state}: {e}")
+                continue
+
+        conn.commit()
+        conn.close()
+        print(f"[Momentum] Computed momentum for {inserted} markets.")
+        return inserted
+    except Exception as e:
+        print(f"[Momentum] Fatal error: {e}")
+        traceback.print_exc()
+        return 0
 
 
 def _get_momentum_for_city(state, city):
@@ -4271,8 +5748,15 @@ def _compute_freshness_score(state, city, company_name):
     if not row or not row[0]:
         return 30
     try:
-        pub_date = datetime.fromisoformat(row[0].replace('Z', '+00:00')) if 'T' in row[0] else datetime.strptime(row[0][:10], '%Y-%m-%d')
-        days_ago = (datetime.utcnow() - pub_date.replace(tzinfo=None)).days
+        val = row[0]
+        if hasattr(val, 'isoformat'):
+            # Postgres returns datetime objects directly
+            pub_date = val.replace(tzinfo=None) if hasattr(val, 'tzinfo') and val.tzinfo else val
+        elif 'T' in str(val):
+            pub_date = datetime.fromisoformat(str(val).replace('Z', '+00:00')).replace(tzinfo=None)
+        else:
+            pub_date = datetime.strptime(str(val)[:10], '%Y-%m-%d')
+        days_ago = (datetime.utcnow() - pub_date).days
     except (ValueError, TypeError):
         return 30
 
@@ -4292,7 +5776,8 @@ def compute_lead_timing_scores(workspace_id=None):
     """
     print("[CallTiming] Computing lead timing scores...")
     conn = _get_db_conn()
-    conn.row_factory = sqlite3.Row
+    if not _is_postgres():
+        conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
     # Gather all prospects from recent prospecting runs (last 90 days)
@@ -4317,18 +5802,21 @@ def compute_lead_timing_scores(workspace_id=None):
     prospect_list = []
 
     for p in prospects:
-        company = p['company_name']
-        city = p['city'] or ''
-        state = p['state'] or ''
+        # Support both sqlite3.Row (dict-like) and psycopg2 tuple access
+        company = p['company_name'] if hasattr(p, 'keys') else p[0]
+        city = (p['city'] if hasattr(p, 'keys') else p[1]) or ''
+        state = (p['state'] if hasattr(p, 'keys') else p[2]) or ''
+        score = p['score'] if hasattr(p, 'keys') else p[3]
+        score_meta_raw = p['score_meta'] if hasattr(p, 'keys') else p[4]
         key = f"{company.lower().strip()}|{city.lower()}|{state.lower()}"
         if key in seen_keys:
             continue
         seen_keys.add(key)
 
         score_meta = {}
-        if p['score_meta']:
+        if score_meta_raw:
             try:
-                score_meta = json.loads(p['score_meta'])
+                score_meta = json.loads(score_meta_raw)
             except (json.JSONDecodeError, TypeError):
                 pass
 
@@ -4336,7 +5824,7 @@ def compute_lead_timing_scores(workspace_id=None):
             'company_name': company,
             'city': city,
             'state': state,
-            'score': p['score'],
+            'score': score,
             'swim_lane_fit_score': score_meta.get('swim_lane_fit_score'),
             'competitive_difficulty': score_meta.get('competitive_difficulty', 'Medium'),
             'unit_band': score_meta.get('unit_band', ''),
@@ -4344,9 +5832,10 @@ def compute_lead_timing_scores(workspace_id=None):
         })
 
     for p in main_prospects:
-        company = p['company']
-        city = p['city'] or ''
-        state = p['state'] or ''
+        company = p['company'] if hasattr(p, 'keys') else p[0]
+        city = (p['city'] if hasattr(p, 'keys') else p[1]) or ''
+        state = (p['state'] if hasattr(p, 'keys') else p[2]) or ''
+        score = p['score'] if hasattr(p, 'keys') else p[3]
         key = f"{company.lower().strip()}|{city.lower()}|{state.lower()}"
         if key in seen_keys:
             continue
@@ -4355,7 +5844,7 @@ def compute_lead_timing_scores(workspace_id=None):
             'company_name': company,
             'city': city,
             'state': state,
-            'score': p['score'],
+            'score': score,
             'swim_lane_fit_score': None,
             'competitive_difficulty': 'Medium',
             'unit_band': '',
@@ -4482,10 +5971,761 @@ def run_daily_optimization():
         materialize_weighted_signals(days=90)
         compute_market_momentum()
         compute_lead_timing_scores()
+        # SPI: precompute final scores after momentum/timing are fresh
+        precompute_final_scores()
+        invalidate_search_cache()
         print("[Optimization] Daily optimization complete.")
     except Exception as e:
         print(f"[Optimization] Error: {e}")
         traceback.print_exc()
+
+
+# ===================================================================
+# SEARCH PERFORMANCE INDEX (SPI) ENGINE
+# Steps 1-9: Metrics, Precomputation, Caching, City Discovery, Guardrails
+# ===================================================================
+
+# --- STEP 1: Search Request Logging ---
+
+def _log_search_request(endpoint, response_time_ms, result_count, cache_hit, city=None, state=None):
+    """Log an individual search request for metrics aggregation."""
+    try:
+        conn = _get_db_conn()
+        c = conn.cursor()
+        c.execute('''INSERT INTO search_request_log (id, endpoint, response_time_ms, result_count, cache_hit, city, state)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                  (str(uuid.uuid4()), endpoint, response_time_ms, result_count, bool(cache_hit), city, state))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f'[SPI] Failed to log search request: {e}')
+
+
+def aggregate_search_metrics_daily():
+    """Aggregate search_request_log into search_metrics_daily. Runs nightly."""
+    print("[SPI] Aggregating daily search metrics...")
+    conn = _get_db_conn()
+    c = conn.cursor()
+
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    yesterday = (datetime.utcnow() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+    # Aggregate yesterday's requests
+    c.execute('''SELECT response_time_ms, result_count, cache_hit
+                 FROM search_request_log
+                 WHERE created_at >= ? AND created_at < ?''', (yesterday, today))
+    rows = c.fetchall()
+
+    if not rows:
+        conn.close()
+        print("[SPI] No search requests to aggregate for yesterday.")
+        return
+
+    times = [r[0] for r in rows]
+    counts = [r[1] for r in rows]
+    cache_hits = sum(1 for r in rows if r[2])
+    null_results = sum(1 for r in rows if r[1] == 0)
+
+    times_sorted = sorted(times)
+    total = len(times)
+    avg_time = sum(times) / total
+    p95_idx = int(total * 0.95)
+    p95_time = times_sorted[min(p95_idx, total - 1)]
+    first_result_times = [t for t, cnt in zip(times, counts) if cnt > 0]
+    avg_first_result = sum(first_result_times) / len(first_result_times) if first_result_times else 0
+
+    metric_id = str(uuid.uuid4())
+    c.execute('''INSERT INTO search_metrics_daily
+                 (id, date, avg_response_time_ms, p95_response_time_ms, time_to_first_result_ms,
+                  null_result_rate, avg_results_returned, total_searches, cache_hit_rate)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (date) DO UPDATE SET
+                    avg_response_time_ms = EXCLUDED.avg_response_time_ms,
+                    p95_response_time_ms = EXCLUDED.p95_response_time_ms,
+                    time_to_first_result_ms = EXCLUDED.time_to_first_result_ms,
+                    null_result_rate = EXCLUDED.null_result_rate,
+                    avg_results_returned = EXCLUDED.avg_results_returned,
+                    total_searches = EXCLUDED.total_searches,
+                    cache_hit_rate = EXCLUDED.cache_hit_rate''',
+              (metric_id, yesterday, round(avg_time, 2), round(p95_time, 2), round(avg_first_result, 2),
+               round(null_results / total, 4), round(sum(counts) / total, 2), total,
+               round(cache_hits / total, 4)))
+
+    # Cleanup old request logs (keep 14 days)
+    cutoff = (datetime.utcnow() - timedelta(days=14)).isoformat()
+    c.execute('DELETE FROM search_request_log WHERE created_at < ?', (cutoff,))
+
+    conn.commit()
+    conn.close()
+    print(f"[SPI] Aggregated {total} searches for {yesterday}: avg={avg_time:.0f}ms, p95={p95_time:.0f}ms, cache_hit={cache_hits/total:.1%}")
+
+
+def compute_spi_daily():
+    """
+    Compute the Search Performance Index (SPI) score for the most recent day.
+    SPI = (0.50 * speed_score) + (0.25 * signal_density_score) + (0.15 * freshness_score) + (0.10 * city_coverage_score)
+    All sub-scores normalized to 0-100.
+    """
+    print("[SPI] Computing daily SPI score...")
+    try:
+        conn = _get_db_conn()
+        c = conn.cursor()
+        yesterday = (datetime.utcnow() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+        # Get yesterday's metrics
+        c.execute('SELECT avg_response_time_ms, p95_response_time_ms, null_result_rate, avg_results_returned, cache_hit_rate FROM search_metrics_daily WHERE date = ?', (yesterday,))
+        row = c.fetchone()
+        if not row:
+            conn.close()
+            print("[SPI] No metrics for yesterday; skipping SPI computation.")
+            return
+
+        avg_time, p95_time, null_rate, avg_results, cache_rate = row
+
+        # Speed score: lower avg response time = higher score
+        # Target: <2000ms = 100, >10000ms = 0
+        speed_score = max(0.0, min(100.0, (1.0 - (float(avg_time or 0) - 2000) / 8000) * 100))
+
+        # Signal density score: based on avg results returned and non-null rate
+        density_raw = (float(avg_results or 0) / max(1, 10)) * (1.0 - float(null_rate or 0))
+        signal_density_score = max(0.0, min(100.0, density_raw * 100))
+
+        # Freshness score: based on recent signal recency from weighted_signals
+        cutoff_7d = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        cutoff_30d = (datetime.utcnow() - timedelta(days=30)).isoformat()
+        c.execute('SELECT COUNT(*) FROM weighted_signals WHERE published_at >= ?', (cutoff_7d,))
+        recent_signals = c.fetchone()[0] or 0
+        c.execute('SELECT COUNT(*) FROM weighted_signals WHERE published_at >= ?', (cutoff_30d,))
+        total_signals = c.fetchone()[0] or 0
+        freshness_ratio = recent_signals / max(1, total_signals)
+        freshness_score = max(0.0, min(100.0, freshness_ratio * 100 * (7.0 / 30.0 * 4.0)))  # normalized for weekly proportion
+
+        # City coverage score: active_cities / candidate_cities
+        c.execute("SELECT COUNT(DISTINCT city || '|' || state) FROM weighted_signals WHERE published_at >= ?", (cutoff_30d,))
+        active_cities = c.fetchone()[0] or 0
+        c.execute('SELECT COUNT(*) FROM city_signal_metrics')
+        candidate_cities = c.fetchone()[0] or 0
+        if candidate_cities == 0:
+            # Fallback: use number of tracked cities in the 5 states
+            candidate_cities = max(active_cities, 1)
+        city_coverage_score = max(0.0, min(100.0, (active_cities / max(1, candidate_cities)) * 100))
+
+        # Composite SPI
+        spi_score = (
+            0.50 * speed_score +
+            0.25 * signal_density_score +
+            0.15 * freshness_score +
+            0.10 * city_coverage_score
+        )
+        spi_score = round(max(0.0, min(100.0, spi_score)), 1)
+
+        # Update the daily metrics row with SPI scores
+        c.execute('''UPDATE search_metrics_daily SET
+                        spi_score = ?, speed_score = ?, signal_density_score = ?,
+                        freshness_score = ?, city_coverage_score = ?
+                     WHERE date = ?''',
+                  (spi_score, round(speed_score, 1), round(signal_density_score, 1),
+                   round(freshness_score, 1), round(city_coverage_score, 1), yesterday))
+
+        conn.commit()
+        conn.close()
+        print(f"[SPI] Daily SPI for {yesterday}: {spi_score} (speed={speed_score:.1f}, density={signal_density_score:.1f}, fresh={freshness_score:.1f}, coverage={city_coverage_score:.1f})")
+    except Exception as e:
+        print(f"[SPI] Error computing SPI: {e}")
+        traceback.print_exc()
+
+
+def get_baseline_metrics(days=7):
+    """Return baseline metrics for last N days."""
+    conn = _get_db_conn()
+    c = conn.cursor()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%d')
+    c.execute('SELECT * FROM search_metrics_daily WHERE date >= ? ORDER BY date DESC', (cutoff,))
+    rows = c.fetchall()
+    conn.close()
+    return [{'date': r[1], 'avg_response_time_ms': r[2], 'p95_response_time_ms': r[3],
+             'time_to_first_result_ms': r[4], 'null_result_rate': r[5], 'avg_results_returned': r[6],
+             'total_searches': r[7], 'cache_hit_rate': r[8],
+             'spi_score': r[9] if len(r) > 9 else 0,
+             'speed_score': r[10] if len(r) > 10 else 0,
+             'signal_density_score': r[11] if len(r) > 11 else 0,
+             'freshness_score': r[12] if len(r) > 12 else 0,
+             'city_coverage_score': r[13] if len(r) > 13 else 0,
+             } for r in rows]
+
+
+# --- STEP 3: Precompute Final Scores (NO LOGIC CHANGES) ---
+
+def precompute_final_scores():
+    """
+    Nightly job: recompute final_score for all prospects and run_prospects.
+    formula: final_score = base_score * city_boost * freshness_multiplier
+    The underlying scoring formula (capital_event, construction_stage, etc.) is UNCHANGED.
+    This only moves the city_boost/freshness multiplication out of the request path.
+    """
+    import math
+    print("[SPI] Precomputing final scores...")
+
+    # Load search config
+    config = _get_search_config()
+    city_boost = json.loads(config.get('city_boost', '{}'))
+    decay_rate = config.get('freshness_decay_rate', 0.03)
+
+    conn = _get_db_conn()
+    c = conn.cursor()
+
+    # Precompute for prospects table
+    c.execute('SELECT id, score, city, state, created_at FROM prospects WHERE score > 0')
+    prospect_rows = c.fetchall()
+    updated = 0
+    for row in prospect_rows:
+        pid, base_score, city, state, created_at = row[0], row[1] or 0, row[2] or '', row[3] or '', row[4]
+        boost = city_boost.get(city, 1.0)
+        # Freshness decay based on created_at
+        days_old = 0
+        if created_at:
+            try:
+                if hasattr(created_at, 'isoformat'):
+                    dt = created_at
+                elif 'T' in str(created_at):
+                    dt = datetime.fromisoformat(str(created_at).replace('Z', '+00:00')).replace(tzinfo=None)
+                else:
+                    dt = datetime.strptime(str(created_at)[:10], '%Y-%m-%d')
+                days_old = max(0, (datetime.utcnow() - dt).days)
+            except (ValueError, TypeError):
+                days_old = 0
+        freshness_mult = math.exp(-decay_rate * days_old)
+        final = round(base_score * boost * freshness_mult, 2)
+        c.execute('UPDATE prospects SET final_score = ? WHERE id = ?', (final, pid))
+        updated += 1
+
+    # Precompute for run_prospects table
+    c.execute('SELECT id, score, city, state, created_at FROM run_prospects WHERE score > 0')
+    rp_rows = c.fetchall()
+    for row in rp_rows:
+        rpid, base_score, city, state, created_at = row[0], row[1] or 0, row[2] or '', row[3] or '', row[4]
+        boost = city_boost.get(city, 1.0)
+        days_old = 0
+        if created_at:
+            try:
+                if hasattr(created_at, 'isoformat'):
+                    dt = created_at
+                elif 'T' in str(created_at):
+                    dt = datetime.fromisoformat(str(created_at).replace('Z', '+00:00')).replace(tzinfo=None)
+                else:
+                    dt = datetime.strptime(str(created_at)[:10], '%Y-%m-%d')
+                days_old = max(0, (datetime.utcnow() - dt).days)
+            except (ValueError, TypeError):
+                days_old = 0
+        freshness_mult = math.exp(-decay_rate * days_old)
+        final = round(base_score * boost * freshness_mult, 2)
+        c.execute('UPDATE run_prospects SET final_score = ? WHERE id = ?', (final, rpid))
+        updated += 1
+
+    conn.commit()
+    conn.close()
+    print(f"[SPI] Precomputed final_score for {updated} prospects.")
+    return updated
+
+
+# --- STEP 4: Smart Caching Layer ---
+
+_search_result_cache = {}  # city:filters_hash -> { results, timestamp }
+_SEARCH_CACHE_TTL = 6 * 3600  # 6 hours
+
+def _cache_key_for_search(city, filters=None):
+    """Generate cache key: search:{city}:{filters_hash}"""
+    filters_str = json.dumps(filters or {}, sort_keys=True)
+    fhash = hashlib.md5(filters_str.encode()).hexdigest()[:12]
+    return f"search:{(city or '').lower().strip()}:{fhash}"
+
+
+def _get_cached_search(city, filters=None):
+    """Return cached top-20 results for a city, or None if miss."""
+    key = _cache_key_for_search(city, filters)
+    entry = _search_result_cache.get(key)
+    if entry:
+        age = (datetime.utcnow() - entry['timestamp']).total_seconds()
+        if age < _SEARCH_CACHE_TTL:
+            return entry['results']
+        else:
+            del _search_result_cache[key]
+    return None
+
+
+def _set_cached_search(city, results, filters=None):
+    """Cache top-20 results for a city."""
+    key = _cache_key_for_search(city, filters)
+    _search_result_cache[key] = {
+        'results': results[:20],
+        'timestamp': datetime.utcnow(),
+    }
+
+
+def invalidate_search_cache():
+    """Invalidate all search result caches. Called after nightly recompute or city expansion."""
+    global _search_result_cache
+    _search_result_cache = {}
+    print("[SPI] Search result cache invalidated.")
+
+
+# --- STEP 6: City Discovery Model ---
+
+def _normalize_0_1(values):
+    """Normalize a list of values to 0-1 scale."""
+    if not values:
+        return []
+    mn, mx = min(values), max(values)
+    if mx == mn:
+        return [0.5] * len(values)
+    return [(v - mn) / (mx - mn) for v in values]
+
+
+def compute_city_signal_scores():
+    """
+    Compute composite_city_score for all tracked cities from existing signal data.
+    Uses ONLY existing cached/stored data (no paid APIs).
+
+    composite_city_score =
+      (permit_growth_rate * 0.25) +
+      (article_velocity * 0.20) +
+      (capital_event_count * 0.25) +
+      (land_transaction_count * 0.15) +
+      (population_growth_proxy * 0.15)
+    """
+    print("[CityDiscovery] Computing city signal scores...")
+    conn = _get_db_conn()
+    c = conn.cursor()
+
+    # Gather signal counts per city from weighted_signals (last 30 days)
+    cutoff_30d = (datetime.utcnow() - timedelta(days=30)).isoformat()
+    cutoff_90d = (datetime.utcnow() - timedelta(days=90)).isoformat()
+
+    c.execute('''SELECT state, city, topic, signal_weight, published_at
+                 FROM weighted_signals WHERE published_at >= ?''', (cutoff_90d,))
+    signals = c.fetchall()
+    conn.close()
+
+    if not signals:
+        print("[CityDiscovery] No signals to compute city scores.")
+        return 0
+
+    # Aggregate by city
+    city_data = {}
+    for row in signals:
+        state, city, topic, weight, pub_date = row[0], row[1], row[2] or '', row[3] or 1, row[4] or ''
+        key = f"{city}|{state}"
+        if key not in city_data:
+            city_data[key] = {'city': city, 'state': state, 'permits': 0, 'articles': 0,
+                              'capital_events': 0, 'land_transactions': 0,
+                              'articles_30d': 0, 'articles_90d': 0}
+        t = topic.lower()
+        is_recent = pub_date >= cutoff_30d if pub_date else False
+
+        if 'permit' in t or 'rezoning' in t or 'entitlement' in t or 'zoning' in t:
+            city_data[key]['permits'] += weight
+        elif 'financing' in t or 'capital' in t or 'credit' in t or 'fund' in t or 'jv' in t:
+            city_data[key]['capital_events'] += weight
+        elif 'acquisition' in t or 'sale' in t or 'purchase' in t or 'land' in t or 'disposition' in t:
+            city_data[key]['land_transactions'] += weight
+        else:
+            city_data[key]['articles'] += weight
+
+        if is_recent:
+            city_data[key]['articles_30d'] += 1
+        city_data[key]['articles_90d'] += 1
+
+    cities = list(city_data.values())
+    if not cities:
+        return 0
+
+    # Compute raw metrics
+    for cd in cities:
+        # Permit growth: permits weighted count
+        cd['permit_growth_rate'] = cd['permits']
+        # Article velocity: articles in 30d
+        cd['article_velocity'] = cd['articles_30d']
+        # Capital event count: weighted
+        cd['capital_event_count_raw'] = cd['capital_events']
+        # Land transaction count: weighted
+        cd['land_transaction_count_raw'] = cd['land_transactions']
+        # Population growth proxy: total signal volume in 90d (proxy for market activity)
+        cd['population_growth_proxy'] = cd['articles_90d']
+
+    # Normalize all inputs to 0-1 scale
+    permit_vals = _normalize_0_1([cd['permit_growth_rate'] for cd in cities])
+    article_vals = _normalize_0_1([cd['article_velocity'] for cd in cities])
+    capital_vals = _normalize_0_1([cd['capital_event_count_raw'] for cd in cities])
+    land_vals = _normalize_0_1([cd['land_transaction_count_raw'] for cd in cities])
+    pop_vals = _normalize_0_1([cd['population_growth_proxy'] for cd in cities])
+
+    # Compute composite score
+    conn = _get_db_conn()
+    c = conn.cursor()
+    updated = 0
+
+    for i, cd in enumerate(cities):
+        composite = (
+            permit_vals[i] * 0.25 +
+            article_vals[i] * 0.20 +
+            capital_vals[i] * 0.25 +
+            land_vals[i] * 0.15 +
+            pop_vals[i] * 0.15
+        )
+        composite = round(composite, 4)
+
+        cid = hashlib.md5(f"{cd['city']}:{cd['state']}".encode()).hexdigest()
+        c.execute('''INSERT INTO city_signal_metrics
+                     (id, city, state, permit_growth_rate, article_velocity, capital_event_count,
+                      land_transaction_count, population_growth_proxy, composite_city_score, last_updated)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                     ON CONFLICT (city, state) DO UPDATE SET
+                        permit_growth_rate = EXCLUDED.permit_growth_rate,
+                        article_velocity = EXCLUDED.article_velocity,
+                        capital_event_count = EXCLUDED.capital_event_count,
+                        land_transaction_count = EXCLUDED.land_transaction_count,
+                        population_growth_proxy = EXCLUDED.population_growth_proxy,
+                        composite_city_score = EXCLUDED.composite_city_score,
+                        last_updated = CURRENT_TIMESTAMP''',
+                  (cid, cd['city'], cd['state'], round(permit_vals[i], 4), round(article_vals[i], 4),
+                   round(capital_vals[i], 4), round(land_vals[i], 4), round(pop_vals[i], 4), composite))
+        updated += 1
+
+    conn.commit()
+    conn.close()
+    print(f"[CityDiscovery] Scored {updated} cities.")
+    return updated
+
+
+# --- STEP 7: Weekly Auto-Discovery Job ---
+
+def run_weekly_city_discovery():
+    """
+    Weekly job: identify top 5 emerging cities not already in primary ingestion.
+    Adds them as candidate_city to city_signal_metrics.
+    Does NOT auto-boost ranking — requires manual promotion.
+    """
+    from discovery_config import DISCOVERY_CITIES
+    print("[CityDiscovery] Running weekly city discovery...")
+
+    # First recompute scores
+    compute_city_signal_scores()
+
+    conn = _get_db_conn()
+    c = conn.cursor()
+
+    # Get current primary cities
+    primary_cities = set()
+    for dc in DISCOVERY_CITIES:
+        primary_cities.add(f"{dc['city'].lower()}|{dc['state'].lower()}")
+
+    # Get top cities by composite score, excluding primary
+    c.execute('''SELECT city, state, composite_city_score
+                 FROM city_signal_metrics
+                 ORDER BY composite_city_score DESC
+                 LIMIT 50''')
+    rows = c.fetchall()
+
+    candidates = []
+    for row in rows:
+        key = f"{row[0].lower()}|{row[1].lower()}"
+        if key not in primary_cities and row[2] > 0:
+            candidates.append({'city': row[0], 'state': row[1], 'score': row[2]})
+            if len(candidates) >= 5:
+                break
+
+    # Flag as candidate_city
+    for cand in candidates:
+        c.execute('''UPDATE city_signal_metrics SET status = 'candidate_city'
+                     WHERE city = ? AND state = ?''', (cand['city'], cand['state']))
+
+    conn.commit()
+    conn.close()
+    city_names = [c['city'] + ', ' + c['state'] for c in candidates]
+    print(f"[CityDiscovery] Identified {len(candidates)} candidate cities: {city_names}")
+    return candidates
+
+
+# --- STEP 8: Search Config (City Boost) ---
+
+def _get_search_config():
+    """Get current search config (or defaults)."""
+    conn = _get_db_conn()
+    c = conn.cursor()
+    c.execute('SELECT recency_multiplier, freshness_decay_rate, city_boost, last_updated FROM search_config ORDER BY last_updated DESC LIMIT 1')
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return {'recency_multiplier': 1.0, 'freshness_decay_rate': 0.03, 'city_boost': '{}'}
+    return {
+        'recency_multiplier': row[0],
+        'freshness_decay_rate': row[1],
+        'city_boost': row[2] or '{}',
+    }
+
+
+def _save_search_config(recency_multiplier=None, freshness_decay_rate=None, city_boost=None, reason='manual'):
+    """Save search config with version history and safety checks."""
+    current = _get_search_config()
+
+    new_rm = recency_multiplier if recency_multiplier is not None else current['recency_multiplier']
+    new_fdr = freshness_decay_rate if freshness_decay_rate is not None else current['freshness_decay_rate']
+    new_cb = json.dumps(city_boost) if city_boost is not None else current['city_boost']
+
+    # PART 3: Safety guardrail — no weight change > 15% per cycle
+    if city_boost:
+        old_boosts = json.loads(current['city_boost'])
+        for city_key, new_val in city_boost.items():
+            old_val = old_boosts.get(city_key, 1.0)
+            if old_val > 0 and abs(new_val - old_val) / old_val > 0.15:
+                print(f"[SPI-GUARD] Rejected boost change for {city_key}: {old_val} -> {new_val} (>15% change)")
+                city_boost[city_key] = old_val * (1.15 if new_val > old_val else 0.85)
+        new_cb = json.dumps(city_boost)
+
+    conn = _get_db_conn()
+    c = conn.cursor()
+
+    # Save new config
+    config_id = str(uuid.uuid4())
+    c.execute('''INSERT INTO search_config (id, recency_multiplier, freshness_decay_rate, city_boost)
+                 VALUES (?, ?, ?, ?)''', (config_id, new_rm, new_fdr, new_cb))
+
+    # Save version snapshot with current performance metrics
+    metrics = get_baseline_metrics(days=1)
+    avg_resp = metrics[0]['avg_response_time_ms'] if metrics else None
+    p95_resp = metrics[0]['p95_response_time_ms'] if metrics else None
+
+    version_id = str(uuid.uuid4())
+    snapshot = json.dumps({'recency_multiplier': new_rm, 'freshness_decay_rate': new_fdr, 'city_boost': new_cb})
+    c.execute('''INSERT INTO search_config_versions (id, config_snapshot, avg_response_time_ms, p95_response_time_ms, change_reason)
+                 VALUES (?, ?, ?, ?, ?)''', (version_id, snapshot, avg_resp, p95_resp, reason))
+
+    conn.commit()
+    conn.close()
+    print(f"[SPI] Search config saved (version {version_id[:8]}). Reason: {reason}")
+
+
+# --- STEP 9: Freshness Prioritization (via final_score) ---
+# Implemented in precompute_final_scores() above:
+#   freshness_score = exp(-decay_rate * days_since_last_activity)
+#   final_score = base_score * city_boost * freshness_score
+# Decay rate adjustable via search_config.freshness_decay_rate
+
+
+# --- PART 3: Safety Guardrails ---
+
+def _check_performance_regression():
+    """
+    Safety check: if avg_response_time increased > 15% vs last 7-day baseline, auto-rollback config.
+    """
+    metrics = get_baseline_metrics(days=7)
+    if len(metrics) < 2:
+        return  # Not enough data
+
+    recent = metrics[0]  # yesterday
+    baseline_avg = sum(m['avg_response_time_ms'] for m in metrics[1:]) / len(metrics[1:])
+
+    if baseline_avg > 0 and recent['avg_response_time_ms'] > baseline_avg * 1.15:
+        print(f"[SPI-GUARD] Performance regression detected! "
+              f"Yesterday: {recent['avg_response_time_ms']:.0f}ms vs baseline: {baseline_avg:.0f}ms")
+        # Rollback to default config
+        _save_search_config(recency_multiplier=1.0, freshness_decay_rate=0.03, city_boost={}, reason='auto_rollback_performance')
+        invalidate_search_cache()
+        print("[SPI-GUARD] Auto-rolled back search config to defaults.")
+
+
+# --- Combined SPI Nightly Job ---
+
+def run_spi_nightly():
+    """
+    Master SPI job: metrics → scores → cache invalidation → performance check.
+    Runs after daily optimization.
+    """
+    print("[SPI] Starting nightly SPI pipeline...")
+    try:
+        # Step 1: Aggregate metrics
+        aggregate_search_metrics_daily()
+
+        # Step 3: Precompute final scores
+        precompute_final_scores()
+
+        # Step 4: Invalidate stale caches
+        invalidate_search_cache()
+
+        # Step 6: Recompute city scores
+        compute_city_signal_scores()
+
+        # Part 3: Check for performance regression
+        _check_performance_regression()
+
+        # Step 7: Compute daily SPI composite score
+        compute_spi_daily()
+
+        print("[SPI] Nightly SPI pipeline complete.")
+    except Exception as e:
+        print(f"[SPI] Error in nightly pipeline: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+# --- SPI API Endpoints ---
+
+@app.route('/api/spi/metrics', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_spi_metrics():
+    """Return search performance metrics for last N days."""
+    days = min(int(request.args.get('days', 7)), 90)
+    metrics = get_baseline_metrics(days=days)
+    return jsonify({'success': True, 'metrics': metrics, 'days': days})
+
+
+@app.route('/api/spi/bottleneck-report', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_spi_bottleneck_report():
+    """STEP 2: Return structured bottleneck analysis."""
+    report = {
+        'bottlenecks': [
+            {
+                'area': 'SerpAPI Calls',
+                'severity': 'high',
+                'description': 'Search endpoint makes 4 synchronous SerpAPI queries (3s min delay each = 12s+)',
+                'impact_ms': 12000,
+                'mitigation': 'Aggressive caching (24h TTL already in place) + precomputed result cache',
+            },
+            {
+                'area': 'Claude API Extraction',
+                'severity': 'high',
+                'description': 'Claude sonnet call for prospect extraction is synchronous in request path (~3-8s)',
+                'impact_ms': 5000,
+                'mitigation': 'In-memory result cache (1h TTL) avoids re-extraction for same city',
+            },
+            {
+                'area': 'Score Computation',
+                'severity': 'low',
+                'description': 'Scores are computed by Claude during ingestion, NOT per-request. Already optimal.',
+                'impact_ms': 0,
+                'mitigation': 'final_score precomputation adds city_boost + freshness decay nightly',
+            },
+            {
+                'area': 'Database Queries',
+                'severity': 'medium',
+                'description': 'SELECT * FROM prospects ORDER BY score DESC — full table scan on unindexed column',
+                'impact_ms': 50,
+                'mitigation': 'Added indexes on city, state, score DESC, final_score DESC, created_at',
+            },
+            {
+                'area': 'External Enrichment',
+                'severity': 'low',
+                'description': 'No enrichment calls during /api/prospects read path. SerpAPI only on /api/search.',
+                'impact_ms': 0,
+                'mitigation': 'N/A — already decoupled',
+            },
+            {
+                'area': 'Sorting on Computed Expressions',
+                'severity': 'low',
+                'description': 'ORDER BY score DESC uses raw column. No computed expressions in sort.',
+                'impact_ms': 5,
+                'mitigation': 'Added B-tree index on score DESC + final_score DESC',
+            },
+        ],
+        'summary': {
+            'critical_bottleneck': 'Synchronous SerpAPI + Claude API calls (~15-20s per search)',
+            'already_optimized': ['Score computation (Claude at ingestion time)', 'SerpAPI cache (24h)', 'In-memory result cache (1h)'],
+            'new_optimizations': ['Precomputed final_score (nightly)', 'Smart city result cache (6h)', 'Database index optimization', 'City boost multiplier (config-based)'],
+        },
+    }
+    return jsonify({'success': True, 'report': report})
+
+
+@app.route('/api/spi/config', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_spi_config_get():
+    """Get current search config."""
+    config = _get_search_config()
+    config['city_boost'] = json.loads(config.get('city_boost', '{}'))
+    return jsonify({'success': True, 'config': config})
+
+
+@app.route('/api/spi/config', methods=['PUT'])
+@require_auth
+@require_role('admin')
+def api_spi_config_update():
+    """Update search config (with safety guardrails)."""
+    data = request.json or {}
+    _save_search_config(
+        recency_multiplier=data.get('recency_multiplier'),
+        freshness_decay_rate=data.get('freshness_decay_rate'),
+        city_boost=data.get('city_boost'),
+        reason=data.get('reason', 'admin_update'),
+    )
+    # Recompute scores with new config
+    precompute_final_scores()
+    invalidate_search_cache()
+    return jsonify({'success': True, 'message': 'Config updated. Scores recomputed.'})
+
+
+@app.route('/api/spi/config/history', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_spi_config_history():
+    """Get config version history with performance snapshots."""
+    conn = _get_db_conn()
+    c = conn.cursor()
+    c.execute('''SELECT id, config_snapshot, avg_response_time_ms, p95_response_time_ms, change_reason, created_at
+                 FROM search_config_versions ORDER BY created_at DESC LIMIT 20''')
+    rows = c.fetchall()
+    conn.close()
+    versions = [{'id': r[0], 'config': json.loads(r[1]), 'avg_response_time_ms': r[2],
+                 'p95_response_time_ms': r[3], 'reason': r[4], 'created_at': _safe_ts(r[5])} for r in rows]
+    return jsonify({'success': True, 'versions': versions})
+
+
+@app.route('/api/spi/city-discovery', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_spi_city_discovery():
+    """Get city discovery rankings and candidates."""
+    conn = _get_db_conn()
+    c = conn.cursor()
+    c.execute('''SELECT city, state, permit_growth_rate, article_velocity, capital_event_count,
+                        land_transaction_count, population_growth_proxy, composite_city_score, status, last_updated
+                 FROM city_signal_metrics
+                 ORDER BY composite_city_score DESC LIMIT 50''')
+    rows = c.fetchall()
+    conn.close()
+    cities = [{'city': r[0], 'state': r[1], 'permit_growth_rate': r[2], 'article_velocity': r[3],
+               'capital_event_count': r[4], 'land_transaction_count': r[5], 'population_growth_proxy': r[6],
+               'composite_city_score': r[7], 'status': r[8], 'last_updated': r[9]} for r in rows]
+    return jsonify({'success': True, 'cities': cities})
+
+
+@app.route('/api/spi/indexes', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_spi_indexes():
+    """STEP 5: Return list of indexes created for search optimization."""
+    indexes = [
+        {'table': 'prospects', 'index': 'idx_prospects_city', 'columns': 'city'},
+        {'table': 'prospects', 'index': 'idx_prospects_state', 'columns': 'state'},
+        {'table': 'prospects', 'index': 'idx_prospects_score', 'columns': 'score DESC'},
+        {'table': 'prospects', 'index': 'idx_prospects_final_score', 'columns': 'final_score DESC'},
+        {'table': 'prospects', 'index': 'idx_prospects_created', 'columns': 'created_at DESC'},
+        {'table': 'run_prospects', 'index': 'idx_run_prospects_city', 'columns': 'city'},
+        {'table': 'run_prospects', 'index': 'idx_run_prospects_state', 'columns': 'state'},
+        {'table': 'run_prospects', 'index': 'idx_run_prospects_final_score', 'columns': 'final_score DESC'},
+        {'table': 'run_prospects', 'index': 'idx_run_prospects_score', 'columns': 'run_id, score DESC'},
+        {'table': 'weighted_signals', 'index': 'idx_weighted_signals_state', 'columns': 'state, city'},
+        {'table': 'weighted_signals', 'index': 'idx_weighted_signals_date', 'columns': 'published_at'},
+        {'table': 'weighted_signals', 'index': 'idx_weighted_signals_entity', 'columns': 'entity_name'},
+        {'table': 'market_momentum', 'index': 'idx_market_momentum_state', 'columns': 'state, city, window_end_date'},
+        {'table': 'lead_timing_scores', 'index': 'idx_lead_timing_score', 'columns': 'call_timing_score DESC'},
+        {'table': 'city_signal_metrics', 'index': 'idx_city_signal_score', 'columns': 'composite_city_score DESC'},
+        {'table': 'search_request_log', 'index': 'idx_search_request_log_date', 'columns': 'created_at'},
+    ]
+    return jsonify({'success': True, 'indexes': indexes, 'total': len(indexes)})
 
 
 # ===================================================================
@@ -4576,11 +6816,15 @@ def run_trend_detection():
     now = datetime.utcnow()
     cutoff_7d = (now - timedelta(days=7)).isoformat()
 
-    # Group by (state, city, topic)
+    # Group by (state, city, topic) — handle null topics
     from collections import defaultdict
     groups = defaultdict(lambda: {'items_7d': 0, 'items_30d': 0})
     for item in all_items:
-        key = (item['state'], item['city'], item['topic'])
+        topic = item.get('topic') or 'other'
+        if not topic.strip():
+            topic = 'other'
+        item['topic'] = topic
+        key = (item['state'], item['city'], topic)
         groups[key]['items_30d'] += 1
         if item['date_str'] and item['date_str'] >= cutoff_7d:
             groups[key]['items_7d'] += 1
@@ -4665,7 +6909,7 @@ def generate_weekly_brief():
 Generate the Weekly Sunbelt Risk Intelligence Brief for {context['week']}.
 
 DATA:
-{json.dumps(context, indent=2)}
+{json.dumps(context, indent=2, default=str)}
 
 Write a structured report with these EXACT sections (use markdown headers):
 
@@ -4722,11 +6966,45 @@ Return the brief as markdown text."""
     conn = _get_db_conn()
     c = conn.cursor()
     c.execute('INSERT INTO weekly_briefs (id, brief_json, week_start, week_end) VALUES (?, ?, ?, ?)',
-              (brief_id, json.dumps(brief_data), week_start, week_end))
+              (brief_id, json.dumps(brief_data, default=str), week_start, week_end))
     conn.commit()
     conn.close()
     print(f"[WeeklyBrief] Brief generated and stored (id={brief_id})")
     return brief_id
+
+
+# --- Intelligence Feed API ---
+
+@app.route('/api/intelligence-feed', methods=['GET'])
+@require_auth
+def api_intelligence_feed():
+    """Return latest intelligence events for the live feed."""
+    limit = min(int(request.args.get('limit', 100)), 500)
+    event_type = request.args.get('type')
+    try:
+        conn = _get_db_conn()
+        c = conn.cursor()
+        if event_type:
+            c.execute(
+                'SELECT * FROM intelligence_events WHERE event_type = ? ORDER BY created_at DESC LIMIT ?',
+                (event_type, limit)
+            )
+        else:
+            c.execute(
+                'SELECT * FROM intelligence_events ORDER BY created_at DESC LIMIT ?',
+                (limit,)
+            )
+        rows = c.fetchall()
+        cols = [d[0] for d in c.description] if c.description else []
+        conn.close()
+        events = [dict(zip(cols, r)) for r in rows]
+        # Normalize timestamps
+        for ev in events:
+            if 'created_at' in ev:
+                ev['created_at'] = _safe_ts(ev['created_at'])
+        return jsonify({'success': True, 'events': events})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # --- Intelligence API Endpoints ---
@@ -4760,7 +7038,7 @@ def api_intelligence_trends():
         trends.append({
             'id': r[0], 'state': r[1], 'city': r[2], 'topic': r[3],
             'count_7d': r[4], 'count_30d': r[5], 'trend_ratio': r[6],
-            'classification': r[7], 'computed_at': r[8],
+            'classification': r[7], 'computed_at': _safe_ts(r[8]),
         })
     conn.close()
     return jsonify({'success': True, 'trends': trends})
@@ -4773,7 +7051,7 @@ def api_intelligence_briefs():
     conn = _get_db_conn()
     c = conn.cursor()
     c.execute('SELECT id, generated_at, week_start, week_end FROM weekly_briefs ORDER BY generated_at DESC LIMIT 20')
-    briefs = [{'id': r[0], 'generated_at': r[1], 'week_start': r[2], 'week_end': r[3]} for r in c.fetchall()]
+    briefs = [{'id': r[0], 'generated_at': _safe_ts(r[1]), 'week_start': _safe_ts(r[2]), 'week_end': _safe_ts(r[3])} for r in c.fetchall()]
     conn.close()
     return jsonify({'success': True, 'briefs': briefs})
 
@@ -4794,9 +7072,9 @@ def api_intelligence_briefs_latest():
         'brief': {
             'id': row[0],
             'content': json.loads(row[1]) if row[1] else {},
-            'generated_at': row[2],
-            'week_start': row[3],
-            'week_end': row[4],
+            'generated_at': _safe_ts(row[2]),
+            'week_start': _safe_ts(row[3]),
+            'week_end': _safe_ts(row[4]),
         }
     })
 
@@ -4817,9 +7095,9 @@ def api_intelligence_brief_detail(brief_id):
         'brief': {
             'id': row[0],
             'content': json.loads(row[1]) if row[1] else {},
-            'generated_at': row[2],
-            'week_start': row[3],
-            'week_end': row[4],
+            'generated_at': _safe_ts(row[2]),
+            'week_start': _safe_ts(row[3]),
+            'week_end': _safe_ts(row[4]),
         }
     })
 
@@ -5345,8 +7623,13 @@ def api_sunbelt_momentum():
                                   {'total_signals': len(signals), 'cities_scored': len(raw_scores)}),
         })
     except Exception as e:
-        app.logger.error(f'[sunbelt/momentum] Error: {e}')
-        return jsonify({'ok': False, 'error': 'Failed to compute momentum', 'details': str(e)}), 500
+        app.logger.error(f'[sunbelt/momentum] Error: {e}\n{traceback.format_exc()}')
+        return jsonify({
+            'ok': False,
+            'error': 'Failed to compute momentum',
+            'details': str(e),
+            'data': {'markets': []},
+        }), 500
 
 
 @app.route('/api/sunbelt/trends', methods=['GET'])
@@ -5377,12 +7660,14 @@ def api_sunbelt_trends():
 
         window_cutoff = (datetime.utcnow() - timedelta(days=window_days)).isoformat()
 
-        # Group by (state, city, topic)
+        # Group by (state, city, topic) — handle null topics safely
         groups = {}  # key -> {count_window, count_baseline, items_window}
         for s in signals:
             state = s.get('state') or None
             city = s.get('city') or None
-            topic = s.get('topic', 'other')
+            topic = s.get('topic') or 'other'
+            if not topic or not topic.strip():
+                topic = 'other'
             if topic_filter and topic.lower() != topic_filter:
                 continue
             key = f"{state or ''}|{city or ''}|{topic}"
@@ -5391,7 +7676,13 @@ def api_sunbelt_trends():
                                'count_window': 0, 'count_baseline': 0, 'items_window': []}
             g = groups[key]
             g['count_baseline'] += 1
-            if s.get('date_str', '') >= window_cutoff:
+            # Normalize date_str to string for comparison (Fix: datetime vs str TypeError)
+            date_val = s.get('date_str', '')
+            if isinstance(date_val, datetime):
+                date_val = date_val.isoformat()
+            elif not isinstance(date_val, str):
+                date_val = str(date_val) if date_val else ''
+            if date_val >= window_cutoff:
                 g['count_window'] += 1
                 if len(g['items_window']) < 5:
                     g['items_window'].append({
@@ -5399,7 +7690,7 @@ def api_sunbelt_trends():
                         'source_url': s.get('url') or None,
                         'city': city,
                         'state': state,
-                        'date': s.get('date_str', ''),
+                        'date': date_val,
                     })
 
         # Compute trend ratio and classify
@@ -5439,8 +7730,13 @@ def api_sunbelt_trends():
                                   {'total_signals': len(signals), 'trends_found': len(trends)}),
         })
     except Exception as e:
-        app.logger.error(f'[sunbelt/trends] Error: {e}')
-        return jsonify({'ok': False, 'error': 'Failed to compute trends', 'details': str(e)}), 500
+        app.logger.error(f'[sunbelt/trends] Error: {e}\n{traceback.format_exc()}')
+        return jsonify({
+            'ok': False,
+            'error': 'Failed to compute trends',
+            'details': str(e),
+            'data': {'trends': []},
+        }), 500
 
 
 @app.route('/api/sunbelt/state-rankings', methods=['GET'])
@@ -5733,7 +8029,7 @@ def _do_sparknotes():
 Analyze the following {len(items)} intelligence items from the "{tab}" view ({window_days}-day window) and produce a structured Sparknotes summary.
 
 ITEMS:
-{json.dumps(items, indent=2)}
+{json.dumps(items, indent=2, default=str)}
 
 Return ONLY valid JSON (no markdown fencing, no explanation) matching this EXACT schema:
 
@@ -5746,7 +8042,13 @@ Return ONLY valid JSON (no markdown fencing, no explanation) matching this EXACT
       "one_liner": "1 sentence distilling the item",
       "bullets": ["key point 1", "key point 2"],
       "why_it_matters": "1 sentence on insurance/brokerage relevance",
-      "suggested_next_step": "1 sentence actionable next step for a producer"
+      "suggested_next_step": "1 sentence actionable next step for a producer",
+      "opportunity_overview": "2-3 sentence opportunity overview for producers",
+      "entities": {{"developers": ["name1"], "lenders": ["name2"], "operators": ["name3"]}},
+      "deal_type": "acquisition|financing|construction|JV|lease-up|other",
+      "location": "City, ST",
+      "capital_involved": "$X million or null if not mentioned",
+      "timeline": "Expected timeline or null if not mentioned"
     }}
   ]
 }}
@@ -5800,7 +8102,7 @@ RULES:
         c = conn.cursor()
         summary_id = str(uuid.uuid4())
         c.execute('INSERT INTO sunbelt_summaries (id, tab, window_days, date_bucket, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-                  (summary_id, tab, window_days, date_bucket, json.dumps(payload), generated_at))
+                  (summary_id, tab, window_days, date_bucket, json.dumps(payload, default=str), generated_at))
         conn.commit()
         conn.close()
     except _IntegrityError:
@@ -5813,6 +8115,38 @@ RULES:
         app.logger.warning(f'[sparknotes] Cache write failed: {e}')
         try:
             conn.rollback()
+            conn.close()
+        except Exception:
+            pass
+
+    # Store per-article structured summaries (non-critical)
+    try:
+        conn = _get_db_conn()
+        c = conn.cursor()
+        for item_note in payload.get('sparknotes_by_item', []):
+            article_id = item_note.get('id', '')
+            if not article_id:
+                continue
+            entities = item_note.get('entities', {})
+            c.execute('''INSERT INTO article_summaries
+                         (id, article_id, summary, entities, deal_type, location, capital, timeline)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                         ON CONFLICT (article_id) DO UPDATE SET
+                            summary = EXCLUDED.summary, entities = EXCLUDED.entities,
+                            deal_type = EXCLUDED.deal_type, location = EXCLUDED.location,
+                            capital = EXCLUDED.capital, timeline = EXCLUDED.timeline''',
+                      (str(uuid.uuid4()), article_id,
+                       item_note.get('opportunity_overview', item_note.get('one_liner', '')),
+                       json.dumps(entities) if isinstance(entities, dict) else str(entities),
+                       item_note.get('deal_type', ''),
+                       item_note.get('location', ''),
+                       item_note.get('capital_involved', ''),
+                       item_note.get('timeline', '')))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f'[sparknotes] Article summary storage failed (non-critical): {e}')
+        try:
             conn.close()
         except Exception:
             pass
@@ -6037,7 +8371,7 @@ def api_government_signals():
                 'source_url': row[9],
                 'source_name': row[10],
                 'summary': row[11],
-                'created_at': row[12],
+                'created_at': _safe_ts(row[12]),
             })
         conn.close()
 
@@ -6238,7 +8572,38 @@ def _scheduled_optimization():
     except Exception as e:
         print(f"[Scheduler] Optimization error: {e}")
 
+def _scheduled_permit_feed():
+    """Scheduled permit-feed ingestion (5:15 AM PT, before discovery)."""
+    try:
+        from permit_feed.ingest_job import run_ingest
+        print("[Scheduler] Starting permit feed ingestion…")
+        items = run_ingest()
+        print(f"[Scheduler] Permit feed done: {len(items)} new signals")
+    except Exception as e:
+        print(f"[Scheduler] Permit feed error (non-fatal): {e}")
+
+def _scheduled_spi_nightly():
+    """SPI nightly: metrics aggregation → score precompute → cache invalidation → perf check."""
+    try:
+        run_spi_nightly()
+    except Exception as e:
+        print(f"[Scheduler] SPI nightly error: {e}")
+
+def _scheduled_weekly_city_discovery():
+    """Weekly city discovery: compute city scores, identify emerging candidates."""
+    try:
+        run_weekly_city_discovery()
+    except Exception as e:
+        print(f"[Scheduler] City discovery error: {e}")
+
 _scheduler = BackgroundScheduler(daemon=True)
+_scheduler.add_job(
+    _scheduled_permit_feed,
+    CronTrigger(hour=5, minute=15, timezone=pytz.timezone('America/Los_Angeles')),
+    id='daily_permit_feed',
+    name='Daily Permit Feed Ingestion',
+    replace_existing=True
+)
 _scheduler.add_job(
     _scheduled_discovery,
     CronTrigger(
@@ -6278,12 +8643,917 @@ _scheduler.add_job(
     name='Daily Government Signals Refresh',
     replace_existing=True
 )
+_scheduler.add_job(
+    _scheduled_spi_nightly,
+    CronTrigger(hour=8, minute=15, timezone=pytz.timezone('America/Los_Angeles')),
+    id='spi_nightly',
+    name='SPI Nightly (Metrics + Score Precompute)',
+    replace_existing=True
+)
+_scheduler.add_job(
+    _scheduled_weekly_city_discovery,
+    CronTrigger(day_of_week='wed', hour=8, minute=30, timezone=pytz.timezone('America/Los_Angeles')),
+    id='weekly_city_discovery',
+    name='Weekly City Discovery',
+    replace_existing=True
+)
+def _scheduled_li_pipeline():
+    """Nightly lead intelligence pipeline run."""
+    try:
+        from workers.pipeline import run_full_pipeline
+        run_full_pipeline()
+    except Exception as e:
+        print(f"[Scheduler] Lead Intelligence pipeline error: {e}")
+
+_scheduler.add_job(
+    _scheduled_li_pipeline,
+    CronTrigger(hour=3, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='li_nightly_pipeline',
+    name='Lead Intelligence Nightly Pipeline',
+    replace_existing=True
+)
+
+def _scheduled_pattern_scan():
+    """Pattern scan: generate events, detect BTR patterns, run pattern detection engine."""
+    try:
+        from workers.jobs.pattern_scan_job import run_pattern_scan
+        run_pattern_scan()
+    except Exception as e:
+        print(f"[Scheduler] Pattern scan error: {e}")
+    try:
+        from workers.analysis.pattern_scan_worker import run_pattern_scan_pipeline
+        run_pattern_scan_pipeline()
+    except Exception as e:
+        print(f"[Scheduler] Pattern detection engine error: {e}")
+
+_scheduler.add_job(
+    _scheduled_pattern_scan,
+    CronTrigger(hour='*/12', minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='pattern_scan_12h',
+    name='BTR Pattern Scan (every 12h)',
+    replace_existing=True
+)
+
+def _scheduled_prediction_optimizer():
+    """Refresh predicted_project_index with enriched scoring."""
+    try:
+        from workers.jobs.predicted_project_optimizer import run_optimizer
+        run_optimizer()
+    except Exception as e:
+        print(f"[Scheduler] Prediction optimizer error: {e}")
+
+_scheduler.add_job(
+    _scheduled_prediction_optimizer,
+    CronTrigger(hour='*/12', minute=30, timezone=pytz.timezone('America/Los_Angeles')),
+    id='prediction_optimizer_12h',
+    name='Predicted Project Optimizer (every 12h)',
+    replace_existing=True
+)
+
+def _scheduled_relationship_graph_builder():
+    """Build relationship graph: entity relationships, developer resolution, parcel mapping."""
+    try:
+        from workers.jobs.relationship_graph_builder import run_relationship_graph_builder
+        run_relationship_graph_builder()
+    except Exception as e:
+        print(f"[Scheduler] Relationship graph builder error: {e}")
+
+_scheduler.add_job(
+    _scheduled_relationship_graph_builder,
+    CronTrigger(hour='*/12', minute=15, timezone=pytz.timezone('America/Los_Angeles')),
+    id='relationship_graph_12h',
+    name='Relationship Graph Builder (every 12h)',
+    replace_existing=True
+)
+
+def _scheduled_market_expansion():
+    """Weekly market expansion: discover new markets and deploy collectors."""
+    try:
+        from workers.jobs.market_expansion_job import run_market_expansion
+        run_market_expansion()
+    except Exception as e:
+        print(f"[Scheduler] Market expansion error: {e}")
+
+_scheduler.add_job(
+    _scheduled_market_expansion,
+    CronTrigger(day_of_week='mon', hour=2, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='weekly_market_expansion',
+    name='Market Expansion (weekly Monday 2 AM)',
+    replace_existing=True
+)
+def _scheduled_developer_dna():
+    """Weekly developer DNA: analyze history, build profiles, predict expansions."""
+    try:
+        from workers.analysis.developer_dna_worker import run_developer_dna_pipeline
+        run_developer_dna_pipeline()
+    except Exception as e:
+        print(f"[Scheduler] Developer DNA error: {e}")
+
+_scheduler.add_job(
+    _scheduled_developer_dna,
+    CronTrigger(day_of_week='sun', hour=3, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='weekly_developer_dna',
+    name='Developer DNA Modeling (weekly Sunday 3 AM)',
+    replace_existing=True
+)
+def _scheduled_contractor_intelligence():
+    """Contractor intelligence scan: analyze activity, map relationships, infer developers."""
+    try:
+        from workers.analysis.contractor_intelligence_worker import run_contractor_intelligence_pipeline
+        run_contractor_intelligence_pipeline()
+    except Exception as e:
+        print(f"[Scheduler] Contractor intelligence error: {e}")
+
+_scheduler.add_job(
+    _scheduled_contractor_intelligence,
+    CronTrigger(hour='*/12', minute=45, timezone=pytz.timezone('America/Los_Angeles')),
+    id='contractor_intelligence_12h',
+    name='Contractor Intelligence Scan (every 12h)',
+    replace_existing=True
+)
+def _scheduled_parcel_probability():
+    """Weekly parcel probability scan: analyze parcels, score development likelihood."""
+    try:
+        from workers.analysis.parcel_probability_worker import run_parcel_probability_pipeline
+        run_parcel_probability_pipeline()
+    except Exception as e:
+        print(f"[Scheduler] Parcel probability error: {e}")
+
+_scheduler.add_job(
+    _scheduled_parcel_probability,
+    CronTrigger(day_of_week='mon', hour=4, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='weekly_parcel_probability',
+    name='Parcel Probability Scan (weekly Monday 4 AM)',
+    replace_existing=True
+)
+def _scheduled_free_data_intelligence():
+    """Free data intelligence pipeline: collect signals, link parcels, resolve entities,
+    detect patterns, calculate momentum, score probability."""
+    # Phase 1: Collection
+    try:
+        from workers.collectors.news_parser import parse_news
+        parse_news()
+    except Exception as e:
+        print(f"[Scheduler] News parser error: {e}")
+    try:
+        from workers.collectors.entity_watcher import watch_entities
+        watch_entities()
+    except Exception as e:
+        print(f"[Scheduler] Entity watcher error: {e}")
+    try:
+        from workers.collectors.engineering_activity import collect_engineering_activity
+        collect_engineering_activity()
+    except Exception as e:
+        print(f"[Scheduler] Engineering activity error: {e}")
+
+    # Phase 2: Analysis
+    try:
+        from workers.analysis.parcel_linker import run_parcel_linker
+        run_parcel_linker()
+    except Exception as e:
+        print(f"[Scheduler] Parcel linker error: {e}")
+    try:
+        from workers.analysis.entity_resolution_engine import resolve_entities
+        resolve_entities()
+    except Exception as e:
+        print(f"[Scheduler] Entity resolution error: {e}")
+    try:
+        from workers.analysis.temporal_pattern_engine import run_temporal_engine
+        run_temporal_engine()
+    except Exception as e:
+        print(f"[Scheduler] Temporal pattern error: {e}")
+    try:
+        from workers.analysis.parcel_momentum_engine import run_momentum_engine
+        run_momentum_engine()
+    except Exception as e:
+        print(f"[Scheduler] Parcel momentum error: {e}")
+    try:
+        from workers.analysis.market_acceleration_engine import run_market_acceleration
+        run_market_acceleration()
+    except Exception as e:
+        print(f"[Scheduler] Market acceleration error: {e}")
+    try:
+        from workers.analysis.development_probability_engine import run_probability_scoring
+        run_probability_scoring()
+    except Exception as e:
+        print(f"[Scheduler] Development probability error: {e}")
+
+_scheduler.add_job(
+    _scheduled_free_data_intelligence,
+    CronTrigger(hour='*/8', minute=20, timezone=pytz.timezone('America/Los_Angeles')),
+    id='free_data_intelligence_8h',
+    name='Free Data Intelligence Pipeline (every 8h)',
+    replace_existing=True
+)
+
+def _scheduled_city_expansion():
+    """City expansion: detect emerging markets and deploy new collectors."""
+    try:
+        from workers.analysis.city_expansion_engine import run_city_expansion
+        run_city_expansion()
+    except Exception as e:
+        print(f"[Scheduler] City expansion error: {e}")
+
+_scheduler.add_job(
+    _scheduled_city_expansion,
+    CronTrigger(day_of_week='wed', hour=3, minute=30, timezone=pytz.timezone('America/Los_Angeles')),
+    id='weekly_city_expansion',
+    name='City Expansion Detection (weekly Wednesday 3:30 AM)',
+    replace_existing=True
+)
+
+def _scheduled_supply_chain_intelligence():
+    """Construction supply chain intelligence pipeline."""
+    # Phase 1: Collect supply chain signals
+    try:
+        from workers.collectors.construction.engineering_activity_collector import collect_engineering_plans
+        collect_engineering_plans()
+    except Exception as e:
+        print(f"[Scheduler] Engineering activity collector error: {e}")
+    try:
+        from workers.collectors.construction.utility_connection_collector import collect_utility_connections
+        collect_utility_connections()
+    except Exception as e:
+        print(f"[Scheduler] Utility connection collector error: {e}")
+    try:
+        from workers.collectors.construction.contractor_bid_collector import collect_contractor_bids
+        collect_contractor_bids()
+    except Exception as e:
+        print(f"[Scheduler] Contractor bid collector error: {e}")
+    try:
+        from workers.collectors.construction.site_prep_activity_collector import collect_site_prep
+        collect_site_prep()
+    except Exception as e:
+        print(f"[Scheduler] Site prep collector error: {e}")
+
+    # Phase 2: Run signal graph engine
+    try:
+        from workers.analysis.signal_graph_engine import run_signal_graph_engine
+        run_signal_graph_engine()
+    except Exception as e:
+        print(f"[Scheduler] Signal graph engine error: {e}")
+
+    # Phase 3: Detect supply chain patterns
+    try:
+        from workers.analysis.supply_chain_pattern_engine import run_supply_chain_engine
+        run_supply_chain_engine()
+    except Exception as e:
+        print(f"[Scheduler] Supply chain pattern engine error: {e}")
+
+_scheduler.add_job(
+    _scheduled_supply_chain_intelligence,
+    CronTrigger(hour='*/6', minute=45, timezone=pytz.timezone('America/Los_Angeles')),
+    id='supply_chain_intelligence_6h',
+    name='Supply Chain Intelligence Pipeline (every 6h)',
+    replace_existing=True
+)
+
+# --- Signal Quality Ranking Engine ---
+def _scheduled_signal_quality():
+    """Signal quality engine: recalculate source accuracy, type accuracy, priority index."""
+    try:
+        from workers.analysis.signal_quality_engine import run_signal_quality_worker
+        run_signal_quality_worker()
+    except Exception as e:
+        print(f"[Scheduler] Signal quality engine error: {e}")
+
+_scheduler.add_job(
+    _scheduled_signal_quality,
+    CronTrigger(hour='*/12', minute=20, timezone=pytz.timezone('America/Los_Angeles')),
+    id='signal_quality_12h',
+    name='Signal Quality Engine (every 12 hours)',
+    replace_existing=True
+)
+
+def _scheduled_development_confirmation():
+    """Development confirmation engine: detect confirmed developments."""
+    try:
+        from workers.analysis.development_confirmation_engine import run_development_confirmation_worker
+        run_development_confirmation_worker()
+    except Exception as e:
+        print(f"[Scheduler] Development confirmation error: {e}")
+
+_scheduler.add_job(
+    _scheduled_development_confirmation,
+    CronTrigger(hour=1, minute=30, timezone=pytz.timezone('America/Los_Angeles')),
+    id='dev_confirmation_daily',
+    name='Development Confirmation Engine (daily 1:30 AM)',
+    replace_existing=True
+)
+
+def _scheduled_planning_agenda():
+    """Planning agenda intelligence: scan city planning commission agendas every 6 hours."""
+    try:
+        from workers.collectors.planning_agenda_collector import collect_planning_agendas
+        collect_planning_agendas()
+    except Exception as e:
+        print(f"[Scheduler] Planning agenda collector error: {e}")
+
+_scheduler.add_job(
+    _scheduled_planning_agenda,
+    CronTrigger(hour='*/6', minute=10, timezone=pytz.timezone('America/Los_Angeles')),
+    id='planning_agenda_6h',
+    name='Planning Agenda Intelligence (every 6h)',
+    replace_existing=True
+)
+
+def _scheduled_building_permits():
+    """Building permit intelligence: collect permit records every 6 hours."""
+    try:
+        from workers.collectors.building_permit_collector import collect_building_permits
+        collect_building_permits()
+    except Exception as e:
+        print(f"[Scheduler] Building permit collector error: {e}")
+
+_scheduler.add_job(
+    _scheduled_building_permits,
+    CronTrigger(hour='*/6', minute=35, timezone=pytz.timezone('America/Los_Angeles')),
+    id='building_permits_6h',
+    name='Building Permit Intelligence (every 6h)',
+    replace_existing=True
+)
+
+def _scheduled_land_transactions():
+    """Land transaction intelligence: collect deed/ownership signals every 6 hours."""
+    try:
+        from workers.collectors.land_transaction_collector import collect_land_transactions
+        collect_land_transactions()
+    except Exception as e:
+        print(f"[Scheduler] Land transaction collector error: {e}")
+
+_scheduler.add_job(
+    _scheduled_land_transactions,
+    CronTrigger(hour='*/6', minute=50, timezone=pytz.timezone('America/Los_Angeles')),
+    id='land_transactions_6h',
+    name='Land Transaction Intelligence (every 6h)',
+    replace_existing=True
+)
+
+def _scheduled_plat_filings():
+    """Plat filing intelligence: collect subdivision/plat signals every 6 hours."""
+    try:
+        from workers.collectors.plat_filing_collector import collect_plat_filings
+        collect_plat_filings()
+    except Exception as e:
+        print(f"[Scheduler] Plat filing collector error: {e}")
+
+_scheduler.add_job(
+    _scheduled_plat_filings,
+    CronTrigger(hour='*/6', minute=55, timezone=pytz.timezone('America/Los_Angeles')),
+    id='plat_filings_6h',
+    name='Plat Filing Intelligence (every 6h)',
+    replace_existing=True
+)
+
+def _scheduled_construction_financing():
+    """Construction financing intelligence: collect loan/mortgage signals every 8 hours."""
+    try:
+        from workers.collectors.construction_financing_collector import collect_construction_financing
+        collect_construction_financing()
+    except Exception as e:
+        print(f"[Scheduler] Construction financing collector error: {e}")
+
+_scheduler.add_job(
+    _scheduled_construction_financing,
+    CronTrigger(hour='*/8', minute=40, timezone=pytz.timezone('America/Los_Angeles')),
+    id='construction_financing_8h',
+    name='Construction Financing Intelligence (every 8h)',
+    replace_existing=True
+)
+
+def _scheduled_zoning_intelligence():
+    """Zoning intelligence: analyze parcel zoning classifications daily."""
+    try:
+        from workers.analysis.zoning_intelligence_engine import run_zoning_intelligence
+        run_zoning_intelligence()
+    except Exception as e:
+        print(f"[Scheduler] Zoning intelligence engine error: {e}")
+
+_scheduler.add_job(
+    _scheduled_zoning_intelligence,
+    CronTrigger(hour=4, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='zoning_intelligence_daily',
+    name='Zoning Intelligence Engine (daily 4:00 AM)',
+    replace_existing=True
+)
+
+def _scheduled_parcel_contiguity():
+    """Parcel contiguity: detect development footprint patterns daily."""
+    try:
+        from workers.analysis.parcel_contiguity_engine import run_contiguity_engine
+        run_contiguity_engine()
+    except Exception as e:
+        print(f"[Scheduler] Parcel contiguity engine error: {e}")
+
+_scheduler.add_job(
+    _scheduled_parcel_contiguity,
+    CronTrigger(hour=4, minute=30, timezone=pytz.timezone('America/Los_Angeles')),
+    id='parcel_contiguity_daily',
+    name='Parcel Contiguity Engine (daily 4:30 AM)',
+    replace_existing=True
+)
+
+def _scheduled_expansion_forecasting():
+    """Developer expansion forecasting: predict expansion markets weekly."""
+    try:
+        from workers.analysis.developer_expansion_engine import run_expansion_forecasting
+        run_expansion_forecasting()
+    except Exception as e:
+        print(f"[Scheduler] Expansion forecasting error: {e}")
+
+_scheduler.add_job(
+    _scheduled_expansion_forecasting,
+    CronTrigger(day_of_week='tue', hour=3, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='expansion_forecasting_weekly',
+    name='Developer Expansion Forecasting (weekly Tue 3:00 AM)',
+    replace_existing=True
+)
+
+def _scheduled_weight_optimization():
+    """Signal weight optimization: adjust signal weights weekly."""
+    try:
+        from workers.analysis.signal_weight_optimizer import run_weight_optimization
+        run_weight_optimization()
+    except Exception as e:
+        print(f"[Scheduler] Weight optimization error: {e}")
+
+_scheduler.add_job(
+    _scheduled_weight_optimization,
+    CronTrigger(day_of_week='sun', hour=4, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='weight_optimization_weekly',
+    name='Signal Weight Optimization (weekly Sun 4:00 AM)',
+    replace_existing=True
+)
+
+def _scheduled_source_discovery():
+    """Autonomous source discovery: find new data sources weekly."""
+    try:
+        from workers.discovery.source_discovery_engine import run_source_discovery
+        run_source_discovery()
+    except Exception as e:
+        print(f"[Scheduler] Source discovery error: {e}")
+
+_scheduler.add_job(
+    _scheduled_source_discovery,
+    CronTrigger(day_of_week='sat', hour=2, minute=0, timezone=pytz.timezone('America/Los_Angeles')),
+    id='source_discovery_weekly',
+    name='Autonomous Source Discovery (weekly Sat 2:00 AM)',
+    replace_existing=True
+)
+
 _scheduler.start()
 print(f"[Scheduler] Daily discovery scheduled for {DISCOVERY_CONFIG['schedule_hour']}:{DISCOVERY_CONFIG['schedule_minute']:02d} AM {DISCOVERY_CONFIG['timezone']}")
 print("[Scheduler] Daily signal optimization at 6:45 AM PT")
 print("[Scheduler] Daily trend detection at 7:30 AM PT")
 print("[Scheduler] Weekly Sunbelt Brief every Monday 7:00 AM PT")
 print("[Scheduler] Daily government signals refresh at 5:30 AM PT")
+print("[Scheduler] Daily permit feed ingestion at 5:15 AM PT")
+print("[Scheduler] Weekly market expansion every Monday 2:00 AM PT")
+print("[Scheduler] SPI nightly pipeline at 8:15 AM PT")
+print("[Scheduler] Weekly city discovery every Wednesday 8:30 AM PT")
+print("[Scheduler] Lead Intelligence pipeline at 3:00 AM PT")
+print("[Scheduler] BTR Pattern Scan every 12 hours")
+print("[Scheduler] Predicted Project Optimizer every 12 hours (offset +30m)")
+print("[Scheduler] Developer DNA Modeling every Sunday 3:00 AM PT")
+print("[Scheduler] Contractor Intelligence Scan every 12 hours (offset +45m)")
+print("[Scheduler] Parcel Probability Scan every Monday 4:00 AM PT")
+print("[Scheduler] Free Data Intelligence Pipeline every 8 hours")
+print("[Scheduler] City Expansion Detection every Wednesday 3:30 AM PT")
+print("[Scheduler] Supply Chain Intelligence Pipeline every 6 hours")
+print("[Scheduler] Signal Quality Engine every 12 hours (offset +20m)")
+print("[Scheduler] Development Confirmation Engine daily 1:30 AM PT")
+print("[Scheduler] Planning Agenda Intelligence every 6 hours")
+print("[Scheduler] Building Permit Intelligence every 6 hours")
+print("[Scheduler] Land Transaction Intelligence every 6 hours")
+print("[Scheduler] Plat Filing Intelligence every 6 hours")
+print("[Scheduler] Construction Financing Intelligence every 8 hours")
+print("[Scheduler] Zoning Intelligence Engine daily 4:00 AM PT")
+print("[Scheduler] Parcel Contiguity Engine daily 4:30 AM PT")
+print("[Scheduler] Developer Expansion Forecasting weekly Tue 3:00 AM PT")
+print("[Scheduler] Signal Weight Optimization weekly Sun 4:00 AM PT")
+print("[Scheduler] Autonomous Source Discovery weekly Sat 2:00 AM PT")
+
+
+# ===================================================================
+# FIX 1 & 2: STARTUP PIPELINE — Run intelligence cycle on server start
+# ===================================================================
+# Ensures intelligence tabs populate immediately after deploy instead
+# of waiting until the next scheduled cron window.
+# Also prevents missed cron windows: if the server starts after a job's
+# scheduled time for the day, the job runs once immediately.
+# ===================================================================
+
+import threading as _startup_threading
+
+
+def _run_startup_discovery_cycle():
+    """
+    Run a full initial discovery cycle on startup.
+    Triggers all key intelligence collectors once so dashboards
+    populate immediately instead of waiting for the next cron window.
+    """
+    import time as _time
+    # Brief delay to let the Flask app finish initializing
+    _time.sleep(5)
+
+    print("\n" + "=" * 60)
+    print("[Startup] INITIAL DISCOVERY CYCLE — BEGIN")
+    print(f"[Startup] {datetime.utcnow().isoformat()} UTC")
+    print("=" * 60 + "\n")
+
+    startup_results = {}
+
+    # --- Insert a discovery_run record ---
+    try:
+        conn = _get_db_conn()
+        c = conn.cursor()
+        c.execute('''
+            INSERT INTO discovery_runs
+            (run_at, results_json, digest_text, city_count, total_new, status, adapter_stats)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            datetime.utcnow().isoformat(),
+            json.dumps({}),
+            'Startup discovery cycle',
+            0, 0, 'running',
+            json.dumps({'trigger': 'startup'}),
+        ))
+        conn.commit()
+        # Retrieve the run_id
+        c.execute('SELECT MAX(id) FROM discovery_runs')
+        startup_run_id = c.fetchone()[0]
+        conn.close()
+        print(f"[Startup] Discovery run created: id={startup_run_id}")
+    except Exception as e:
+        print(f"[Startup] Discovery run insert error: {e}")
+        startup_run_id = None
+
+    total_signals = 0
+
+    # --- Planning Agenda Intelligence ---
+    print("[Startup] Starting Planning Agenda Intelligence...")
+    try:
+        from workers.collectors.planning_agenda_collector import collect_planning_agendas
+        count = collect_planning_agendas()
+        startup_results['planning_agendas'] = count or 0
+        total_signals += count or 0
+        print(f"[Startup] Planning Agenda Intelligence complete — signals discovered: {count or 0}")
+    except Exception as e:
+        print(f"[Startup] Planning Agenda Intelligence error: {e}")
+        startup_results['planning_agendas'] = 0
+
+    # --- Building Permit Intelligence ---
+    print("[Startup] Starting Building Permit Intelligence...")
+    try:
+        from workers.collectors.building_permit_collector import collect_building_permits
+        count = collect_building_permits()
+        startup_results['building_permits'] = count or 0
+        total_signals += count or 0
+        print(f"[Startup] Building Permit Intelligence complete — signals discovered: {count or 0}")
+    except Exception as e:
+        print(f"[Startup] Building Permit Intelligence error: {e}")
+        startup_results['building_permits'] = 0
+
+    # --- Land Transaction Intelligence ---
+    print("[Startup] Starting Land Transaction Intelligence...")
+    try:
+        from workers.collectors.land_transaction_collector import collect_land_transactions
+        count = collect_land_transactions()
+        startup_results['land_transactions'] = count or 0
+        total_signals += count or 0
+        print(f"[Startup] Land Transaction Intelligence complete — signals discovered: {count or 0}")
+    except Exception as e:
+        print(f"[Startup] Land Transaction Intelligence error: {e}")
+        startup_results['land_transactions'] = 0
+
+    # --- Plat Filing Intelligence ---
+    print("[Startup] Starting Plat Filing Intelligence...")
+    try:
+        from workers.collectors.plat_filing_collector import collect_plat_filings
+        count = collect_plat_filings()
+        startup_results['plat_filings'] = count or 0
+        total_signals += count or 0
+        print(f"[Startup] Plat Filing Intelligence complete — signals discovered: {count or 0}")
+    except Exception as e:
+        print(f"[Startup] Plat Filing Intelligence error: {e}")
+        startup_results['plat_filings'] = 0
+
+    # --- Construction Financing Intelligence ---
+    print("[Startup] Starting Construction Financing Intelligence...")
+    try:
+        from workers.collectors.construction_financing_collector import collect_construction_financing
+        count = collect_construction_financing()
+        startup_results['construction_financing'] = count or 0
+        total_signals += count or 0
+        print(f"[Startup] Construction Financing Intelligence complete — signals discovered: {count or 0}")
+    except Exception as e:
+        print(f"[Startup] Construction Financing Intelligence error: {e}")
+        startup_results['construction_financing'] = 0
+
+    # --- Zoning Intelligence Engine ---
+    print("[Startup] Starting Zoning Intelligence Engine...")
+    try:
+        from workers.analysis.zoning_intelligence_engine import run_zoning_intelligence
+        result = run_zoning_intelligence()
+        startup_results['zoning_intelligence'] = result
+        print(f"[Startup] Zoning Intelligence Engine complete — result: {result}")
+    except Exception as e:
+        print(f"[Startup] Zoning Intelligence Engine error: {e}")
+        startup_results['zoning_intelligence'] = {'error': str(e)}
+
+    # --- Contractor Intelligence ---
+    print("[Startup] Starting Contractor Intelligence...")
+    try:
+        from workers.analysis.contractor_intelligence_worker import run_contractor_intelligence_pipeline
+        result = run_contractor_intelligence_pipeline()
+        startup_results['contractor_intelligence'] = result
+        print(f"[Startup] Contractor Intelligence complete — result: {result}")
+    except Exception as e:
+        print(f"[Startup] Contractor Intelligence error: {e}")
+        startup_results['contractor_intelligence'] = {'error': str(e)}
+
+    # --- Lead Intelligence Pipeline (full 8-stage pipeline) ---
+    print("[Startup] Starting Lead Intelligence Pipeline...")
+    try:
+        from workers.pipeline import run_full_pipeline
+        result = run_full_pipeline()
+        startup_results['lead_intelligence'] = result
+        li_signals = result.get('collection', 0) if isinstance(result, dict) else 0
+        total_signals += li_signals
+        print(f"[Startup] Lead Intelligence Pipeline complete — signals: {li_signals}")
+    except Exception as e:
+        print(f"[Startup] Lead Intelligence Pipeline error: {e}")
+        startup_results['lead_intelligence'] = {'error': str(e)}
+
+    # --- Finalize the discovery_run ---
+    if startup_run_id:
+        try:
+            conn = _get_db_conn()
+            c = conn.cursor()
+            c.execute('''
+                UPDATE discovery_runs
+                SET status = 'completed',
+                    total_new = ?,
+                    results_json = ?,
+                    adapter_stats = ?
+                WHERE id = ?
+            ''', (
+                total_signals,
+                json.dumps(startup_results, default=str),
+                json.dumps({k: v if isinstance(v, (int, float)) else str(v)
+                            for k, v in startup_results.items()}),
+                startup_run_id,
+            ))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"[Startup] Discovery run finalization error: {e}")
+
+    # --- Log final summary ---
+    print("\n" + "=" * 60)
+    print("[Startup] INITIAL DISCOVERY CYCLE — COMPLETE")
+    print(f"[Startup] {datetime.utcnow().isoformat()} UTC")
+    print(f"[Startup] Total signals collected: {total_signals}")
+    for name, result in startup_results.items():
+        if isinstance(result, int):
+            print(f"[Startup]   {name}: {result} signals")
+        elif isinstance(result, dict) and 'error' not in result:
+            print(f"[Startup]   {name}: {result}")
+        elif isinstance(result, dict):
+            print(f"[Startup]   {name}: ERROR — {result.get('error', 'unknown')}")
+    print("[Startup] Discovery run completed — intelligence tabs should now populate")
+    print("=" * 60 + "\n")
+
+
+def _check_missed_cron_windows():
+    """
+    Fix 2: Check if any daily cron jobs were missed because the server
+    started after their scheduled time. If so, run them once immediately.
+    """
+    import time as _time
+    _time.sleep(8)  # Wait for startup cycle to begin first
+
+    _tz = pytz.timezone('America/Los_Angeles')
+    now_local = datetime.now(_tz)
+    current_hour = now_local.hour
+    current_minute = now_local.minute
+    current_weekday = now_local.strftime('%a').lower()[:3]
+
+    print(f"\n[Scheduler] Checking for missed cron windows — current time: {now_local.strftime('%H:%M %Z %A')}")
+
+    # Daily jobs with their scheduled (hour, minute) — only run if missed today
+    daily_missed_jobs = [
+        (1, 30, 'Development Confirmation', _scheduled_development_confirmation),
+        (3, 0, 'Lead Intelligence Pipeline', _scheduled_li_pipeline),
+        (4, 0, 'Zoning Intelligence', _scheduled_zoning_intelligence),
+        (4, 30, 'Parcel Contiguity', _scheduled_parcel_contiguity),
+        (5, 15, 'Permit Feed', _scheduled_permit_feed),
+        (5, 30, 'Government Signals', _scheduled_gov_signals),
+        (6, 45, 'Signal Optimization', _scheduled_optimization),
+        (7, 30, 'Trend Detection', _scheduled_trend_detection),
+    ]
+
+    missed_count = 0
+    for sched_hour, sched_minute, label, fn in daily_missed_jobs:
+        sched_time = sched_hour * 60 + sched_minute
+        now_time = current_hour * 60 + current_minute
+        if now_time > sched_time:
+            missed_count += 1
+            print(f"[Scheduler] Missed window for {label} (scheduled {sched_hour}:{sched_minute:02d} AM PT) — running now")
+            try:
+                fn()
+                print(f"[Scheduler] {label} catch-up complete")
+            except Exception as e:
+                print(f"[Scheduler] {label} catch-up error: {e}")
+
+    if missed_count == 0:
+        print("[Scheduler] No missed cron windows — all jobs will run at their scheduled times")
+    else:
+        print(f"[Scheduler] {missed_count} missed jobs executed")
+
+
+# Launch startup discovery cycle in a background thread so it doesn't
+# block the Flask app from starting and serving requests.
+_startup_thread = _startup_threading.Thread(
+    target=_run_startup_discovery_cycle,
+    name='startup-discovery-cycle',
+    daemon=True,
+)
+_startup_thread.start()
+print("[Startup] Initial discovery cycle launched in background thread")
+
+# Launch missed-cron-window check in a separate background thread
+_missed_cron_thread = _startup_threading.Thread(
+    target=_check_missed_cron_windows,
+    name='missed-cron-check',
+    daemon=True,
+)
+_missed_cron_thread.start()
+print("[Startup] Missed cron window check launched in background thread")
+
+
+# ---------------------------------------------------------------------------
+# Test Email Preview — renders email templates in-browser with sample data
+# ---------------------------------------------------------------------------
+
+@app.route('/api/test-email/opportunity', methods=['GET'])
+@require_auth
+def test_email_opportunity():
+    """Preview the opportunity alert email with sample data."""
+    developer = request.args.get('developer', 'Greystar Real Estate Partners')
+    city = request.args.get('city', 'Dallas')
+    state = request.args.get('state', 'TX')
+    confidence = int(request.args.get('confidence', 92))
+
+    sample_signals = {
+        "developer_intent": True,
+        "contractor_activity": True,
+        "parcel_probability": True,
+        "capital_deployment": True,
+        "developer_dna_match": True,
+    }
+
+    signal_items = []
+    if sample_signals.get("developer_intent"):
+        signal_items.append("<li>Developer Intent</li>")
+    if sample_signals.get("contractor_activity"):
+        signal_items.append("<li>Contractor Activity</li>")
+    if sample_signals.get("parcel_probability"):
+        signal_items.append("<li>Parcel Probability Spike</li>")
+    if sample_signals.get("capital_deployment"):
+        signal_items.append("<li>Capital Deployment Signal</li>")
+    if sample_signals.get("developer_dna_match"):
+        signal_items.append("<li>Developer DNA Match</li>")
+
+    signals_html = "\n".join(signal_items)
+    subject = "\U0001f6a8 New Development Opportunity Detected"
+
+    email_body = f"""
+<h2>New Development Opportunity</h2>
+<b>Developer:</b> {developer}<br>
+<b>Market:</b> {city}, {state}<br>
+<b>Confidence:</b> {confidence}%<br>
+<h3>Signals Detected</h3>
+<ul>
+{signals_html}
+</ul>
+"""
+
+    return _render_email_preview(subject, email_body)
+
+
+@app.route('/api/test-email/digest', methods=['GET'])
+@require_auth
+def test_email_digest():
+    """Preview the daily sales digest email with sample data."""
+    sample_leads = [
+        {"developer": "Greystar Real Estate Partners", "city": "Dallas", "state": "TX", "lead_score": 95, "confidence": 92},
+        {"developer": "NexMetro Communities", "city": "Phoenix", "state": "AZ", "lead_score": 88, "confidence": 85},
+        {"developer": "AHV Communities", "city": "Austin", "state": "TX", "lead_score": 82, "confidence": 79},
+        {"developer": "Wan Bridge Group", "city": "San Antonio", "state": "TX", "lead_score": 78, "confidence": 74},
+        {"developer": "Pretium Partners", "city": "Charlotte", "state": "NC", "lead_score": 75, "confidence": 71},
+    ]
+
+    total_new = len(sample_leads)
+
+    market_counts = {}
+    for lead in sample_leads:
+        market = f"{lead['city']}, {lead['state']}"
+        market_counts[market] = market_counts.get(market, 0) + 1
+    top_markets = sorted(market_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    top_lead = sample_leads[0]
+
+    markets_html = "".join(f"<li>{m} ({c} leads)</li>" for m, c in top_markets)
+
+    top_opp_html = (
+        f"<p><b>{top_lead['developer']}</b> &mdash; "
+        f"{top_lead['city']}, {top_lead['state']} "
+        f"(Score: {top_lead['lead_score']}, "
+        f"Confidence: {top_lead['confidence']}%)</p>"
+    )
+
+    leads_table_rows = ""
+    for lead in sample_leads:
+        leads_table_rows += (
+            f"<tr>"
+            f"<td>{lead['developer']}</td>"
+            f"<td>{lead['city']}, {lead['state']}</td>"
+            f"<td>{lead['lead_score']}</td>"
+            f"<td>{lead['confidence']}%</td>"
+            f"</tr>"
+        )
+
+    email_body = f"""
+<h2>Daily Development Intelligence Brief</h2>
+<p><b>New Leads Today:</b> {total_new}</p>
+
+<h3>Top Markets</h3>
+<ul>
+{markets_html}
+</ul>
+
+<h3>Highest Confidence Opportunity</h3>
+{top_opp_html}
+
+<h3>Recent Leads</h3>
+<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+<tr><th>Developer</th><th>Market</th><th>Score</th><th>Confidence</th></tr>
+{leads_table_rows}
+</table>
+"""
+
+    return _render_email_preview("Daily Development Intelligence Brief", email_body)
+
+
+def _render_email_preview(subject, body_html):
+    """Wrap email body in a preview shell that mimics the sent email."""
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Email Preview</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f4f4f5; margin: 0; padding: 40px 20px; }}
+  .envelope {{ max-width: 640px; margin: 0 auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); overflow: hidden; }}
+  .envelope-header {{ background: #1e293b; color: #fff; padding: 20px 28px; }}
+  .envelope-header .label {{ font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; margin-bottom: 4px; }}
+  .envelope-header .from {{ font-size: 14px; margin-bottom: 10px; }}
+  .envelope-header .to {{ font-size: 14px; margin-bottom: 10px; }}
+  .envelope-header .subject {{ font-size: 18px; font-weight: 600; }}
+  .envelope-body {{ padding: 28px; font-size: 15px; line-height: 1.6; color: #1e293b; }}
+  .envelope-body h2 {{ color: #0f172a; margin-top: 0; }}
+  .envelope-body h3 {{ color: #334155; }}
+  .envelope-body table {{ font-size: 14px; width: 100%; }}
+  .envelope-body th {{ background: #f1f5f9; text-align: left; }}
+  .test-banner {{ text-align: center; padding: 12px; background: #fef3c7; color: #92400e; font-weight: 600; font-size: 13px; letter-spacing: 0.5px; }}
+  .preview-links {{ max-width: 640px; margin: 16px auto 0; text-align: center; font-size: 13px; color: #64748b; }}
+  .preview-links a {{ color: #2563eb; text-decoration: none; margin: 0 10px; }}
+  .preview-links a:hover {{ text-decoration: underline; }}
+</style>
+</head>
+<body>
+  <div class="envelope">
+    <div class="test-banner">TEST PREVIEW — This email was not sent</div>
+    <div class="envelope-header">
+      <div class="label">From</div>
+      <div class="from">BTR Intelligence &lt;alerts@btrcommand.com&gt;</div>
+      <div class="label">To</div>
+      <div class="to">max@btrcommand.com</div>
+      <div class="label">Subject</div>
+      <div class="subject">{subject}</div>
+    </div>
+    <div class="envelope-body">
+      {body_html}
+    </div>
+  </div>
+  <div class="preview-links">
+    <a href="/api/test-email/opportunity">Opportunity Alert</a>
+    <a href="/api/test-email/digest">Daily Digest</a>
+  </div>
+</body>
+</html>"""
+    return make_response(html)
 
 
 if __name__ == '__main__':
