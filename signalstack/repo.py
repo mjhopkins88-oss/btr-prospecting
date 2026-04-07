@@ -441,8 +441,18 @@ def get_profile_context(prospect_id: str) -> Optional[dict]:
     conn = get_db()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT * FROM ss_profile_context WHERE prospect_id = ?", (prospect_id,))
-        return _row_to_dict(cur, cur.fetchone())
+        try:
+            cur.execute("SELECT * FROM ss_profile_context WHERE prospect_id = ?", (prospect_id,))
+            return _row_to_dict(cur, cur.fetchone())
+        except Exception as e:
+            # Table may not exist on older deploys — fail soft so the
+            # generator can still run from inline profile_override.
+            print(f"[SignalStack] get_profile_context skipped: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            return None
     finally:
         conn.close()
 
@@ -485,11 +495,19 @@ def list_principles(active_only: bool = True) -> list:
     conn = get_db()
     try:
         cur = conn.cursor()
-        if active_only:
-            cur.execute("SELECT * FROM ss_social_principles WHERE active = 1 ORDER BY category, principle_name")
-        else:
-            cur.execute("SELECT * FROM ss_social_principles ORDER BY category, principle_name")
-        return _rows_to_dicts(cur, cur.fetchall())
+        try:
+            if active_only:
+                cur.execute("SELECT * FROM ss_social_principles WHERE active = 1 ORDER BY category, principle_name")
+            else:
+                cur.execute("SELECT * FROM ss_social_principles ORDER BY category, principle_name")
+            return _rows_to_dicts(cur, cur.fetchall())
+        except Exception as e:
+            print(f"[SignalStack] list_principles skipped: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            return []
     finally:
         conn.close()
 
