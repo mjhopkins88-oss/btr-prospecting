@@ -1850,115 +1850,21 @@ function TabBar({
   user
 }) {
   const role = user?.role || 'producer';
-  const [mobileOpen, setMobileOpen] = useState(false);
-
-  // Build groups based on role
-  let groups = [...(NAV_GROUPS[role] || NAV_GROUPS.producer)];
-
-  // For super_admin without admin role, add System group
-  if (user && user.is_super_admin && role !== 'admin') {
-    const hasSystem = groups.some(g => g.label === 'System');
-    if (!hasSystem) {
-      groups.push({
-        label: 'System',
-        items: [{
-          id: 'admin',
-          label: 'Admin'
-        }]
-      });
-    }
+  const tabs = [...(ROLE_TABS[role] || ROLE_TABS.producer)];
+  if (role === 'admin') {
+    if (!tabs.some(t => t.id === 'quoting')) tabs.push({ id: 'quoting', label: 'Quoting' });
+    if (!tabs.some(t => t.id === 'underwriting')) tabs.push({ id: 'underwriting', label: 'Underwriting Sheet' });
   }
-  // For admin, ensure admin tab is in System if super_admin
-  if (user && user.is_super_admin && role === 'admin') {
-    const sysGroup = groups.find(g => g.label === 'System');
-    if (sysGroup && !sysGroup.items.some(i => i.id === 'admin')) {
-      // already there from NAV_GROUPS definition
-    }
+  if (user && user.is_super_admin && !tabs.some(t => t.id === 'admin')) {
+    tabs.push({ id: 'admin', label: 'Admin' });
   }
-  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      ...ds.tabBar,
-      display: 'flex',
-      flexWrap: 'wrap'
-    },
-    className: "nav-desktop"
-  }, groups.map(group => /*#__PURE__*/React.createElement(NavDropdown, {
-    key: group.label,
-    group: group,
-    activeTab: activeTab,
-    setActiveTab: setActiveTab
-  }))), /*#__PURE__*/React.createElement("div", {
-    className: "nav-mobile",
-    style: {
-      display: 'none',
-      marginBottom: '1.5rem'
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => setMobileOpen(!mobileOpen),
-    style: {
-      background: 'rgba(15,22,36,0.95)',
-      border: '1px solid rgba(255,255,255,0.08)',
-      color: '#00FFC6',
-      padding: '0.7rem 1rem',
-      borderRadius: '0.5rem',
-      cursor: 'pointer',
-      fontSize: '1.1rem',
-      fontFamily: "'Orbitron', sans-serif",
-      fontWeight: 700,
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-      width: '100%',
-      justifyContent: 'space-between'
-    }
-  }, /*#__PURE__*/React.createElement("span", null, mobileOpen ? 'Close Menu' : 'Menu'), /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: '1.2rem'
-    }
-  }, mobileOpen ? '\u2715' : '\u2630')), mobileOpen && /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: 'rgba(15,22,36,0.95)',
-      backdropFilter: 'blur(12px)',
-      WebkitBackdropFilter: 'blur(12px)',
-      border: '1px solid rgba(255,255,255,0.08)',
-      borderRadius: '0.5rem',
-      marginTop: '0.5rem',
-      padding: '0.5rem 0',
-      animation: 'navDropIn 200ms ease-out forwards'
-    }
-  }, groups.map(group => /*#__PURE__*/React.createElement("div", {
-    key: group.label
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: '0.5rem 1rem',
-      fontSize: '0.65rem',
-      color: '#64748b',
-      textTransform: 'uppercase',
-      letterSpacing: '0.1em',
-      fontWeight: 700,
-      fontFamily: "'Orbitron', sans-serif",
-      borderBottom: '1px solid rgba(255,255,255,0.04)'
-    }
-  }, group.label), group.items.map(item => /*#__PURE__*/React.createElement("button", {
-    key: item.id,
-    onClick: () => {
-      setActiveTab(item.id);
-      setMobileOpen(false);
-    },
-    style: {
-      display: 'block',
-      width: '100%',
-      textAlign: 'left',
-      background: activeTab === item.id ? 'rgba(0,255,198,0.08)' : 'transparent',
-      border: 'none',
-      color: activeTab === item.id ? '#00FFC6' : '#cbd5e1',
-      padding: '0.65rem 1.5rem',
-      fontSize: '0.85rem',
-      fontWeight: 500,
-      cursor: 'pointer',
-      fontFamily: "'Inter', sans-serif"
-    }
-  }, item.label)))))));
+  return /*#__PURE__*/React.createElement("div", {
+    style: { ...ds.tabBar, flexWrap: 'wrap' }
+  }, tabs.map(tab => /*#__PURE__*/React.createElement("button", {
+    key: tab.id,
+    style: { ...ds.tab, ...(activeTab === tab.id ? ds.tabActive : {}) },
+    onClick: () => setActiveTab(tab.id)
+  }, tab.label)));
 }
 
 // ===================================================================
