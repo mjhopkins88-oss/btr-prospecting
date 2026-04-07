@@ -172,7 +172,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef, useCallback } = React;
+        const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
         // Get API base URL (works both locally and on Railway)
         const API_BASE = window.location.hostname === 'localhost'
@@ -976,6 +976,7 @@
                     {activeTab === 'statewide' && user?.role !== 'broker' && <StatewideDiscovery />}
                     {activeTab === 'intelligence' && <SunbeltIntelligence user={user} />}
                     {activeTab === 'dealboard' && <DealBoardPage user={user} />}
+                    {activeTab === 'linkedinhub' && <LinkedInHub user={user} />}
                     {activeTab === 'admin' && user && user.is_super_admin && <AdminPage user={user} />}
                     {activeTab === 'quoting' && user && user.role === 'admin' && <QuotingPage user={user} />}
                     {activeTab === 'underwriting' && user && user.role === 'admin' && <UnderwritingSheet user={user} />}
@@ -1030,6 +1031,7 @@
                 { id: 'search', label: 'Prospect Search' },
                 { id: 'intelligence', label: 'Sunbelt Intelligence' },
                 { id: 'dealboard', label: 'Deal Board' },
+                { id: 'linkedinhub', label: 'LinkedIn Hub' },
             ],
             producer: [
                 { id: 'search', label: 'Prospect Search' },
@@ -1038,6 +1040,7 @@
                 { id: 'intelligence', label: 'Sunbelt Intelligence' },
                 { id: 'pipeline', label: 'My Pipeline' },
                 { id: 'followups', label: 'Follow-ups Due' },
+                { id: 'linkedinhub', label: 'LinkedIn Hub' },
             ],
             admin: [
                 { id: 'search', label: 'Prospect Search' },
@@ -1046,6 +1049,7 @@
                 { id: 'intelligence', label: 'Sunbelt Intelligence' },
                 { id: 'pipeline', label: 'My Pipeline' },
                 { id: 'followups', label: 'Follow-ups Due' },
+                { id: 'linkedinhub', label: 'LinkedIn Hub' },
             ],
         };
 
@@ -1060,6 +1064,217 @@
         };
         function brokerLabel(label, role) {
             return role === 'broker' ? (BROKER_LABELS[label] || label) : label;
+        }
+
+        function LinkedInHub({ user }) {
+            const [prospects, setProspects] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [query, setQuery] = useState('');
+            const [sortBy, setSortBy] = useState('score');
+            const [ssProspects, setSsProspects] = useState([]);
+            const [copiedId, setCopiedId] = useState(null);
+
+            useEffect(() => {
+                let cancelled = false;
+                async function load() {
+                    setLoading(true);
+                    setError(null);
+                    try {
+                        const [pRes, sRes] = await Promise.all([
+                            fetch(`${API_BASE}/api/prospects`).then(r => r.json()).catch(() => ({ prospects: [] })),
+                            fetch(`${API_BASE}/api/signalstack/prospects`).then(r => r.ok ? r.json() : { prospects: [] }).catch(() => ({ prospects: [] })),
+                        ]);
+                        if (cancelled) return;
+                        setProspects(Array.isArray(pRes?.prospects) ? pRes.prospects : []);
+                        setSsProspects(Array.isArray(sRes?.prospects) ? sRes.prospects : []);
+                    } catch (e) {
+                        if (!cancelled) setError(e.message || 'Failed to load');
+                    } finally {
+                        if (!cancelled) setLoading(false);
+                    }
+                }
+                load();
+                return () => { cancelled = true; };
+            }, []);
+
+            const linkedinProspects = useMemo(() => {
+                const list = (prospects || []).filter(p => validLinkedIn(p.linkedin));
+                const q = query.trim().toLowerCase();
+                const filtered = q ? list.filter(p =>
+                    (p.company || '').toLowerCase().includes(q) ||
+                    (p.executive || '').toLowerCase().includes(q) ||
+                    (p.title || '').toLowerCase().includes(q) ||
+                    (p.city || '').toLowerCase().includes(q) ||
+                    (p.state || '').toLowerCase().includes(q)
+                ) : list;
+                const sorted = [...filtered];
+                if (sortBy === 'score') sorted.sort((a, b) => (b.score || 0) - (a.score || 0));
+                else if (sortBy === 'company') sorted.sort((a, b) => (a.company || '').localeCompare(b.company || ''));
+                else if (sortBy === 'executive') sorted.sort((a, b) => (a.executive || '').localeCompare(b.executive || ''));
+                return sorted;
+            }, [prospects, query, sortBy]);
+
+            const ssWithLinks = useMemo(
+                () => (ssProspects || []).filter(p => p.linkedin_url && String(p.linkedin_url).includes('linkedin.com/')),
+                [ssProspects]
+            );
+
+            const totalProspects = (prospects || []).length;
+            const withLinks = linkedinProspects.length;
+            const coverage = totalProspects > 0 ? Math.round((withLinks / totalProspects) * 100) : 0;
+            const uniqueCompanies = new Set(linkedinProspects.map(p => p.company)).size;
+
+            const copyLink = (id, url) => {
+                try {
+                    navigator.clipboard.writeText(normalizeLinkedIn(url));
+                    setCopiedId(id);
+                    setTimeout(() => setCopiedId(null), 1500);
+                } catch {}
+            };
+
+            const cellStyle = { padding: '0.75rem', borderBottom: '1px solid #1e293b', fontSize: '0.85rem', color: '#e2e8f0', verticalAlign: 'top' };
+            const headStyle = { ...cellStyle, color: '#94a3b8', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid #334155', textAlign: 'left' };
+
+            return (
+                <div style={{ padding: '1.5rem 0' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
+                        <div>
+                            <h2 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.5rem', color: '#e2e8f0', margin: 0 }}>LinkedIn Hub</h2>
+                            <p style={{ color: '#94a3b8', fontSize: '0.9rem', margin: '0.35rem 0 0' }}>
+                                Centralized view of every LinkedIn touchpoint across your prospects, pipeline, and SignalStack contacts.
+                            </p>
+                        </div>
+                        <a href="/signalstack" target="_blank" rel="noopener noreferrer"
+                           style={{ ...styles.btnPrimary, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>
+                            Open SignalStack →
+                        </a>
+                    </div>
+
+                    <div style={styles.statsBar}>
+                        <StatCard label="Prospects w/ LinkedIn" value={withLinks} />
+                        <StatCard label="Coverage" value={`${coverage}%`} />
+                        <StatCard label="Unique Companies" value={uniqueCompanies} />
+                        <StatCard label="SignalStack Contacts" value={ssWithLinks.length} />
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', margin: '1.25rem 0' }}>
+                        <input
+                            type="text"
+                            style={{ ...styles.input, flex: '1 1 280px' }}
+                            value={query}
+                            onChange={(e) => setQuery(e.target.value)}
+                            placeholder="Search company, executive, title, city…"
+                        />
+                        <select style={styles.select} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                            <option value="score">Sort: Score</option>
+                            <option value="company">Sort: Company</option>
+                            <option value="executive">Sort: Executive</option>
+                        </select>
+                    </div>
+
+                    {loading && <div style={{ color: '#94a3b8', padding: '2rem', textAlign: 'center' }}>Loading LinkedIn data…</div>}
+                    {error && <div style={{ color: '#f87171', padding: '1rem' }}>{error}</div>}
+
+                    {!loading && !error && (
+                        <>
+                            <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '0.75rem', overflow: 'hidden', marginBottom: '2rem' }}>
+                                <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #1e293b', color: '#cbd5e1', fontFamily: "'Orbitron', sans-serif", fontSize: '0.9rem' }}>
+                                    Prospects with LinkedIn ({withLinks})
+                                </div>
+                                {withLinks === 0 ? (
+                                    <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>
+                                        No prospects with LinkedIn URLs yet. Run a Prospect Search to populate.
+                                    </div>
+                                ) : (
+                                    <div style={{ overflowX: 'auto' }}>
+                                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                            <thead>
+                                                <tr>
+                                                    <th style={headStyle}>Company</th>
+                                                    <th style={headStyle}>Executive</th>
+                                                    <th style={headStyle}>Title</th>
+                                                    <th style={headStyle}>Location</th>
+                                                    <th style={headStyle}>Score</th>
+                                                    <th style={headStyle}>LinkedIn</th>
+                                                    <th style={headStyle}>Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {linkedinProspects.map((p) => {
+                                                    const url = normalizeLinkedIn(p.linkedin);
+                                                    return (
+                                                        <tr key={p.id}>
+                                                            <td style={cellStyle}><strong>{p.company || '—'}</strong></td>
+                                                            <td style={cellStyle}>{p.executive || '—'}</td>
+                                                            <td style={cellStyle}>{p.title || '—'}</td>
+                                                            <td style={cellStyle}>{[p.city, p.state].filter(Boolean).join(', ') || '—'}</td>
+                                                            <td style={cellStyle}>{p.score ?? '—'}</td>
+                                                            <td style={{ ...cellStyle, maxWidth: '260px', wordBreak: 'break-all' }}>
+                                                                <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6' }}>{url}</a>
+                                                            </td>
+                                                            <td style={cellStyle}>
+                                                                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                                    <a href={url} target="_blank" rel="noopener noreferrer"
+                                                                       style={{ ...styles.actionBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>
+                                                                        Open
+                                                                    </a>
+                                                                    <button style={styles.actionBtn} onClick={() => copyLink(p.id, p.linkedin)}>
+                                                                        {copiedId === p.id ? 'Copied!' : 'Copy'}
+                                                                    </button>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '0.75rem', overflow: 'hidden' }}>
+                                <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #1e293b', color: '#cbd5e1', fontFamily: "'Orbitron', sans-serif", fontSize: '0.9rem' }}>
+                                    SignalStack Contacts ({ssWithLinks.length})
+                                </div>
+                                {ssWithLinks.length === 0 ? (
+                                    <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>
+                                        No SignalStack contacts yet. <a href="/signalstack" target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6' }}>Add contacts in SignalStack →</a>
+                                    </div>
+                                ) : (
+                                    <div style={{ overflowX: 'auto' }}>
+                                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                            <thead>
+                                                <tr>
+                                                    <th style={headStyle}>Name</th>
+                                                    <th style={headStyle}>Company</th>
+                                                    <th style={headStyle}>Title</th>
+                                                    <th style={headStyle}>LinkedIn</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {ssWithLinks.map((p) => {
+                                                    const url = normalizeLinkedIn(p.linkedin_url);
+                                                    return (
+                                                        <tr key={p.id}>
+                                                            <td style={cellStyle}><strong>{p.full_name || '—'}</strong></td>
+                                                            <td style={cellStyle}>{p.company_name || '—'}</td>
+                                                            <td style={cellStyle}>{p.title || '—'}</td>
+                                                            <td style={{ ...cellStyle, maxWidth: '320px', wordBreak: 'break-all' }}>
+                                                                <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6' }}>{url}</a>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
+                        </>
+                    )}
+                </div>
+            );
         }
 
         function TabBar({ activeTab, setActiveTab, user }) {
