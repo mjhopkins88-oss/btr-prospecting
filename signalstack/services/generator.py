@@ -23,6 +23,7 @@ from .input_quality_scorer import score_inputs
 from .observation_distiller import distill as distill_observations
 from .message_angle_planner import plan as plan_angles
 from .anti_generic_validator import validate as anti_generic_validate
+from . import playbook_loader
 
 
 def _merge_profile(stored: Optional[dict], override: Optional[dict]) -> dict:
@@ -118,9 +119,26 @@ def generate(
     distilled = distill_observations(context)
     context["distilled_observations"] = distilled
 
+    # 2.5) Load industry playbook intelligence (BTR/CRE today). This
+    #      shapes angle selection, anti-pattern avoidance, and the
+    #      "why this angle" trail returned to the UI. Playbook entries
+    #      are NEVER copy-pasted into messages as personalization.
+    playbook_bundle = playbook_loader.load_relevant_entries(
+        context, instruction=instruction
+    )
+    pb_entries = playbook_bundle.get("entries") or []
+    pb_preferred = playbook_loader.preferred_angles(pb_entries)
+    pb_anti_patterns = playbook_loader.collect_anti_patterns(pb_entries)
+    context["playbook"] = playbook_bundle
+    context["playbook_anti_patterns"] = pb_anti_patterns
+
     # 3) Plan distinct angles for the options. Weak-input cases get
     #    restricted to low-pressure / networking angles only.
-    strategies = plan_angles(quality, n=n, override=strategy_override)
+    strategies = plan_angles(
+        quality, n=n,
+        override=strategy_override,
+        playbook_preferred_angles=pb_preferred or None,
+    )
 
     provider = get_provider()
     try:
@@ -187,11 +205,55 @@ def generate(
         )
         cand["anti_generic"] = ag
         cand["selected_angle"] = cand.get("angle")
+
+        # Attach the playbook entries that informed this angle so the
+        # UI can show the "why" trail. We match by angle membership.
+        angle = cand.get("angle")
+        used_pb_entries = [
+            {
+                "id": e.get("id"),
+                "category": e.get("category"),
+                "title": e.get("title"),
+                "confidence": e.get("confidence"),
+            }
+            for e in pb_entries
+            if angle and angle in (e.get("message_angles") or [])
+        ]
+        # Always include the active anti-pattern entries — they shaped
+        # what the message is *not* allowed to say.
+        for e in pb_entries:
+            if e.get("category") == "anti_patterns":
+                summary = {
+                    "id": e.get("id"),
+                    "category": e.get("category"),
+                    "title": e.get("title"),
+                    "confidence": e.get("confidence"),
+                }
+                if summary not in used_pb_entries:
+                    used_pb_entries.append(summary)
+        cand["playbook_entries_used"] = used_pb_entries
+        cand["playbook_reasoning"] = (
+            f"Angle '{angle}' was prioritized by the "
+            f"{(playbook_bundle.get('playbook') or {}).get('name') or 'industry'} "
+            f"playbook based on the loaded categories: "
+            f"{', '.join((playbook_bundle.get('categories') or [])[:4])}."
+            if angle else playbook_bundle.get("reasoning")
+        )
+
+        # Reject the candidate if it leaks any playbook anti-pattern phrase.
+        body_low = body.lower()
+        leaked = [p for p in pb_anti_patterns
+                  if p and "{" not in p and p.lower() in body_low]
+        if leaked:
+            cand.setdefault("grounding", {}).setdefault("violations", []).extend(
+                [f"playbook_anti_pattern:{p}" for p in leaked]
+            )
         cand["strongest_observation_used"] = (
             (distilled[0]["text"] if distilled else None)
         )
 
-        ok = verdict["ok"] and anti["passes_anti_copy_check"]
+        playbook_clean = not leaked
+        ok = verdict["ok"] and anti["passes_anti_copy_check"] and playbook_clean
         if not anti["passes_anti_copy_check"]:
             verdict.setdefault("violations", []).extend(anti["violations"])
 
@@ -238,6 +300,25 @@ def generate(
             ),
         },
         "distilled_observations": distilled,
+        "playbook": {
+            "name": (playbook_bundle.get("playbook") or {}).get("name"),
+            "description": (playbook_bundle.get("playbook") or {}).get("description"),
+            "categories": playbook_bundle.get("categories") or [],
+            "preferred_angles": pb_preferred,
+            "entries": [
+                {
+                    "id": e.get("id"),
+                    "category": e.get("category"),
+                    "title": e.get("title"),
+                    "description": e.get("description"),
+                    "when_to_use": e.get("when_to_use"),
+                    "message_angles": e.get("message_angles") or [],
+                    "confidence": e.get("confidence"),
+                }
+                for e in pb_entries
+            ],
+            "reasoning": playbook_bundle.get("reasoning"),
+        },
         "strategies": strategies,
         "instruction": instruction,
         "candidates": candidates,
@@ -279,6 +360,8 @@ def save_draft(prospect_id: str, candidate: dict) -> dict:
                 "communication_style": candidate.get("communication_style"),
                 "outreach_goal": candidate.get("outreach_goal"),
                 "angle": candidate.get("angle"),
+                "playbook_entries_used": candidate.get("playbook_entries_used") or [],
+                "playbook_reasoning": candidate.get("playbook_reasoning"),
             },
         })
     except Exception as e:

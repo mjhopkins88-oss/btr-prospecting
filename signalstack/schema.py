@@ -174,6 +174,30 @@ SCHEMA_SQL = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS ss_industry_playbooks (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        market_focus TEXT,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ss_playbook_entries (
+        id TEXT PRIMARY KEY,
+        playbook_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        when_to_use TEXT,
+        message_angles_json TEXT,
+        example_phrases_json TEXT,
+        anti_patterns_json TEXT,
+        confidence REAL,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS ss_prompt_templates (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -194,6 +218,8 @@ INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS ix_ss_messages_status ON ss_messages(status)",
     "CREATE INDEX IF NOT EXISTS ix_ss_profile_prospect ON ss_profile_context(prospect_id)",
     "CREATE INDEX IF NOT EXISTS ix_ss_principles_active ON ss_social_principles(active)",
+    "CREATE INDEX IF NOT EXISTS ix_ss_playbook_entries_pb ON ss_playbook_entries(playbook_id)",
+    "CREATE INDEX IF NOT EXISTS ix_ss_playbook_entries_cat ON ss_playbook_entries(category)",
 ]
 
 
@@ -232,3 +258,8 @@ def init_schema() -> None:
         seed_principles_if_empty()
     except Exception as e:
         print(f"[SignalStack] principle seed skipped: {e}")
+    try:
+        from .seed import seed_btr_playbook_if_empty
+        seed_btr_playbook_if_empty()
+    except Exception as e:
+        print(f"[SignalStack] BTR playbook seed skipped: {e}")

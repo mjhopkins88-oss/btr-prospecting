@@ -535,6 +535,127 @@ def create_principle(data: dict) -> dict:
     return {"id": pid, **data}
 
 
+# ----------------------- Industry Playbooks -----------------------
+
+def create_playbook(data: dict) -> dict:
+    pid = _uid()
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO ss_industry_playbooks
+               (id, name, description, market_focus, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (pid, data["name"], data.get("description"),
+             data.get("market_focus"), _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"id": pid, **data}
+
+
+def get_playbook_by_name(name: str) -> Optional[dict]:
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT * FROM ss_industry_playbooks WHERE name = ?", (name,))
+            return _row_to_dict(cur, cur.fetchone())
+        except Exception:
+            try: conn.rollback()
+            except Exception: pass
+            return None
+    finally:
+        conn.close()
+
+
+def list_playbooks() -> list:
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT * FROM ss_industry_playbooks ORDER BY name")
+            return _rows_to_dicts(cur, cur.fetchall())
+        except Exception:
+            try: conn.rollback()
+            except Exception: pass
+            return []
+    finally:
+        conn.close()
+
+
+def create_playbook_entry(data: dict) -> dict:
+    import json as _json
+    eid = _uid()
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO ss_playbook_entries
+               (id, playbook_id, category, title, description, when_to_use,
+                message_angles_json, example_phrases_json, anti_patterns_json,
+                confidence, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (eid, data["playbook_id"], data["category"], data["title"],
+             data.get("description"), data.get("when_to_use"),
+             _json.dumps(data.get("message_angles") or []),
+             _json.dumps(data.get("example_phrases") or []),
+             _json.dumps(data.get("anti_patterns") or []),
+             float(data.get("confidence") or 0.8),
+             _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"id": eid, **data}
+
+
+def list_playbook_entries(
+    playbook_id: Optional[str] = None,
+    categories: Optional[list] = None,
+) -> list:
+    import json as _json
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        try:
+            if playbook_id and categories:
+                placeholders = ",".join(["?"] * len(categories))
+                cur.execute(
+                    f"SELECT * FROM ss_playbook_entries WHERE playbook_id = ? "
+                    f"AND category IN ({placeholders}) ORDER BY category, title",
+                    (playbook_id, *categories),
+                )
+            elif playbook_id:
+                cur.execute(
+                    "SELECT * FROM ss_playbook_entries WHERE playbook_id = ? "
+                    "ORDER BY category, title",
+                    (playbook_id,),
+                )
+            else:
+                cur.execute("SELECT * FROM ss_playbook_entries ORDER BY category, title")
+            rows = _rows_to_dicts(cur, cur.fetchall())
+        except Exception as e:
+            print(f"[SignalStack] list_playbook_entries skipped: {e}")
+            try: conn.rollback()
+            except Exception: pass
+            return []
+    finally:
+        conn.close()
+    for r in rows:
+        for src, dst in (
+            ("message_angles_json", "message_angles"),
+            ("example_phrases_json", "example_phrases"),
+            ("anti_patterns_json", "anti_patterns"),
+        ):
+            try:
+                r[dst] = _json.loads(r.get(src) or "[]")
+            except Exception:
+                r[dst] = []
+    return rows
+
+
 # ----------------------- Message metadata (grounding trail) -----------------------
 
 def save_message_metadata(message_id: str, meta: dict) -> None:
