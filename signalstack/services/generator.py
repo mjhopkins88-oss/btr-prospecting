@@ -19,6 +19,10 @@ from ..grounding import validate_message, filter_safe_signals
 from . import strategy as strategy_engine
 from .signal_interpreter import interpret_signals
 from .anti_copy import check_message as anti_copy_check, shorten as anti_copy_shorten
+from .input_quality_scorer import score_inputs
+from .observation_distiller import distill as distill_observations
+from .message_angle_planner import plan as plan_angles
+from .anti_generic_validator import validate as anti_generic_validate
 
 
 def _merge_profile(stored: Optional[dict], override: Optional[dict]) -> dict:
@@ -105,7 +109,18 @@ def generate(
             ),
         }
 
-    strategies = strategy_engine.recommend(context, override=strategy_override, n=n)
+    # 1) Score input quality. This decides whether we allow high-quality
+    #    personalized outreach or only a low-context fallback.
+    quality = score_inputs(context)
+
+    # 2) Distill 1–3 sharp observations from the raw material. The
+    #    generator reasons about these — not the raw source blobs.
+    distilled = distill_observations(context)
+    context["distilled_observations"] = distilled
+
+    # 3) Plan distinct angles for the options. Weak-input cases get
+    #    restricted to low-pressure / networking angles only.
+    strategies = plan_angles(quality, n=n, override=strategy_override)
 
     provider = get_provider()
     try:
@@ -141,7 +156,7 @@ def generate(
         if prof.get(k):
             raw_sources.append(prof[k])
 
-    candidates, rejected = [], []
+    candidates, rejected, low_context_candidates = [], [], []
     for cand in raw or []:
         body = cand.get("body", "") or ""
 
@@ -161,15 +176,47 @@ def generate(
         )
         cand["grounding"] = verdict
 
+        # 3) Anti-generic validator: kills weak-fact / template openers.
+        ag = anti_generic_validate(
+            body=body,
+            facts_used=cand.get("facts_used") or [],
+            signal_ids=cand.get("signal_ids") or [],
+            notes_used=cand.get("notes_used") or [],
+            profile_fields_used=cand.get("profile_fields_used") or [],
+            quality=quality,
+        )
+        cand["anti_generic"] = ag
+        cand["selected_angle"] = cand.get("angle")
+        cand["strongest_observation_used"] = (
+            (distilled[0]["text"] if distilled else None)
+        )
+
         ok = verdict["ok"] and anti["passes_anti_copy_check"]
         if not anti["passes_anti_copy_check"]:
             verdict.setdefault("violations", []).extend(anti["violations"])
-        (candidates if ok else rejected).append(cand)
+
+        is_low_context = bool(cand.get("low_context")) or quality.get("weak_only")
+
+        if not ok:
+            rejected.append(cand)
+        elif is_low_context or not ag["passes_quality_threshold"]:
+            # Demote to the clearly-labeled low-context bucket. We do not
+            # present these as high-quality personalized messages.
+            low_context_candidates.append(cand)
+        else:
+            candidates.append(cand)
 
     # Note: we deliberately do NOT return the full `context` here. It can
     # contain DB rows whose types (datetime, Decimal, bytes from Postgres)
     # are not always JSON-serializable, which previously caused the route
     # to 500 and the UI to hang on "Generating…".
+    warning = None
+    if quality.get("weak_only"):
+        warning = (
+            "Not enough specificity for strong personalized outreach. "
+            "Add a signal, note, recent activity, or profile context."
+        )
+
     return {
         "context_summary": {
             "signal_count": len(context.get("signals") or []),
@@ -177,10 +224,26 @@ def generate(
             "has_profile": bool(context.get("profile")),
             "principle_count": len(context.get("principles") or []),
         },
+        "input_quality": {
+            "input_quality_score": quality["input_quality_score"],
+            "tier": quality["tier"],
+            "enough_specificity_for_high_quality_message":
+                quality["enough_specificity_for_high_quality_message"],
+            "reasons": quality["reasons"],
+            "strongest_signal_type": (
+                (quality.get("strongest_available_signal") or {}).get("type")
+            ),
+            "strongest_observation": (
+                (quality.get("strongest_available_observation") or {}).get("summary")
+            ),
+        },
+        "distilled_observations": distilled,
         "strategies": strategies,
         "instruction": instruction,
         "candidates": candidates,
+        "low_context_candidates": low_context_candidates,
         "rejected": rejected,
+        "warning": warning,
     }
 
 
