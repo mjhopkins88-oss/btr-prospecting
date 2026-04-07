@@ -1,0 +1,22 @@
+You will draft {n} distinct LinkedIn outreach options for this prospect.
+
+Hard rules:
+- Use ONLY the facts in CONTEXT. Never invent metrics, history, or relationships.
+- Each option must reference at least one stored signal, note, or profile field.
+- No generic openers ("hope this finds you well", "I help companies like yours").
+- Each option must differ in framing, opening, rhythm, angle, and ask.
+- Keep messages short, sharp, peer-toned. Lower the cost of "no".
+
+CONTEXT:
+{context_json}
+
+STRATEGIES (one per option, use the angle field):
+{strategies_json}
+
+USER INSTRUCTION (optional, may be empty):
+{instruction}
+
+Return a JSON array of objects with keys:
+body, rationale, angle, message_type, primary_trigger,
+communication_style, outreach_goal, signal_ids, notes_used,
+profile_fields_used, facts_used.

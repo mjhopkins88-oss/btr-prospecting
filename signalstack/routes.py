@@ -159,8 +159,67 @@ def generate_messages():
     pid = data.get("prospect_id")
     if not pid:
         return jsonify({"error": "prospect_id required"}), 400
-    n = int(data.get("n", 4))
-    return jsonify(generator.generate(pid, n=n))
+    try:
+        n = int(data.get("n", 4))
+    except (TypeError, ValueError):
+        n = 4
+    result = generator.generate(
+        pid,
+        n=n,
+        instruction=data.get("instruction"),
+        strategy_override=data.get("strategy"),
+        profile_override=data.get("profile"),
+    )
+    return jsonify(result)
+
+
+# ===================== Profile Context =====================
+
+@bp.route("/api/signalstack/prospects/<pid>/profile", methods=["GET"])
+def get_profile(pid):
+    return jsonify(repo.get_profile_context(pid) or {})
+
+
+@bp.route("/api/signalstack/prospects/<pid>/profile", methods=["PUT"])
+def upsert_profile(pid):
+    data = _json_body()
+    return jsonify(repo.upsert_profile_context(pid, data))
+
+
+# ===================== Notes =====================
+
+@bp.route("/api/signalstack/notes", methods=["POST"])
+def create_note():
+    data = _json_body()
+    if not data.get("body"):
+        return jsonify({"error": "body required"}), 400
+    if not data.get("prospect_id") and not data.get("company_id"):
+        return jsonify({"error": "prospect_id or company_id required"}), 400
+    return jsonify(repo.create_note(data)), 201
+
+
+# ===================== Social-selling principles =====================
+
+@bp.route("/api/signalstack/principles", methods=["GET"])
+def list_principles():
+    return jsonify(repo.list_principles(active_only=True))
+
+
+@bp.route("/api/signalstack/principles", methods=["POST"])
+def create_principle():
+    data = _json_body()
+    for f in ("category", "principle_name", "description"):
+        if not data.get(f):
+            return jsonify({"error": f"{f} required"}), 400
+    return jsonify(repo.create_principle(data)), 201
+
+
+# ===================== Demo seed =====================
+
+@bp.route("/api/signalstack/seed-demo", methods=["POST"])
+def seed_demo():
+    from .seed import seed_demo as _seed
+    return jsonify(_seed())
 
 
 @bp.route("/api/signalstack/messages", methods=["GET"])

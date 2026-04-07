@@ -68,6 +68,20 @@ OUTREACH_GOALS = (
 MESSAGE_STATUS = ("draft", "saved", "sent", "discarded")
 MESSAGE_CHANNELS = ("linkedin_dm", "linkedin_inmail", "email", "other")
 
+# --- Strategy modifiers ---
+STRATEGY_MODIFIERS = (
+    "low_pressure", "concise", "warmer", "sharper",
+    "more_observational", "more_executive", "more_peer_like",
+)
+
+# --- Social-selling knowledge categories ---
+PRINCIPLE_CATEGORIES = (
+    "trust_building", "curiosity", "relevance", "specificity",
+    "social_proof", "timing", "objection_softening",
+    "conversational_tone", "authority_without_chest_beating",
+    "anti_template",
+)
+
 # --- Outcomes (used for learning) ---
 MESSAGE_OUTCOMES = (
     "no_response",

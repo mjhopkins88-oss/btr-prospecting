@@ -1,0 +1,8 @@
+You will read pasted LinkedIn profile content and extract a normalized
+profile context object. Do NOT invent fields. If a field is missing,
+leave it null. Mark each field with safe_to_reference = true only when
+the source paste explicitly contains it.
+
+Return JSON with: headline, about_text, current_role, current_company,
+prior_roles_summary, featured_topics, recent_posts_summary,
+notable_language_patterns, shared_context, manual_observations.

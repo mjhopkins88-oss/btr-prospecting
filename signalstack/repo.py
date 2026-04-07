@@ -382,6 +382,171 @@ def record_outcome(message_id: str, outcome: str, notes: str = "") -> dict:
     return {"id": oid, "message_id": message_id, "outcome": outcome, "notes": notes}
 
 
+_PROFILE_FIELDS = (
+    "linkedin_url", "headline", "about_text", "current_role", "current_company",
+    "prior_roles_summary", "featured_topics", "recent_posts_summary",
+    "notable_language_patterns", "shared_context", "manual_observations",
+    "safe_flags",
+)
+
+
+def upsert_profile_context(prospect_id: str, data: dict) -> dict:
+    """Insert or update the manual LinkedIn profile context for a prospect."""
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM ss_profile_context WHERE prospect_id = ?", (prospect_id,))
+        row = cur.fetchone()
+        now = _now()
+        if row:
+            sets, vals = [], []
+            for f in _PROFILE_FIELDS:
+                if f in data:
+                    sets.append(f"{f} = ?")
+                    vals.append(data[f])
+            if sets:
+                sets.append("updated_at = ?")
+                vals.append(now)
+                vals.append(row[0])
+                cur.execute(
+                    f"UPDATE ss_profile_context SET {', '.join(sets)} WHERE id = ?",
+                    tuple(vals),
+                )
+        else:
+            pid = _uid()
+            cur.execute(
+                """INSERT INTO ss_profile_context
+                   (id, prospect_id, linkedin_url, headline, about_text,
+                    current_role, current_company, prior_roles_summary,
+                    featured_topics, recent_posts_summary,
+                    notable_language_patterns, shared_context,
+                    manual_observations, safe_flags, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (pid, prospect_id, data.get("linkedin_url"),
+                 data.get("headline"), data.get("about_text"),
+                 data.get("current_role"), data.get("current_company"),
+                 data.get("prior_roles_summary"), data.get("featured_topics"),
+                 data.get("recent_posts_summary"),
+                 data.get("notable_language_patterns"),
+                 data.get("shared_context"), data.get("manual_observations"),
+                 data.get("safe_flags"), now, now),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_profile_context(prospect_id) or {}
+
+
+def get_profile_context(prospect_id: str) -> Optional[dict]:
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM ss_profile_context WHERE prospect_id = ?", (prospect_id,))
+        return _row_to_dict(cur, cur.fetchone())
+    finally:
+        conn.close()
+
+
+# ----------------------- Notes -----------------------
+
+def create_note(data: dict) -> dict:
+    nid = _uid()
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO ss_notes (id, prospect_id, company_id, body, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (nid, data.get("prospect_id"), data.get("company_id"),
+             data["body"], _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"id": nid, **data}
+
+
+def list_notes_for_prospect(prospect_id: str) -> list:
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM ss_notes WHERE prospect_id = ? ORDER BY created_at DESC",
+            (prospect_id,),
+        )
+        return _rows_to_dicts(cur, cur.fetchall())
+    finally:
+        conn.close()
+
+
+# ----------------------- Social-selling principles -----------------------
+
+def list_principles(active_only: bool = True) -> list:
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        if active_only:
+            cur.execute("SELECT * FROM ss_social_principles WHERE active = 1 ORDER BY category, principle_name")
+        else:
+            cur.execute("SELECT * FROM ss_social_principles ORDER BY category, principle_name")
+        return _rows_to_dicts(cur, cur.fetchall())
+    finally:
+        conn.close()
+
+
+def create_principle(data: dict) -> dict:
+    pid = _uid()
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO ss_social_principles
+               (id, category, principle_name, description, practical_use_case,
+                allowed_contexts, disallowed_contexts, example_pattern,
+                anti_pattern, active, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (pid, data["category"], data["principle_name"],
+             data["description"], data.get("practical_use_case"),
+             data.get("allowed_contexts"), data.get("disallowed_contexts"),
+             data.get("example_pattern"), data.get("anti_pattern"),
+             1 if data.get("active", True) else 0, _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"id": pid, **data}
+
+
+# ----------------------- Message metadata (grounding trail) -----------------------
+
+def save_message_metadata(message_id: str, meta: dict) -> None:
+    import json as _json
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM ss_message_metadata WHERE message_id = ?", (message_id,))
+        cur.execute(
+            """INSERT INTO ss_message_metadata
+               (message_id, facts_used_json, signals_used_json, notes_used_json,
+                profile_fields_used_json, grounding_score, unsafe_claims_json,
+                validator_notes, strategy_json, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (message_id,
+             _json.dumps(meta.get("facts_used") or []),
+             _json.dumps(meta.get("signals_used") or []),
+             _json.dumps(meta.get("notes_used") or []),
+             _json.dumps(meta.get("profile_fields_used") or []),
+             meta.get("grounding_score"),
+             _json.dumps(meta.get("unsafe_claims") or []),
+             meta.get("validator_notes"),
+             _json.dumps(meta.get("strategy") or {}),
+             _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def list_outcomes_for_message(message_id: str) -> list:
     conn = get_db()
     try:
