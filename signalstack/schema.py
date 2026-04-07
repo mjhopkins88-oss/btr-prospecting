@@ -198,18 +198,34 @@ INDEXES_SQL = [
 
 
 def init_schema() -> None:
-    """Create all SignalStack tables if they don't exist. Idempotent."""
-    conn = get_db()
-    try:
-        cur = conn.cursor()
-        for stmt in SCHEMA_SQL:
+    """Create all SignalStack tables if they don't exist. Idempotent.
+
+    Each statement is committed independently so a single failure (e.g.
+    a pre-existing table with a slightly different shape on Postgres)
+    cannot abort the whole transaction and leave later tables missing.
+    """
+    created = 0
+    failed = 0
+    for stmt in SCHEMA_SQL + INDEXES_SQL:
+        conn = get_db()
+        try:
+            cur = conn.cursor()
             cur.execute(stmt)
-        for stmt in INDEXES_SQL:
-            cur.execute(stmt)
-        conn.commit()
-        print(f"[SignalStack] Schema initialized ({'postgres' if is_postgres() else 'sqlite'})")
-    finally:
-        conn.close()
+            conn.commit()
+            created += 1
+        except Exception as e:
+            failed += 1
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f"[SignalStack] schema stmt failed: {e}\n  SQL: {stmt[:120]}")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    print(f"[SignalStack] Schema initialized ({'postgres' if is_postgres() else 'sqlite'}) — {created} ok, {failed} failed")
     # Idempotent seeding of the social-selling knowledge layer.
     try:
         from .seed import seed_principles_if_empty
