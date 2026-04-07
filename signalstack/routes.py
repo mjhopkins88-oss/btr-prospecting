@@ -163,14 +163,36 @@ def generate_messages():
         n = int(data.get("n", 4))
     except (TypeError, ValueError):
         n = 4
-    result = generator.generate(
-        pid,
-        n=n,
-        instruction=data.get("instruction"),
-        strategy_override=data.get("strategy"),
-        profile_override=data.get("profile"),
-    )
-    return jsonify(result)
+    try:
+        result = generator.generate(
+            pid,
+            n=n,
+            instruction=data.get("instruction"),
+            strategy_override=data.get("strategy"),
+            profile_override=data.get("profile"),
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "error": "generator_crashed",
+            "message": f"Generator crashed: {e}",
+            "candidates": [],
+            "rejected": [],
+        }), 200
+    try:
+        return jsonify(result)
+    except Exception as e:
+        # Last-ditch: strip non-serializable context and try again.
+        import traceback
+        traceback.print_exc()
+        safe = {
+            "error": "serialization_failed",
+            "message": f"Could not serialize generator result: {e}",
+            "candidates": result.get("candidates", []) if isinstance(result, dict) else [],
+            "rejected": result.get("rejected", []) if isinstance(result, dict) else [],
+        }
+        return jsonify(safe), 200
 
 
 # ===================== Profile Context =====================
