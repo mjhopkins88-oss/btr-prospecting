@@ -434,9 +434,24 @@ async function viewGenerator() {
       (r.candidates||[]).forEach(c => {
       const wrap = h("div",{class:"candidate mb"});
       wrap.append(h("pre",{},c.body));
+      const ac = c.anti_copy || {};
       wrap.append(h("div",{class:"muted"},
-        c.message_type+" • "+c.primary_trigger+" • grounding "+c.grounding.score));
+        c.message_type+" • "+c.primary_trigger
+        +" • grounding "+c.grounding.score
+        +" • "+(ac.char_count||c.body.length)+" chars"
+        +" • overlap "+(ac.raw_source_overlap_score ?? 0)
+        +(ac.passes_anti_copy_check===false ? " • COPY-FAIL" : "")));
+      if (c.observation && c.observation.safe_reference_text) {
+        wrap.append(h("div",{class:"muted"},
+          "Observation: "+c.observation.safe_reference_text));
+      }
       wrap.append(h("div",{class:"muted"},"Rationale: "+c.rationale));
+      if ((c.signal_ids||[]).length) {
+        wrap.append(h("div",{class:"muted"},"Signals: "+c.signal_ids.join(", ")));
+      }
+      if ((c.facts_used||[]).length) {
+        wrap.append(h("div",{class:"muted"},"Facts: "+c.facts_used.join(", ")));
+      }
       const save = h("button",{},"Save draft");
       save.onclick = async () => {
         await api("/messages",{method:"POST",body:{...c, prospect_id: sel.value}});

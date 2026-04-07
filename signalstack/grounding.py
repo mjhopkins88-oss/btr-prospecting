@@ -40,7 +40,9 @@ CREEPY_PATTERNS = [
     r"\bi noticed you (live|moved) (in|to)\b",  # personal location stalking
 ]
 
-MAX_MESSAGE_CHARS = 600
+# LinkedIn first-touch hard cap. The anti-copy validator also enforces
+# a 450-char soft ceiling and auto-shortens before this runs.
+MAX_MESSAGE_CHARS = 450
 
 
 class GroundingError(ValueError):
