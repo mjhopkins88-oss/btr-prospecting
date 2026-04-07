@@ -1,0 +1,5 @@
+Rewrite the provided draft per the instruction. Preserve all grounding —
+do not add any fact that wasn't already present in the original draft or
+the provided context. Keep it under 600 characters.
+
+Output JSON: { "body": "..." }
