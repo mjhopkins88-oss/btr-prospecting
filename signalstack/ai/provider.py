@@ -87,25 +87,28 @@ def _compose(angle: str, first: str, anchor: str, profile_anchor: Optional[str])
     """Build a distinct opener per angle. Anchors come from real stored data."""
     profile_clause = f" Given your focus on {profile_anchor}," if profile_anchor else ""
     if angle == "curiosity":
-        return (f"Hi {first} — noticed {anchor}.{profile_clause} "
-                f"Curious how you're thinking about it as things settle.")
-    if angle == "observation":
-        return (f"Hey {first}, picked up on {anchor}. No agenda — "
-                f"just thought it was worth flagging.")
-    if angle == "insight":
-        return (f"Hi {first} — saw {anchor}. A few teams in similar spots "
-                f"have been wrestling with the same trade-off; happy to share "
+        return (f"Hi {first} — {anchor} caught my attention.{profile_clause} "
+                f"Curious how you're thinking about that segment right now.")
+    if angle in ("observation", "timely_observation"):
+        return (f"Hey {first} — {anchor} jumped out at me this week. "
+                f"No agenda, just thought I'd flag it while it's timely.")
+    if angle in ("insight", "light_insight"):
+        return (f"Hi {first} — on {anchor}, a few teams in similar spots "
+                f"have been wrestling with the same trade-off. Happy to share "
                 f"what I've seen if it's useful.")
+    if angle == "market_pattern":
+        return (f"Hi {first} — {anchor} lines up with a pattern we're seeing "
+                f"across similar desks this quarter. Curious if you're reading it the same way.")
     if angle == "point_of_view":
         return (f"Hi {first} — on {anchor}, my read is the second-order effect "
-                f"hits within a quarter, not at announcement. Happy to be wrong.")
+                f"hits within a quarter, not at announcement. Tell me I'm wrong.")
     if angle == "relevant_challenge":
-        return (f"Hi {first} — given {anchor}, is there someone on your team "
-                f"already owning the downstream side of this, or is it still floating?")
-    if angle == "timing_context":
-        return (f"Hey {first} — {anchor} caught my eye this week. "
-                f"Worth a quick exchange of notes, or too early?")
-    return f"Hi {first} — noticed {anchor}."
+        return (f"Hi {first} — given {anchor}, is someone on your team already "
+                f"owning the downstream side of this, or is it still floating?")
+    if angle == "low_pressure_starter":
+        return (f"Hi {first} — no agenda here, just wanted to open a line "
+                f"in case it's useful down the road.")
+    return f"Hi {first} — {anchor} caught my eye."
 
 
 class MockAiProvider:
@@ -156,24 +159,16 @@ class MockAiProvider:
         if not anchors and profile_anchor_text:
             anchors.append((profile_anchor_text, {"profile_field": profile_field}))
 
-        # Fallback: anchor on the prospect's stored role/company so the
-        # generator still produces something usable when only a LinkedIn
-        # URL was provided. We mark this as a "facts_used" anchor so the
-        # grounding validator still passes.
-        if not anchors:
-            title = prospect.get("title")
-            company = prospect.get("company_name")
-            if title and company:
-                anchors.append((f"your work as {title} at {company}", {"fact": "title+company"}))
-            elif title:
-                anchors.append((f"your work as {title}", {"fact": "title"}))
-            elif company:
-                anchors.append((f"your work at {company}", {"fact": "company"}))
-            elif profile.get("linkedin_url"):
-                anchors.append(("your LinkedIn profile", {"fact": "linkedin_url"}))
-
-        if not anchors:
-            return []
+        # NOTE: We deliberately do NOT fall back to anchoring on the
+        # prospect's title / company / location here. Those are weak
+        # profile facts and lead to "noticed your work as Managing
+        # Director at JLL"-style fake personalization. When no real
+        # anchor exists we hand back a generic, clearly-low-context
+        # opener and let the anti-generic validator + UI flag it as
+        # a "low-context fallback option".
+        low_context_mode = not anchors
+        if low_context_mode:
+            anchors.append(("", {"low_context": True}))
 
         strategies = strategies or [{"angle": "curiosity"}, {"angle": "observation"},
                                     {"angle": "insight"}, {"angle": "point_of_view"}]
@@ -181,6 +176,10 @@ class MockAiProvider:
         for i, spec in enumerate(strategies[:n]):
             anchor_text, src = anchors[i % len(anchors)]
             angle = spec.get("angle") or "curiosity"
+            if src.get("low_context"):
+                # Force the only safe low-context angle so we never
+                # produce fake-personalized lines from weak facts.
+                angle = "low_pressure_starter"
             body = _compose(angle, first, anchor_text, profile_anchor_text)
 
             if instruction:
@@ -232,6 +231,7 @@ class MockAiProvider:
                     ([profile_field] if profile_field else [])
                 ),
                 "facts_used": facts_used,
+                "low_context": bool(src.get("low_context")),
             })
         return results
 
