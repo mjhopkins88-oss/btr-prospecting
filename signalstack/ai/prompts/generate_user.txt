@@ -49,16 +49,62 @@ HARD BANS — never produce any of these
   early. The partnership angle is carried by POV and pattern,
   never by stating the role.
 - Any ask for a call, meeting, or quick chat.
+- Any vague, floating market commentary. Every message must have
+  a "where this shows up" anchor. Phrases like "this part of the
+  market", "this space", "this slice", "this slice of the market",
+  "this segment", "this kind of market", "this side of the
+  business", "the current environment", "today's market" are
+  BANNED — they have no anchor.
+
+====================================================================
+CONTEXTUAL ANCHOR (do this BEFORE writing each message)
+====================================================================
+
+For every option, first pick a CONTEXTUAL ANCHOR — the real
+operating surface where the idea actually shows up in the
+prospect's world. The anchor answers:
+
+    "Where would this insight actually show up in their world?"
+
+Use one of these shapes (or a close variant that names a real
+operating surface):
+
+  - "on newer deals"
+  - "in your pipeline"
+  - "when underwriting gets deeper"
+  - "on newer communities"
+  - "once deals get closer to execution"
+  - "in the next capital allocation decision"
+  - "during lease-up"
+  - "as new sites come online"
+  - "on deals still in diligence"
+  - "on the sites you're working right now"
+  - "in the build phase of new communities"
+
+Two options in the same batch should lean on DIFFERENT anchors
+where possible — not every message on the same surface.
+
+BAD  (floats, no anchor):
+  "the trend suggests where capital is moving"
+
+GOOD (anchored on newer deals + underwriting):
+  "on newer BTR deals, capital still shows up, but it's getting
+   more selective the deeper you get into underwriting"
 
 ====================================================================
 MESSAGE STRUCTURE (use unless the style mode needs otherwise)
 ====================================================================
 
-  observation -> interpretation -> soft invitation
+  1. anchored observation  — "where this shows up". Name the real
+                             operating surface (pipeline,
+                             underwriting, newer deals, lease-up,
+                             capital allocation, etc.).
+  2. interpretation        — the internal thought, in peer voice.
+  3. light curiosity       — a low-pressure compare-notes question.
 
 Example shape:
-  "Feels like [interpreted pattern] — curious if that's showing up
-   in your world too."
+  "On newer deals, [interpreted pattern] — curious if that's
+   showing up in your pipeline too."
 
 Tone: sharp, low-pressure, human, calm, peer-like, slightly
 understated.
@@ -177,4 +223,7 @@ Return an object of shape:
 
 Every option must be written from a DIFFERENT thought, a DIFFERENT
 style mode, a DIFFERENT psychology angle, and a DIFFERENT opening
-line. Minor rewrites of the same line are a hard failure.
+line. Every option must carry its OWN contextual anchor (the
+"where this shows up" surface). Minor rewrites of the same line
+are a hard failure. Unanchored abstract market commentary is a
+hard failure.

@@ -88,6 +88,78 @@ _TAG_LIKE_TERMS = (
     "fintech", "proptech", "saas",
 )
 
+# Vague floating phrases that are NOT contextual anchors. A thought
+# that leans on any of these lacks a "where this shows up" anchor
+# and must be rewritten so it lands on a real operating surface
+# (pipeline, underwriting, newer deals, lease-up, capital
+# allocation, deal execution, etc.).
+#
+# Replacements here are deliberate: we swap the vague phrase for a
+# concrete operating surface so the final thought still reads as a
+# complete sentence. The replacement list is intentionally short —
+# downstream the generator and critic will push for stronger
+# anchors where possible.
+# Each entry is (pattern, replacement). The pattern is a regex
+# (case-insensitive) that intentionally captures the leading
+# preposition ("in", "of", "across") when present so the anchor
+# substitution doesn't leave "in on newer deals" style grammar. When
+# no leading preposition is captured we just drop in the anchor.
+_VAGUE_ANCHOR_REPLACEMENTS: tuple[tuple[str, str], ...] = (
+    (r"\bin\s+this\s+slice\s+of\s+the\s+market\b", "on newer deals"),
+    (r"\bin\s+this\s+slice\s+of\s+the\s+business\b", "in your pipeline"),
+    (r"\bin\s+this\s+slice\b", "on newer deals"),
+    (r"\bin\s+this\s+part\s+of\s+the\s+market\b", "on newer deals"),
+    (r"\bin\s+this\s+part\s+of\s+the\s+business\b", "in your pipeline"),
+    (r"\bin\s+this\s+kind\s+of\s+market\b", "on newer deals"),
+    (r"\bin\s+this\s+side\s+of\s+the\s+business\b", "in your pipeline"),
+    (r"\bin\s+this\s+side\s+of\s+the\s+market\b", "on newer deals"),
+    (r"\bin\s+this\s+segment\s+of\s+the\s+market\b", "on newer deals"),
+    (r"\bin\s+this\s+segment\b", "on newer deals"),
+    (r"\bin\s+this\s+space\b", "in your pipeline"),
+    (r"\bin\s+today'?s\s+market\b", "on newer deals"),
+    (r"\bin\s+the\s+current\s+environment\b", "once deals get closer to execution"),
+    (r"\bof\s+this\s+slice\s+of\s+the\s+market\b", "of newer deals"),
+    (r"\bof\s+this\s+part\s+of\s+the\s+market\b", "of newer deals"),
+    (r"\bof\s+this\s+segment\b", "of newer deals"),
+    # Bare noun-phrase forms (no leading preposition): plain swap.
+    (r"\bthis\s+slice\s+of\s+the\s+market\b", "newer deals"),
+    (r"\bthis\s+slice\s+of\s+the\s+business\b", "your pipeline"),
+    (r"\bthis\s+slice\b", "newer deals"),
+    (r"\bthis\s+part\s+of\s+the\s+market\b", "newer deals"),
+    (r"\bthis\s+part\s+of\s+the\s+business\b", "your pipeline"),
+    (r"\bthis\s+kind\s+of\s+market\b", "newer deals"),
+    (r"\bthis\s+side\s+of\s+the\s+business\b", "your pipeline"),
+    (r"\bthis\s+side\s+of\s+the\s+market\b", "newer deals"),
+    (r"\bthis\s+segment\s+of\s+the\s+market\b", "newer deals"),
+    (r"\bthis\s+segment\b", "newer deals"),
+    (r"\bthis\s+space\b", "your pipeline"),
+    (r"\bthe\s+current\s+environment\b", "once deals get closer to execution"),
+    (r"\btoday'?s\s+market\b", "newer deals"),
+)
+
+
+def _replace_vague_anchors(text: str) -> str:
+    """
+    Swap vague floating phrases for real operating-surface anchors.
+
+    These phrases are banned by the generator / critic prompts because
+    they are not anchors — they float. When a heuristic or AI-produced
+    thought slips one through, we rewrite it here so the downstream
+    message is still grounded on a real operating surface.
+
+    Patterns intentionally capture the leading preposition when
+    present so the rewrite produces natural grammar ("on newer deals"
+    instead of "in on newer deals").
+    """
+    if not text:
+        return text
+    out = text
+    for pattern, anchor in _VAGUE_ANCHOR_REPLACEMENTS:
+        out = re.sub(pattern, anchor, out, flags=re.IGNORECASE)
+    # Collapse any double spaces the substitutions may have left.
+    out = re.sub(r"\s{2,}", " ", out).strip()
+    return out
+
 # Peer-voice lead-ins. These are used by the deterministic rewriter
 # when it needs to turn a third-person insight ("teams leaning into X
 # are solving for Y") into a first-person thought ("most groups
@@ -234,6 +306,7 @@ def _deterministic_thought(
 
     rewritten = _to_peer_voice(insight_text)
     rewritten = _strip_tag_stacks(rewritten)
+    rewritten = _replace_vague_anchors(rewritten)
     if not rewritten:
         return None
 
@@ -280,30 +353,38 @@ def _deterministic_thought(
 # insights. They are intentionally broad — framed as possibilities,
 # never as claims — and each one is typed to a DIFFERENT product
 # vocabulary slot so the final set of 5 carries genuine diversity.
+#
+# Every fallback is ANCHORED on a real operating surface ("on newer
+# deals", "in the pipeline", "when underwriting gets deeper", "on
+# newer communities", "once deals get closer to execution", etc.).
+# Floating phrases like "this part of the market", "this space",
+# "this slice", "this slice of the market" are explicitly banned —
+# the whole point of the fallback is to sound like someone who
+# actually sees deals, not a market-commentary bot.
 _FALLBACK_THOUGHTS_BY_TYPE: dict[str, list[str]] = {
     "pattern_recognition": [
-        "feels like most groups in this seat are spending more time on cost discipline than on growth right now",
-        "the pattern I keep noticing is that the teams still moving are the ones who already rebuilt their assumptions",
+        "on newer deals it feels like most groups are spending more time on cost discipline than on growth",
+        "the pattern I keep noticing in the pipeline is that the teams still moving are the ones who already rebuilt their assumptions",
     ],
     "tension_tradeoff": [
-        "the interesting tension right now may not be demand — it's whether the operating stack can actually move at the same pace the capital side wants",
-        "the real tradeoff for a lot of folks in this market seems to be sourcing speed versus underwriting discipline",
+        "when underwriting gets deeper, the real tension seems less about demand and more about whether the operating stack can keep pace with what the capital side wants",
+        "on newer deals the real tradeoff feels like sourcing speed versus underwriting discipline, not deal flow",
     ],
     "contrarian_observation": [
-        "the interesting part of this market may not be growth, it may be who can still move efficiently",
-        "the default read is that deal flow is the constraint — my guess is it's actually the bar for conviction that's moved",
+        "on newer communities the interesting question may not be growth, it may be who can still move efficiently",
+        "the default read on the pipeline is that deal flow is the constraint — my guess is it's actually the bar for conviction that's moved",
     ],
     "timing_insight": [
-        "my read right now is that the window for the next set of decisions is narrower than it looked six months ago",
-        "timing-wise it feels like the groups moving now have already decided; the rest are waiting for another data point",
+        "my read right now is that once deals get closer to execution, the window for the next set of decisions is narrower than it looked six months ago",
+        "on newer deals it feels like the groups still moving have already decided; the rest are waiting for another data point before they underwrite",
     ],
     "second_order_effect": [
-        "the second-order effect I'd expect from this kind of positioning is that it reshuffles what gets prioritized on the ops side within a quarter",
-        "one downstream thing I keep seeing is that capital shifts show up in sourcing before they show up anywhere else",
+        "a capital allocation shift on newer communities usually reshuffles what gets prioritized on the ops side inside a quarter",
+        "one downstream thing I keep seeing on newer deals is that capital shifts show up in sourcing before they show up anywhere else",
     ],
     "self_relevance": [
-        "most folks in a seat like this seem to be weighing the same question — whether the current read on the market is still the right one to underwrite against",
-        "if I were sitting in that seat right now I'd probably care more about who's still lending at real terms than about deal flow",
+        "most folks in this seat seem to be weighing the same question on newer deals — whether the read they were underwriting against six months ago still holds",
+        "if I were sitting in that seat on a new deal right now, I'd probably care more about who's still lending at real terms than about deal flow",
     ],
 }
 
@@ -421,6 +502,7 @@ def _normalize_ai_thoughts(
         if not text:
             continue
         text = _strip_tag_stacks(text)
+        text = _replace_vague_anchors(text)
         if len(text) > MAX_THOUGHT_CHARS:
             text = text[: MAX_THOUGHT_CHARS - 1].rsplit(" ", 1)[0] + "…"
         based_on = raw.get("based_on_insight_id")

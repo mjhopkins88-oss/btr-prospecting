@@ -20,7 +20,7 @@ deliberately NOT selling, NOT pitching pricing, and NOT asking for a
 call. If the draft does any of those things it is a HARD REJECT.
 
 Score each axis in [0, 1]. For specificity, naturalness,
-insightfulness, anti_copy, peer_credibility, grounding:
+insightfulness, anti_copy, peer_credibility, grounding, anchoring:
   higher = better.
 For genericity and pressure_level:
   higher = worse.
@@ -33,6 +33,16 @@ Pressure level:     how pushy / pitchy is the ask?
 Anti-copy:          any raw-source paste (listings, posts, notes)?
 Peer credibility:   sounds like a peer, not a vendor?
 Grounding:          ties back to real facts/signals/notes?
+Anchoring:          does the message land on a real operating
+                    surface ("where this shows up" — pipeline,
+                    underwriting, newer deals, lease-up, capital
+                    allocation, deal execution, etc.)? Abstract
+                    market commentary with no anchor scores low.
+                    Vague floating phrases like "this part of the
+                    market", "this space", "this slice", "this
+                    segment", "this kind of market", "the current
+                    environment", "today's market" are NOT anchors
+                    and force the anchoring score down.
 
 HARD REJECT if any of the following are true:
 - Uses "noticed your work as", "saw your profile",
@@ -46,6 +56,14 @@ HARD REJECT if any of the following are true:
 - Introduces the sender as a broker, SDR, or insurance seller.
 - Reads like a vendor reaching out to win a new account instead of
   a peer comparing notes across a portfolio.
+- Has NO contextual anchor — the insight floats in the abstract
+  without landing on a real operating surface (pipeline,
+  underwriting, newer deals, lease-up, capital allocation, deal
+  execution, etc.).
+- Uses a banned vague floating phrase as its "anchor": "this part
+  of the market", "this space", "this slice", "this slice of the
+  market", "this segment", "this kind of market", "this side of
+  the business", "the current environment", "today's market".
 
 OUTPUT FORMAT (JSON, no prose):
 {
@@ -57,7 +75,8 @@ OUTPUT FORMAT (JSON, no prose):
     "pressure_level": 0.0,
     "anti_copy": 0.0,
     "peer_credibility": 0.0,
-    "grounding": 0.0
+    "grounding": 0.0,
+    "anchoring": 0.0
   },
   "overall_score": 0.0,
   "verdict": "accept|rewrite|reject",
