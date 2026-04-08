@@ -53,6 +53,53 @@ BANNED_OPENERS = [
     r"\bcircle back\b",
 ]
 
+# Vague floating phrases that do NOT count as a contextual anchor.
+# A message using any of these as its "where this shows up" beat is
+# treated as unanchored — the reasoning floats instead of landing on
+# a real operating surface (pipeline, underwriting, newer deals,
+# lease-up, capital allocation, deal execution, etc.).
+VAGUE_ANCHOR_PHRASES = [
+    r"\bthis part of the market\b",
+    r"\bthis part of the business\b",
+    r"\bthis slice of the market\b",
+    r"\bthis slice of the business\b",
+    r"\bthis slice\b",
+    r"\bthis segment of the market\b",
+    r"\bthis segment\b",
+    r"\bthis kind of market\b",
+    r"\bthis side of the business\b",
+    r"\bthis side of the market\b",
+    r"\bthis space\b",
+    r"\bin this space\b",
+    r"\bthe current environment\b",
+    r"\btoday'?s market\b",
+]
+
+# Allow-list of contextual anchor phrases. When a message contains
+# any of these (or a close variant), it is considered to land on a
+# real operating surface. Absence of an anchor at HIGH/MEDIUM
+# confidence is a specificity penalty. At LOW confidence we still
+# prefer anchored messages but do not hard-fail on the absence.
+CONTEXTUAL_ANCHOR_PHRASES = [
+    r"\bon newer deals\b",
+    r"\bon new deals\b",
+    r"\bon newer communities\b",
+    r"\bon new communities\b",
+    r"\bin your pipeline\b",
+    r"\bin the pipeline\b",
+    r"\bwhen underwriting gets deeper\b",
+    r"\bwhen you'?re underwriting\b",
+    r"\bonce deals get closer to execution\b",
+    r"\bin the next capital allocation\b",
+    r"\bduring lease[- ]?up\b",
+    r"\bas new sites come online\b",
+    r"\bon deals still in diligence\b",
+    r"\bin the build phase\b",
+    r"\bon the sites you'?re working\b",
+    r"\bin deal execution\b",
+    r"\bon the underwriting side\b",
+]
+
 # Empty praise / buzzword phrases.
 BUZZWORDS = [
     "synergy", "leverage", "best-in-class", "world-class", "thought leader",
@@ -100,6 +147,22 @@ def validate(
     for w in buzz_hits:
         violations.append(f"buzzword:{w}")
 
+    # Vague floating phrases are banned as "where this shows up"
+    # anchors. Any hit here downgrades the message to unanchored and
+    # raises genericity so the hard gate below can reject it at
+    # HIGH/MEDIUM confidence.
+    vague_hits = _contains_any(body_lo, VAGUE_ANCHOR_PHRASES)
+    for h in vague_hits:
+        violations.append(f"vague_anchor:{h}")
+
+    # Does the message land on a real operating surface? We look for
+    # any of the allow-listed contextual anchor phrases. A message
+    # missing all of them has no "where this shows up" beat.
+    anchor_hits = _contains_any(body_lo, CONTEXTUAL_ANCHOR_PHRASES)
+    has_contextual_anchor = bool(anchor_hits) and not vague_hits
+    if not has_contextual_anchor and not vague_hits:
+        violations.append("no_contextual_anchor")
+
     # Anchored only on weak facts?
     weak_fact_only = (
         not signal_ids
@@ -129,11 +192,23 @@ def validate(
         specificity_score += 0.2
     if has_place:
         specificity_score += 0.2
+    # A real "where this shows up" anchor is itself a specificity
+    # signal — it means the message lands on an operating surface
+    # the prospect actually works on, even if we don't have a strong
+    # signal to cite by id.
+    if has_contextual_anchor:
+        specificity_score += 0.2
     specificity_score = min(1.0, specificity_score)
 
     genericity_score = 0.0
     genericity_score += 0.5 * len(banned_hits)
     genericity_score += 0.2 * len(buzz_hits)
+    # Vague floating phrases raise genericity. Missing any anchor
+    # at all raises it less, but still tips the message toward the
+    # "could be sent to 200 people" end of the scale.
+    genericity_score += 0.35 * len(vague_hits)
+    if not has_contextual_anchor and not vague_hits:
+        genericity_score += 0.15
     # At HIGH confidence, weak-fact-only anchoring is a strong
     # genericity penalty — we expected real signals and didn't get
     # them. At MEDIUM it's a moderate penalty. At LOW it's expected
@@ -169,9 +244,18 @@ def validate(
     if not confidence_level:
         confidence_level = "low" if quality.get("weak_only") else "high"
 
+    # Vague "this slice of the market" / "this space" phrasings are
+    # treated as hard violations at every confidence level — the
+    # whole point of the contextual anchor change is that they read
+    # as unanchored market commentary regardless of how thin the
+    # input context is.
+    vague_violations = [v for v in violations if v.startswith("vague_anchor:")]
+
     if confidence_level == "high":
         # Keep the original behaviour for strong-signal generation —
         # demand real specificity, reject weak-fact-only anchoring.
+        # A missing contextual anchor at HIGH confidence is a fail
+        # (we had real context and still floated).
         passes = (
             not violations
             and specificity_score >= PASS_THRESHOLD
@@ -179,10 +263,16 @@ def validate(
         )
     elif confidence_level == "medium":
         # Medium: allow broader framing but still reject hard
-        # violations and the worst of the buzzword/template openers.
+        # violations, vague anchors, and the worst of the
+        # buzzword/template openers. A missing anchor at medium is
+        # also a fail — the pipeline has enough context to ground
+        # on a real operating surface.
         hard_violations = [
             v for v in violations
-            if v.startswith("banned_opener:") or v.startswith("buzzword:")
+            if v.startswith("banned_opener:")
+            or v.startswith("buzzword:")
+            or v.startswith("vague_anchor:")
+            or v == "no_contextual_anchor"
         ]
         passes = (
             not hard_violations
@@ -190,11 +280,17 @@ def validate(
         )
     else:
         # Low: only the hardest violations disqualify — banned sales
-        # template openers and buzzwords. A broad-but-thoughtful
-        # message is allowed through.
+        # template openers, buzzwords, and vague floating phrases.
+        # A missing anchor is NOT a hard fail at low confidence
+        # because the heuristic fallback messages may still ground
+        # on pattern framing without a canonical anchor phrase; we
+        # still penalize it on the genericity score so the critic
+        # can prefer anchored drafts.
         hard_violations = [
             v for v in violations
-            if v.startswith("banned_opener:") or v.startswith("buzzword:")
+            if v.startswith("banned_opener:")
+            or v.startswith("buzzword:")
+            or v.startswith("vague_anchor:")
         ]
         passes = not hard_violations
 
@@ -204,5 +300,8 @@ def validate(
         "specificity_score": round(specificity_score, 3),
         "genericity_score": round(genericity_score, 3),
         "situation_relevance_score": round(situation_relevance_score, 3),
+        "has_contextual_anchor": has_contextual_anchor,
+        "vague_anchor_hits": vague_hits,
+        "anchor_hits": anchor_hits,
         "violations": violations,
     }

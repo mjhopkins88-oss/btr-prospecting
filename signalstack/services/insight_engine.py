@@ -137,50 +137,54 @@ def _build_heuristic_insight(
     topics = _topic_hits(summary)
     place = _place_hit(summary)
 
-    # Pick an insight "type" from the context.
+    # Pick an insight "type" from the context. Every branch anchors
+    # the insight on a real operating surface (newer deals, pipeline,
+    # underwriting, deal execution, etc.) — abstract "this slice of
+    # the market" framing is deliberately avoided.
     if "expansion" in summary.lower() or "hiring" in summary.lower():
         insight_type = "second_order"
+        place_clause = f"into {place}" if place else "on newer communities"
         text = (
-            f"Groups moving into {place or 'this kind of market'} usually "
-            f"have already decided; the downstream work is about lining up "
-            f"sourcing, capital, and ops — the second-order effects hit "
-            f"within a quarter."
+            f"Groups moving {place_clause} usually have already decided — "
+            f"once deals get closer to execution, the sourcing, capital, "
+            f"and ops work tends to reshuffle inside a quarter."
         )
     elif any(t in ("capital markets", "fund", "deal", "raise") for t in topics):
         insight_type = "timing"
         text = (
-            "Teams showing capital-markets activity here tend to be in a "
-            "narrow timing window — the product decisions are already made, "
-            "what changes fast is how they solve for cost of capital."
+            "Teams showing capital-markets activity on newer deals tend to "
+            "be in a narrow window — the product call is usually already "
+            "made, what changes fast is how they solve for cost of capital "
+            "when underwriting gets deeper."
         )
     elif any(t in ("btr", "townhome", "build-to-rent", "sfr") for t in topics):
         insight_type = "market_pattern"
         text = (
-            "A lot of the groups leaning into townhome/BTR right now are "
-            "solving for cost pressure more than pure demand — which changes "
-            "what the conversation is really about."
+            "On newer BTR/townhome deals, a lot of the groups still moving "
+            "feel like they're solving for cost pressure more than pure "
+            "demand — which changes what the conversation is really about."
         )
     elif any(t in ("multifamily", "land", "portfolio", "acquisition") for t in topics):
         insight_type = "tension"
         text = (
-            "The interesting tension in this part of the market is that "
-            "deal flow looks steady on the surface but the underwriting bar "
-            "is moving — the people still transacting are the ones who "
-            "have already adjusted."
+            "The interesting tension in the pipeline right now is that deal "
+            "flow looks steady on the surface, but when underwriting gets "
+            "deeper the bar has moved — the teams still transacting are the "
+            "ones who already adjusted."
         )
     elif source == "note":
         insight_type = "peer_pov"
         text = (
             f"Worth reading this as a peer-level data point rather than a "
-            f"one-off — the pattern you noted usually means there's already "
-            f"momentum under the surface."
+            f"one-off — on newer deals, the pattern you noted usually means "
+            f"there's already momentum under the surface."
         )
     else:
         insight_type = "trend"
         text = (
-            "The signal itself isn't the point — what matters is the trend "
-            "it implies about where attention and capital are moving next "
-            "in this slice of the market."
+            "The signal itself isn't the point — what matters is where it "
+            "shows up in the pipeline: capital is still moving, but it's "
+            "getting more selective once underwriting gets deeper."
         )
 
     # Light playbook bias: if a playbook anti-pattern warns against this

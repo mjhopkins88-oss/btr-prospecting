@@ -128,86 +128,144 @@ def _apply_modifiers(body: str, modifiers: list[str]) -> str:
 
 
 def _compose(angle: str, first: str, anchor: str, profile_anchor: Optional[str]) -> str:
-    """Build a distinct opener per angle. Anchors come from real stored data."""
+    """Build a distinct opener per angle. Anchors come from real stored data.
+
+    Each angle grounds its second beat on a real operating surface
+    (pipeline, newer deals, underwriting, deal execution) rather than
+    vague phrases like "that segment" or "across similar desks", so
+    the message lands where the prospect actually sees the pattern.
+    """
     profile_clause = f" Given your focus on {profile_anchor}," if profile_anchor else ""
     if angle == "curiosity":
         return (f"Hi {first} — {anchor} caught my attention.{profile_clause} "
-                f"Curious how you're thinking about that segment right now.")
+                f"Curious how that's landing on newer deals in your pipeline "
+                f"right now.")
     if angle in ("observation", "timely_observation"):
         return (f"Hey {first} — {anchor} jumped out at me this week. "
-                f"No agenda, just thought I'd flag it while it's timely.")
+                f"No agenda, just wanted to flag it in case it's showing up "
+                f"in your pipeline too.")
     if angle in ("insight", "light_insight"):
-        return (f"Hi {first} — on {anchor}, a few teams in similar spots "
-                f"have been wrestling with the same trade-off. Happy to share "
-                f"what I've seen if it's useful.")
+        return (f"Hi {first} — on {anchor}, a few teams in similar seats "
+                f"have been wrestling with the same tradeoff once underwriting "
+                f"gets deeper. Happy to compare notes if it's useful.")
     if angle == "market_pattern":
-        return (f"Hi {first} — {anchor} lines up with a pattern we're seeing "
-                f"across similar desks this quarter. Curious if you're reading it the same way.")
+        return (f"Hi {first} — {anchor} lines up with a pattern I keep seeing "
+                f"on newer deals this quarter. Curious if it's showing up in "
+                f"your pipeline the same way.")
     if angle == "point_of_view":
-        return (f"Hi {first} — on {anchor}, my read is the second-order effect "
-                f"hits within a quarter, not at announcement. Tell me I'm wrong.")
+        return (f"Hi {first} — on {anchor}, my read is that once deals get "
+                f"closer to execution the second-order effects hit fast. "
+                f"Tell me I'm wrong.")
     if angle == "relevant_challenge":
         return (f"Hi {first} — given {anchor}, is someone on your team already "
-                f"owning the downstream side of this, or is it still floating?")
+                f"owning the downstream side of it once deals get closer to "
+                f"execution, or is it still floating?")
     if angle == "low_pressure_starter":
         return (f"Hi {first} — no agenda here, just wanted to open a line "
-                f"in case it's useful down the road.")
-    return f"Hi {first} — {anchor} caught my eye."
+                f"in case something useful comes up in your pipeline down "
+                f"the road.")
+    return f"Hi {first} — {anchor} caught my eye on the pipeline side."
 
 
 def _compose_from_thought(angle: str, first: str, thought_text: str) -> str:
     """
     Build a message that flows from a single plain-language internal
     thought. This is the preferred composer path — it produces
-    messages that read like "light observation → interpreted thought
-    → soft curiosity", without touching raw profile keywords.
+    messages that read like "anchored observation → interpreted
+    thought → light curiosity", without touching raw profile
+    keywords.
 
     The thought should already be in peer voice (the thought_translator
-    ensures that). We just wrap it with a short lead-in and a soft
-    curiosity tail.
+    ensures that). We just wrap it with a short anchor lead-in (when
+    the thought doesn't already carry an anchor) and a soft curiosity
+    tail. The tail always references a real operating surface
+    ("pipeline", "your side of the table") rather than "your world"
+    or other floating phrases.
     """
     t = (thought_text or "").strip().rstrip(".")
     if not t:
-        return f"Hi {first} — curious how things are shaping up on your side right now."
+        return (
+            f"Hi {first} — curious how things are shaping up in your "
+            f"pipeline right now."
+        )
 
     # Strip any "Hi/Hey {first} —" prefix the thought might already
     # carry so we don't double-stack greetings.
     t = re.sub(r"^(hi|hey)\s+\w+\s*[—-]\s*", "", t, flags=re.IGNORECASE)
 
+    # If the thought doesn't already land on a real operating
+    # surface, prepend an angle-appropriate anchor so the final
+    # message grounds on "where this shows up".
+    has_anchor = _thought_has_anchor(t)
+
     if angle in ("curiosity", "light_insight", "insight"):
+        lead = "" if has_anchor else "on newer deals, "
         return (
-            f"Hey {first} — {t}. "
-            f"Curious if that's showing up in your world too."
+            f"Hey {first} — {lead}{t}. "
+            f"Curious if that's showing up in your pipeline too."
         )
     if angle in ("observation", "timely_observation"):
+        lead = "" if has_anchor else "in the pipeline right now, "
         return (
-            f"Hey {first} — {t}. "
+            f"Hey {first} — {lead}{t}. "
             f"No agenda, just something I keep coming back to."
         )
     if angle == "market_pattern":
+        lead = "" if has_anchor else "on newer deals, "
         return (
-            f"Hey {first} — {t}. "
-            f"Does that match what you're seeing right now?"
+            f"Hey {first} — {lead}{t}. "
+            f"Does that match what's showing up in your pipeline right now?"
         )
     if angle == "point_of_view":
+        lead = "" if has_anchor else "when underwriting gets deeper, "
         return (
-            f"Hey {first} — {t}. "
+            f"Hey {first} — {lead}{t}. "
             f"Tell me I'm reading it wrong."
         )
     if angle == "relevant_challenge":
+        lead = "" if has_anchor else "once deals get closer to execution, "
         return (
-            f"Hey {first} — {t}. "
+            f"Hey {first} — {lead}{t}. "
             f"Is that landing on your plate, or is someone else owning it?"
         )
     if angle == "low_pressure_starter":
+        lead = "" if has_anchor else "in your pipeline right now, "
         return (
-            f"Hey {first} — {t}. "
+            f"Hey {first} — {lead}{t}. "
             f"Just wanted to open a line, no agenda."
         )
+    lead = "" if has_anchor else "on newer deals, "
     return (
-        f"Hey {first} — {t}. "
-        f"Curious how you're reading it."
+        f"Hey {first} — {lead}{t}. "
+        f"Curious how you're reading it from your side."
     )
+
+
+def _thought_has_anchor(text: str) -> bool:
+    """
+    Return True if ``text`` already lands on a real operating surface
+    (the pipeline, underwriting, newer deals, newer communities,
+    lease-up, capital allocation, deal execution, etc.).
+
+    We use a small allow-list of anchor phrases. When none of them
+    appear, the composer wraps the thought with an anchor lead-in
+    so the final message still grounds in a "where this shows up"
+    surface rather than floating as abstract commentary.
+    """
+    if not text:
+        return False
+    lo = text.lower()
+    anchors = (
+        "on newer deals", "on newer communities", "on new deals",
+        "on new communities", "in your pipeline", "in the pipeline",
+        "when underwriting gets deeper", "once deals get closer to execution",
+        "in the next capital allocation", "during lease-up",
+        "during lease up", "as new sites come online",
+        "on deals still in diligence", "in the build phase",
+        "on the sites you're working", "when you're stress-testing",
+        "on the underwriting side", "in deal execution",
+    )
+    return any(a in lo for a in anchors)
 
 
 def _compose_from_thought_by_style(
@@ -224,48 +282,64 @@ def _compose_from_thought_by_style(
     The thought text is the single source of truth — we do not
     stitch in profile keywords or raw signal text. We only wrap it
     with a lead-in / close-out that matches the style mode.
+
+    If the thought does not already carry a contextual anchor
+    ("where this shows up"), the composer prepends a style-specific
+    anchor lead-in so the final message grounds on a real operating
+    surface rather than floating as market commentary.
     """
     t = (thought_text or "").strip().rstrip(".")
     if not t:
         return (
             f"Hey {first} — no agenda, just opening a line. "
-            f"Curious what you're watching right now."
+            f"Curious what you're watching in your pipeline right now."
         )
     # Drop any "Hi/Hey X —" greeting the thought carried.
     t = re.sub(r"^(hi|hey)\s+\w+\s*[—-]\s*", "", t, flags=re.IGNORECASE)
 
+    # If the thought already lands on a real operating surface, keep
+    # it as-is. Otherwise wrap it with a style-appropriate anchor so
+    # the final message has a "where this shows up" beat.
+    has_anchor = _thought_has_anchor(t)
+
     if style_mode == "curious_insider":
-        # Short observation -> single real question -> stop.
+        # Short anchored observation -> single real question -> stop.
+        lead = "" if has_anchor else "on newer deals, "
         return (
-            f"Hey {first} — {t}. "
-            f"Is that how it's lining up from where you sit?"
+            f"Hey {first} — {lead}{t}. "
+            f"Is that how it's lining up in your pipeline?"
         )
     if style_mode == "quiet_contrarian":
-        # Default read -> contrast -> soft pushback invitation.
+        # Default read -> anchored contrast -> soft pushback.
+        lead = "" if has_anchor else "when underwriting gets deeper, "
         return (
             f"Hi {first} — the easy read is the obvious one, but "
-            f"my take is {t}. Tell me I'm reading it wrong."
+            f"my take is {lead}{t}. Tell me I'm reading it wrong."
         )
     if style_mode == "pattern_spotter":
-        # Plural observation -> interpretation -> compare-notes ask.
+        # Plural anchored observation -> interpretation -> compare-notes.
+        lead = "" if has_anchor else "on newer deals, "
         return (
-            f"Hi {first} — pattern I keep noticing across similar "
-            f"desks: {t}. Does that track with what you're seeing?"
+            f"Hi {first} — pattern I keep noticing: {lead}{t}. "
+            f"Does that track with what's showing up in your pipeline?"
         )
     if style_mode == "low_ego_peer":
-        # Soft observation -> understated thought -> no-ask close.
+        # Soft anchored observation -> understated thought -> no-ask close.
+        lead = "" if has_anchor else "in the pipeline right now, "
         return (
-            f"Hey {first} — no real agenda here, {t}. Just wanted "
-            f"to open a line in case it's useful down the road."
+            f"Hey {first} — no real agenda here, just that {lead}{t}. "
+            f"Figured it was worth opening a line in case it's useful."
         )
     if style_mode == "sharp_operator":
-        # One-line interpretation -> short peer ask.
+        # One-line anchored interpretation -> short peer ask.
+        lead = "" if has_anchor else "once deals get closer to execution, "
         return (
-            f"Hi {first} — my read right now is {t}. "
+            f"Hi {first} — my read right now is {lead}{t}. "
             f"Curious whether that matches your side of the table."
         )
-    # Fallback: plain peer voice.
-    return f"Hey {first} — {t}. Curious how you're reading it."
+    # Fallback: plain peer voice with a default pipeline anchor.
+    lead = "" if has_anchor else "in your pipeline right now, "
+    return f"Hey {first} — {lead}{t}. Curious how you're reading it."
 
 
 def _compose_hypothesis(angle: str, first: str, hypothesis_text: str) -> str:
@@ -275,6 +349,11 @@ def _compose_hypothesis(angle: str, first: str, hypothesis_text: str) -> str:
     may be" framing — we are not claiming to know the prospect's
     situation, we are sharing a pattern we see across similar roles
     and markets and asking whether it tracks.
+
+    Every branch is ANCHORED on a real operating surface (newer
+    deals, the pipeline, underwriting, newer communities, etc.) so
+    the message lands where the prospect actually sees the pattern,
+    not in vague market commentary.
     """
     # Normalize: strip a leading "likely / possibly / may be / the team"
     # so the sentence flows after our lead-in clause.
@@ -289,35 +368,38 @@ def _compose_hypothesis(angle: str, first: str, hypothesis_text: str) -> str:
 
     if angle == "curiosity":
         return (
-            f"Hi {first} — not anchoring this on anything specific, but "
-            f"folks in your part of the market tend to be {h} right now. "
-            f"Curious how you're reading it."
+            f"Hi {first} — on newer deals, folks in your seat tend to be "
+            f"{h}. Curious how that's landing in your pipeline right now."
         )
     if angle == "market_pattern":
         return (
-            f"Hi {first} — one pattern I keep seeing across similar desks: "
-            f"they're {h}. Does that match what you're looking at?"
+            f"Hi {first} — one pattern I keep seeing on newer deals: "
+            f"teams are {h}. Does that track with what's showing up in "
+            f"your pipeline?"
         )
     if angle in ("light_insight", "insight"):
         return (
-            f"Hi {first} — worth flagging that a lot of teams in your seat "
-            f"right now are {h}. Happy to share what I've seen if it's useful."
+            f"Hi {first} — worth flagging that when underwriting gets "
+            f"deeper, a lot of teams in your seat end up {h}. Happy to "
+            f"compare notes if it's useful."
         )
     if angle in ("observation", "timely_observation"):
         return (
-            f"Hi {first} — the timely observation on my side is that groups "
-            f"in this slice of the market are {h}. Curious if you're seeing "
-            f"the same."
+            f"Hi {first} — the timely observation on my side is that on "
+            f"newer deals, groups like yours seem to be {h}. Curious if "
+            f"that's showing up in your pipeline too."
         )
     if angle == "low_pressure_starter":
         return (
-            f"Hi {first} — no agenda, just opening a line. Most folks I "
-            f"talk to in your seat are {h}, so figured it was worth saying hi."
+            f"Hi {first} — no agenda, just opening a line. On newer deals, "
+            f"most folks I talk to in your seat are {h}, so figured it "
+            f"was worth saying hi."
         )
-    # Default: a curiosity-framed pattern message.
+    # Default: a curiosity-framed pattern message anchored on the
+    # pipeline / newer-deals surface so it doesn't float.
     return (
-        f"Hi {first} — across similar desks right now, a lot of teams are "
-        f"{h}. Curious how you're thinking about it."
+        f"Hi {first} — in the pipeline right now, a lot of teams look "
+        f"like they're {h}. Curious how that's landing on your side."
     )
 
 

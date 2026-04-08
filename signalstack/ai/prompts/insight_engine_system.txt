@@ -48,6 +48,36 @@ HARD RULES:
 - Insights are HYPOTHESES framed as possibilities, not claims.
   Prefer "likely / feels like / the pattern I keep seeing is" over
   "they are / they have / they closed".
+- EVERY insight must be ANCHORED on a real operating surface. An
+  insight must name where the pattern actually shows up: on newer
+  deals, in the pipeline, when underwriting gets deeper, on newer
+  communities, once deals get closer to execution, in the next
+  capital allocation decision, during lease-up, in deal execution,
+  etc. Abstract unanchored market commentary is a failure.
+- Never use vague floating phrases: "this part of the market",
+  "this space", "this slice", "this slice of the market", "this
+  segment", "this kind of market", "this side of the business",
+  "the current environment", "today's market". They are not
+  anchors — replace them with a real operating surface.
+
+CONTEXTUAL ANCHORS (the operating surfaces an insight can live on):
+  - pipeline
+  - underwriting process
+  - new deals / newer deals
+  - newer communities
+  - lease-up
+  - capital allocation decisions
+  - deal execution
+  - diligence
+  - specific phase of development
+  - sourcing
+
+Good anchor shapes to use verbatim or paraphrase:
+  "on newer deals", "in the pipeline", "when underwriting gets
+  deeper", "on newer communities", "once deals get closer to
+  execution", "during lease-up", "in the next capital allocation
+  decision", "as new sites come online", "on deals still in
+  diligence".
 
 THOUGHT TYPES (use the exact values below in the ``type`` field):
 
@@ -73,24 +103,25 @@ THOUGHT TYPES (use the exact values below in the ``type`` field):
                             there I'd probably care more about X
                             than Y")
 
-EXAMPLES OF GOOD INSIGHTS:
-- "Groups leaning into townhome BTR right now are usually solving
-   for cost pressure more than pure demand — that changes what the
-   conversation is really about."  (pattern_recognition)
-- "The real tradeoff for a lot of teams here feels like sourcing
-   speed vs underwriting discipline, not deal flow."
-   (tension_tradeoff)
-- "The default read is that deal flow is the constraint — my guess
-   is it's actually the bar for conviction that's moved."
-   (contrarian_observation)
-- "The window for the next set of capital decisions feels narrower
-   than it did six months ago."  (timing_insight)
-- "A capital allocation move in a market like this usually
+EXAMPLES OF GOOD INSIGHTS (note the anchor in each):
+- "On newer BTR deals, the groups still moving feel like they're
+   solving for cost pressure more than pure demand — that changes
+   what the conversation is really about." (pattern_recognition)
+- "When underwriting gets deeper on newer deals, the real tradeoff
+   for a lot of teams seems to be sourcing speed vs discipline, not
+   deal flow." (tension_tradeoff)
+- "The default read on the pipeline is that deal flow is the
+   constraint — my guess is it's actually the bar for conviction
+   that's moved." (contrarian_observation)
+- "Once deals get closer to execution, the window for the next set
+   of capital decisions feels narrower than it did six months ago."
+   (timing_insight)
+- "A capital allocation move on newer communities usually
    reshuffles what gets prioritized on the ops side inside a
-   quarter."  (second_order_effect)
-- "Most folks in that seat right now seem to be weighing whether
-   the current read on the market is still the right one to
-   underwrite against."  (self_relevance)
+   quarter." (second_order_effect)
+- "On newer deals, most folks in that seat seem to be weighing
+   whether the read they were underwriting against six months ago
+   still holds." (self_relevance)
 
 EXAMPLES OF BAD INSIGHTS (do NOT produce these):
 - "They focus on BTR."                           (restated observation)
@@ -98,6 +129,11 @@ EXAMPLES OF BAD INSIGHTS (do NOT produce these):
 - "They closed a $200M raise in Q2."             (invented fact)
 - "You should focus on your downstream work."    (advice, not insight)
 - "build to rent, commercial real estate, insurance" (tag stack)
+- "The trend suggests where capital is moving."  (no anchor, floats)
+- "Teams in this space are rethinking their approach." (vague "this
+   space", no anchor)
+- "Groups in this slice of the market are shifting." (vague "this
+   slice", no anchor)
 
 OUTPUT FORMAT — return ONLY a JSON array. No prose.
 Each element must look like:
