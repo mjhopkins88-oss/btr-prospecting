@@ -153,9 +153,12 @@ def generate(
     # Stage tracker: tells the route / UI / logs which pipeline steps
     # actually ran, which were skipped (e.g. by minimal mode), and which
     # failed. Consumed by routes.py and surfaced in the response so
-    # Step-2 stability testing can see the exact pipeline shape without
-    # reading logs.
-    stages: dict[str, str] = {}
+    # Step-2/3 stability testing can see the exact pipeline shape
+    # without reading logs. Values are short status strings; a single
+    # ``candidate_validation_summary`` sub-dict is also appended by the
+    # candidate validation stage so the caller can see raw/accepted/
+    # low_context/rejected counts without parsing the arrays.
+    stages: dict = {}
 
     def _stage(name: str, status: str) -> None:
         stages[name] = status
@@ -483,7 +486,24 @@ def generate(
             low_context_candidates.append(cand)
         else:
             candidates.append(cand)
-    _stage("candidate_validation", "ok")
+    # Record a short sub-summary so the response clearly shows whether
+    # candidate_validation degraded (all-rejected / all-low-context)
+    # without the caller having to inspect the candidate arrays. This
+    # is the signal we watch for when stepping complexity up in Step 3+.
+    raw_count = len(raw or [])
+    validation_summary = {
+        "raw": raw_count,
+        "accepted": len(candidates),
+        "low_context": len(low_context_candidates),
+        "rejected": len(rejected),
+    }
+    if raw_count and len(candidates) == 0:
+        # Every candidate was demoted or rejected — this is a real
+        # degradation even though the stage itself did not crash.
+        _stage("candidate_validation", "degraded_all_demoted")
+    else:
+        _stage("candidate_validation", "ok")
+    stages["candidate_validation_summary"] = validation_summary
 
     # Note: we deliberately do NOT return the full `context` here. It can
     # contain DB rows whose types (datetime, Decimal, bytes from Postgres)
