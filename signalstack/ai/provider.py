@@ -10,9 +10,48 @@ from __future__ import annotations
 
 import os
 import random
+import re
 from typing import Optional, Protocol
 
 from .prompts import load_prompt
+
+
+# Very small topic/place vocab we allow the mock provider to lift out
+# of a note body. Kept intentionally tiny — we only need enough to
+# produce a 2-4 word anchor that doesn't trip anti_copy's 6-gram
+# overlap threshold. If nothing matches we fall back to a generic
+# "your recent note" anchor, which is safer than pasting first-sentence
+# text from the note verbatim.
+_NOTE_TOPIC_VOCAB = {
+    "btr", "build-to-rent", "build to rent", "sunbelt", "townhome",
+    "townhomes", "multifamily", "sfr", "capital markets", "land",
+    "nmhc", "development", "pipeline", "acquisition", "acquisitions",
+    "raise", "deal", "expansion", "hiring",
+}
+
+
+def _compress_note_anchor(body: str) -> str:
+    """
+    Produce a very short (2-4 word) anchor phrase for a note so the
+    generated message will not paste verbatim note text. We look for
+    a known topic keyword in the note and hand back something like
+    ``"your recent NMHC note"``; otherwise ``"your recent note"``.
+
+    This is the narrow Step 3 fix for the degradation where any note
+    of >=8 words caused the mock provider to leak a 6-gram overlap
+    into every note-anchored candidate, which ``anti_copy_check``
+    then rejected at ~30% overlap.
+    """
+    text = (body or "").strip().lower()
+    if not text:
+        return "your recent note"
+    for kw in _NOTE_TOPIC_VOCAB:
+        if re.search(rf"\b{re.escape(kw)}\b", text):
+            # Uppercase 1-token acronyms, title-case the rest, so
+            # "nmhc" -> "NMHC" and "sunbelt" -> "Sunbelt".
+            label = kw.upper() if kw.isalpha() and len(kw) <= 4 else kw.title()
+            return f"your recent {label} note"
+    return "your recent note"
 
 
 class AiProvider(Protocol):
@@ -149,11 +188,15 @@ class MockAiProvider:
             t = (note.get("body") or "").strip()
             if not t:
                 continue
-            # Compress notes too — never paste a long note verbatim.
-            short = t.split(".")[0].strip()
-            if len(short) > 80:
-                short = short[:77].rsplit(" ", 1)[0] + "…"
-            anchors.append((f"your note about {short}", {"note_id": note.get("id")}))
+            # Compress notes to a SHORT topical anchor (2-4 words).
+            # Previously we pasted the first ~80 chars of the note,
+            # which reliably tripped anti_copy_check's 6-gram overlap
+            # threshold for any realistic note and caused every
+            # note-anchored candidate to be rejected during
+            # candidate_validation. The compressed anchor avoids any
+            # shared 6-gram with the raw note body.
+            anchor_phrase = _compress_note_anchor(t)
+            anchors.append((anchor_phrase, {"note_id": note.get("id")}))
 
         profile_anchor_text, profile_field = _profile_anchor(profile)
         if not anchors and profile_anchor_text:
