@@ -79,17 +79,59 @@ def plan(
     playbook_preferred_angles: Optional[list[str]] = None,
 ) -> list[dict]:
     """
-    Select n distinct angles. When the input quality is weak (tier 3),
-    we restrict to low-pressure / low-context-safe angles only.
+    Select n distinct angles, graded by confidence level.
+
+    * HIGH   — any angle; bias by the strongest signal type.
+    * MEDIUM — pattern / market / curiosity / light_insight angles;
+               avoid strong point-of-view claims on thin evidence.
+    * LOW    — curiosity, market pattern, light insight, and
+               low-pressure starter only. The low path is the most
+               important change: we no longer restrict to a single
+               networking opener, we produce several thoughtful,
+               intelligent, pattern-based angles.
     """
     override = override or {}
     n = max(1, min(n, 5))
 
-    if quality.get("weak_only"):
-        # Only safe in a low-context world: don't fake insight or POV.
-        candidates = [a for a in ANGLES if a["angle"] in (
-            "low_pressure_starter", "curiosity",
-        )]
+    confidence = (quality.get("confidence_level") or "").lower()
+    if not confidence:
+        # Backwards compat: derive from weak_only when the scorer
+        # hasn't been updated yet.
+        confidence = "low" if quality.get("weak_only") else "high"
+
+    if confidence == "low":
+        # Low-confidence angles are intentionally broader than the
+        # old "low_pressure_starter only" list. The new path produces
+        # curiosity / pattern / light-insight / networking openers so
+        # the user still gets 3-5 distinct, thoughtful options even
+        # with just a LinkedIn profile.
+        allowed = {
+            "curiosity", "market_pattern", "light_insight",
+            "low_pressure_starter", "timely_observation",
+        }
+        candidates = [a for a in ANGLES if a["angle"] in allowed]
+        preferred = (
+            "curiosity", "market_pattern", "light_insight",
+            "low_pressure_starter",
+        )
+        candidates.sort(
+            key=lambda a: preferred.index(a["angle"]) if a["angle"] in preferred else 99
+        )
+    elif confidence == "medium":
+        # Medium: allow everything except hard point_of_view on thin
+        # evidence. We keep POV available if the playbook asks for it.
+        allowed = {
+            "curiosity", "timely_observation", "market_pattern",
+            "light_insight", "relevant_challenge", "low_pressure_starter",
+        }
+        candidates = [a for a in ANGLES if a["angle"] in allowed]
+        preferred = (
+            "market_pattern", "curiosity", "light_insight",
+            "timely_observation",
+        )
+        candidates.sort(
+            key=lambda a: preferred.index(a["angle"]) if a["angle"] in preferred else 99
+        )
     else:
         candidates = list(ANGLES)
         # Bias ordering by what kind of evidence exists.

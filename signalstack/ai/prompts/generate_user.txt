@@ -1,15 +1,29 @@
 Draft {n} distinct LinkedIn outreach options for this prospect.
 
-Hard rules:
-- Use ONLY the facts in CONTEXT. Never invent metrics, history, or relationships.
-- Each option must reference at least one stored signal, note, or profile field.
-- Do NOT anchor any option on title, company, or location alone.
-- Lead with the strongest distilled observation AND/OR a real insight.
-  If no strong observation or insight exists, return only low-pressure
-  networking openers and set "low_context": true on each option.
-- Each option must use a DIFFERENT angle from the STRATEGIES list — a
-  different framing, opening, rhythm, and ask. No minor rewrites.
+CONFIDENCE_LEVEL: {confidence_level}
+
+Behaviour by confidence level:
+- HIGH: lead with the strongest distilled observation and/or insight.
+  Be specific, be timely, reference what is actually in context.
+- MEDIUM: lean on profile, industry, market, and role context.
+  Pattern-based framing is fine. Do not claim specific deals.
+- LOW: anchor on the HYPOTHESES below. These are plausible
+  situational guesses, NOT facts. Every LOW-confidence message
+  must preserve "likely / possibly / may be / tends to / I'm
+  seeing a lot of X lately" framing. Do not assert the hypothesis
+  as a claim about the individual.
+
+Hard rules (all confidence levels):
+- Use ONLY the facts that are in CONTEXT. Never invent metrics,
+  history, relationships, deals, or life details.
+- Each option must use a DIFFERENT angle from the STRATEGIES
+  list — a different framing, opening, rhythm, and ask. No
+  minor rewrites.
 - Keep messages short, sharp, peer-toned. Lower the cost of "no".
+- If you use a hypothesis, set "message_basis": "hypothesis_based"
+  on that option. If you use a real signal or note, set it to
+  "signal_based". If you lean on profile/market context without
+  a specific signal, set it to "observation_based".
 
 PROSPECT:
 {prospect_line}
@@ -22,6 +36,10 @@ DISTILLED OBSERVATIONS:
 
 INSIGHTS (use these to make the message NON-GENERIC):
 {insights_json}
+
+HYPOTHESES (fallback for low-confidence generation — these are
+POSSIBILITIES, never claims):
+{hypotheses_json}
 
 STRATEGIES (one per option, use the angle field):
 {strategies_json}
