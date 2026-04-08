@@ -2,14 +2,24 @@ Draft {n} distinct LinkedIn outreach options for this prospect.
 
 CONFIDENCE_LEVEL: {confidence_level}
 
-PRIMARY SOURCE — READ THIS FIRST:
-The INTERNAL THOUGHTS below are plain-language, peer-voice rewrites
-of the insights. Each thought is a single sentence a smart operator
-might actually think. Your job is to turn ONE internal thought into
-ONE LinkedIn message. Write FROM the thought — do not stitch
-together the raw insight, the profile blob, or the keyword list.
+====================================================================
+PRIMARY SOURCE — READ THIS FIRST
+====================================================================
 
-HARD BANS — never produce any of these:
+The INTERNAL THOUGHTS below are plain-language, peer-voice thoughts.
+Each one is a single sentence a smart operator might actually
+think. Your job is to turn ONE internal thought into ONE LinkedIn
+message. Write FROM the thought — do not stitch together the raw
+insight, the profile blob, or the keyword list.
+
+Every option must be written FROM A DIFFERENT THOUGHT and in A
+DIFFERENT STYLE MODE. Two options must never share a thought, a
+style mode, or an opening line.
+
+====================================================================
+HARD BANS — never produce any of these
+====================================================================
+
 - Comma-separated topic lists ("build to rent, commercial real
   estate, insurance").
 - Repeated keyword phrases from featured_topics, headline, or any
@@ -18,34 +28,77 @@ HARD BANS — never produce any of these:
 - Anything that reads like a profile summary ("given your focus on
   X, Y, and Z, curious how...").
 - Anything that reads like a CRM tag line flattened into prose.
+- Template SDR openers ("hope this finds you well", "I came across
+  your profile", "I help companies like yours", "quick chat",
+  "would love to connect", etc).
+- Fake scarcity or reverse-psychology gimmicks.
+- Performative contrarianism — disagreement has to be earned, not
+  theatrical.
 
-Behaviour by confidence level:
+====================================================================
+MESSAGE STRUCTURE (use unless the style mode needs otherwise)
+====================================================================
+
+  observation -> interpretation -> soft invitation
+
+Example shape:
+  "Feels like [interpreted pattern] — curious if that's showing up
+   in your world too."
+
+Tone: sharp, low-pressure, human, calm, peer-like, slightly
+understated.
+
+====================================================================
+STYLE MODES (REQUIRED — ONE PER OPTION, NO REPEATS)
+====================================================================
+
+Each option MUST use a DIFFERENT style mode from the STRATEGIES
+list below. The strategies are pre-assigned by the pipeline — use
+the style_mode field on each strategy as the voice for that option.
+
+The five style modes:
+
+  1. curious_insider    — real peer-question voice, warm but not
+                          eager, short observation -> single
+                          question.
+  2. quiet_contrarian   — light earned counter-view of the default
+                          read, invites pushback without theatrics.
+  3. pattern_spotter    — names the pattern across similar desks,
+                          invites compare-notes.
+  4. low_ego_peer       — calm understated no-ask opener, survives
+                          a non-reply.
+  5. sharp_operator     — concise operator voice, earned authority,
+                          direct but not pushy.
+
+====================================================================
+PSYCHOLOGY ANGLES (ONE PER OPTION)
+====================================================================
+
+Each option leans on EXACTLY ONE of these ethical levers, drawn
+from the style mode's allowed list:
+
+  curiosity, self_relevance, low_pressure_control,
+  pattern_recognition, peer_status_framing, subtle_contrast,
+  earned_contrarianism.
+
+====================================================================
+BEHAVIOUR BY CONFIDENCE LEVEL
+====================================================================
+
 - HIGH: lead with the strongest distilled observation and/or
-  internal thought. Be specific, be timely, reference what is
-  actually in context — but always through the peer-voice thought,
-  never through the raw profile keywords.
-- MEDIUM: lean on the internal thoughts (which are already
-  grounded in profile, industry, market, and role). Pattern-based
-  framing is fine. Do not claim specific deals.
+  internal thought. Be specific and timely, but always through
+  the peer-voice thought — never through raw profile keywords.
+- MEDIUM: lean on the internal thoughts (already grounded in
+  profile, industry, market, and role). Pattern-based framing is
+  fine. Do not claim specific deals.
 - LOW: anchor on the internal thoughts or the HYPOTHESES below.
   Every LOW-confidence message must preserve "likely / possibly /
-  may be / tends to / I'm seeing a lot of X lately" framing. Do
-  not assert any thought as a claim about the individual.
+  may be / tends to / seeing a lot of X lately" framing. Do not
+  assert any thought as a claim about the individual.
 
-Hard rules (all confidence levels):
-- Use ONLY the facts that are in CONTEXT. Never invent metrics,
-  history, relationships, deals, or life details.
-- Each option must use a DIFFERENT angle from the STRATEGIES list —
-  a different framing, opening, rhythm, and ask. No minor rewrites.
-- Keep messages short, sharp, peer-toned. Lower the cost of "no".
-- Preferred structure: (1) light observation, (2) interpreted
-  thought, (3) soft curiosity. Example: "Feels like [interpreted
-  pattern] — curious if that's showing up in your world too."
-- If you use an internal thought, put its id in "thought_id".
-- If you use a hypothesis, set "message_basis": "hypothesis_based".
-- If you use a real signal or note, set it to "signal_based".
-- If you lean on profile/market context without a specific signal,
-  set it to "observation_based".
+====================================================================
+INPUTS
+====================================================================
 
 PROSPECT:
 {prospect_line}
@@ -53,10 +106,11 @@ PROSPECT:
 CONTEXT:
 {context_json}
 
-INTERNAL THOUGHTS (primary source — write FROM these):
+INTERNAL THOUGHTS (primary source — write FROM these, one per option):
 {thoughts_json}
 
-DISTILLED OBSERVATIONS (secondary — for grounding only):
+DISTILLED OBSERVATIONS (secondary — for grounding only, do NOT
+quote verbatim):
 {observations_json}
 
 INSIGHTS (reference — the thoughts above are the translated form):
@@ -66,10 +120,46 @@ HYPOTHESES (fallback for low-confidence generation — these are
 POSSIBILITIES, never claims):
 {hypotheses_json}
 
-STRATEGIES (one per option, use the angle field):
+STRATEGIES (one per option — each carries angle + style_mode +
+psychology_angle; use the style_mode as the voice):
 {strategies_json}
 
 USER INSTRUCTION (optional, may be empty):
 {instruction}
 
-Return JSON ONLY. Shape: { "messages": [ ... ] }.
+====================================================================
+OUTPUT FORMAT (return JSON ONLY — no prose, no markdown fences)
+====================================================================
+
+Return an object of shape:
+
+{
+  "messages": [
+    {
+      "thought": "exact peer-voice text of the internal thought used",
+      "thought_id": "thought-0",
+      "thought_type": "pattern_recognition|tension_tradeoff|contrarian_observation|timing_insight|second_order_effect|self_relevance",
+      "psychology_angle": "curiosity|self_relevance|low_pressure_control|pattern_recognition|peer_status_framing|subtle_contrast|earned_contrarianism",
+      "style_mode": "curious_insider|quiet_contrarian|pattern_spotter|low_ego_peer|sharp_operator",
+      "body": "the final message body",
+      "final_message": "same as body",
+      "why_it_works": "one short sentence — why this lands and what lever it leans on",
+      "rationale": "one short sentence on angle + grounding basis",
+      "angle": "...",
+      "observation": { "summary": "...", "safe_reference_text": "..." },
+      "message_basis": "signal_based|observation_based|hypothesis_based",
+      "message_type": "curiosity|insight|casual|direct",
+      "primary_trigger": "...",
+      "communication_style": "...",
+      "outreach_goal": "...",
+      "signal_ids": ["..."],
+      "notes_used": ["..."],
+      "profile_fields_used": ["..."],
+      "facts_used": ["..."]
+    }
+  ]
+}
+
+Every option must be written from a DIFFERENT thought, a DIFFERENT
+style mode, a DIFFERENT psychology angle, and a DIFFERENT opening
+line. Minor rewrites of the same line are a hard failure.

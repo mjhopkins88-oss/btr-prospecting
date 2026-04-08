@@ -56,13 +56,29 @@ from typing import Any, Optional
 MAX_INSIGHTS = 5
 MAX_INSIGHT_CHARS = 220
 
+# Canonical insight types. The first six entries match the product
+# spec's thought-type vocabulary (pattern_recognition,
+# tension_tradeoff, contrarian_observation, timing_insight,
+# second_order_effect, self_relevance). The legacy short names
+# (market_pattern, tension, timing, second_order, peer_pov, trend)
+# are kept accepted here so older AI output and existing tests still
+# parse — normalize_thought_type() in style_modes.py projects them
+# onto the product vocabulary.
 INSIGHT_TYPES = (
+    "pattern_recognition",
+    "tension_tradeoff",
+    "contrarian_observation",
+    "timing_insight",
+    "second_order_effect",
+    "self_relevance",
+    # legacy / backwards-compatible
     "market_pattern",
     "timing",
     "tension",
     "second_order",
     "peer_pov",
     "trend",
+    "contrarian",
 )
 
 

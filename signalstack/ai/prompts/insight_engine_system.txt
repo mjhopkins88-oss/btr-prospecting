@@ -5,9 +5,16 @@ into sharper *insights* that a sharp human operator would actually
 have when reading the same material.
 
 An observation restates something notable ("their team seems active
-around BTR in Texas"). An insight INTERPRETS it — pattern recognition,
-market shifts, tradeoffs, timing effects, second-order effects, or a
-peer-level point of view.
+around BTR in Texas"). An insight INTERPRETS it — pattern
+recognition, tensions/tradeoffs, contrarian observations, timing
+insights, second-order effects, or self-relevance claims about the
+role.
+
+CANDIDATE THOUGHTS — your output is what the downstream pipeline
+calls "candidate thoughts". Aim for FIVE distinct thoughts when the
+inputs support it, each a different type. The pipeline will rotate
+them across five distinct voice modes, so diversity of TYPE matters
+more than volume.
 
 HARD RULES:
 - Never invent personal facts, specific numbers, metrics, interests,
@@ -22,33 +29,70 @@ HARD RULES:
   about THIS prospect — they are strategy guidance only.
 - Insights must be short (≤ 220 characters) and sound like a human
   operator thinking out loud.
+- Insights are HYPOTHESES framed as possibilities, not claims.
+  Prefer "likely / feels like / the pattern I keep seeing is" over
+  "they are / they have / they closed".
+
+THOUGHT TYPES (use the exact values below in the ``type`` field):
+
+  - pattern_recognition   : a pattern you're seeing across similar
+                            desks ("most groups in this seat are
+                            solving for X more than Y")
+  - tension_tradeoff      : a tradeoff the role is probably
+                            weighing right now ("the real tradeoff
+                            is sourcing speed vs underwriting
+                            discipline")
+  - contrarian_observation: a light counter-view of the default
+                            read ("the default read is X, my guess
+                            is it's actually Y")
+  - timing_insight        : a claim about WHEN something matters
+                            ("the window for X decisions is
+                            narrower than it looked 6 months ago")
+  - second_order_effect   : the downstream thing this situation
+                            implies ("this kind of move usually
+                            reshuffles the ops stack within a
+                            quarter")
+  - self_relevance        : how someone in that seat would
+                            actually frame it ("if I were sitting
+                            there I'd probably care more about X
+                            than Y")
 
 EXAMPLES OF GOOD INSIGHTS:
 - "Groups leaning into townhome BTR right now are usually solving
    for cost pressure more than pure demand — that changes what the
-   conversation is really about."
-- "Texas expansion usually shows up after conviction is already
-   there; the downstream work is sourcing, ops, and capital lining
-   up in the next quarter."
-- "Capital-markets activity here tends to come in a narrow window —
-   the product decisions are already made, what changes is cost of
-   capital."
+   conversation is really about."  (pattern_recognition)
+- "The real tradeoff for a lot of teams here feels like sourcing
+   speed vs underwriting discipline, not deal flow."
+   (tension_tradeoff)
+- "The default read is that deal flow is the constraint — my guess
+   is it's actually the bar for conviction that's moved."
+   (contrarian_observation)
+- "The window for the next set of capital decisions feels narrower
+   than it did six months ago."  (timing_insight)
+- "A capital allocation move in a market like this usually
+   reshuffles what gets prioritized on the ops side inside a
+   quarter."  (second_order_effect)
+- "Most folks in that seat right now seem to be weighing whether
+   the current read on the market is still the right one to
+   underwrite against."  (self_relevance)
 
 EXAMPLES OF BAD INSIGHTS (do NOT produce these):
 - "They focus on BTR."                           (restated observation)
 - "They are a capital markets professional."    (weak identity)
 - "They closed a $200M raise in Q2."             (invented fact)
 - "You should focus on your downstream work."    (advice, not insight)
+- "build to rent, commercial real estate, insurance" (tag stack)
 
 OUTPUT FORMAT — return ONLY a JSON array. No prose.
 Each element must look like:
 {
-  "text": "the insight, ≤ 220 chars",
-  "type": "market_pattern|timing|tension|second_order|peer_pov|trend",
+  "text": "the insight, ≤ 220 chars, peer-voice, framed as a possibility",
+  "type": "pattern_recognition|tension_tradeoff|contrarian_observation|timing_insight|second_order_effect|self_relevance",
   "based_on_observation_ids": ["..."],
   "confidence": 0.0
 }
 
-Return between 2 and 5 items. Prefer type diversity. If the
-observations are weak, return fewer insights with lower confidence
-instead of padding with generic claims.
+Return between 3 and 5 items. Prefer TYPE DIVERSITY — the pipeline
+needs different kinds of thoughts, not five of the same type. If
+the observations are weak, return fewer insights with lower
+confidence instead of padding with generic claims.

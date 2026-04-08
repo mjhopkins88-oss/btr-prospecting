@@ -32,6 +32,13 @@ from . import insight_engine
 from . import thought_translator
 from . import message_critic
 from . import reasoning_pipeline
+from . import taste_filter
+from .style_modes import (
+    default_psychology_for,
+    describe_psychology,
+    get_style_mode,
+    normalize_thought_type,
+)
 
 
 def _classify_message_basis(candidate: dict, distilled: list[dict]) -> str:
@@ -155,6 +162,139 @@ def _merge_profile(stored: Optional[dict], override: Optional[dict]) -> dict:
         if v not in (None, ""):
             out[k] = v
     return out
+
+
+def _lookup_thought(
+    thought_id: Optional[str],
+    thoughts: list[dict],
+) -> Optional[dict]:
+    if not thought_id:
+        return None
+    for t in thoughts or []:
+        if t.get("id") == thought_id:
+            return t
+    return None
+
+
+def _why_it_works(
+    style_mode: Optional[str],
+    psychology_angle: Optional[str],
+    thought_type: Optional[str],
+    message_basis: Optional[str],
+) -> str:
+    """
+    Build a short human-readable explanation of why a given message
+    lands, using the style mode description and the psychology angle
+    description. This is surfaced in the output format alongside the
+    final message so a reviewer can see the reasoning trail at a
+    glance.
+    """
+    parts: list[str] = []
+    mode = get_style_mode(style_mode or "")
+    if mode:
+        parts.append(
+            f"Written in the {mode['mode']} voice — {mode['description']}"
+        )
+    psych = describe_psychology(psychology_angle or "")
+    if psych:
+        parts.append(
+            f"Leans on {psychology_angle} ({psych['description']})."
+        )
+    if thought_type:
+        parts.append(
+            f"The underlying thought is a {thought_type.replace('_', ' ')} — "
+            f"a specific reasoning shape, not a vibe."
+        )
+    if message_basis:
+        parts.append(
+            {
+                "signal_based": "Grounded in a real observed signal.",
+                "observation_based": "Grounded in role/profile context, not a specific event.",
+                "hypothesis_based": "Framed as a pattern/possibility, not a claim.",
+            }.get(message_basis, "")
+        )
+    return " ".join(p for p in parts if p).strip()
+
+
+def _decorate_candidate_with_output_format(
+    cand: dict,
+    strategies: list[dict],
+    internal_thoughts: list[dict],
+) -> None:
+    """
+    Attach the product-spec output format to a candidate.
+
+    For each candidate this adds (without removing anything the UI
+    already consumes):
+
+      * ``thought``           — the internal thought the message was
+                                written from (text + id + type)
+      * ``psychology_angle``  — the single ethical lever used
+      * ``style_mode``        — the voice the message is written in
+      * ``final_message``     — alias for ``body`` for UIs that want to
+                                read from the new shape
+      * ``why_it_works``      — a short rationale the reviewer can read
+
+    This function is side-effect-free beyond mutating ``cand`` and
+    never raises.
+    """
+    # Resolve the strategy that was assigned to this candidate. The
+    # generator lines up strategies 1:1 with candidates by list index,
+    # but when the provider reshuffles we fall back to matching by
+    # angle name.
+    strategy: Optional[dict] = None
+    angle = cand.get("angle")
+    if angle and strategies:
+        for s in strategies:
+            if s.get("angle") == angle:
+                strategy = s
+                break
+    if strategy is None and strategies:
+        idx = cand.get("_strategy_index")
+        if isinstance(idx, int) and 0 <= idx < len(strategies):
+            strategy = strategies[idx]
+
+    style_mode = cand.get("style_mode") or (
+        (strategy or {}).get("style_mode") if strategy else None
+    )
+    psychology_angle = cand.get("psychology_angle") or (
+        (strategy or {}).get("psychology_angle") if strategy else None
+    )
+    if not psychology_angle and style_mode:
+        psychology_angle = default_psychology_for(style_mode)
+
+    cand["style_mode"] = style_mode
+    cand["psychology_angle"] = psychology_angle
+
+    # Resolve the internal thought the candidate was written from.
+    # Prefer the explicit thought_id the provider returned; otherwise
+    # take the thought whose index matches the strategy index.
+    thought = _lookup_thought(cand.get("thought_id"), internal_thoughts)
+    if thought is None and internal_thoughts:
+        idx = cand.get("_strategy_index")
+        if isinstance(idx, int) and 0 <= idx < len(internal_thoughts):
+            thought = internal_thoughts[idx]
+        elif isinstance(idx, int):
+            thought = internal_thoughts[idx % len(internal_thoughts)]
+    if thought:
+        cand["thought"] = {
+            "id": thought.get("id"),
+            "text": thought.get("text"),
+            "thought_type": normalize_thought_type(
+                thought.get("thought_type") or thought.get("angle_hint")
+            ),
+            "source": thought.get("source"),
+        }
+    else:
+        cand["thought"] = None
+
+    cand["final_message"] = cand.get("body")
+    cand["why_it_works"] = _why_it_works(
+        style_mode=style_mode,
+        psychology_angle=psychology_angle,
+        thought_type=(cand.get("thought") or {}).get("thought_type"),
+        message_basis=cand.get("message_basis"),
+    )
 
 
 def build_context(
@@ -619,7 +759,13 @@ def generate(
     for f in ("title", "company_name", "location", "industry"):
         if pros.get(f):
             fallback_facts.append(f)
-    for cand in raw or []:
+    internal_thoughts = context.get("internal_thoughts") or []
+    for _cand_index, cand in enumerate(raw or []):
+        # Record the index of this candidate in the raw provider
+        # response so the downstream output-format decoration can
+        # match candidates to strategies and thoughts by position
+        # when the provider didn't return an explicit thought_id.
+        cand["_strategy_index"] = _cand_index
         body = cand.get("body", "") or ""
 
         # 1) Anti-copy: auto-shorten, then check for raw-source overlap.
@@ -675,6 +821,22 @@ def generate(
             profile=context.get("profile") or {},
         )
         cand["naturalness"] = naturalness
+
+        # 3.6) Taste Filter. This is the "would a sharp human
+        #      actually send this?" gate that consolidates template
+        #      detection, CRM-tag detection, profile restatement,
+        #      SDR-bot tells, over-optimization, and keyword stacks
+        #      into a single unified verdict. It reads the other
+        #      validators' verdicts so its reject_reasons list can
+        #      act as a single source of truth for the UI. A failing
+        #      taste verdict is a hard reject — we do not demote
+        #      taste-failing candidates to the low-context bucket,
+        #      because taste is voice and voice does not improve
+        #      with more context.
+        taste_verdict = taste_filter.evaluate(
+            cand, profile=context.get("profile") or {},
+        )
+        cand["taste_filter"] = taste_verdict
         cand["selected_angle"] = cand.get("angle")
 
         # Attach the playbook entries that informed this angle so the
@@ -743,11 +905,17 @@ def generate(
             v.startswith("comma_stack:") or v.startswith("keyword_stacking:")
             for v in (naturalness.get("violations") or [])
         )
+        # Taste filter is the final voice-level gate. Its verdict is
+        # authoritative for "does this sound like a human DM" — a
+        # failing taste verdict rejects the candidate even when the
+        # upstream mechanical validators all passed.
+        passes_taste = bool(taste_verdict.get("passes_taste", True))
         ok = (
             verdict["ok"]
             and anti["passes_anti_copy_check"]
             and playbook_clean
             and not has_comma_stack
+            and passes_taste
         )
         if not anti["passes_anti_copy_check"]:
             verdict.setdefault("violations", []).extend(anti["violations"])
@@ -756,6 +924,10 @@ def generate(
                 [v for v in naturalness.get("violations") or []
                  if v.startswith("comma_stack:")
                  or v.startswith("keyword_stacking:")]
+            )
+        if not passes_taste:
+            verdict.setdefault("violations", []).extend(
+                [f"taste:{r}" for r in (taste_verdict.get("reject_reasons") or [])]
             )
 
         # Label this candidate with a confidence level and a
@@ -777,6 +949,15 @@ def generate(
         # fine and should land in the main candidates list.
         demote_for_validator = (
             not ag["passes_quality_threshold"] and cand_confidence == "high"
+        )
+
+        # Decorate every candidate (accepted, rejected, demoted) with
+        # the product-spec output format so the UI can render the
+        # reasoning trail uniformly regardless of the bucket.
+        _decorate_candidate_with_output_format(
+            cand,
+            strategies=strategies or [],
+            internal_thoughts=internal_thoughts,
         )
 
         if not ok:
@@ -806,17 +987,34 @@ def generate(
             for v in ((c.get("grounding") or {}).get("violations") or [])
         )
     )
+    rejected_by_taste = sum(
+        1 for c in rejected
+        if not (c.get("taste_filter") or {}).get("passes_taste", True)
+    )
+    distinct_styles_accepted = sorted({
+        (c.get("style_mode") or "")
+        for c in candidates
+        if c.get("style_mode")
+    })
+    distinct_thought_types_accepted = sorted({
+        (c.get("thought") or {}).get("thought_type") or ""
+        for c in candidates
+        if (c.get("thought") or {}).get("thought_type")
+    })
     validation_summary = {
         "raw": raw_count,
         "accepted": len(candidates),
         "low_context": len(low_context_candidates),
         "rejected": len(rejected),
         "rejected_for_comma_stack": rejected_for_comma_stack,
+        "rejected_by_taste": rejected_by_taste,
         "accepted_with_playbook": accepted_with_pb,
         "accepted_with_knowledge": accepted_with_kn,
         "playbook_entries_loaded": len(pb_entries),
         "knowledge_entries_loaded": len(knowledge_entries),
         "internal_thoughts_used": len(context.get("internal_thoughts") or []),
+        "distinct_style_modes_accepted": distinct_styles_accepted,
+        "distinct_thought_types_accepted": distinct_thought_types_accepted,
     }
     if raw_count and len(candidates) == 0:
         # Every candidate was demoted or rejected — this is a real
@@ -825,6 +1023,14 @@ def generate(
     else:
         _stage("candidate_validation", "ok")
     stages["candidate_validation_summary"] = validation_summary
+    # Explicit taste_filter stage event — even though the filter
+    # runs inside the candidate_validation loop, it is logically
+    # its own pipeline stage and the UI renders it as such. Mark
+    # it degraded when every candidate was rejected by taste.
+    if raw_count and rejected_by_taste >= raw_count:
+        _stage("taste_filter", "degraded_all_rejected")
+    else:
+        _stage("taste_filter", "ok")
 
     # Message Critic. The critic runs over every surviving candidate
     # (accepted + low_context) and attaches a structured ``critique``
@@ -923,6 +1129,12 @@ def generate(
             "hypothesis_count": len(
                 (context.get("context_expansion") or {}).get("hypotheses") or []
             ),
+            "style_modes_used": validation_summary.get(
+                "distinct_style_modes_accepted"
+            ) or [],
+            "thought_types_used": validation_summary.get(
+                "distinct_thought_types_accepted"
+            ) or [],
         },
         "knowledge": {
             "entries": knowledge_entry_summaries,

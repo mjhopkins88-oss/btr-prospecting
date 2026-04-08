@@ -58,6 +58,14 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
+from .style_modes import normalize_thought_type, THOUGHT_TYPES
+
+# The pipeline aims to give the generator FIVE candidate thoughts
+# before any message is written. When the upstream insight engine
+# produced fewer insights, we top up with typed fallback thoughts
+# drawn from the context_expansion hypotheses so the generator
+# always has a full set of five distinct reasoning lenses.
+TARGET_THOUGHTS = 5
 MAX_THOUGHTS = 5
 MAX_THOUGHT_CHARS = 180
 
@@ -214,7 +222,11 @@ def _deterministic_thought(
 
     Never invents facts. Only rewrites the insight text into a
     plain-language thought, strips tag stacks, and truncates to the
-    max thought length.
+    max thought length. Every returned thought carries a
+    ``thought_type`` from the closed product vocabulary so the
+    downstream generator can reason about the KIND of thought it
+    is working with (pattern recognition vs timing vs contrarian
+    observation etc.).
     """
     insight_text = (insight.get("text") or "").strip()
     if not insight_text:
@@ -252,13 +264,125 @@ def _deterministic_thought(
     if len(rewritten) > MAX_THOUGHT_CHARS:
         rewritten = rewritten[: MAX_THOUGHT_CHARS - 1].rsplit(" ", 1)[0] + "…"
 
+    thought_type = normalize_thought_type(insight.get("type"))
     return {
         "id": f"thought-{index}",
         "based_on_insight_id": insight.get("id"),
         "text": rewritten,
         "angle_hint": (insight.get("type") or "trend"),
+        "thought_type": thought_type,
         "source": "heuristic",
     }
+
+
+# Type-specific fallback thoughts. These are used to top up the
+# candidate set when the insight engine produced fewer than 5 real
+# insights. They are intentionally broad — framed as possibilities,
+# never as claims — and each one is typed to a DIFFERENT product
+# vocabulary slot so the final set of 5 carries genuine diversity.
+_FALLBACK_THOUGHTS_BY_TYPE: dict[str, list[str]] = {
+    "pattern_recognition": [
+        "feels like most groups in this seat are spending more time on cost discipline than on growth right now",
+        "the pattern I keep noticing is that the teams still moving are the ones who already rebuilt their assumptions",
+    ],
+    "tension_tradeoff": [
+        "the interesting tension right now may not be demand — it's whether the operating stack can actually move at the same pace the capital side wants",
+        "the real tradeoff for a lot of folks in this market seems to be sourcing speed versus underwriting discipline",
+    ],
+    "contrarian_observation": [
+        "the interesting part of this market may not be growth, it may be who can still move efficiently",
+        "the default read is that deal flow is the constraint — my guess is it's actually the bar for conviction that's moved",
+    ],
+    "timing_insight": [
+        "my read right now is that the window for the next set of decisions is narrower than it looked six months ago",
+        "timing-wise it feels like the groups moving now have already decided; the rest are waiting for another data point",
+    ],
+    "second_order_effect": [
+        "the second-order effect I'd expect from this kind of positioning is that it reshuffles what gets prioritized on the ops side within a quarter",
+        "one downstream thing I keep seeing is that capital shifts show up in sourcing before they show up anywhere else",
+    ],
+    "self_relevance": [
+        "most folks in a seat like this seem to be weighing the same question — whether the current read on the market is still the right one to underwrite against",
+        "if I were sitting in that seat right now I'd probably care more about who's still lending at real terms than about deal flow",
+    ],
+}
+
+
+def _fallback_thought(
+    thought_type: str,
+    index: int,
+    used_texts: set[str],
+) -> Optional[dict]:
+    """
+    Build one fallback thought for ``thought_type``. Skips any template
+    whose normalized text has already been used in the current set,
+    so the final set of 5 stays genuinely distinct.
+    """
+    templates = _FALLBACK_THOUGHTS_BY_TYPE.get(thought_type) or []
+    for text in templates:
+        key = re.sub(r"\s+", " ", text.strip().lower())
+        if key in used_texts:
+            continue
+        used_texts.add(key)
+        clipped = text.strip()
+        if len(clipped) > MAX_THOUGHT_CHARS:
+            clipped = clipped[: MAX_THOUGHT_CHARS - 1].rsplit(" ", 1)[0] + "…"
+        return {
+            "id": f"thought-{index}",
+            "based_on_insight_id": None,
+            "text": clipped,
+            "angle_hint": thought_type,
+            "thought_type": thought_type,
+            "source": "fallback",
+        }
+    return None
+
+
+def _top_up_to_target(
+    thoughts: list[dict],
+    target: int = TARGET_THOUGHTS,
+) -> list[dict]:
+    """
+    Ensure the returned thought list carries at least ``target``
+    entries by synthesizing typed fallback thoughts from
+    ``_FALLBACK_THOUGHTS_BY_TYPE``.
+
+    * Existing thoughts keep their original text and type.
+    * Missing types are filled in rotation through ``THOUGHT_TYPES``
+      so the final set carries maximum type diversity.
+    * Fallback thoughts are clearly labelled ``source="fallback"``.
+    """
+    if len(thoughts) >= target:
+        return thoughts[:target]
+
+    used_texts: set[str] = set()
+    used_types: set[str] = set()
+    for t in thoughts:
+        txt = (t.get("text") or "").strip().lower()
+        if txt:
+            used_texts.add(re.sub(r"\s+", " ", txt))
+        tt = (t.get("thought_type") or "").strip().lower()
+        if tt:
+            used_types.add(tt)
+
+    # Preferred fill order: any type we haven't seen yet, in the
+    # canonical product vocabulary order.
+    fill_order = [t for t in THOUGHT_TYPES if t not in used_types]
+    # If we've already used every type at least once, allow a
+    # second pass so we can still reach the target.
+    fill_order += list(THOUGHT_TYPES)
+
+    out = list(thoughts)
+    i = len(out)
+    for tt in fill_order:
+        if len(out) >= target:
+            break
+        fb = _fallback_thought(tt, index=i, used_texts=used_texts)
+        if fb is None:
+            continue
+        out.append(fb)
+        i += 1
+    return out[:target]
 
 
 def _deterministic_thoughts(insights: list[dict]) -> list[dict]:
@@ -282,7 +406,12 @@ def _normalize_ai_thoughts(
       * a valid based_on_insight_id (fall back to insights[i].id),
       * tag-stack stripping (so AI-produced thoughts are still clean
         even if the model slipped a keyword list through),
-      * max length truncation.
+      * max length truncation,
+      * a typed ``thought_type`` drawn from the closed product
+        vocabulary (pattern_recognition, tension_tradeoff,
+        contrarian_observation, timing_insight, second_order_effect,
+        self_relevance). Unknown values are projected onto the
+        closest match.
     """
     out: list[dict] = []
     for i, raw in enumerate(ai_thoughts or []):
@@ -297,11 +426,18 @@ def _normalize_ai_thoughts(
         based_on = raw.get("based_on_insight_id")
         if not based_on and i < len(insights or []):
             based_on = insights[i].get("id")
+        raw_type = (
+            raw.get("thought_type")
+            or raw.get("type")
+            or raw.get("angle_hint")
+        )
+        thought_type = normalize_thought_type(raw_type)
         out.append({
             "id": f"thought-{i}",
             "based_on_insight_id": based_on,
             "text": text,
-            "angle_hint": (raw.get("angle_hint") or "trend"),
+            "angle_hint": (raw.get("angle_hint") or thought_type),
+            "thought_type": thought_type,
             "source": "ai",
         })
         if len(out) >= MAX_THOUGHTS:
@@ -324,17 +460,24 @@ def translate_insights(
 
     Never raises. On provider failure falls back to the deterministic
     branch and records the failure under ``error``.
+
+    The pipeline aims to hand the generator exactly five candidate
+    thoughts. When the insight engine produced fewer insights than
+    that — which is the common case on thin LinkedIn-only inputs —
+    the result is topped up with typed fallback thoughts drawn from
+    the closed product vocabulary. Every returned thought carries
+    a ``thought_type`` so the downstream generator can route each
+    thought to a distinct style mode without re-deriving the type.
     """
     insights = context.get("insights") or []
-    if not insights:
-        return {"thoughts": [], "source": "heuristic", "error": None}
 
     # Always compute the deterministic branch first so we have a
     # guaranteed non-empty fallback.
     fallback = _deterministic_thoughts(insights)
 
     if provider is None or not callable(getattr(provider, "translate_thoughts", None)):
-        return {"thoughts": fallback, "source": "heuristic", "error": None}
+        topped = _top_up_to_target(fallback, target=TARGET_THOUGHTS)
+        return {"thoughts": topped, "source": "heuristic", "error": None}
 
     try:
         raw = provider.translate_thoughts(context)
@@ -343,25 +486,30 @@ def translate_insights(
             f"[SignalStack] thought_translator: provider translate_thoughts "
             f"FAILED — falling back to heuristic: {type(e).__name__}: {e}"
         )
+        topped = _top_up_to_target(fallback, target=TARGET_THOUGHTS)
         return {
-            "thoughts": fallback,
+            "thoughts": topped,
             "source": "heuristic",
             "error": f"provider_translation_failed:{type(e).__name__}",
         }
 
     ai_thoughts = _normalize_ai_thoughts(raw or [], insights)
     if not ai_thoughts:
+        topped = _top_up_to_target(fallback, target=TARGET_THOUGHTS)
         return {
-            "thoughts": fallback,
+            "thoughts": topped,
             "source": "heuristic",
             "error": "ai_thoughts_empty",
         }
 
     # Hybrid: prefer AI but keep heuristic fallback as backfill so we
-    # always have at least one thought per insight.
+    # always have at least one thought per insight. Then top up with
+    # typed fallback thoughts so we always return exactly
+    # TARGET_THOUGHTS distinct thoughts to the generator.
     hybrid = ai_thoughts
     if fallback and len(hybrid) < len(insights):
         hybrid = hybrid + fallback[len(hybrid):]
+    hybrid = _top_up_to_target(hybrid, target=TARGET_THOUGHTS)
     return {
         "thoughts": hybrid[:MAX_THOUGHTS],
         "source": "ai" if len(hybrid) == len(ai_thoughts) else "hybrid",
