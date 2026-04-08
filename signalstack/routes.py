@@ -21,10 +21,13 @@ from flask import Blueprint, request, jsonify, send_from_directory
 
 from . import repo
 from .services import generator, analytics
+from .knowledge import repo as knowledge_repo, extractor as knowledge_extractor
 from .types import (
     PROSPECT_STATUS, SIGNAL_TYPES, SIGNAL_SOURCES, MESSAGE_TYPES,
     PRIMARY_TRIGGERS, COMMUNICATION_STYLES, OUTREACH_GOALS,
     MESSAGE_STATUS, MESSAGE_OUTCOMES,
+    KNOWLEDGE_SOURCE_TYPES, KNOWLEDGE_EXTRACTION_STATUS,
+    KNOWLEDGE_ENTRY_CATEGORIES,
 )
 
 bp = Blueprint("signalstack", __name__)
@@ -62,6 +65,9 @@ def meta():
         "outreach_goals": OUTREACH_GOALS,
         "message_status": MESSAGE_STATUS,
         "message_outcomes": MESSAGE_OUTCOMES,
+        "knowledge_source_types": KNOWLEDGE_SOURCE_TYPES,
+        "knowledge_extraction_status": KNOWLEDGE_EXTRACTION_STATUS,
+        "knowledge_entry_categories": KNOWLEDGE_ENTRY_CATEGORIES,
     })
 
 
@@ -283,3 +289,155 @@ def add_outcome(mid):
 @bp.route("/api/signalstack/analytics", methods=["GET"])
 def get_analytics():
     return jsonify(analytics.overview())
+
+
+# ===================== Knowledge dataset =====================
+
+def _parse_tags(value) -> list:
+    """Accept tags as list or comma-separated string."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(t).strip() for t in value if str(t).strip()]
+    if isinstance(value, str):
+        return [t.strip() for t in value.split(",") if t.strip()]
+    return []
+
+
+def _parse_active(value):
+    if value in (None, "", "all"):
+        return None
+    if isinstance(value, bool):
+        return value
+    return str(value).lower() in ("1", "true", "yes", "on", "active")
+
+
+@bp.route("/api/signalstack/knowledge/stats", methods=["GET"])
+def knowledge_stats():
+    return jsonify(knowledge_repo.overview_stats())
+
+
+@bp.route("/api/signalstack/knowledge/sources", methods=["GET"])
+def list_knowledge_sources():
+    return jsonify(knowledge_repo.list_sources(
+        q=request.args.get("q", ""),
+        source_type=request.args.get("source_type", ""),
+        active=_parse_active(request.args.get("active")),
+        extraction_status=request.args.get("extraction_status", ""),
+        tag=request.args.get("tag", ""),
+    ))
+
+
+@bp.route("/api/signalstack/knowledge/sources", methods=["POST"])
+def create_knowledge_source():
+    data = _json_body()
+    if not data.get("title"):
+        return jsonify({"error": "title required"}), 400
+    if not data.get("source_type"):
+        data["source_type"] = "manual_entry"
+    data["tags"] = _parse_tags(data.get("tags"))
+    extract = bool(data.pop("extract_after_save", False))
+    try:
+        source = knowledge_repo.create_source(data)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    if extract:
+        try:
+            result = knowledge_extractor.extract_for_source(source["id"])
+            source = knowledge_repo.get_source(source["id"]) or source
+            source["extraction_result"] = result
+        except Exception as e:
+            print(f"[SignalStack] knowledge extract on create failed: {e}")
+            source["extraction_result"] = {"error": "extract_failed", "message": str(e)}
+    return jsonify(source), 201
+
+
+@bp.route("/api/signalstack/knowledge/sources/<sid>", methods=["GET"])
+def get_knowledge_source(sid):
+    source = knowledge_repo.get_source(sid)
+    if not source:
+        return jsonify({"error": "not_found"}), 404
+    source["entries"] = knowledge_repo.list_entries(source_id=sid)
+    return jsonify(source)
+
+
+@bp.route("/api/signalstack/knowledge/sources/<sid>", methods=["PATCH"])
+def update_knowledge_source(sid):
+    data = _json_body()
+    if "tags" in data:
+        data["tags"] = _parse_tags(data.get("tags"))
+    try:
+        source = knowledge_repo.update_source(sid, data)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    if not source:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify(source)
+
+
+@bp.route("/api/signalstack/knowledge/sources/<sid>/archive", methods=["POST"])
+def archive_knowledge_source(sid):
+    source = knowledge_repo.archive_source(sid)
+    if not source:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify(source)
+
+
+@bp.route("/api/signalstack/knowledge/sources/<sid>/extract", methods=["POST"])
+def extract_knowledge_source(sid):
+    try:
+        result = knowledge_extractor.extract_for_source(sid)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "extract_failed", "message": str(e)}), 200
+    if result.get("error"):
+        return jsonify(result), 404 if result["error"] == "source_not_found" else 200
+    return jsonify(result)
+
+
+@bp.route("/api/signalstack/knowledge/sources/<sid>/entries", methods=["GET"])
+def list_knowledge_entries_for_source(sid):
+    return jsonify(knowledge_repo.list_entries(source_id=sid))
+
+
+@bp.route("/api/signalstack/knowledge/entries", methods=["GET"])
+def list_knowledge_entries():
+    return jsonify(knowledge_repo.list_entries(
+        source_id=request.args.get("source_id", ""),
+        active=_parse_active(request.args.get("active")),
+        category=request.args.get("category", ""),
+    ))
+
+
+@bp.route("/api/signalstack/knowledge/entries", methods=["POST"])
+def create_knowledge_entry():
+    data = _json_body()
+    for f in ("source_id", "category", "principle_name", "description"):
+        if not data.get(f):
+            return jsonify({"error": f"{f} required"}), 400
+    if "tags" in data:
+        data["tags"] = _parse_tags(data.get("tags"))
+    return jsonify(knowledge_repo.create_entry(data)), 201
+
+
+@bp.route("/api/signalstack/knowledge/entries/<eid>", methods=["PATCH"])
+def update_knowledge_entry(eid):
+    data = _json_body()
+    if "tags" in data:
+        data["tags"] = _parse_tags(data.get("tags"))
+    entry = knowledge_repo.update_entry(eid, data)
+    if not entry:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify(entry)
+
+
+@bp.route("/api/signalstack/knowledge/entries/<eid>", methods=["DELETE"])
+def delete_knowledge_entry(eid):
+    ok = knowledge_repo.delete_entry(eid)
+    return jsonify({"ok": ok}), (200 if ok else 404)
+
+
+@bp.route("/api/signalstack/knowledge/tags", methods=["GET"])
+def list_knowledge_tags():
+    return jsonify(knowledge_repo.list_tags())

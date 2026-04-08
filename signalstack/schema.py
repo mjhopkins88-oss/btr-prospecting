@@ -207,6 +207,67 @@ SCHEMA_SQL = [
         created_at TEXT NOT NULL
     )
     """,
+    # ----------------- Knowledge dataset layer -----------------
+    # ss_knowledge_sources: a video, article, note, podcast, transcript,
+    # framework, manual entry, or playbook source. Raw material that the
+    # extraction service later turns into structured knowledge entries.
+    """
+    CREATE TABLE IF NOT EXISTS ss_knowledge_sources (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        title TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        source_url TEXT,
+        raw_text TEXT,
+        summary TEXT,
+        notes TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        extraction_status TEXT NOT NULL DEFAULT 'RAW',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    # ss_knowledge_entries: structured knowledge extracted from a source.
+    # These are reusable strategy/style/angle facts the generator can
+    # consult — they are NEVER treated as prospect personalization.
+    """
+    CREATE TABLE IF NOT EXISTS ss_knowledge_entries (
+        id TEXT PRIMARY KEY,
+        source_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        principle_name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        practical_use_case TEXT,
+        allowed_contexts TEXT,
+        disallowed_contexts TEXT,
+        example_pattern TEXT,
+        anti_pattern TEXT,
+        confidence REAL NOT NULL DEFAULT 0.7,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ss_knowledge_tags (
+        id TEXT PRIMARY KEY,
+        label TEXT NOT NULL UNIQUE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ss_knowledge_source_tags (
+        source_id TEXT NOT NULL,
+        tag_id TEXT NOT NULL,
+        PRIMARY KEY (source_id, tag_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ss_knowledge_entry_tags (
+        entry_id TEXT NOT NULL,
+        tag_id TEXT NOT NULL,
+        PRIMARY KEY (entry_id, tag_id)
+    )
+    """,
 ]
 
 INDEXES_SQL = [
@@ -220,6 +281,12 @@ INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS ix_ss_principles_active ON ss_social_principles(active)",
     "CREATE INDEX IF NOT EXISTS ix_ss_playbook_entries_pb ON ss_playbook_entries(playbook_id)",
     "CREATE INDEX IF NOT EXISTS ix_ss_playbook_entries_cat ON ss_playbook_entries(category)",
+    "CREATE INDEX IF NOT EXISTS ix_ss_kn_sources_type ON ss_knowledge_sources(source_type)",
+    "CREATE INDEX IF NOT EXISTS ix_ss_kn_sources_active ON ss_knowledge_sources(active)",
+    "CREATE INDEX IF NOT EXISTS ix_ss_kn_sources_status ON ss_knowledge_sources(extraction_status)",
+    "CREATE INDEX IF NOT EXISTS ix_ss_kn_entries_source ON ss_knowledge_entries(source_id)",
+    "CREATE INDEX IF NOT EXISTS ix_ss_kn_entries_active ON ss_knowledge_entries(active)",
+    "CREATE INDEX IF NOT EXISTS ix_ss_kn_entries_cat ON ss_knowledge_entries(category)",
 ]
 
 
@@ -263,3 +330,8 @@ def init_schema() -> None:
         seed_btr_playbook_if_empty()
     except Exception as e:
         print(f"[SignalStack] BTR playbook seed skipped: {e}")
+    try:
+        from .seed import seed_knowledge_dataset_if_empty
+        seed_knowledge_dataset_if_empty()
+    except Exception as e:
+        print(f"[SignalStack] knowledge dataset seed skipped: {e}")

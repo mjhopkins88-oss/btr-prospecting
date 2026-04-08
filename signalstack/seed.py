@@ -7,6 +7,8 @@ and idempotent enough for local exploration.
 """
 from db import get_db
 from . import repo
+from .knowledge import repo as knowledge_repo
+from .knowledge import extractor as knowledge_extractor
 
 
 PRINCIPLES = [
@@ -583,6 +585,134 @@ def seed_btr_playbook_if_empty() -> int:
         repo.create_playbook_entry({**entry, "playbook_id": pb["id"]})
     print(f"[SignalStack] Seeded BTR playbook with {len(BTR_ENTRIES)} entries")
     return len(BTR_ENTRIES)
+
+
+KNOWLEDGE_SOURCES = [
+    {
+        "title": "How modern AEs use LinkedIn (Justin Welsh)",
+        "source_type": "youtube_video",
+        "source_url": "https://www.youtube.com/watch?v=demo-justin-welsh",
+        "summary": (
+            "Walks through how top sellers earn the right to send a "
+            "DM by being publicly useful first. Trust beats persuasion. "
+            "Specificity beats cleverness. Curiosity beats pitches."
+        ),
+        "notes": (
+            "Trust is built before the first message, not inside it. "
+            "Open with something the recipient already knows is true "
+            "about themselves. Make 'no' easy — a reply costs nothing, "
+            "a meeting costs everything."
+        ),
+        "tags": ["linkedin", "social-selling", "outbound"],
+        "active": True,
+        "extract": True,
+    },
+    {
+        "title": "Relevance is the only personalization that matters",
+        "source_type": "article",
+        "source_url": "https://example.com/relevance-in-outreach",
+        "summary": (
+            "An opener should reference a specific, observable thing "
+            "tied to the prospect's actual work. Generic compliments "
+            "and 'noticed your work as VP at X' are disqualifiers."
+        ),
+        "notes": (
+            "Numbers, places, names, and timeframes outperform "
+            "adjectives. Tie every opener to a stored signal — never "
+            "anchor on title, company, or city alone."
+        ),
+        "tags": ["relevance", "specificity", "openers"],
+        "active": True,
+        "extract": True,
+    },
+    {
+        "title": "BTR operator outreach playbook",
+        "source_type": "playbook",
+        "source_url": None,
+        "summary": (
+            "How BTR developers, capital allocators, and land brokers "
+            "actually behave — and what kind of message reads as a "
+            "peer in the market vs. a templated SDR."
+        ),
+        "notes": (
+            "Pattern recognition beats flattery. Name a submarket, "
+            "not a metro. Reference the deal, not the company. "
+            "Curiosity grounded in a dated event is the only "
+            "curiosity that lands."
+        ),
+        "tags": ["btr", "real-estate", "industry"],
+        "active": True,
+        "extract": True,
+    },
+    {
+        "title": "Personal note: openers I've seen actually work",
+        "source_type": "note",
+        "source_url": None,
+        "summary": (
+            "Recurring motif across replies: name a specific window "
+            "(quarter, deal, hire), then ask one question."
+        ),
+        "notes": (
+            "Quick thought — feel free to ignore. No agenda — happy "
+            "to be wrong. Curious how you're sizing it. These three "
+            "framings consistently get replies."
+        ),
+        "tags": ["openers", "personal-notes"],
+        "active": True,
+        "extract": True,
+    },
+    {
+        "title": "Operators podcast — capital markets shifts in BTR",
+        "source_type": "podcast",
+        "source_url": "https://example.com/operators-podcast-ep42",
+        "summary": (
+            "Discussion of how bridge-to-agency takeouts have changed "
+            "the timing pressure on lease-up. Operators with a 30-day "
+            "lease-up slip are quietly looking for new debt sources."
+        ),
+        "notes": (
+            "Bridge-to-agency only works if lease-up lands inside the "
+            "rate window. Reference the window, not the deal headline."
+        ),
+        "tags": ["btr", "capital-markets", "podcast"],
+        "active": True,
+        "extract": True,
+    },
+]
+
+
+def seed_knowledge_dataset_if_empty() -> int:
+    """Insert a small starter dataset of knowledge sources + run mock
+    extraction so the page is immediately useful. Idempotent."""
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT COUNT(*) FROM ss_knowledge_sources")
+            n = int(cur.fetchone()[0])
+        except Exception:
+            try: conn.rollback()
+            except Exception: pass
+            return 0
+    finally:
+        conn.close()
+    if n:
+        return 0
+    created = 0
+    for spec in KNOWLEDGE_SOURCES:
+        extract = spec.pop("extract", False)
+        try:
+            src = knowledge_repo.create_source(spec)
+            created += 1
+            if extract and src.get("id"):
+                try:
+                    knowledge_extractor.extract_for_source(src["id"])
+                except Exception as e:
+                    print(f"[SignalStack] knowledge seed extract failed: {e}")
+        except Exception as e:
+            print(f"[SignalStack] knowledge seed source failed: {e}")
+    print(f"[SignalStack] Seeded {created} knowledge sources (with mock extraction)")
+    return created
 
 
 def seed_demo() -> dict:
