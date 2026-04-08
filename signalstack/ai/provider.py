@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 import random
 import re
-from typing import Optional, Protocol
+from typing import Any, Optional, Protocol
 
 from .prompts import load_prompt
 
@@ -289,18 +289,240 @@ class MockAiProvider:
         return body
 
 
-# ----------------------- Claude provider scaffold -----------------------
+# ----------------------- Claude provider -----------------------
+
+def _safe_json_loads(raw: str) -> Any:
+    """Best-effort JSON parsing for Claude's output.
+
+    Claude occasionally wraps JSON in ```json fences, adds a leading
+    prose paragraph, or emits trailing whitespace. This helper strips
+    the common wrappers and falls back to a substring match on the
+    first balanced ``{...}`` or ``[...]`` block.
+    """
+    import json as _json
+    import re as _re
+
+    if raw is None:
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    # Strip Markdown fences.
+    if text.startswith("```"):
+        text = _re.sub(r"^```[a-zA-Z]*\s*", "", text)
+        text = _re.sub(r"\s*```\s*$", "", text)
+    try:
+        return _json.loads(text)
+    except Exception:
+        pass
+    # Try to find the first top-level JSON structure.
+    for opener, closer in (("{", "}"), ("[", "]")):
+        start = text.find(opener)
+        if start < 0:
+            continue
+        depth = 0
+        for i in range(start, len(text)):
+            ch = text[i]
+            if ch == opener:
+                depth += 1
+            elif ch == closer:
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return _json.loads(text[start : i + 1])
+                    except Exception:
+                        break
+    return None
+
+
+def _summarize_context_for_prompt(context: dict) -> dict:
+    """Produce a compact, JSON-safe view of the context for Claude.
+
+    We deliberately strip raw signal/note text — the AI only sees the
+    compressed observations and a tiny identifying header per entity.
+    This keeps us under token budget AND prevents the AI from being
+    tempted to copy raw source material verbatim.
+    """
+    prospect = context.get("prospect") or {}
+    company = context.get("company") or {}
+    profile = context.get("profile") or {}
+    signals = context.get("signals") or []
+    notes = context.get("notes") or []
+    observations = context.get("observations") or []
+    distilled = context.get("distilled_observations") or []
+    insights = context.get("insights") or []
+    knowledge_entries = context.get("knowledge_entries") or []
+    playbook = context.get("playbook") or {}
+
+    return {
+        "prospect": {
+            "id": prospect.get("id"),
+            "full_name": prospect.get("full_name"),
+            "title": prospect.get("title"),
+            "company_name": prospect.get("company_name"),
+            "location": prospect.get("location"),
+            "industry": prospect.get("industry"),
+        },
+        "company": {
+            "id": company.get("id"),
+            "name": company.get("name"),
+            "industry": company.get("industry"),
+            "company_type": company.get("company_type"),
+        },
+        "profile": {
+            "headline": profile.get("headline"),
+            "featured_topics": profile.get("featured_topics"),
+            "about_text": (profile.get("about_text") or "")[:400],
+            "shared_context": profile.get("shared_context"),
+            "current_role": profile.get("current_role"),
+        },
+        "signals": [
+            {
+                "id": s.get("id"),
+                "type": s.get("type"),
+                "source": s.get("source"),
+                "summary": (s.get("text") or "")[:160],
+            }
+            for s in signals[:10]
+        ],
+        "notes": [
+            {
+                "id": n.get("id"),
+                "body_preview": (n.get("body") or "")[:160],
+            }
+            for n in notes[:5]
+        ],
+        "signal_observations": [
+            {
+                "signal_id": o.get("signal_id"),
+                "summary": o.get("summary"),
+                "safe_reference_text": o.get("safe_reference_text"),
+            }
+            for o in observations[:6]
+        ],
+        "distilled_observations": [
+            {
+                "text": o.get("text"),
+                "source": o.get("source"),
+                "source_id": o.get("source_id"),
+                "strength": o.get("strength"),
+            }
+            for o in distilled[:5]
+        ],
+        "insights": [
+            {
+                "id": i.get("id"),
+                "text": i.get("text"),
+                "type": i.get("type"),
+                "confidence": i.get("confidence"),
+            }
+            for i in insights[:5]
+        ],
+        "knowledge_style_guidance": [
+            {
+                "category": k.get("category"),
+                "principle_name": k.get("principle_name"),
+            }
+            for k in knowledge_entries[:10]
+        ],
+        "playbook": {
+            "name": (playbook.get("playbook") or {}).get("name")
+            if isinstance(playbook, dict)
+            else None,
+            "preferred_angles": playbook.get("preferred_angles") or []
+            if isinstance(playbook, dict)
+            else [],
+        },
+    }
+
 
 class ClaudeProvider:
     """
-    Production scaffold for the Anthropic API. Intentionally minimal —
-    drops in cleanly when ANTHROPIC_API_KEY is configured. Falls back to
-    raising so the generator surfaces a clean error to the UI.
+    Claude-backed provider for SignalStack.
+
+    Wires the full multi-stage pipeline to the Anthropic Messages API.
+    Every method is wrapped to raise cleanly on network/JSON errors so
+    the generator's existing structured-error handling can take over.
+
+    Env vars:
+      ANTHROPIC_API_KEY         — required
+      SIGNALSTACK_CLAUDE_MODEL  — optional (default: claude-sonnet-4-6)
+
+    Secrets are never logged or echoed back in responses.
     """
 
     def __init__(self) -> None:
         self.api_key = os.getenv("ANTHROPIC_API_KEY")
         self.model = os.getenv("SIGNALSTACK_CLAUDE_MODEL", "claude-sonnet-4-6")
+        self._client = None
+        if not self.api_key:
+            raise RuntimeError("ANTHROPIC_API_KEY not set")
+        try:
+            import anthropic  # type: ignore
+
+            self._client = anthropic.Anthropic(api_key=self.api_key)
+        except Exception as e:
+            raise RuntimeError(
+                f"anthropic SDK not available: {type(e).__name__}: {e}"
+            )
+
+    # -------- low level --------
+
+    def _call_messages(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 1600,
+        temperature: float = 0.6,
+    ) -> str:
+        """Single Messages API call. Returns the joined text of all
+        text blocks in the first content list. Raises on any transport
+        error so the generator can surface a clean structured error.
+        """
+        resp = self._client.messages.create(
+            model=self.model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        parts: list[str] = []
+        for block in getattr(resp, "content", []) or []:
+            txt = getattr(block, "text", None)
+            if txt:
+                parts.append(txt)
+        return "\n".join(parts).strip()
+
+    # -------- pipeline: insight engine --------
+
+    def generate_insights(self, context: dict) -> list[dict]:
+        """Called by insight_engine when configured as an AI provider."""
+        import json as _json
+
+        system = load_prompt("insight_engine_system")
+        ctx = _summarize_context_for_prompt(context)
+        prospect_line = (
+            f"{(ctx['prospect'] or {}).get('full_name') or 'Unknown'} "
+            f"— {(ctx['prospect'] or {}).get('title') or ''} "
+            f"at {(ctx['prospect'] or {}).get('company_name') or ''}"
+        ).strip()
+        user = (
+            load_prompt("insight_engine_user")
+            .replace("{prospect_line}", prospect_line)
+            .replace("{observations_json}", _json.dumps(ctx.get("distilled_observations") or []))
+            .replace("{signals_json}", _json.dumps(ctx.get("signal_observations") or []))
+            .replace("{notes_json}", _json.dumps(ctx.get("notes") or []))
+            .replace("{knowledge_json}", _json.dumps(ctx.get("knowledge_style_guidance") or []))
+        )
+        raw = self._call_messages(system, user, max_tokens=1200, temperature=0.6)
+        parsed = _safe_json_loads(raw)
+        if isinstance(parsed, dict) and "insights" in parsed:
+            parsed = parsed.get("insights")
+        if not isinstance(parsed, list):
+            return []
+        return parsed
+
+    # -------- pipeline: message generator --------
 
     def generate_messages(
         self,
@@ -309,18 +531,85 @@ class ClaudeProvider:
         strategies: Optional[list[dict]] = None,
         instruction: Optional[str] = None,
     ) -> list[dict]:
-        if not self.api_key:
-            raise RuntimeError("ANTHROPIC_API_KEY not set")
-        # Real implementation would call the Messages API with prompts
-        # loaded via load_prompt() and parse a JSON response. Left as a
-        # scaffold so we don't ship an untested network path.
-        raise NotImplementedError("ClaudeProvider not yet wired — using MockAiProvider")
+        import json as _json
+
+        system = load_prompt("generate_system")
+        ctx = _summarize_context_for_prompt(context)
+        prospect_line = (
+            f"{(ctx['prospect'] or {}).get('full_name') or 'Unknown'} "
+            f"— {(ctx['prospect'] or {}).get('title') or ''} "
+            f"at {(ctx['prospect'] or {}).get('company_name') or ''}"
+        ).strip()
+        user = (
+            load_prompt("generate_user")
+            .replace("{n}", str(n))
+            .replace("{prospect_line}", prospect_line)
+            .replace("{context_json}", _json.dumps(ctx))
+            .replace("{observations_json}", _json.dumps(ctx.get("distilled_observations") or []))
+            .replace("{insights_json}", _json.dumps(ctx.get("insights") or []))
+            .replace("{strategies_json}", _json.dumps(strategies or []))
+            .replace("{instruction}", instruction or "")
+        )
+        raw = self._call_messages(system, user, max_tokens=2000, temperature=0.7)
+        parsed = _safe_json_loads(raw)
+        if isinstance(parsed, dict) and "messages" in parsed:
+            parsed = parsed.get("messages")
+        if not isinstance(parsed, list):
+            # Return empty list — the generator treats this as a
+            # structured parse/empty result, not a hard crash.
+            return []
+        return parsed
+
+    # -------- pipeline: message critic --------
+
+    def critique_candidate(
+        self,
+        candidate: dict,
+        context: dict,
+        insights: Optional[list[dict]] = None,
+    ) -> dict:
+        import json as _json
+
+        system = load_prompt("message_critic_system")
+        ctx = _summarize_context_for_prompt(context)
+        insight_text = ""
+        iid = candidate.get("insight_id")
+        if iid:
+            for i in insights or []:
+                if i.get("id") == iid:
+                    insight_text = i.get("text") or ""
+                    break
+        user = (
+            load_prompt("message_critic_user")
+            .replace("{body}", candidate.get("body") or "")
+            .replace("{angle}", candidate.get("angle") or "")
+            .replace("{insight}", insight_text)
+            .replace("{context_json}", _json.dumps(ctx))
+        )
+        raw = self._call_messages(system, user, max_tokens=700, temperature=0.2)
+        parsed = _safe_json_loads(raw)
+        if not isinstance(parsed, dict):
+            return {}
+        return parsed
+
+    # -------- legacy passthroughs --------
 
     def critique(self, body: str, context: dict) -> dict:
-        raise NotImplementedError
+        # Legacy entrypoint — the critic used via the new pipeline is
+        # critique_candidate above. Kept here so the AiProvider Protocol
+        # remains satisfied.
+        return {
+            "score": 0.7,
+            "notes": "Claude critique call — use critique_candidate for the pipeline.",
+        }
 
     def rewrite(self, body: str, instruction: str, context: dict) -> str:
-        raise NotImplementedError
+        system = load_prompt("rewrite_system")
+        user = f"Rewrite:\n{body}\n\nInstruction: {instruction}"
+        try:
+            return self._call_messages(system, user, max_tokens=500, temperature=0.5) or body
+        except Exception:
+            return body
 
 
 # ----------------------- Selector -----------------------

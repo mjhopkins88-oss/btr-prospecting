@@ -1,0 +1,18 @@
+Convert the observations below into 2-5 sharp insights.
+
+PROSPECT:
+{prospect_line}
+
+OBSERVATIONS (use these as source material, do NOT quote them):
+{observations_json}
+
+SIGNAL SUMMARIES (compressed — never copy raw text):
+{signals_json}
+
+NOTES (compressed — never copy raw text):
+{notes_json}
+
+STRATEGY GUIDANCE (NOT facts about the prospect — style/pattern guidance only):
+{knowledge_json}
+
+Return JSON array only.

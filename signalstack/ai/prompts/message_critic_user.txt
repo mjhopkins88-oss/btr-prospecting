@@ -1,0 +1,12 @@
+Critique this draft message.
+
+DRAFT BODY:
+{body}
+
+ANGLE USED: {angle}
+INSIGHT USED: {insight}
+
+PROSPECT CONTEXT (summarized):
+{context_json}
+
+Return a single JSON object per the system instructions.

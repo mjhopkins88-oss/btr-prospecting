@@ -26,6 +26,9 @@ from .observation_distiller import distill as distill_observations
 from .message_angle_planner import plan as plan_angles
 from .anti_generic_validator import validate as anti_generic_validate
 from . import playbook_loader
+from . import insight_engine
+from . import message_critic
+from . import reasoning_pipeline
 
 
 def _clean_playbook_entry(entry: Optional[dict]) -> dict:
@@ -298,18 +301,61 @@ def generate(
     context["playbook"] = playbook_bundle
     context["playbook_anti_patterns"] = pb_anti_patterns
 
-    # 3) Plan distinct angles for the options. Weak-input cases get
-    #    restricted to low-pressure / networking angles only.
-    _stage("strategy_plan", "running")
-    strategies = plan_angles(
-        quality, n=n,
-        override=strategy_override,
-        playbook_preferred_angles=pb_preferred or None,
-    )
-    _stage("strategy_plan", "ok")
-
+    # Resolve the provider up-front so the insight engine, message
+    # generator, and critic all share the same instance and its
+    # failure surfaces are funneled through the same error paths.
     provider = get_provider()
     provider_name = type(provider).__name__
+
+    # 2.75) Insight Engine. Converts observations into sharpened
+    #       interpretations (market patterns, timing effects, second-order
+    #       effects, peer POV). This is what makes the message NOT
+    #       sound like a topic-list restatement.
+    #
+    #       Minimal mode skips this layer entirely so the base
+    #       pipeline stays provably stable. We still attach an empty
+    #       insights array so downstream code has a consistent shape.
+    insight_source: Optional[str] = None
+    insight_error: Optional[str] = None
+    if minimal:
+        _stage("insight_engine", "skipped_minimal")
+        context["insights"] = []
+        insight_source = "skipped"
+    else:
+        _stage("insight_engine", "running")
+        try:
+            insight_result = insight_engine.generate_insights(
+                context, provider=provider,
+            )
+            context["insights"] = insight_result.get("insights") or []
+            insight_source = insight_result.get("source")
+            insight_error = insight_result.get("error")
+            _stage("insight_engine", insight_source or "heuristic")
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(
+                f"[SignalStack] generator: insight_engine FAILED — continuing "
+                f"without insights: {type(e).__name__}: {e}"
+            )
+            context["insights"] = []
+            insight_source = "heuristic"
+            insight_error = f"insight_engine_failed:{type(e).__name__}"
+            _stage("insight_engine", "failed_soft")
+
+    # 3) Plan distinct angles for the options. Weak-input cases get
+    #    restricted to low-pressure / networking angles only. The
+    #    reasoning_pipeline wraps plan_angles and annotates each
+    #    strategy with a short "why this angle" trail driven by the
+    #    strongest signal type + top insight type.
+    strategies = reasoning_pipeline.run_strategy_selection(
+        context,
+        quality=quality,
+        n=n,
+        strategy_override=strategy_override,
+        playbook_preferred_angles=pb_preferred or None,
+        stage_recorder=_stage,
+    )
     print(
         f"[SignalStack] generator: calling provider={provider_name} "
         f"n={n} strategies={len(strategies or [])} "
@@ -384,6 +430,11 @@ def generate(
         print("[SignalStack] generator: parsed provider JSON response OK")
     else:
         _stage("provider_response_parse", "skipped_not_string")
+
+    # Claude may return `{"messages": [...]}` instead of a bare list.
+    # Unwrap that here before the type check.
+    if isinstance(raw, dict) and isinstance(raw.get("messages"), list):
+        raw = raw["messages"]
 
     if raw is not None and not isinstance(raw, list):
         print(
@@ -586,6 +637,66 @@ def generate(
         _stage("candidate_validation", "ok")
     stages["candidate_validation_summary"] = validation_summary
 
+    # Message Critic. The critic runs over every surviving candidate
+    # (accepted + low_context) and attaches a structured ``critique``
+    # block with scores + verdict. Candidates whose verdict is
+    # ``reject`` get demoted to rejected, candidates whose verdict is
+    # ``rewrite`` get moved to a new ``rewrite`` bucket (the UI can
+    # show them as "needs work"). The critic never touches already-
+    # rejected candidates and never crashes the pipeline.
+    if minimal:
+        _stage("message_critic", "skipped_minimal")
+        rewrite_candidates: list[dict] = []
+        critic_summary = {"accepted": len(candidates), "rewrite": 0, "rejected": 0}
+    else:
+        _stage("message_critic", "running")
+        rewrite_candidates = []
+        try:
+            combined = candidates + low_context_candidates
+            message_critic.critique_all(
+                combined,
+                context,
+                insights=context.get("insights") or [],
+                provider=provider,
+            )
+            promoted: list[dict] = []
+            demoted_low: list[dict] = []
+            critic_rejected: list[dict] = []
+            for c in combined:
+                verdict = (c.get("critique") or {}).get("verdict", "accept")
+                if verdict == "reject":
+                    critic_rejected.append(c)
+                elif verdict == "rewrite":
+                    rewrite_candidates.append(c)
+                else:
+                    if c in low_context_candidates:
+                        demoted_low.append(c)
+                    else:
+                        promoted.append(c)
+            candidates = promoted
+            low_context_candidates = demoted_low
+            rejected = rejected + critic_rejected
+            critic_summary = {
+                "accepted": len(candidates),
+                "rewrite": len(rewrite_candidates),
+                "rejected": len(critic_rejected),
+                "low_context": len(low_context_candidates),
+            }
+            if not candidates and not rewrite_candidates:
+                _stage("message_critic", "degraded_all_rejected")
+            else:
+                _stage("message_critic", "ok")
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(
+                f"[SignalStack] generator: message_critic FAILED — "
+                f"continuing without critique: {type(e).__name__}: {e}"
+            )
+            critic_summary = {"error": f"{type(e).__name__}"}
+            _stage("message_critic", "failed_soft")
+    stages["message_critic_summary"] = critic_summary
+
     # Note: we deliberately do NOT return the full `context` here. It can
     # contain DB rows whose types (datetime, Decimal, bytes from Postgres)
     # are not always JSON-serializable, which previously caused the route
@@ -600,6 +711,7 @@ def generate(
     return {
         "ok": True,
         "minimal_mode": minimal,
+        "provider": provider_name,
         "stages": stages,
         "context_summary": {
             "signal_count": len(context.get("signals") or []),
@@ -608,6 +720,7 @@ def generate(
             "principle_count": len(context.get("principles") or []),
             "knowledge_entry_count": len(knowledge_entries),
             "knowledge_source_count": len(knowledge_source_ids_used),
+            "insight_count": len(context.get("insights") or []),
         },
         "knowledge": {
             "entries": knowledge_entry_summaries,
@@ -628,6 +741,9 @@ def generate(
             ),
         },
         "distilled_observations": distilled,
+        "insights": context.get("insights") or [],
+        "insight_source": insight_source,
+        "insight_error": insight_error,
         "playbook": {
             "name": (playbook_bundle.get("playbook") or {}).get("name"),
             "description": (playbook_bundle.get("playbook") or {}).get("description"),
@@ -639,6 +755,7 @@ def generate(
         "strategies": strategies,
         "instruction": instruction,
         "candidates": candidates,
+        "rewrite_candidates": rewrite_candidates if not minimal else [],
         "low_context_candidates": low_context_candidates,
         "rejected": rejected,
         "warning": warning,
