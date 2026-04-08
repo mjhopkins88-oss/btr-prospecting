@@ -33,6 +33,12 @@ def _clean_playbook_entry(entry: Optional[dict]) -> dict:
     attach to generator output. Raw rows may contain Postgres-typed
     values (datetime, Decimal, memoryview); ``to_json_safe`` normalizes
     the remaining primitives defensively.
+
+    Used for the TOP-LEVEL ``playbook.entries`` block where full detail
+    is needed for the playbook inspection UI. For per-candidate refs
+    use ``_ref_playbook_entry`` instead — it drops the heavy text
+    fields so we don't duplicate the same entries across every
+    candidate.
     """
     if not entry:
         return {}
@@ -47,9 +53,31 @@ def _clean_playbook_entry(entry: Optional[dict]) -> dict:
     })
 
 
+def _ref_playbook_entry(entry: Optional[dict]) -> dict:
+    """Compact per-candidate reference for a playbook entry.
+
+    The UI only needs ``{category, title}`` per candidate to render
+    the "Playbook entries used" trail, plus ``id`` so the full row
+    can be resolved from the top-level ``playbook.entries`` block.
+    Dropping description/when_to_use/message_angles shrinks each
+    per-candidate entry from ~500 bytes to ~100 bytes, which matters
+    once we ship n candidates × N playbook entries.
+    """
+    if not entry:
+        return {}
+    return to_json_safe({
+        "id": entry.get("id"),
+        "category": entry.get("category"),
+        "title": entry.get("title"),
+    })
+
+
 def _clean_knowledge_entry(entry: Optional[dict]) -> dict:
     """Project a raw ``ss_knowledge_entries`` row down to the safe fields
     we attach to generator output.
+
+    Used for the TOP-LEVEL ``knowledge.entries`` block. For
+    per-candidate refs use ``_ref_knowledge_entry``.
     """
     if not entry:
         return {}
@@ -59,6 +87,24 @@ def _clean_knowledge_entry(entry: Optional[dict]) -> dict:
         "category": entry.get("category"),
         "principle_name": entry.get("principle_name"),
         "confidence": entry.get("confidence"),
+    })
+
+
+def _ref_knowledge_entry(entry: Optional[dict]) -> dict:
+    """Compact per-candidate reference for a knowledge entry.
+
+    The UI renders ``[category] principle_name`` for the first four
+    per candidate; we keep just those fields plus ``id`` so the full
+    entry can be resolved from the top-level ``knowledge.entries``
+    block. Drops ``source_id`` and ``confidence`` to keep the
+    per-candidate payload small when 20+ entries are active.
+    """
+    if not entry:
+        return {}
+    return to_json_safe({
+        "id": entry.get("id"),
+        "category": entry.get("category"),
+        "principle_name": entry.get("principle_name"),
     })
 
 
@@ -380,13 +426,22 @@ def generate(
     # because knowledge is generation-context, not personalization.
     #
     # IMPORTANT: we deliberately project each raw DB row down to a small
-    # set of primitives via ``_clean_knowledge_entry``. Raw rows coming
-    # back from Postgres can contain datetime/Decimal/memoryview values
-    # that are not JSON-serializable and previously crashed the response
-    # path with a 500.
+    # set of primitives. Raw rows coming back from Postgres can contain
+    # datetime/Decimal/memoryview values that are not JSON-serializable
+    # and previously crashed the response path with a 500.
+    #
+    # Two projections:
+    #  * ``knowledge_entry_summaries`` — full-ish fields for the
+    #    top-level ``knowledge.entries`` block (UI detail view).
+    #  * ``knowledge_entry_refs`` — compact per-candidate refs (just
+    #    id/category/principle_name). This is the list that gets
+    #    duplicated across every candidate, so it must stay small.
     knowledge_entries = context.get("knowledge_entries") or []
     knowledge_entry_summaries = [
         _clean_knowledge_entry(e) for e in knowledge_entries
+    ]
+    knowledge_entry_refs = [
+        _ref_knowledge_entry(e) for e in knowledge_entries
     ]
     knowledge_source_ids_used = sorted({
         str(e.get("source_id")) for e in knowledge_entries if e.get("source_id")
@@ -430,21 +485,30 @@ def generate(
 
         # Attach the playbook entries that informed this angle so the
         # UI can show the "why" trail. We match by angle membership.
-        # Rows are projected via ``_clean_playbook_entry`` so we never
-        # attach raw DB row objects to candidate payloads.
+        # Rows are projected via ``_ref_playbook_entry`` (NOT
+        # ``_clean_playbook_entry``) so we only attach
+        # ``{id, category, title}`` per candidate — the full row is
+        # available via the top-level ``playbook.entries`` block and
+        # can be resolved by id. This avoids duplicating every entry's
+        # description/when_to_use across every candidate.
         angle = cand.get("angle")
-        used_pb_entries: list[dict] = []
+        used_pb_refs: list[dict] = []
+        seen_ids: set = set()
         for e in pb_entries:
             if angle and angle in (e.get("message_angles") or []):
-                used_pb_entries.append(_clean_playbook_entry(e))
+                ref = _ref_playbook_entry(e)
+                if ref.get("id") not in seen_ids:
+                    used_pb_refs.append(ref)
+                    seen_ids.add(ref.get("id"))
         # Always include the active anti-pattern entries — they shaped
         # what the message is *not* allowed to say.
         for e in pb_entries:
             if e.get("category") == "anti_patterns":
-                summary = _clean_playbook_entry(e)
-                if summary not in used_pb_entries:
-                    used_pb_entries.append(summary)
-        cand["playbook_entries_used"] = used_pb_entries
+                ref = _ref_playbook_entry(e)
+                if ref.get("id") not in seen_ids:
+                    used_pb_refs.append(ref)
+                    seen_ids.add(ref.get("id"))
+        cand["playbook_entries_used"] = used_pb_refs
         cand["playbook_reasoning"] = (
             f"Angle '{angle}' was prioritized by the "
             f"{(playbook_bundle.get('playbook') or {}).get('name') or 'industry'} "
@@ -467,7 +531,11 @@ def generate(
 
         # Attribute knowledge usage. Knowledge entries are NOT prospect
         # personalization — they shape tone, framing, and angle choice.
-        cand["knowledge_entries_used"] = knowledge_entry_summaries
+        # Per-candidate we attach the COMPACT refs (id/category/
+        # principle_name), NOT the full summaries. The full summaries
+        # live in the top-level ``knowledge.entries`` block and the UI
+        # can resolve by id when it needs more detail.
+        cand["knowledge_entries_used"] = knowledge_entry_refs
         cand["knowledge_source_ids_used"] = knowledge_source_ids_used
         cand["knowledge_entry_ids_used"] = knowledge_entry_ids_used
 
@@ -489,13 +557,26 @@ def generate(
     # Record a short sub-summary so the response clearly shows whether
     # candidate_validation degraded (all-rejected / all-low-context)
     # without the caller having to inspect the candidate arrays. This
-    # is the signal we watch for when stepping complexity up in Step 3+.
+    # is the signal we watch for when stepping complexity up in
+    # Step 3+. We also record whether any accepted candidate actually
+    # *referenced* playbook or knowledge entries so Step 4 can tell
+    # whether the enrichment layer is reaching the output or not.
     raw_count = len(raw or [])
+    accepted_with_pb = sum(
+        1 for c in candidates if (c.get("playbook_entries_used") or [])
+    )
+    accepted_with_kn = sum(
+        1 for c in candidates if (c.get("knowledge_entries_used") or [])
+    )
     validation_summary = {
         "raw": raw_count,
         "accepted": len(candidates),
         "low_context": len(low_context_candidates),
         "rejected": len(rejected),
+        "accepted_with_playbook": accepted_with_pb,
+        "accepted_with_knowledge": accepted_with_kn,
+        "playbook_entries_loaded": len(pb_entries),
+        "knowledge_entries_loaded": len(knowledge_entries),
     }
     if raw_count and len(candidates) == 0:
         # Every candidate was demoted or rejected — this is a real
