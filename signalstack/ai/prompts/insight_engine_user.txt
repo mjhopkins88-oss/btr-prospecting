@@ -1,5 +1,12 @@
 Convert the observations below into 2-5 sharp insights.
 
+SENDER (you are generating insights FROM this operator's seat —
+never mention their role, company, or product in the insights):
+{sender_persona_line}
+
+Full sender persona:
+{sender_persona_block}
+
 PROSPECT:
 {prospect_line}
 

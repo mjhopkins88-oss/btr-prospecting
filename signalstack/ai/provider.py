@@ -14,6 +14,11 @@ import re
 from typing import Any, Optional, Protocol
 
 from .prompts import load_prompt
+from ..sender_persona import (
+    sender_persona_for_context,
+    sender_persona_line,
+    sender_persona_prompt_block,
+)
 
 
 # Very small topic/place vocab we allow the mock provider to lift out
@@ -607,8 +612,13 @@ def _summarize_context_for_prompt(context: dict) -> dict:
     playbook = context.get("playbook") or {}
     expansion = context.get("context_expansion") or {}
     input_quality = context.get("input_quality") or {}
+    # Sender persona — the operator these messages are written FROM.
+    # Always included in the JSON context block so every prompt stage
+    # sees the same identity, strengths, and hard bans.
+    sender_persona = context.get("sender_persona") or sender_persona_for_context()
 
     return {
+        "sender_persona": sender_persona,
         "prospect": {
             "id": prospect.get("id"),
             "full_name": prospect.get("full_name"),
@@ -782,8 +792,15 @@ class ClaudeProvider:
         """Called by insight_engine when configured as an AI provider."""
         import json as _json
 
-        system = load_prompt("insight_engine_system")
         ctx = _summarize_context_for_prompt(context)
+        persona = ctx.get("sender_persona") or {}
+        persona_block = sender_persona_prompt_block(persona)
+        persona_line = sender_persona_line(persona)
+        system = (
+            load_prompt("insight_engine_system")
+            .replace("{sender_persona_block}", persona_block)
+            .replace("{sender_persona_line}", persona_line)
+        )
         prospect_line = (
             f"{(ctx['prospect'] or {}).get('full_name') or 'Unknown'} "
             f"— {(ctx['prospect'] or {}).get('title') or ''} "
@@ -791,6 +808,9 @@ class ClaudeProvider:
         ).strip()
         user = (
             load_prompt("insight_engine_user")
+            .replace("{sender_persona_block}", persona_block)
+            .replace("{sender_persona_line}", persona_line)
+            .replace("{sender_persona_json}", _json.dumps(persona))
             .replace("{prospect_line}", prospect_line)
             .replace("{observations_json}", _json.dumps(ctx.get("distilled_observations") or []))
             .replace("{signals_json}", _json.dumps(ctx.get("signal_observations") or []))
@@ -816,8 +836,15 @@ class ClaudeProvider:
     ) -> list[dict]:
         import json as _json
 
-        system = load_prompt("generate_system")
         ctx = _summarize_context_for_prompt(context)
+        persona = ctx.get("sender_persona") or {}
+        persona_block = sender_persona_prompt_block(persona)
+        persona_line = sender_persona_line(persona)
+        system = (
+            load_prompt("generate_system")
+            .replace("{sender_persona_block}", persona_block)
+            .replace("{sender_persona_line}", persona_line)
+        )
         prospect_line = (
             f"{(ctx['prospect'] or {}).get('full_name') or 'Unknown'} "
             f"— {(ctx['prospect'] or {}).get('title') or ''} "
@@ -825,6 +852,9 @@ class ClaudeProvider:
         ).strip()
         user = (
             load_prompt("generate_user")
+            .replace("{sender_persona_block}", persona_block)
+            .replace("{sender_persona_line}", persona_line)
+            .replace("{sender_persona_json}", _json.dumps(persona))
             .replace("{n}", str(n))
             .replace("{prospect_line}", prospect_line)
             .replace("{context_json}", _json.dumps(ctx))
@@ -867,8 +897,15 @@ class ClaudeProvider:
     ) -> dict:
         import json as _json
 
-        system = load_prompt("message_critic_system")
         ctx = _summarize_context_for_prompt(context)
+        persona = ctx.get("sender_persona") or {}
+        persona_block = sender_persona_prompt_block(persona)
+        persona_line = sender_persona_line(persona)
+        system = (
+            load_prompt("message_critic_system")
+            .replace("{sender_persona_block}", persona_block)
+            .replace("{sender_persona_line}", persona_line)
+        )
         insight_text = ""
         iid = candidate.get("insight_id")
         if iid:
@@ -878,6 +915,8 @@ class ClaudeProvider:
                     break
         user = (
             load_prompt("message_critic_user")
+            .replace("{sender_persona_block}", persona_block)
+            .replace("{sender_persona_line}", persona_line)
             .replace("{body}", candidate.get("body") or "")
             .replace("{angle}", candidate.get("angle") or "")
             .replace("{insight}", insight_text)
@@ -901,7 +940,17 @@ class ClaudeProvider:
         }
 
     def rewrite(self, body: str, instruction: str, context: dict) -> str:
-        system = load_prompt("rewrite_system")
+        persona = (
+            context.get("sender_persona")
+            or sender_persona_for_context()
+        )
+        persona_block = sender_persona_prompt_block(persona)
+        persona_line = sender_persona_line(persona)
+        system = (
+            load_prompt("rewrite_system")
+            .replace("{sender_persona_block}", persona_block)
+            .replace("{sender_persona_line}", persona_line)
+        )
         user = f"Rewrite:\n{body}\n\nInstruction: {instruction}"
         try:
             return self._call_messages(system, user, max_tokens=500, temperature=0.5) or body

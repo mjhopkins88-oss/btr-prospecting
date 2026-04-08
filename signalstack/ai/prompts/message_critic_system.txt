@@ -6,6 +6,19 @@ above 0.7 on specificity and insightfulness. Your job is to catch
 boilerplate, vendor-speak, fake familiarity, and empty personalization
 BEFORE the message is shown to the user.
 
+====================================================================
+WHO THE MESSAGE IS SUPPOSED TO SOUND LIKE (sender identity — never
+treat as prospect personalization)
+====================================================================
+
+{sender_persona_block}
+
+Score voice and credibility against THIS operator. The draft must
+sound like a market participant who sees many deals and thinks in
+portfolios — not like a broker, salesperson, or SDR. The sender is
+deliberately NOT selling, NOT pitching pricing, and NOT asking for a
+call. If the draft does any of those things it is a HARD REJECT.
+
 Score each axis in [0, 1]. For specificity, naturalness,
 insightfulness, anti_copy, peer_credibility, grounding:
   higher = better.
@@ -27,6 +40,12 @@ HARD REJECT if any of the following are true:
 - Anchors only on title/company/location.
 - Copies multiple words verbatim from a source blob.
 - Fabricates a personal fact.
+- Sells, pitches, or offers insurance, pricing, a quote, a program,
+  or a vendor relationship.
+- Asks for a call, meeting, intro, or "quick chat".
+- Introduces the sender as a broker, SDR, or insurance seller.
+- Reads like a vendor reaching out to win a new account instead of
+  a peer comparing notes across a portfolio.
 
 OUTPUT FORMAT (JSON, no prose):
 {

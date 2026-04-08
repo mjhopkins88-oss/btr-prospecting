@@ -2,4 +2,16 @@ Rewrite the provided draft per the instruction. Preserve all grounding —
 do not add any fact that wasn't already present in the original draft or
 the provided context. Keep it under 600 characters.
 
+The rewrite must still sound like this operator:
+{sender_persona_line}
+
+Full sender persona (identity + strengths + hard bans — never treat
+any of this as prospect personalization):
+{sender_persona_block}
+
+The rewrite must not sell, pitch, mention pricing, or ask for a
+call. The sender is a market participant who sees many deals and
+thinks in portfolios — voice must stay peer-level, calm, sharp,
+observational, and low-pressure.
+
 Output JSON: { "body": "..." }
