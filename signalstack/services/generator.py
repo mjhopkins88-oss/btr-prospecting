@@ -17,6 +17,7 @@ from .. import repo
 from ..ai.provider import get_provider
 from ..grounding import validate_message, filter_safe_signals
 from ..knowledge import repo as knowledge_repo
+from ..serialization import to_json_safe
 from . import strategy as strategy_engine
 from .signal_interpreter import interpret_signals
 from .anti_copy import check_message as anti_copy_check, shorten as anti_copy_shorten
@@ -25,6 +26,40 @@ from .observation_distiller import distill as distill_observations
 from .message_angle_planner import plan as plan_angles
 from .anti_generic_validator import validate as anti_generic_validate
 from . import playbook_loader
+
+
+def _clean_playbook_entry(entry: Optional[dict]) -> dict:
+    """Project a raw ``ss_playbook_entries`` row down to the safe fields we
+    attach to generator output. Raw rows may contain Postgres-typed
+    values (datetime, Decimal, memoryview); ``to_json_safe`` normalizes
+    the remaining primitives defensively.
+    """
+    if not entry:
+        return {}
+    return to_json_safe({
+        "id": entry.get("id"),
+        "category": entry.get("category"),
+        "title": entry.get("title"),
+        "description": entry.get("description"),
+        "when_to_use": entry.get("when_to_use"),
+        "message_angles": entry.get("message_angles") or [],
+        "confidence": entry.get("confidence"),
+    })
+
+
+def _clean_knowledge_entry(entry: Optional[dict]) -> dict:
+    """Project a raw ``ss_knowledge_entries`` row down to the safe fields
+    we attach to generator output.
+    """
+    if not entry:
+        return {}
+    return to_json_safe({
+        "id": entry.get("id"),
+        "source_id": entry.get("source_id"),
+        "category": entry.get("category"),
+        "principle_name": entry.get("principle_name"),
+        "confidence": entry.get("confidence"),
+    })
 
 
 def _merge_profile(stored: Optional[dict], override: Optional[dict]) -> dict:
@@ -189,21 +224,22 @@ def generate(
     # Pre-compute the active knowledge entries used as strategy guidance
     # for this generation run. Every candidate inherits the same set
     # because knowledge is generation-context, not personalization.
+    #
+    # IMPORTANT: we deliberately project each raw DB row down to a small
+    # set of primitives via ``_clean_knowledge_entry``. Raw rows coming
+    # back from Postgres can contain datetime/Decimal/memoryview values
+    # that are not JSON-serializable and previously crashed the response
+    # path with a 500.
     knowledge_entries = context.get("knowledge_entries") or []
     knowledge_entry_summaries = [
-        {
-            "id": e.get("id"),
-            "source_id": e.get("source_id"),
-            "category": e.get("category"),
-            "principle_name": e.get("principle_name"),
-            "confidence": e.get("confidence"),
-        }
-        for e in knowledge_entries
+        _clean_knowledge_entry(e) for e in knowledge_entries
     ]
     knowledge_source_ids_used = sorted({
-        e.get("source_id") for e in knowledge_entries if e.get("source_id")
+        str(e.get("source_id")) for e in knowledge_entries if e.get("source_id")
     })
-    knowledge_entry_ids_used = [e.get("id") for e in knowledge_entries if e.get("id")]
+    knowledge_entry_ids_used = [
+        str(e.get("id")) for e in knowledge_entries if e.get("id")
+    ]
 
     candidates, rejected, low_context_candidates = [], [], []
     for cand in raw or []:
@@ -239,27 +275,18 @@ def generate(
 
         # Attach the playbook entries that informed this angle so the
         # UI can show the "why" trail. We match by angle membership.
+        # Rows are projected via ``_clean_playbook_entry`` so we never
+        # attach raw DB row objects to candidate payloads.
         angle = cand.get("angle")
-        used_pb_entries = [
-            {
-                "id": e.get("id"),
-                "category": e.get("category"),
-                "title": e.get("title"),
-                "confidence": e.get("confidence"),
-            }
-            for e in pb_entries
-            if angle and angle in (e.get("message_angles") or [])
-        ]
+        used_pb_entries: list[dict] = []
+        for e in pb_entries:
+            if angle and angle in (e.get("message_angles") or []):
+                used_pb_entries.append(_clean_playbook_entry(e))
         # Always include the active anti-pattern entries — they shaped
         # what the message is *not* allowed to say.
         for e in pb_entries:
             if e.get("category") == "anti_patterns":
-                summary = {
-                    "id": e.get("id"),
-                    "category": e.get("category"),
-                    "title": e.get("title"),
-                    "confidence": e.get("confidence"),
-                }
+                summary = _clean_playbook_entry(e)
                 if summary not in used_pb_entries:
                     used_pb_entries.append(summary)
         cand["playbook_entries_used"] = used_pb_entries
@@ -349,18 +376,7 @@ def generate(
             "description": (playbook_bundle.get("playbook") or {}).get("description"),
             "categories": playbook_bundle.get("categories") or [],
             "preferred_angles": pb_preferred,
-            "entries": [
-                {
-                    "id": e.get("id"),
-                    "category": e.get("category"),
-                    "title": e.get("title"),
-                    "description": e.get("description"),
-                    "when_to_use": e.get("when_to_use"),
-                    "message_angles": e.get("message_angles") or [],
-                    "confidence": e.get("confidence"),
-                }
-                for e in pb_entries
-            ],
+            "entries": [_clean_playbook_entry(e) for e in pb_entries],
             "reasoning": playbook_bundle.get("reasoning"),
         },
         "strategies": strategies,
