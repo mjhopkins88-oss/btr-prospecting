@@ -150,6 +150,61 @@ def _compose(angle: str, first: str, anchor: str, profile_anchor: Optional[str])
     return f"Hi {first} — {anchor} caught my eye."
 
 
+def _compose_from_thought(angle: str, first: str, thought_text: str) -> str:
+    """
+    Build a message that flows from a single plain-language internal
+    thought. This is the preferred composer path — it produces
+    messages that read like "light observation → interpreted thought
+    → soft curiosity", without touching raw profile keywords.
+
+    The thought should already be in peer voice (the thought_translator
+    ensures that). We just wrap it with a short lead-in and a soft
+    curiosity tail.
+    """
+    t = (thought_text or "").strip().rstrip(".")
+    if not t:
+        return f"Hi {first} — curious how things are shaping up on your side right now."
+
+    # Strip any "Hi/Hey {first} —" prefix the thought might already
+    # carry so we don't double-stack greetings.
+    t = re.sub(r"^(hi|hey)\s+\w+\s*[—-]\s*", "", t, flags=re.IGNORECASE)
+
+    if angle in ("curiosity", "light_insight", "insight"):
+        return (
+            f"Hey {first} — {t}. "
+            f"Curious if that's showing up in your world too."
+        )
+    if angle in ("observation", "timely_observation"):
+        return (
+            f"Hey {first} — {t}. "
+            f"No agenda, just something I keep coming back to."
+        )
+    if angle == "market_pattern":
+        return (
+            f"Hey {first} — {t}. "
+            f"Does that match what you're seeing right now?"
+        )
+    if angle == "point_of_view":
+        return (
+            f"Hey {first} — {t}. "
+            f"Tell me I'm reading it wrong."
+        )
+    if angle == "relevant_challenge":
+        return (
+            f"Hey {first} — {t}. "
+            f"Is that landing on your plate, or is someone else owning it?"
+        )
+    if angle == "low_pressure_starter":
+        return (
+            f"Hey {first} — {t}. "
+            f"Just wanted to open a line, no agenda."
+        )
+    return (
+        f"Hey {first} — {t}. "
+        f"Curious how you're reading it."
+    )
+
+
 def _compose_hypothesis(angle: str, first: str, hypothesis_text: str) -> str:
     """
     Build a low-confidence opener anchored on a context_expansion
@@ -226,6 +281,10 @@ class MockAiProvider:
         # ONLY source-derived strings the generator is allowed to use.
         observations = context.get("observations") or []
         obs_by_signal = {o.get("signal_id"): o for o in observations}
+        # Internal thoughts come from thought_translator. When present
+        # they are the PREFERRED composition source — they're already
+        # in peer voice and stripped of CRM tag stacks.
+        internal_thoughts = context.get("internal_thoughts") or []
         first = _first_name(prospect)
 
         random.seed(prospect.get("id") or "seed")
@@ -284,7 +343,16 @@ class MockAiProvider:
         for i, spec in enumerate(strategies[:n]):
             anchor_text, src = anchors[i % len(anchors)]
             angle = spec.get("angle") or "curiosity"
-            if src.get("is_hypothesis"):
+            # Prefer composing from an internal thought when available.
+            # The thought is already in peer voice and stripped of CRM
+            # tag stacks, so the composer can wrap it directly without
+            # touching the profile or the raw signal text.
+            thought = None
+            if internal_thoughts:
+                thought = internal_thoughts[i % len(internal_thoughts)]
+            if thought and thought.get("text"):
+                body = _compose_from_thought(angle, first, thought.get("text"))
+            elif src.get("is_hypothesis"):
                 # Hypothesis-anchored: use the dedicated low-confidence
                 # composer so we preserve the "likely / possibly" framing.
                 body = _compose_hypothesis(angle, first, anchor_text)
@@ -441,6 +509,7 @@ def _summarize_context_for_prompt(context: dict) -> dict:
     observations = context.get("observations") or []
     distilled = context.get("distilled_observations") or []
     insights = context.get("insights") or []
+    internal_thoughts = context.get("internal_thoughts") or []
     knowledge_entries = context.get("knowledge_entries") or []
     playbook = context.get("playbook") or {}
     expansion = context.get("context_expansion") or {}
@@ -509,6 +578,15 @@ def _summarize_context_for_prompt(context: dict) -> dict:
                 "confidence": i.get("confidence"),
             }
             for i in insights[:5]
+        ],
+        "internal_thoughts": [
+            {
+                "id": t.get("id"),
+                "based_on_insight_id": t.get("based_on_insight_id"),
+                "text": t.get("text"),
+                "angle_hint": t.get("angle_hint"),
+            }
+            for t in internal_thoughts[:5]
         ],
         "knowledge_style_guidance": [
             {
@@ -658,6 +736,10 @@ class ClaudeProvider:
             .replace("{context_json}", _json.dumps(ctx))
             .replace("{observations_json}", _json.dumps(ctx.get("distilled_observations") or []))
             .replace("{insights_json}", _json.dumps(ctx.get("insights") or []))
+            .replace(
+                "{thoughts_json}",
+                _json.dumps(ctx.get("internal_thoughts") or []),
+            )
             .replace(
                 "{hypotheses_json}",
                 _json.dumps(

@@ -26,8 +26,10 @@ from .context_expansion import expand_context
 from .observation_distiller import distill as distill_observations
 from .message_angle_planner import plan as plan_angles
 from .anti_generic_validator import validate as anti_generic_validate
+from .naturalness_validator import validate as naturalness_validate
 from . import playbook_loader
 from . import insight_engine
+from . import thought_translator
 from . import message_critic
 from . import reasoning_pipeline
 
@@ -410,6 +412,44 @@ def generate(
             insight_error = f"insight_engine_failed:{type(e).__name__}"
             _stage("insight_engine", "failed_soft")
 
+    # 2.8) Thought Translation Layer. Converts each insight into a
+    #      plain-language peer-voice "internal thought" before the
+    #      generator is allowed to see it. This is the last-mile fix
+    #      for the failure mode where messages stitched profile
+    #      keywords / CRM tags into the final output even when the
+    #      upstream insights were correct. The generator is then told
+    #      (via generate_user.txt) to write ONLY from the internal
+    #      thought and never to reuse raw input keywords.
+    thought_source: Optional[str] = None
+    thought_error: Optional[str] = None
+    if minimal:
+        _stage("thought_translation", "skipped_minimal")
+        context["internal_thoughts"] = []
+        thought_source = "skipped"
+    else:
+        _stage("thought_translation", "running")
+        try:
+            translation_result = thought_translator.translate_insights(
+                context, provider=provider,
+            )
+            context["internal_thoughts"] = (
+                translation_result.get("thoughts") or []
+            )
+            thought_source = translation_result.get("source")
+            thought_error = translation_result.get("error")
+            _stage("thought_translation", thought_source or "heuristic")
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(
+                f"[SignalStack] generator: thought_translator FAILED — "
+                f"continuing without thoughts: {type(e).__name__}: {e}"
+            )
+            context["internal_thoughts"] = []
+            thought_source = "heuristic"
+            thought_error = f"thought_translator_failed:{type(e).__name__}"
+            _stage("thought_translation", "failed_soft")
+
     # 3) Plan distinct angles for the options. Weak-input cases get
     #    restricted to low-pressure / networking angles only. The
     #    reasoning_pipeline wraps plan_angles and annotates each
@@ -623,6 +663,18 @@ def generate(
             quality=quality,
         )
         cand["anti_generic"] = ag
+
+        # 3.5) Naturalness validator. This is the last-mile gate that
+        #      catches messages which stitched profile keywords / CRM
+        #      tags into the final prose even when the upstream
+        #      reasoning was correct. A hard comma-stack violation
+        #      always fails the candidate — the generator was told to
+        #      write from an internal thought, not from the profile.
+        naturalness = naturalness_validate(
+            body=body,
+            profile=context.get("profile") or {},
+        )
+        cand["naturalness"] = naturalness
         cand["selected_angle"] = cand.get("angle")
 
         # Attach the playbook entries that informed this angle so the
@@ -682,9 +734,29 @@ def generate(
         cand["knowledge_entry_ids_used"] = knowledge_entry_ids_used
 
         playbook_clean = not leaked
-        ok = verdict["ok"] and anti["passes_anti_copy_check"] and playbook_clean
+        # Naturalness hard-fail: a message that stacks CRM tags
+        # ("X, Y, Z" style) is a hard reject — the generator was
+        # explicitly told to write from an internal thought rather
+        # than the profile. Soft violations (profile-summary phrases,
+        # low naturalness score) are surfaced to the critic instead.
+        has_comma_stack = any(
+            v.startswith("comma_stack:") or v.startswith("keyword_stacking:")
+            for v in (naturalness.get("violations") or [])
+        )
+        ok = (
+            verdict["ok"]
+            and anti["passes_anti_copy_check"]
+            and playbook_clean
+            and not has_comma_stack
+        )
         if not anti["passes_anti_copy_check"]:
             verdict.setdefault("violations", []).extend(anti["violations"])
+        if has_comma_stack:
+            verdict.setdefault("violations", []).extend(
+                [v for v in naturalness.get("violations") or []
+                 if v.startswith("comma_stack:")
+                 or v.startswith("keyword_stacking:")]
+            )
 
         # Label this candidate with a confidence level and a
         # message_basis so the UI can communicate how strong the
@@ -727,15 +799,24 @@ def generate(
     accepted_with_kn = sum(
         1 for c in candidates if (c.get("knowledge_entries_used") or [])
     )
+    rejected_for_comma_stack = sum(
+        1 for c in rejected
+        if any(
+            v.startswith("comma_stack:") or v.startswith("keyword_stacking:")
+            for v in ((c.get("grounding") or {}).get("violations") or [])
+        )
+    )
     validation_summary = {
         "raw": raw_count,
         "accepted": len(candidates),
         "low_context": len(low_context_candidates),
         "rejected": len(rejected),
+        "rejected_for_comma_stack": rejected_for_comma_stack,
         "accepted_with_playbook": accepted_with_pb,
         "accepted_with_knowledge": accepted_with_kn,
         "playbook_entries_loaded": len(pb_entries),
         "knowledge_entries_loaded": len(knowledge_entries),
+        "internal_thoughts_used": len(context.get("internal_thoughts") or []),
     }
     if raw_count and len(candidates) == 0:
         # Every candidate was demoted or rejected — this is a real
@@ -838,6 +919,7 @@ def generate(
             "knowledge_entry_count": len(knowledge_entries),
             "knowledge_source_count": len(knowledge_source_ids_used),
             "insight_count": len(context.get("insights") or []),
+            "internal_thought_count": len(context.get("internal_thoughts") or []),
             "hypothesis_count": len(
                 (context.get("context_expansion") or {}).get("hypotheses") or []
             ),
@@ -867,6 +949,9 @@ def generate(
         "insights": context.get("insights") or [],
         "insight_source": insight_source,
         "insight_error": insight_error,
+        "internal_thoughts": context.get("internal_thoughts") or [],
+        "thought_source": thought_source,
+        "thought_error": thought_error,
         "playbook": {
             "name": (playbook_bundle.get("playbook") or {}).get("name"),
             "description": (playbook_bundle.get("playbook") or {}).get("description"),

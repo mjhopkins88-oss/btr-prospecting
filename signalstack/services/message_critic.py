@@ -66,7 +66,10 @@ ACCEPT_THRESHOLD = 0.62
 REJECT_THRESHOLD = 0.40
 
 
-def _score_naturalness(body: str) -> float:
+def _score_naturalness(
+    body: str,
+    naturalness_verdict: Optional[dict] = None,
+) -> float:
     body = body or ""
     lo = body.lower()
     if not lo.strip():
@@ -85,6 +88,24 @@ def _score_naturalness(body: str) -> float:
     sentences = re.split(r"[.!?]\s", body)
     if sentences and max(len(s.split()) for s in sentences) > 40:
         score -= 0.15
+    # Merge in the naturalness validator verdict if it was attached
+    # during candidate_validation. This gives us a single combined
+    # score that reflects both the "human DM" heuristics above and
+    # the hard signals (comma-stacks, profile-summary prose) the
+    # naturalness_validator catches.
+    if naturalness_verdict:
+        validator_score = float(
+            naturalness_verdict.get("naturalness_score") or 0.0
+        )
+        # Average the two — the validator is the authority on
+        # comma-stacks but the critic-side heuristics catch some
+        # template-opener patterns the validator ignores.
+        score = 0.5 * score + 0.5 * validator_score
+        # A single comma-stack violation dominates everything —
+        # the message can't be natural if it's literally a keyword
+        # list. Clamp the score to reflect that.
+        if not naturalness_verdict.get("passes_naturalness", True):
+            score = min(score, 0.35)
     return max(0.0, min(1.0, score))
 
 
@@ -230,6 +251,7 @@ def critique_candidate(
     grounding_verdict = candidate.get("grounding") or {}
     anti_copy_verdict = candidate.get("anti_copy") or {}
     anti_generic_verdict = candidate.get("anti_generic") or {}
+    naturalness_verdict = candidate.get("naturalness") or {}
 
     # Read the confidence level off the anti-generic verdict (which is
     # written by the confidence-aware anti_generic_validator). Fall back
@@ -248,7 +270,7 @@ def critique_candidate(
     specificity = _score_specificity(
         body, facts_used, signal_ids, notes_used, profile_fields_used,
     )
-    naturalness = _score_naturalness(body)
+    naturalness = _score_naturalness(body, naturalness_verdict)
     insightfulness = _score_insightfulness(body, len(insights or []))
     genericity = _score_genericity(body, anti_generic_verdict, confidence_level)
     pressure = _score_pressure(body)
@@ -273,12 +295,23 @@ def critique_candidate(
         specificity_floor = 0.0
         genericity_ceiling = 0.9
 
+    # A comma-stack or keyword-stack naturalness violation is always
+    # a hard fail, at every confidence level. The generator was told
+    # explicitly to write from an internal thought, not from profile
+    # keywords — a failure here means the last-mile translation
+    # didn't hold and the message needs to be rejected.
+    has_comma_stack = any(
+        v.startswith("comma_stack:") or v.startswith("keyword_stacking:")
+        for v in (naturalness_verdict.get("violations") or [])
+    )
+
     hard_fail = bool(
         (anti_copy_verdict.get("violations") or [])
         or (grounding_verdict.get("violations") or [])
         or genericity >= genericity_ceiling
         or specificity < specificity_floor
         or pressure >= 0.6
+        or has_comma_stack
     )
 
     # Weighted composite. Weights favor specificity + naturalness +
@@ -309,6 +342,8 @@ def critique_candidate(
         notes.append("pushy")
     if peer_cred < 0.4:
         notes.append("vendor_tone")
+    if has_comma_stack:
+        notes.append("comma_stack_or_keyword_summary")
 
     deterministic = {
         "scores": {

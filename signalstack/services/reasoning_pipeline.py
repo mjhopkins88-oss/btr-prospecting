@@ -13,11 +13,18 @@ Stage ordering:
     2. observation_distiller.distill
     3. (optional) playbook_loader.load_relevant_entries
     4. insight_engine.generate_insights
-    5. message_angle_planner.plan (strategy selector)
-    6. provider.generate_messages
-    7. grounding + anti_copy + anti_generic validation
-    8. message_critic.critique_all
-    9. final accept/rewrite/reject bucketing
+    5. thought_translator.translate_insights    <-- last-mile fix
+    6. message_angle_planner.plan (strategy selector)
+    7. provider.generate_messages
+    8. grounding + anti_copy + anti_generic + naturalness validation
+    9. message_critic.critique_all
+   10. final accept/rewrite/reject bucketing
+
+The thought_translator step sits between insights and strategy
+selection. Its only job is to rewrite each insight into a plain-
+language "internal thought" that the generator can safely use as
+source material — without pulling profile keywords or CRM tags
+into the final message.
 
 The generator.generate() entry point still owns the context build and
 the final response shape; the orchestrator is here so we have one place
@@ -29,6 +36,7 @@ from typing import Any, Callable, Optional
 
 from . import insight_engine
 from . import message_critic
+from . import thought_translator
 from .input_quality_scorer import score_inputs
 from .message_angle_planner import plan as plan_angles
 from .observation_distiller import distill as distill_observations
@@ -70,12 +78,36 @@ def run_pre_generation_stages(
         ),
     )
 
+    # Thought translation. Converts each insight into a plain-
+    # language peer-voice "internal thought" before the generator
+    # sees it. This is the last-mile fix for messages that stitched
+    # profile keywords / CRM tags into the final output even when
+    # the insight itself was sharp.
+    _stage("thought_translation", "running")
+    translation_result = thought_translator.translate_insights(
+        context, provider=provider,
+    )
+    context["internal_thoughts"] = translation_result.get("thoughts") or []
+    _stage(
+        "thought_translation",
+        (
+            "ai" if translation_result.get("source") == "ai"
+            else (
+                "hybrid" if translation_result.get("source") == "hybrid"
+                else "heuristic"
+            )
+        ),
+    )
+
     return {
         "quality": quality,
         "distilled_observations": distilled,
         "insights": context["insights"],
         "insight_source": insight_result.get("source"),
         "insight_error": insight_result.get("error"),
+        "internal_thoughts": context["internal_thoughts"],
+        "thought_source": translation_result.get("source"),
+        "thought_error": translation_result.get("error"),
     }
 
 
