@@ -958,7 +958,7 @@ function App({
   user,
   onLogout
 }) {
-  const [activeTab, setActiveTab] = useState('search');
+  const [activeTab, setActiveTab] = useState('command');
   const [prospects, setProspects] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedProspect, setSelectedProspect] = useState(null);
@@ -1307,10 +1307,18 @@ function App({
     setActiveTab: setActiveTab,
     user: user,
     prospects: prospects
-  }), /*#__PURE__*/React.createElement(TabBar, {
+  }), /*#__PURE__*/React.createElement(TopNav, {
     activeTab: activeTab,
     setActiveTab: setActiveTab,
     user: user
+  }), /*#__PURE__*/React.createElement(SubNav, {
+    activeTab: activeTab,
+    setActiveTab: setActiveTab,
+    user: user
+  }), activeTab === 'command' && /*#__PURE__*/React.createElement(CommandCenter, {
+    user: user,
+    prospects: prospects,
+    setActiveTab: setActiveTab
   }), activeTab === 'search' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Stats, {
     prospects: prospects
   }), /*#__PURE__*/React.createElement(Controls, {
@@ -1372,13 +1380,13 @@ function App({
   }), activeTab === 'underwriting' && user && user.role === 'admin' && /*#__PURE__*/React.createElement(UnderwritingSheet, {
     user: user
   }), activeTab === 'dev_network' && /*#__PURE__*/React.createElement(DeveloperNetworkPanel, null), activeTab === 'corridors' && /*#__PURE__*/React.createElement(DevelopmentCorridorsPanel, null), activeTab === 'dev_momentum' && /*#__PURE__*/React.createElement(MomentumEnginePanel, null), activeTab === 'signal_discovery' && user && user.is_super_admin && /*#__PURE__*/React.createElement(SignalDiscoveryPanel, null), activeTab === 'quoting' && (!user || user.role !== 'admin') && (() => {
-    setActiveTab(ROLE_DEFAULT_TAB[user?.role] || 'search');
+    setActiveTab(ROLE_DEFAULT_TAB[user?.role] || 'command');
     return null;
   })(), activeTab === 'underwriting' && (!user || user.role !== 'admin') && (() => {
-    setActiveTab(ROLE_DEFAULT_TAB[user?.role] || 'search');
+    setActiveTab(ROLE_DEFAULT_TAB[user?.role] || 'command');
     return null;
-  })(), user?.role === 'broker' && ['discovery', 'pipeline', 'followups', 'statewide'].includes(activeTab) && (() => {
-    setActiveTab('search');
+  })(), user?.role === 'broker' && ['discovery', 'pipeline', 'followups', 'statewide', 'predictions', 'markets'].includes(activeTab) && (() => {
+    setActiveTab('command');
     return null;
   })(), showEmailModal && /*#__PURE__*/React.createElement(EmailModal, {
     email: emailTemplate,
@@ -1429,84 +1437,11 @@ function Header({
   }, "Logout")));
 }
 
-// Role-based tab definitions
-const ROLE_TABS = {
-  broker: [{
-    id: 'search',
-    label: 'Prospect Search'
-  }, {
-    id: 'intelligence',
-    label: 'Sunbelt Intelligence'
-  }, {
-    id: 'dealboard',
-    label: 'Deal Board'
-  }, {
-    id: 'linkedinhub',
-    label: 'LinkedIn Hub'
-  }],
-  producer: [{
-    id: 'search',
-    label: 'Prospect Search'
-  }, {
-    id: 'discovery',
-    label: 'Daily Discovery'
-  }, {
-    id: 'statewide',
-    label: 'Statewide'
-  }, {
-    id: 'intelligence',
-    label: 'Sunbelt Intelligence'
-  }, {
-    id: 'predictions',
-    label: 'Predicted Devs'
-  }, {
-    id: 'markets',
-    label: 'Market Expansion'
-  }, {
-    id: 'pipeline',
-    label: 'My Pipeline'
-  }, {
-    id: 'followups',
-    label: 'Follow-ups Due'
-  }, {
-    id: 'linkedinhub',
-    label: 'LinkedIn Hub'
-  }],
-  admin: [{
-    id: 'search',
-    label: 'Prospect Search'
-  }, {
-    id: 'discovery',
-    label: 'Daily Discovery'
-  }, {
-    id: 'statewide',
-    label: 'Statewide'
-  }, {
-    id: 'intelligence',
-    label: 'Sunbelt Intelligence'
-  }, {
-    id: 'predictions',
-    label: 'Predicted Devs'
-  }, {
-    id: 'markets',
-    label: 'Market Expansion'
-  }, {
-    id: 'pipeline',
-    label: 'My Pipeline'
-  }, {
-    id: 'followups',
-    label: 'Follow-ups Due'
-  }, {
-    id: 'linkedinhub',
-    label: 'LinkedIn Hub'
-  }]
-};
-
 // Default tab per role (for route guard redirects)
 const ROLE_DEFAULT_TAB = {
-  broker: 'search',
-  producer: 'search',
-  admin: 'search'
+  broker: 'command',
+  producer: 'command',
+  admin: 'command'
 };
 
 // Broker-mode label mappings
@@ -1844,27 +1779,429 @@ function LinkedInHub({
     }, url)));
   })))))));
 }
-function TabBar({
-  activeTab,
-  setActiveTab,
-  user
-}) {
+// ===================================================================
+// COMMAND CENTER NAVIGATION — workflow-based 5-section top nav
+// ===================================================================
+
+// Top-level sections and their child routes. Section order = display order.
+// Child `id` values must match the existing `activeTab` route ids so that all
+// pre-existing page renderings continue to work unchanged.
+const NAV_SECTIONS = [
+  {
+    id: 'command',
+    label: 'Command Center',
+    icon: '\u25C8', // ◈
+    children: [
+      { id: 'command', label: 'Overview' },
+      { id: 'followups', label: 'Follow-ups Due' }
+    ]
+  },
+  {
+    id: 'deals',
+    label: 'Deals',
+    icon: '\u25B2', // ▲
+    children: [
+      { id: 'search', label: 'Prospect Search' },
+      { id: 'linkedinhub', label: 'LinkedIn Hub' },
+      { id: 'dealboard', label: 'Saved Prospects' }
+    ]
+  },
+  {
+    id: 'intel',
+    label: 'Market Intel',
+    icon: '\u25C9', // ◉
+    children: [
+      { id: 'discovery', label: 'Daily Discovery' },
+      { id: 'statewide', label: 'Statewide' },
+      { id: 'intelligence', label: 'Sunbelt Intelligence' },
+      { id: 'predictions', label: 'Predicted Devs' },
+      { id: 'markets', label: 'Market Expansion' }
+    ]
+  },
+  {
+    id: 'pipeline_section',
+    label: 'Pipeline',
+    icon: '\u25B3', // △
+    children: [
+      { id: 'pipeline', label: 'My Pipeline' },
+      { id: 'quoting', label: 'Quoting' },
+      { id: 'underwriting', label: 'Underwriting Sheet' }
+    ]
+  },
+  {
+    id: 'admin_section',
+    label: 'Admin',
+    icon: '\u2699', // ⚙
+    children: [{ id: 'admin', label: 'Admin' }]
+  }
+];
+
+// Role-aware hiding: filter both sections and their children by role
+function getNavForUser(user) {
   const role = user?.role || 'producer';
-  const tabs = [...(ROLE_TABS[role] || ROLE_TABS.producer)];
-  if (role === 'admin') {
-    if (!tabs.some(t => t.id === 'quoting')) tabs.push({ id: 'quoting', label: 'Quoting' });
-    if (!tabs.some(t => t.id === 'underwriting')) tabs.push({ id: 'underwriting', label: 'Underwriting Sheet' });
+  const isSuperAdmin = !!user?.is_super_admin;
+
+  // Per-role hidden child tab ids
+  const hiddenTabs = new Set();
+  if (role === 'broker') {
+    ['discovery', 'statewide', 'predictions', 'markets', 'pipeline', 'followups', 'quoting', 'underwriting'].forEach(t => hiddenTabs.add(t));
+  } else if (role === 'producer') {
+    ['quoting', 'underwriting'].forEach(t => hiddenTabs.add(t));
   }
-  if (user && user.is_super_admin && !tabs.some(t => t.id === 'admin')) {
-    tabs.push({ id: 'admin', label: 'Admin' });
+
+  // Per-role hidden sections
+  const hiddenSections = new Set();
+  if (!isSuperAdmin) hiddenSections.add('admin_section');
+  if (role === 'broker') hiddenSections.add('pipeline_section');
+
+  return NAV_SECTIONS
+    .filter(s => !hiddenSections.has(s.id))
+    .map(s => ({ ...s, children: s.children.filter(c => !hiddenTabs.has(c.id)) }))
+    .filter(s => s.children.length > 0);
+}
+
+// Find which section a given tab id belongs to
+function findSectionForTab(tabId, sections) {
+  for (const s of sections) {
+    if (s.children.some(c => c.id === tabId)) return s.id;
   }
-  return /*#__PURE__*/React.createElement("div", {
-    style: { ...ds.tabBar, flexWrap: 'wrap' }
-  }, tabs.map(tab => /*#__PURE__*/React.createElement("button", {
-    key: tab.id,
-    style: { ...ds.tab, ...(activeTab === tab.id ? ds.tabActive : {}) },
-    onClick: () => setActiveTab(tab.id)
-  }, tab.label)));
+  return sections[0]?.id || 'command';
+}
+
+// ------- TopNav: 5-section command-center navigation with CTA -------
+function TopNav({ activeTab, setActiveTab, user }) {
+  const sections = getNavForUser(user);
+  const activeSectionId = findSectionForTab(activeTab, sections);
+
+  const rowStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.4rem',
+    padding: '0.5rem 0 0.85rem',
+    marginBottom: '1.25rem',
+    borderBottom: '1px solid rgba(51,65,85,0.5)',
+    flexWrap: 'wrap'
+  };
+  const btnStyle = (isActive) => ({
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.5rem',
+    padding: '0.6rem 1.1rem',
+    background: isActive ? 'rgba(16,185,129,0.12)' : 'transparent',
+    border: '1px solid ' + (isActive ? 'rgba(16,185,129,0.4)' : 'rgba(51,65,85,0.4)'),
+    color: isActive ? '#34d399' : '#94a3b8',
+    borderRadius: '0.75rem',
+    cursor: 'pointer',
+    fontFamily: "'Orbitron', sans-serif",
+    fontSize: '0.82rem',
+    fontWeight: 700,
+    letterSpacing: '0.03em',
+    transition: 'all 0.2s',
+    boxShadow: isActive ? '0 0 18px rgba(16,185,129,0.12)' : 'none'
+  });
+
+  return /*#__PURE__*/React.createElement('div', { style: rowStyle },
+    sections.map(s => /*#__PURE__*/React.createElement('button', {
+      key: s.id,
+      style: btnStyle(s.id === activeSectionId),
+      onClick: () => {
+        if (s.children.length > 0) setActiveTab(s.children[0].id);
+      },
+      onMouseEnter: (e) => {
+        if (s.id !== activeSectionId) {
+          e.currentTarget.style.color = '#cbd5e1';
+          e.currentTarget.style.borderColor = 'rgba(52,211,153,0.25)';
+        }
+      },
+      onMouseLeave: (e) => {
+        if (s.id !== activeSectionId) {
+          e.currentTarget.style.color = '#94a3b8';
+          e.currentTarget.style.borderColor = 'rgba(51,65,85,0.4)';
+        }
+      }
+    },
+      /*#__PURE__*/React.createElement('span', { style: { fontSize: '0.95rem', opacity: 0.85 } }, s.icon),
+      s.label
+    )),
+    // Primary CTA — anchored on the right
+    /*#__PURE__*/React.createElement('div', { style: { marginLeft: 'auto', display: 'flex', gap: '0.5rem' } },
+      /*#__PURE__*/React.createElement('button', {
+        style: {
+          ...styles.btnPrimary,
+          padding: '0.6rem 1.1rem',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.35rem',
+          boxShadow: '0 0 18px rgba(16,185,129,0.25)'
+        },
+        onClick: () => setActiveTab('search')
+      }, '+ Run Prospect Search')
+    )
+  );
+}
+
+// ------- SubNav: secondary tab strip for the active section -------
+function SubNav({ activeTab, setActiveTab, user }) {
+  const sections = getNavForUser(user);
+  const activeSectionId = findSectionForTab(activeTab, sections);
+  const section = sections.find(s => s.id === activeSectionId);
+  if (!section || section.children.length <= 1) return null;
+
+  const rowStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.25rem',
+    marginBottom: '1.5rem',
+    borderBottom: '1px solid rgba(51,65,85,0.35)',
+    flexWrap: 'wrap'
+  };
+  const itemStyle = (isActive) => ({
+    background: 'transparent',
+    border: 'none',
+    color: isActive ? '#34d399' : '#64748b',
+    padding: '0.5rem 0.95rem',
+    fontSize: '0.8rem',
+    fontWeight: 600,
+    cursor: 'pointer',
+    borderBottom: isActive ? '2px solid #34d399' : '2px solid transparent',
+    marginBottom: '-1px',
+    fontFamily: "'Inter', sans-serif",
+    letterSpacing: '0.01em',
+    transition: 'color 0.2s, border-color 0.2s'
+  });
+
+  // Breadcrumb pill
+  const crumbStyle = {
+    fontFamily: "'Orbitron', sans-serif",
+    fontSize: '0.68rem',
+    color: '#64748b',
+    textTransform: 'uppercase',
+    letterSpacing: '0.12em',
+    padding: '0.25rem 0.7rem 0.25rem 0',
+    borderRight: '1px solid rgba(51,65,85,0.4)',
+    marginRight: '0.5rem'
+  };
+
+  return /*#__PURE__*/React.createElement('div', { style: rowStyle },
+    /*#__PURE__*/React.createElement('span', { style: crumbStyle }, section.label),
+    section.children.map(c => /*#__PURE__*/React.createElement('button', {
+      key: c.id,
+      style: itemStyle(c.id === activeTab),
+      onClick: () => setActiveTab(c.id),
+      onMouseEnter: (e) => {
+        if (c.id !== activeTab) e.currentTarget.style.color = '#cbd5e1';
+      },
+      onMouseLeave: (e) => {
+        if (c.id !== activeTab) e.currentTarget.style.color = '#64748b';
+      }
+    }, c.label))
+  );
+}
+
+// ------- Command Center landing page -------
+function CommandCenter({ user, prospects, setActiveTab }) {
+  const [dueLeads, setDueLeads] = useState([]);
+  const [dueLoading, setDueLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_BASE}/api/crm/leads?due=1`)
+      .then(r => r.json())
+      .then(d => {
+        if (cancelled) return;
+        if (d && d.success) setDueLeads(Array.isArray(d.leads) ? d.leads : []);
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setDueLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const total = (prospects || []).length;
+  const hot = (prospects || []).filter(p => (p.score || 0) >= 80).length;
+  const withLinkedIn = (prospects || []).filter(p => validLinkedIn(p.linkedin)).length;
+  const dueCount = dueLeads.length;
+
+  const greeting = (() => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good morning';
+    if (h < 18) return 'Good afternoon';
+    return 'Good evening';
+  })();
+  const firstName = user?.name ? String(user.name).split(' ')[0] : '';
+
+  const alerts = [
+    { dot: '#34d399', text: 'Permit surge detected \u2014 Phoenix metro' },
+    { dot: '#a855f7', text: 'Capital raise detected \u2014 Tampa' },
+    { dot: '#fbbf24', text: 'Zoning change alert \u2014 Charlotte' },
+    { dot: '#22d3ee', text: 'Construction start signal \u2014 Austin' }
+  ];
+
+  // Role-aware quick actions
+  const role = user?.role || 'producer';
+  const quickActions = [
+    { id: 'search', label: 'Run Prospect Search', roles: ['broker', 'producer', 'admin'] },
+    { id: 'discovery', label: 'Daily Discovery', roles: ['producer', 'admin'] },
+    { id: 'intelligence', label: 'Sunbelt Intelligence', roles: ['broker', 'producer', 'admin'] },
+    { id: 'pipeline', label: 'Open Pipeline', roles: ['producer', 'admin'] },
+    { id: 'followups', label: 'Follow-ups Due', roles: ['producer', 'admin'] },
+    { id: 'linkedinhub', label: 'LinkedIn Hub', roles: ['broker', 'producer', 'admin'] },
+    { id: 'dealboard', label: 'Saved Prospects', roles: ['broker', 'producer', 'admin'] }
+  ].filter(a => a.roles.includes(role));
+
+  const sectionCard = {
+    ...styles.card,
+    padding: '1.25rem',
+    boxShadow: '0 8px 24px rgba(0,0,0,0.25)'
+  };
+  const panelHeader = {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '0.85rem'
+  };
+  const panelTitle = {
+    fontFamily: "'Orbitron', sans-serif",
+    fontSize: '0.95rem',
+    color: '#f1f5f9',
+    margin: 0,
+    letterSpacing: '0.03em'
+  };
+
+  return /*#__PURE__*/React.createElement('div', null,
+    // Greeting header w/ primary + secondary actions
+    /*#__PURE__*/React.createElement('div', {
+      style: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        gap: '1rem',
+        marginBottom: '1.75rem',
+        flexWrap: 'wrap'
+      }
+    },
+      /*#__PURE__*/React.createElement('div', null,
+        /*#__PURE__*/React.createElement('h2', {
+          style: {
+            fontFamily: "'Orbitron', sans-serif",
+            fontSize: '1.8rem',
+            fontWeight: 900,
+            margin: 0,
+            background: 'linear-gradient(135deg, #34d399 0%, #22d3ee 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            letterSpacing: '0.03em'
+          }
+        }, 'Command Center'),
+        /*#__PURE__*/React.createElement('p', {
+          style: { color: '#94a3b8', margin: '0.35rem 0 0', fontSize: '0.9rem' }
+        }, `${greeting}${firstName ? ', ' + firstName : ''}. Here's where your day starts.`)
+      )
+    ),
+
+    // Summary stat cards
+    /*#__PURE__*/React.createElement('div', { style: styles.statsBar },
+      /*#__PURE__*/React.createElement(StatCard, { label: 'Total Prospects', value: total }),
+      /*#__PURE__*/React.createElement(StatCard, { label: 'Hot Leads (80+)', value: hot }),
+      /*#__PURE__*/React.createElement(StatCard, { label: 'Follow-ups Due', value: dueCount, pulse: dueCount > 0 }),
+      /*#__PURE__*/React.createElement(StatCard, { label: 'LinkedIn Coverage', value: withLinkedIn })
+    ),
+
+    // Two-column panel grid: alerts + follow-ups snapshot
+    /*#__PURE__*/React.createElement('div', {
+      style: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+        gap: '1.25rem',
+        marginBottom: '1.5rem'
+      }
+    },
+      // Alerts / key signals
+      /*#__PURE__*/React.createElement('div', { style: sectionCard },
+        /*#__PURE__*/React.createElement('div', { style: panelHeader },
+          /*#__PURE__*/React.createElement('h3', { style: panelTitle }, 'Key Signals & Alerts'),
+          /*#__PURE__*/React.createElement('button', {
+            style: { ...styles.actionBtn, fontSize: '0.7rem' },
+            onClick: () => setActiveTab('intelligence')
+          }, 'View all \u2192')
+        ),
+        /*#__PURE__*/React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.5rem' } },
+          alerts.map((a, i) => /*#__PURE__*/React.createElement('div', {
+            key: i,
+            style: {
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.7rem',
+              padding: '0.6rem 0.8rem',
+              background: 'rgba(15,23,42,0.5)',
+              border: '1px solid rgba(51,65,85,0.45)',
+              borderRadius: '0.5rem',
+              fontSize: '0.82rem',
+              color: '#cbd5e1'
+            }
+          },
+            /*#__PURE__*/React.createElement('span', {
+              style: {
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: a.dot,
+                flexShrink: 0,
+                boxShadow: `0 0 8px ${a.dot}`
+              }
+            }),
+            a.text
+          ))
+        )
+      ),
+
+      // Follow-ups snapshot
+      /*#__PURE__*/React.createElement('div', { style: sectionCard },
+        /*#__PURE__*/React.createElement('div', { style: panelHeader },
+          /*#__PURE__*/React.createElement('h3', { style: panelTitle }, `Follow-ups Due (${dueCount})`),
+          /*#__PURE__*/React.createElement('button', {
+            style: { ...styles.actionBtn, fontSize: '0.7rem' },
+            onClick: () => setActiveTab('followups')
+          }, 'Open \u2192')
+        ),
+        dueLoading
+          ? /*#__PURE__*/React.createElement('div', { style: { color: '#64748b', fontSize: '0.85rem', padding: '0.6rem 0' } }, 'Loading\u2026')
+          : dueLeads.length === 0
+            ? /*#__PURE__*/React.createElement('div', { style: { color: '#64748b', fontSize: '0.85rem', padding: '0.6rem 0' } }, 'All caught up \u2014 nothing overdue.')
+            : /*#__PURE__*/React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.4rem' } },
+                dueLeads.slice(0, 5).map(l => /*#__PURE__*/React.createElement('div', {
+                  key: l.id,
+                  style: {
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '0.6rem',
+                    padding: '0.55rem 0.8rem',
+                    background: 'rgba(15,23,42,0.5)',
+                    border: '1px solid rgba(51,65,85,0.45)',
+                    borderRadius: '0.5rem',
+                    fontSize: '0.82rem'
+                  }
+                },
+                  /*#__PURE__*/React.createElement('span', { style: { color: '#f1f5f9', fontWeight: 600 } }, l.company_name || '—'),
+                  /*#__PURE__*/React.createElement('span', { style: { color: '#94a3b8', fontSize: '0.72rem' } }, l.status || '')
+                ))
+              )
+      )
+    ),
+
+    // Quick actions strip
+    /*#__PURE__*/React.createElement('div', { style: sectionCard },
+      /*#__PURE__*/React.createElement('h3', { style: { ...panelTitle, marginBottom: '0.85rem' } }, 'Quick Actions'),
+      /*#__PURE__*/React.createElement('div', { style: { display: 'flex', gap: '0.6rem', flexWrap: 'wrap' } },
+        quickActions.map(a => /*#__PURE__*/React.createElement('button', {
+          key: a.id,
+          className: 'action-btn',
+          style: { ...styles.actionBtn, padding: '0.55rem 1rem' },
+          onClick: () => setActiveTab(a.id)
+        }, a.label))
+      )
+    )
+  );
 }
 
 // ===================================================================

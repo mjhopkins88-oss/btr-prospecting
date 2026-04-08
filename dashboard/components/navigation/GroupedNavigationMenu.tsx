@@ -1,257 +1,294 @@
 /**
- * GroupedNavigationMenu - BTR Command grouped dropdown navigation
+ * GroupedNavigationMenu - BTR Command workflow-based navigation
  *
- * This component defines the navigation group structure and types used by the
- * inline TabBar/NavDropdown components in static/index.html.
+ * Canonical reference for the Command Center navigation architecture.
+ * The live implementation is inlined in static/vendor/app.js as the
+ * TopNav / SubNav / CommandCenter components (see NAV_SECTIONS there).
  *
- * The actual rendering lives in static/index.html as part of the single-page
- * React app (loaded via CDN). This file serves as the canonical reference for
- * the navigation architecture and can be used if the project migrates to a
- * bundled React setup.
+ * Navigation model:
+ *   - 5 top-level sections (Command Center, Deals, Market Intel, Pipeline, Admin)
+ *   - Each section has 1..n child pages rendered as a secondary tab strip
+ *   - Child `id` values map 1:1 to the existing `activeTab` routes so no
+ *     downstream page component needs to change.
+ *
+ * Role visibility:
+ *   - broker:   Command Center, Deals, Market Intel (Sunbelt Intelligence only)
+ *   - producer: Command Center, Deals, Market Intel, Pipeline (My Pipeline)
+ *   - admin:    Command Center, Deals, Market Intel, Pipeline (full), Admin*
+ *   - *Admin section only shows when user.is_super_admin === true
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React from 'react';
 
 // ---- Types ----
 
-interface NavItem {
+export interface NavChild {
   id: string;
   label: string;
 }
 
-interface NavGroup {
+export interface NavSection {
+  id: string;
   label: string;
-  items: NavItem[];
+  icon: string;
+  children: NavChild[];
 }
 
-interface NavDropdownProps {
-  group: NavGroup;
+export interface User {
+  role?: 'broker' | 'producer' | 'admin';
+  is_super_admin?: boolean;
+  name?: string;
+}
+
+// ---- Section definitions (source of truth) ----
+
+export const NAV_SECTIONS: NavSection[] = [
+  {
+    id: 'command',
+    label: 'Command Center',
+    icon: '\u25C8', // ◈
+    children: [
+      { id: 'command', label: 'Overview' },
+      { id: 'followups', label: 'Follow-ups Due' },
+    ],
+  },
+  {
+    id: 'deals',
+    label: 'Deals',
+    icon: '\u25B2', // ▲
+    children: [
+      { id: 'search', label: 'Prospect Search' },
+      { id: 'linkedinhub', label: 'LinkedIn Hub' },
+      { id: 'dealboard', label: 'Saved Prospects' },
+    ],
+  },
+  {
+    id: 'intel',
+    label: 'Market Intel',
+    icon: '\u25C9', // ◉
+    children: [
+      { id: 'discovery', label: 'Daily Discovery' },
+      { id: 'statewide', label: 'Statewide' },
+      { id: 'intelligence', label: 'Sunbelt Intelligence' },
+      { id: 'predictions', label: 'Predicted Devs' },
+      { id: 'markets', label: 'Market Expansion' },
+    ],
+  },
+  {
+    id: 'pipeline_section',
+    label: 'Pipeline',
+    icon: '\u25B3', // △
+    children: [
+      { id: 'pipeline', label: 'My Pipeline' },
+      { id: 'quoting', label: 'Quoting' },
+      { id: 'underwriting', label: 'Underwriting Sheet' },
+    ],
+  },
+  {
+    id: 'admin_section',
+    label: 'Admin',
+    icon: '\u2699', // ⚙
+    children: [{ id: 'admin', label: 'Admin' }],
+  },
+];
+
+// ---- Role-aware filtering ----
+
+export function getNavForUser(user: User | null | undefined): NavSection[] {
+  const role = user?.role || 'producer';
+  const isSuperAdmin = !!user?.is_super_admin;
+
+  const hiddenTabs = new Set<string>();
+  if (role === 'broker') {
+    [
+      'discovery',
+      'statewide',
+      'predictions',
+      'markets',
+      'pipeline',
+      'followups',
+      'quoting',
+      'underwriting',
+    ].forEach((t) => hiddenTabs.add(t));
+  } else if (role === 'producer') {
+    ['quoting', 'underwriting'].forEach((t) => hiddenTabs.add(t));
+  }
+
+  const hiddenSections = new Set<string>();
+  if (!isSuperAdmin) hiddenSections.add('admin_section');
+  if (role === 'broker') hiddenSections.add('pipeline_section');
+
+  return NAV_SECTIONS.filter((s) => !hiddenSections.has(s.id))
+    .map((s) => ({
+      ...s,
+      children: s.children.filter((c) => !hiddenTabs.has(c.id)),
+    }))
+    .filter((s) => s.children.length > 0);
+}
+
+export function findSectionForTab(tabId: string, sections: NavSection[]): string {
+  for (const s of sections) {
+    if (s.children.some((c) => c.id === tabId)) return s.id;
+  }
+  return sections[0]?.id || 'command';
+}
+
+// ---- Props ----
+
+interface TopNavProps {
   activeTab: string;
   setActiveTab: (id: string) => void;
+  user: User | null;
 }
+
+// ---- TopNav ----
+
+const topNavStyles = {
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.4rem',
+    padding: '0.5rem 0 0.85rem',
+    marginBottom: '1.25rem',
+    borderBottom: '1px solid rgba(51,65,85,0.5)',
+    flexWrap: 'wrap' as const,
+  },
+  cta: {
+    background: '#10b981',
+    border: 'none',
+    color: '#0f172a',
+    padding: '0.6rem 1.1rem',
+    borderRadius: '0.5rem',
+    fontSize: '0.9rem',
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: "'Inter', sans-serif",
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.35rem',
+    boxShadow: '0 0 18px rgba(16,185,129,0.25)',
+  },
+};
+
+function sectionBtnStyle(isActive: boolean) {
+  return {
+    display: 'inline-flex' as const,
+    alignItems: 'center' as const,
+    gap: '0.5rem',
+    padding: '0.6rem 1.1rem',
+    background: isActive ? 'rgba(16,185,129,0.12)' : 'transparent',
+    border: '1px solid ' + (isActive ? 'rgba(16,185,129,0.4)' : 'rgba(51,65,85,0.4)'),
+    color: isActive ? '#34d399' : '#94a3b8',
+    borderRadius: '0.75rem',
+    cursor: 'pointer' as const,
+    fontFamily: "'Orbitron', sans-serif",
+    fontSize: '0.82rem',
+    fontWeight: 700,
+    letterSpacing: '0.03em',
+    transition: 'all 0.2s',
+    boxShadow: isActive ? '0 0 18px rgba(16,185,129,0.12)' : 'none',
+  };
+}
+
+export function TopNav({ activeTab, setActiveTab, user }: TopNavProps) {
+  const sections = getNavForUser(user);
+  const activeSectionId = findSectionForTab(activeTab, sections);
+
+  return (
+    <div style={topNavStyles.row}>
+      {sections.map((s) => {
+        const isActive = s.id === activeSectionId;
+        return (
+          <button
+            key={s.id}
+            style={sectionBtnStyle(isActive)}
+            onClick={() => {
+              if (s.children.length > 0) setActiveTab(s.children[0].id);
+            }}
+          >
+            <span style={{ fontSize: '0.95rem', opacity: 0.85 }}>{s.icon}</span>
+            {s.label}
+          </button>
+        );
+      })}
+      <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem' }}>
+        <button style={topNavStyles.cta} onClick={() => setActiveTab('search')}>
+          + Run Prospect Search
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---- SubNav ----
+
+function subNavItemStyle(isActive: boolean) {
+  return {
+    background: 'transparent',
+    border: 'none',
+    color: isActive ? '#34d399' : '#64748b',
+    padding: '0.5rem 0.95rem',
+    fontSize: '0.8rem',
+    fontWeight: 600,
+    cursor: 'pointer' as const,
+    borderBottom: isActive ? '2px solid #34d399' : '2px solid transparent',
+    marginBottom: '-1px',
+    fontFamily: "'Inter', sans-serif",
+    letterSpacing: '0.01em',
+    transition: 'color 0.2s, border-color 0.2s',
+  };
+}
+
+export function SubNav({ activeTab, setActiveTab, user }: TopNavProps) {
+  const sections = getNavForUser(user);
+  const activeSectionId = findSectionForTab(activeTab, sections);
+  const section = sections.find((s) => s.id === activeSectionId);
+  if (!section || section.children.length <= 1) return null;
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.25rem',
+        marginBottom: '1.5rem',
+        borderBottom: '1px solid rgba(51,65,85,0.35)',
+        flexWrap: 'wrap',
+      }}
+    >
+      <span
+        style={{
+          fontFamily: "'Orbitron', sans-serif",
+          fontSize: '0.68rem',
+          color: '#64748b',
+          textTransform: 'uppercase',
+          letterSpacing: '0.12em',
+          padding: '0.25rem 0.7rem 0.25rem 0',
+          borderRight: '1px solid rgba(51,65,85,0.4)',
+          marginRight: '0.5rem',
+        }}
+      >
+        {section.label}
+      </span>
+      {section.children.map((c) => (
+        <button
+          key={c.id}
+          style={subNavItemStyle(c.id === activeTab)}
+          onClick={() => setActiveTab(c.id)}
+        >
+          {c.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ---- Default export: combined nav menu ----
 
 interface GroupedNavigationMenuProps {
   activeTab: string;
   setActiveTab: (id: string) => void;
-  user: { role?: string; is_super_admin?: boolean } | null;
-}
-
-// ---- Styles ----
-
-const dropdownStyles = {
-  container: {
-    position: 'absolute' as const,
-    top: '100%',
-    left: 0,
-    minWidth: '220px',
-    zIndex: 1000,
-    background: 'rgba(15,22,36,0.95)',
-    backdropFilter: 'blur(12px)',
-    WebkitBackdropFilter: 'blur(12px)',
-    border: '1px solid rgba(255,255,255,0.08)',
-    borderRadius: '0.5rem',
-    padding: '0.4rem 0',
-    marginTop: '2px',
-    boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
-    animation: 'navDropIn 200ms ease-out forwards',
-  },
-  item: {
-    display: 'block',
-    width: '100%',
-    textAlign: 'left' as const,
-    background: 'transparent',
-    border: 'none',
-    color: '#cbd5e1',
-    padding: '0.6rem 1.1rem',
-    fontSize: '0.85rem',
-    fontWeight: 500,
-    cursor: 'pointer',
-    fontFamily: "'Inter', sans-serif",
-    transition: 'background 0.15s, color 0.15s',
-  },
-  itemHover: {
-    background: 'rgba(0,255,180,0.08)',
-    color: '#00FFC6',
-  },
-  itemActive: {
-    background: 'rgba(0,255,198,0.08)',
-    color: '#00FFC6',
-  },
-};
-
-// ---- Navigation Group Definitions ----
-
-export const NAV_GROUPS: Record<string, NavGroup[]> = {
-  broker: [
-    {
-      label: 'Prospecting',
-      items: [
-        { id: 'search', label: 'Prospect Search' },
-        { id: 'dealboard', label: 'Deal Board' },
-      ],
-    },
-    {
-      label: 'Intelligence',
-      items: [
-        { id: 'intelligence', label: 'Sunbelt Intelligence' },
-        { id: 'dev_network', label: 'Developer Networks' },
-        { id: 'corridors', label: 'Dev Corridors' },
-        { id: 'dev_momentum', label: 'Momentum Engine' },
-      ],
-    },
-  ],
-  producer: [
-    {
-      label: 'Prospecting',
-      items: [
-        { id: 'search', label: 'Prospect Search' },
-        { id: 'discovery', label: 'Daily Discovery' },
-        { id: 'statewide', label: 'Statewide' },
-        { id: 'predictions', label: 'Predicted Devs' },
-        { id: 'markets', label: 'Market Expansion' },
-      ],
-    },
-    {
-      label: 'Intelligence',
-      items: [
-        { id: 'intelligence', label: 'Sunbelt Intelligence' },
-        { id: 'dev_network', label: 'Developer Networks' },
-        { id: 'corridors', label: 'Dev Corridors' },
-        { id: 'dev_momentum', label: 'Momentum Engine' },
-      ],
-    },
-    {
-      label: 'Pipeline',
-      items: [
-        { id: 'pipeline', label: 'My Pipeline' },
-        { id: 'followups', label: 'Follow-ups Due' },
-      ],
-    },
-  ],
-  admin: [
-    {
-      label: 'Prospecting',
-      items: [
-        { id: 'search', label: 'Prospect Search' },
-        { id: 'discovery', label: 'Daily Discovery' },
-        { id: 'statewide', label: 'Statewide' },
-        { id: 'predictions', label: 'Predicted Devs' },
-        { id: 'markets', label: 'Market Expansion' },
-      ],
-    },
-    {
-      label: 'Intelligence',
-      items: [
-        { id: 'intelligence', label: 'Sunbelt Intelligence' },
-        { id: 'dev_network', label: 'Developer Networks' },
-        { id: 'corridors', label: 'Dev Corridors' },
-        { id: 'dev_momentum', label: 'Momentum Engine' },
-        { id: 'signal_discovery', label: 'Signal Discovery' },
-      ],
-    },
-    {
-      label: 'Pipeline',
-      items: [
-        { id: 'pipeline', label: 'My Pipeline' },
-        { id: 'followups', label: 'Follow-ups Due' },
-        { id: 'quoting', label: 'Quoting' },
-        { id: 'underwriting', label: 'Underwriting Sheet' },
-      ],
-    },
-    {
-      label: 'System',
-      items: [{ id: 'admin', label: 'Admin' }],
-    },
-  ],
-};
-
-// ---- Components ----
-
-function NavDropdown({ group, activeTab, setActiveTab }: NavDropdownProps) {
-  const [open, setOpen] = useState(false);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hasActive = group.items.some((i) => i.id === activeTab);
-
-  const handleEnter = () => {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    setOpen(true);
-  };
-  const handleLeave = () => {
-    timeoutRef.current = setTimeout(() => setOpen(false), 120);
-  };
-
-  useEffect(() => () => {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-  }, []);
-
-  return (
-    <div style={{ position: 'relative' }} onMouseEnter={handleEnter} onMouseLeave={handleLeave}>
-      <button
-        style={{
-          background: 'transparent',
-          border: 'none',
-          color: hasActive ? '#00FFC6' : '#94a3b8',
-          padding: '0.75rem 1.25rem',
-          fontSize: '0.9rem',
-          fontWeight: 700,
-          cursor: 'pointer',
-          fontFamily: "'Orbitron', sans-serif",
-          transition: 'color 0.2s',
-          borderBottom: hasActive ? '2px solid #00FFC6' : '2px solid transparent',
-          marginBottom: '-2px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.35rem',
-        }}
-        onClick={() => {
-          if (group.items.length === 1) setActiveTab(group.items[0].id);
-        }}
-      >
-        {group.label}
-        {group.items.length > 1 && (
-          <span
-            style={{
-              fontSize: '0.55rem',
-              opacity: 0.6,
-              transition: 'transform 0.2s',
-              transform: open ? 'rotate(180deg)' : 'rotate(0)',
-            }}
-          >
-            &#9660;
-          </span>
-        )}
-      </button>
-      {open && group.items.length > 1 && (
-        <div style={dropdownStyles.container}>
-          {group.items.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => {
-                setActiveTab(item.id);
-                setOpen(false);
-              }}
-              style={{
-                ...dropdownStyles.item,
-                ...(activeTab === item.id ? dropdownStyles.itemActive : {}),
-              }}
-              onMouseEnter={(e) => {
-                (e.target as HTMLElement).style.background = 'rgba(0,255,198,0.08)';
-                (e.target as HTMLElement).style.color = '#00FFC6';
-              }}
-              onMouseLeave={(e) => {
-                (e.target as HTMLElement).style.background =
-                  activeTab === item.id ? 'rgba(0,255,198,0.08)' : 'transparent';
-                (e.target as HTMLElement).style.color =
-                  activeTab === item.id ? '#00FFC6' : '#cbd5e1';
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  user: User | null;
 }
 
 export default function GroupedNavigationMenu({
@@ -259,108 +296,10 @@ export default function GroupedNavigationMenu({
   setActiveTab,
   user,
 }: GroupedNavigationMenuProps) {
-  const role = user?.role || 'producer';
-  const [mobileOpen, setMobileOpen] = useState(false);
-
-  let groups = [...(NAV_GROUPS[role] || NAV_GROUPS.producer)];
-
-  if (user?.is_super_admin && !groups.some((g) => g.label === 'System')) {
-    groups.push({ label: 'System', items: [{ id: 'admin', label: 'Admin' }] });
-  }
-
   return (
     <>
-      {/* Desktop navigation */}
-      <div
-        className="nav-desktop"
-        style={{ display: 'flex', gap: '0.25rem', borderBottom: '2px solid #334155', paddingBottom: '0', marginBottom: '2rem', flexWrap: 'wrap' }}
-      >
-        {groups.map((group) => (
-          <NavDropdown key={group.label} group={group} activeTab={activeTab} setActiveTab={setActiveTab} />
-        ))}
-      </div>
-      {/* Mobile hamburger */}
-      <div className="nav-mobile" style={{ display: 'none', marginBottom: '1.5rem' }}>
-        <button
-          onClick={() => setMobileOpen(!mobileOpen)}
-          style={{
-            background: 'rgba(15,22,36,0.95)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            color: '#00FFC6',
-            padding: '0.7rem 1rem',
-            borderRadius: '0.5rem',
-            cursor: 'pointer',
-            fontSize: '1.1rem',
-            fontFamily: "'Orbitron', sans-serif",
-            fontWeight: 700,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            width: '100%',
-            justifyContent: 'space-between',
-          }}
-        >
-          <span>{mobileOpen ? 'Close Menu' : 'Menu'}</span>
-          <span style={{ fontSize: '1.2rem' }}>{mobileOpen ? '\u2715' : '\u2630'}</span>
-        </button>
-        {mobileOpen && (
-          <div
-            style={{
-              background: 'rgba(15,22,36,0.95)',
-              backdropFilter: 'blur(12px)',
-              WebkitBackdropFilter: 'blur(12px)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: '0.5rem',
-              marginTop: '0.5rem',
-              padding: '0.5rem 0',
-              animation: 'navDropIn 200ms ease-out forwards',
-            }}
-          >
-            {groups.map((group) => (
-              <div key={group.label}>
-                <div
-                  style={{
-                    padding: '0.5rem 1rem',
-                    fontSize: '0.65rem',
-                    color: '#64748b',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.1em',
-                    fontWeight: 700,
-                    fontFamily: "'Orbitron', sans-serif",
-                    borderBottom: '1px solid rgba(255,255,255,0.04)',
-                  }}
-                >
-                  {group.label}
-                </div>
-                {group.items.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => {
-                      setActiveTab(item.id);
-                      setMobileOpen(false);
-                    }}
-                    style={{
-                      display: 'block',
-                      width: '100%',
-                      textAlign: 'left',
-                      background: activeTab === item.id ? 'rgba(0,255,198,0.08)' : 'transparent',
-                      border: 'none',
-                      color: activeTab === item.id ? '#00FFC6' : '#cbd5e1',
-                      padding: '0.65rem 1.5rem',
-                      fontSize: '0.85rem',
-                      fontWeight: 500,
-                      cursor: 'pointer',
-                      fontFamily: "'Inter', sans-serif",
-                    }}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <TopNav activeTab={activeTab} setActiveTab={setActiveTab} user={user} />
+      <SubNav activeTab={activeTab} setActiveTab={setActiveTab} user={user} />
     </>
   );
 }
