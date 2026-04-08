@@ -441,3 +441,46 @@ def delete_knowledge_entry(eid):
 @bp.route("/api/signalstack/knowledge/tags", methods=["GET"])
 def list_knowledge_tags():
     return jsonify(knowledge_repo.list_tags())
+
+
+@bp.route("/api/signalstack/knowledge/playbooks", methods=["GET"])
+def list_knowledge_playbooks():
+    """List all industry playbooks with entry counts and categories."""
+    try:
+        books = repo.list_playbooks()
+    except Exception as e:
+        print(f"[SignalStack] list_playbooks failed: {e}")
+        return jsonify([])
+    out = []
+    for pb in books:
+        try:
+            entries = repo.list_playbook_entries(playbook_id=pb["id"])
+        except Exception:
+            entries = []
+        cats = sorted({e.get("category") for e in entries if e.get("category")})
+        out.append({
+            **pb,
+            "entry_count": len(entries),
+            "categories": cats,
+        })
+    return jsonify(out)
+
+
+@bp.route("/api/signalstack/knowledge/playbooks/<pid>", methods=["GET"])
+def get_knowledge_playbook(pid):
+    """Return a single playbook with its full entry list."""
+    try:
+        books = repo.list_playbooks()
+    except Exception as e:
+        return jsonify({"error": "load_failed", "message": str(e)}), 500
+    pb = next((b for b in books if b.get("id") == pid), None)
+    if not pb:
+        return jsonify({"error": "not_found"}), 404
+    try:
+        entries = repo.list_playbook_entries(playbook_id=pid)
+    except Exception:
+        entries = []
+    pb["entries"] = entries
+    pb["entry_count"] = len(entries)
+    pb["categories"] = sorted({e.get("category") for e in entries if e.get("category")})
+    return jsonify(pb)
