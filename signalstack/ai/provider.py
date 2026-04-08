@@ -150,6 +150,59 @@ def _compose(angle: str, first: str, anchor: str, profile_anchor: Optional[str])
     return f"Hi {first} — {anchor} caught my eye."
 
 
+def _compose_hypothesis(angle: str, first: str, hypothesis_text: str) -> str:
+    """
+    Build a low-confidence opener anchored on a context_expansion
+    hypothesis. These messages MUST preserve the "likely / possibly /
+    may be" framing — we are not claiming to know the prospect's
+    situation, we are sharing a pattern we see across similar roles
+    and markets and asking whether it tracks.
+    """
+    # Normalize: strip a leading "likely / possibly / may be / the team"
+    # so the sentence flows after our lead-in clause.
+    h = (hypothesis_text or "").strip()
+    for prefix in (
+        "likely ", "possibly ", "may be ", "the team may be ",
+        "the team is likely ",
+    ):
+        if h.lower().startswith(prefix):
+            h = h[len(prefix):]
+            break
+
+    if angle == "curiosity":
+        return (
+            f"Hi {first} — not anchoring this on anything specific, but "
+            f"folks in your part of the market tend to be {h} right now. "
+            f"Curious how you're reading it."
+        )
+    if angle == "market_pattern":
+        return (
+            f"Hi {first} — one pattern I keep seeing across similar desks: "
+            f"they're {h}. Does that match what you're looking at?"
+        )
+    if angle in ("light_insight", "insight"):
+        return (
+            f"Hi {first} — worth flagging that a lot of teams in your seat "
+            f"right now are {h}. Happy to share what I've seen if it's useful."
+        )
+    if angle in ("observation", "timely_observation"):
+        return (
+            f"Hi {first} — the timely observation on my side is that groups "
+            f"in this slice of the market are {h}. Curious if you're seeing "
+            f"the same."
+        )
+    if angle == "low_pressure_starter":
+        return (
+            f"Hi {first} — no agenda, just opening a line. Most folks I "
+            f"talk to in your seat are {h}, so figured it was worth saying hi."
+        )
+    # Default: a curiosity-framed pattern message.
+    return (
+        f"Hi {first} — across similar desks right now, a lot of teams are "
+        f"{h}. Curious how you're thinking about it."
+    )
+
+
 class MockAiProvider:
     """
     Deterministic mock generator. Produces diverse, grounded openers
@@ -202,16 +255,28 @@ class MockAiProvider:
         if not anchors and profile_anchor_text:
             anchors.append((profile_anchor_text, {"profile_field": profile_field}))
 
-        # NOTE: We deliberately do NOT fall back to anchoring on the
-        # prospect's title / company / location here. Those are weak
-        # profile facts and lead to "noticed your work as Managing
-        # Director at JLL"-style fake personalization. When no real
-        # anchor exists we hand back a generic, clearly-low-context
-        # opener and let the anti-generic validator + UI flag it as
-        # a "low-context fallback option".
+        # Hypothesis anchors: when no real signals / notes / profile
+        # anchors are available, fall back to context_expansion
+        # hypotheses. These produce thoughtful, pattern-based openers
+        # (NOT the single "low pressure starter" we used to force).
+        expansion = context.get("context_expansion") or {}
+        hypotheses = expansion.get("hypotheses") or []
         low_context_mode = not anchors
         if low_context_mode:
-            anchors.append(("", {"low_context": True}))
+            if hypotheses:
+                for h in hypotheses:
+                    anchors.append((
+                        h.get("text") or "",
+                        {
+                            "hypothesis_basis": h.get("basis"),
+                            "low_context": True,
+                            "is_hypothesis": True,
+                        },
+                    ))
+            else:
+                # Absolute last resort: one empty anchor that triggers
+                # the generic low-pressure starter.
+                anchors.append(("", {"low_context": True}))
 
         strategies = strategies or [{"angle": "curiosity"}, {"angle": "observation"},
                                     {"angle": "insight"}, {"angle": "point_of_view"}]
@@ -219,11 +284,17 @@ class MockAiProvider:
         for i, spec in enumerate(strategies[:n]):
             anchor_text, src = anchors[i % len(anchors)]
             angle = spec.get("angle") or "curiosity"
-            if src.get("low_context"):
-                # Force the only safe low-context angle so we never
-                # produce fake-personalized lines from weak facts.
+            if src.get("is_hypothesis"):
+                # Hypothesis-anchored: use the dedicated low-confidence
+                # composer so we preserve the "likely / possibly" framing.
+                body = _compose_hypothesis(angle, first, anchor_text)
+            elif src.get("low_context"):
+                # No hypotheses available either — fall back to the
+                # truly generic no-anchor opener.
                 angle = "low_pressure_starter"
-            body = _compose(angle, first, anchor_text, profile_anchor_text)
+                body = _compose(angle, first, "", profile_anchor_text)
+            else:
+                body = _compose(angle, first, anchor_text, profile_anchor_text)
 
             if instruction:
                 # Reflect the user's instruction in tone, not in invented content.
@@ -248,6 +319,26 @@ class MockAiProvider:
             body = _shorten(body, target=320)
 
             obs = src.get("observation") or {}
+            # Rationale varies by anchor type so the UI can show a
+            # clear "why this message was written this way" trail.
+            if src.get("is_hypothesis"):
+                rationale_tail = (
+                    f"hypothesis.{src.get('hypothesis_basis') or 'default'}"
+                )
+                message_basis = "hypothesis_based"
+            elif src.get("signal_id"):
+                rationale_tail = f"signal {src['signal_id']}"
+                message_basis = "signal_based"
+            elif src.get("note_id"):
+                rationale_tail = f"note {src.get('note_id')}"
+                message_basis = "signal_based"
+            elif src.get("profile_field"):
+                rationale_tail = f"profile.{src.get('profile_field')}"
+                message_basis = "observation_based"
+            else:
+                rationale_tail = "no_anchor"
+                message_basis = "hypothesis_based"
+
             results.append({
                 "observation": {
                     "summary": obs.get("summary"),
@@ -256,10 +347,7 @@ class MockAiProvider:
                 } if obs else None,
                 "body": body,
                 "rationale": (
-                    f"Angle: {angle}. Grounded in "
-                    + (f"signal {src['signal_id']}" if src.get("signal_id") else
-                       f"note {src.get('note_id')}" if src.get("note_id") else
-                       f"profile.{src.get('profile_field')}")
+                    f"Angle: {angle}. Grounded in {rationale_tail}"
                     + (f". Instruction: {instruction!r}." if instruction else ".")
                 ),
                 "angle": angle,
@@ -275,6 +363,8 @@ class MockAiProvider:
                 ),
                 "facts_used": facts_used,
                 "low_context": bool(src.get("low_context")),
+                "message_basis": message_basis,
+                "hypothesis_basis": src.get("hypothesis_basis"),
             })
         return results
 
@@ -353,6 +443,8 @@ def _summarize_context_for_prompt(context: dict) -> dict:
     insights = context.get("insights") or []
     knowledge_entries = context.get("knowledge_entries") or []
     playbook = context.get("playbook") or {}
+    expansion = context.get("context_expansion") or {}
+    input_quality = context.get("input_quality") or {}
 
     return {
         "prospect": {
@@ -433,6 +525,25 @@ def _summarize_context_for_prompt(context: dict) -> dict:
             if isinstance(playbook, dict)
             else [],
         },
+        "context_expansion": {
+            "hypotheses": [
+                {
+                    "text": h.get("text"),
+                    "basis": h.get("basis"),
+                    "strength": h.get("strength"),
+                }
+                for h in (expansion.get("hypotheses") or [])[:6]
+            ],
+            "confidence_level": expansion.get("confidence_level"),
+            "inferred_role_family": expansion.get("inferred_role_family"),
+            "inferred_market": expansion.get("inferred_market"),
+            "inferred_activity": expansion.get("inferred_activity"),
+        },
+        "confidence_level": (
+            input_quality.get("confidence_level")
+            or expansion.get("confidence_level")
+            or "high"
+        ),
     }
 
 
@@ -547,6 +658,16 @@ class ClaudeProvider:
             .replace("{context_json}", _json.dumps(ctx))
             .replace("{observations_json}", _json.dumps(ctx.get("distilled_observations") or []))
             .replace("{insights_json}", _json.dumps(ctx.get("insights") or []))
+            .replace(
+                "{hypotheses_json}",
+                _json.dumps(
+                    (ctx.get("context_expansion") or {}).get("hypotheses") or []
+                ),
+            )
+            .replace(
+                "{confidence_level}",
+                ctx.get("confidence_level") or "high",
+            )
             .replace("{strategies_json}", _json.dumps(strategies or []))
             .replace("{instruction}", instruction or "")
         )

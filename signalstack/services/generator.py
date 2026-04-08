@@ -22,6 +22,7 @@ from . import strategy as strategy_engine
 from .signal_interpreter import interpret_signals
 from .anti_copy import check_message as anti_copy_check, shorten as anti_copy_shorten
 from .input_quality_scorer import score_inputs
+from .context_expansion import expand_context
 from .observation_distiller import distill as distill_observations
 from .message_angle_planner import plan as plan_angles
 from .anti_generic_validator import validate as anti_generic_validate
@@ -29,6 +30,40 @@ from . import playbook_loader
 from . import insight_engine
 from . import message_critic
 from . import reasoning_pipeline
+
+
+def _classify_message_basis(candidate: dict, distilled: list[dict]) -> str:
+    """
+    Label a candidate as signal-based, observation-based, or
+    hypothesis-based so the UI can communicate how strong the
+    grounding is.
+
+    Priority:
+      * signal_based       — candidate references at least one real
+                             signal ID or note ID
+      * observation_based  — anchored on profile / distilled observation
+                             drawn from non-hypothesis sources
+      * hypothesis_based   — anchored on a context_expansion hypothesis
+    """
+    if (candidate.get("signal_ids") or []) or (candidate.get("notes_used") or []):
+        return "signal_based"
+    # If the candidate claims hypothesis basis explicitly, respect it.
+    if candidate.get("low_context") or candidate.get("message_basis") == "hypothesis_based":
+        # Determine whether the distilled observation pool has any real
+        # (non-hypothesis) content. If yes, we prefer the observation
+        # label; if not, this really is hypothesis-based.
+        any_real = any(
+            (o.get("source") or "") != "hypothesis" for o in distilled or []
+        )
+        return "observation_based" if any_real else "hypothesis_based"
+    if candidate.get("profile_fields_used"):
+        return "observation_based"
+    # Fallback: if we have any non-hypothesis distilled observation,
+    # call it observation_based, otherwise hypothesis_based.
+    any_real = any(
+        (o.get("source") or "") != "hypothesis" for o in distilled or []
+    )
+    return "observation_based" if any_real else "hypothesis_based"
 
 
 def _clean_playbook_entry(entry: Optional[dict]) -> dict:
@@ -168,7 +203,7 @@ def build_context(
     # listing/post bodies were being pasted directly into messages.
     observations = interpret_signals(signals)
 
-    return {
+    ctx: dict = {
         "prospect": prospect,
         "company": company,
         "signals": signals,
@@ -180,6 +215,29 @@ def build_context(
         # Tracked separately so we can attribute usage in metadata.
         "knowledge_entries": knowledge_entries,
     }
+
+    # Context expansion: infer a likely operating context and produce
+    # 3-5 hypotheses. This is the FIRST reasoning step in the new
+    # graded pipeline — the rest of the stages read it off the
+    # context. Never raises; always returns a usable dict.
+    try:
+        ctx["context_expansion"] = expand_context(ctx)
+    except Exception as e:
+        print(
+            f"[SignalStack] build_context: context_expansion FAILED — "
+            f"continuing without: {type(e).__name__}: {e}"
+        )
+        ctx["context_expansion"] = {
+            "hypotheses": [],
+            "confidence_level": "low",
+            "confidence_score": 0.0,
+            "inferred_role_family": "unknown",
+            "inferred_market": "unknown",
+            "inferred_activity": "unknown",
+            "basis_counts": {},
+        }
+
+    return ctx
 
 
 def _has_any_grounding(context: dict) -> bool:
@@ -228,27 +286,36 @@ def generate(
         }
     _stage("build_context", "ok")
 
-    if not _has_any_grounding(context):
-        _stage("grounding_check", "no_grounding")
-        return {
-            "candidates": [],
-            "rejected": [],
-            "error": "no_grounding",
-            "message": (
-                "No signals, notes, or profile context stored for this prospect. "
-                "Add at least one observation, paste profile context, or write a "
-                "note before generating outreach."
-            ),
-            "stages": stages,
-            "minimal_mode": minimal,
-        }
-    _stage("grounding_check", "ok")
+    # NOTE: we no longer hard-block generation when context is thin.
+    # The pipeline is graded: HIGH confidence → strong specific
+    # messages, MEDIUM → pattern-based, LOW → hypothesis-based. The
+    # grounding_check stage is still recorded so the UI/logs can see
+    # which bucket this request fell into, but it never short-circuits.
+    if _has_any_grounding(context):
+        _stage("grounding_check", "ok")
+    else:
+        _stage("grounding_check", "no_stored_grounding_running_hypothesis_path")
 
-    # 1) Score input quality. This decides whether we allow high-quality
-    #    personalized outreach or only a low-context fallback.
+    # 1) Score input quality. This is now a GRADING step (confidence
+    #    high/medium/low), not a gate — the generator keeps going in
+    #    all cases and tags each candidate with the appropriate
+    #    message_basis.
     _stage("input_quality", "running")
     quality = score_inputs(context)
-    _stage("input_quality", "ok")
+    # Reflect the context_expansion confidence level onto the quality
+    # dict when context is thin — expansion has more information about
+    # the inferred role/market, so we prefer its judgement when the
+    # scorer says "low".
+    exp = context.get("context_expansion") or {}
+    exp_level = (exp.get("confidence_level") or "").lower()
+    if exp_level and quality.get("confidence_level") == "low" and exp_level == "medium":
+        quality["confidence_level"] = "medium"
+        quality.setdefault("reasons", []).append("raised_by_context_expansion")
+    # Expose the quality dict on the context so the critic can read
+    # confidence_level when it wasn't attached via the anti_generic
+    # verdict (e.g. in tests or direct calls).
+    context["input_quality"] = quality
+    _stage("input_quality", f"ok:{quality.get('confidence_level')}")
 
     # 2) Distill 1–3 sharp observations from the raw material. The
     #    generator reasons about these — not the raw source blobs.
@@ -503,6 +570,15 @@ def generate(
 
     _stage("candidate_validation", "running")
     candidates, rejected, low_context_candidates = [], [], []
+    # Fallback "facts" list we can attach to hypothesis-based candidates
+    # so the grounding validator has something non-empty to count. This
+    # is purely metadata — the actual message body never references
+    # these fields as if they were personalization.
+    fallback_facts: list[str] = []
+    pros = context.get("prospect") or {}
+    for f in ("title", "company_name", "location", "industry"):
+        if pros.get(f):
+            fallback_facts.append(f)
     for cand in raw or []:
         body = cand.get("body", "") or ""
 
@@ -512,6 +588,21 @@ def generate(
             cand["body"] = body
         anti = anti_copy_check(body, raw_sources)
         cand["anti_copy"] = anti
+
+        # If this is a hypothesis-based candidate with no grounding
+        # hooks, backfill ``facts_used`` with the prospect-level facts
+        # that are already known. This is NOT personalization — it
+        # just lets the downstream grounding validator see that the
+        # message is tied to a real prospect record.
+        is_hyp = (
+            cand.get("message_basis") == "hypothesis_based"
+            or cand.get("low_context")
+        )
+        if is_hyp and not (
+            cand.get("signal_ids") or cand.get("notes_used")
+            or cand.get("profile_fields_used") or cand.get("facts_used")
+        ):
+            cand["facts_used"] = list(fallback_facts)
 
         # 2) Grounding: banned phrases, fake familiarity, etc.
         verdict = validate_message(
@@ -595,13 +686,30 @@ def generate(
         if not anti["passes_anti_copy_check"]:
             verdict.setdefault("violations", []).extend(anti["violations"])
 
-        is_low_context = bool(cand.get("low_context")) or quality.get("weak_only")
+        # Label this candidate with a confidence level and a
+        # message_basis so the UI can communicate how strong the
+        # grounding is. This replaces the old binary "low_context"
+        # bucket — we no longer demote thoughtful pattern-based
+        # messages just because the confidence level is low.
+        cand_confidence = (
+            quality.get("confidence_level")
+            or ("low" if cand.get("low_context") else "high")
+        )
+        cand["confidence_level"] = cand_confidence
+        cand["message_basis"] = _classify_message_basis(cand, distilled)
+
+        # Only demote to the low-context bucket when the anti-generic
+        # validator actually fails — and even then, only at HIGH
+        # confidence where the user expected real specificity. At
+        # MEDIUM/LOW confidence a broad-but-thoughtful message is
+        # fine and should land in the main candidates list.
+        demote_for_validator = (
+            not ag["passes_quality_threshold"] and cand_confidence == "high"
+        )
 
         if not ok:
             rejected.append(cand)
-        elif is_low_context or not ag["passes_quality_threshold"]:
-            # Demote to the clearly-labeled low-context bucket. We do not
-            # present these as high-quality personalized messages.
+        elif demote_for_validator:
             low_context_candidates.append(cand)
         else:
             candidates.append(cand)
@@ -702,10 +810,19 @@ def generate(
     # are not always JSON-serializable, which previously caused the route
     # to 500 and the UI to hang on "Generating…".
     warning = None
-    if quality.get("weak_only"):
+    confidence_level = quality.get("confidence_level") or ("low" if quality.get("weak_only") else "high")
+    if confidence_level == "low":
         warning = (
-            "Not enough specificity for strong personalized outreach. "
-            "Add a signal, note, recent activity, or profile context."
+            "Running in low-confidence mode — messages are anchored on "
+            "market and role patterns rather than specific situational "
+            "signals. Add a note, signal, or richer profile context for "
+            "sharper, more specific outreach."
+        )
+    elif confidence_level == "medium":
+        warning = (
+            "Running in medium-confidence mode — messages use pattern and "
+            "profile-based framing. Add a specific signal or note for the "
+            "strongest personalization."
         )
 
     return {
@@ -721,15 +838,21 @@ def generate(
             "knowledge_entry_count": len(knowledge_entries),
             "knowledge_source_count": len(knowledge_source_ids_used),
             "insight_count": len(context.get("insights") or []),
+            "hypothesis_count": len(
+                (context.get("context_expansion") or {}).get("hypotheses") or []
+            ),
         },
         "knowledge": {
             "entries": knowledge_entry_summaries,
             "source_ids_used": knowledge_source_ids_used,
             "entry_ids_used": knowledge_entry_ids_used,
         },
+        "context_expansion": context.get("context_expansion") or {},
+        "confidence_level": confidence_level,
         "input_quality": {
             "input_quality_score": quality["input_quality_score"],
             "tier": quality["tier"],
+            "confidence_level": confidence_level,
             "enough_specificity_for_high_quality_message":
                 quality["enough_specificity_for_high_quality_message"],
             "reasons": quality["reasons"],

@@ -1,15 +1,27 @@
 """
 Input Quality Scorer.
 
-Classifies the available inputs for a prospect into tiers and decides
-whether there is enough specificity to justify high-quality personalized
-outreach. The generator consults this service BEFORE producing strong
-messages — if the answer is "no", we either refuse or fall back to a
-clearly labeled low-context option set.
+Classifies the available inputs for a prospect into tiers and emits a
+graded ``confidence_level`` (``low|medium|high``). The generator uses
+this to shape the downstream pipeline — NOT as a hard block.
 
-This is the layer that prevents SignalStack from anchoring outreach on
-weak profile facts (title / company / location) and pretending it is
-"personalization".
+Before the context-expansion refactor, the scorer's ``weak_only`` flag
+was effectively a kill switch: weak inputs → no strong messages, no
+real reasoning, pure "low-context fallback". That made the product
+feel broken whenever the user only had a LinkedIn profile to paste in.
+
+New behaviour:
+
+  * HIGH confidence → generator produces sharp, specific, signal-driven
+    messages.
+  * MEDIUM confidence → generator produces pattern-based, semi-specific
+    messages anchored in profile context.
+  * LOW confidence → generator produces thoughtful, pattern-based,
+    non-specific but intelligent messages grounded in context_expansion
+    hypotheses.
+
+The scorer still classifies inputs into tiers and still prevents fake
+specificity from weak facts — it just no longer hard-fails.
 """
 from __future__ import annotations
 
@@ -109,16 +121,29 @@ def score_inputs(context: dict) -> dict:
     enough = tier == 1
     weak_only = tier == 3
 
+    # Graded confidence level. This is the new primary signal the
+    # downstream pipeline reads — tier / weak_only are kept for
+    # backwards compatibility with the angle planner and for the UI
+    # summary, but we no longer hard-block on them.
+    if tier == 1:
+        confidence_level = "high"
+    elif tier == 2:
+        confidence_level = "medium"
+    else:
+        confidence_level = "low"
+
     if tier1_hits:
         reasons.append(f"tier1_signals:{tier1_hits}")
     if tier2_hits:
         reasons.append(f"tier2_profile_fields:{tier2_hits}")
     if weak_only:
         reasons.append("only_weak_profile_facts")
+    reasons.append(f"confidence_level:{confidence_level}")
 
     return {
         "input_quality_score": score,
         "tier": tier,
+        "confidence_level": confidence_level,
         "strongest_available_signal": strongest_signal,
         "strongest_available_observation": strongest_observation,
         "enough_specificity_for_high_quality_message": enough,

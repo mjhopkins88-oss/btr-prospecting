@@ -13,6 +13,15 @@ signal_interpreter. The distinction is important:
 - observation_distiller.distill() selects and de-duplicates the 1–3
   best observations across signals / notes / profile, so the generator
   has a small, sharp working set instead of a noisy list.
+
+Hypothesis fallback
+-------------------
+When strong sources are thin, the distiller will also pull from the
+``context_expansion`` layer's hypotheses. Hypothesis-sourced
+observations are clearly labelled (``source="hypothesis"``, strength
+``"hypothetical"``) and framed as possibilities so the generator can
+reason about them without treating them as facts. This is the key
+fix for the "LinkedIn-profile-only → empty output" bug.
 """
 from __future__ import annotations
 
@@ -111,6 +120,32 @@ def distill(context: dict) -> list[dict]:
             _push(
                 f"{cname} operates in the {ctype} space.",
                 "company", company.get("id"), "moderate",
+            )
+
+    # 5) Hypothetical fallback: pull from the context_expansion layer
+    #    when the real sources didn't fill us up. Hypotheses are
+    #    framed as possibilities, never as claims — the generator
+    #    must preserve that framing in the final message.
+    if len(out) < MAX_OBSERVATIONS:
+        expansion = context.get("context_expansion") or {}
+        hypotheses = expansion.get("hypotheses") or []
+        for h in hypotheses:
+            if len(out) >= MAX_OBSERVATIONS:
+                break
+            text = (h.get("text") or "").strip()
+            if not text:
+                continue
+            # Hypotheses already read as "likely / possibly / may be".
+            # We capitalize the first letter and drop a trailing period
+            # so the rendered observation reads naturally.
+            pretty = text[0].upper() + text[1:] if text else text
+            if not pretty.endswith("."):
+                pretty = pretty + "."
+            _push(
+                pretty,
+                "hypothesis",
+                h.get("basis") or "default",
+                "hypothetical",
             )
 
     return out

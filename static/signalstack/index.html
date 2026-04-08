@@ -52,6 +52,24 @@
   .candidate { border-left: 3px solid var(--accent); padding-left: 12px;
     margin-bottom: 14px; }
   .rejected .candidate { border-left-color: var(--bad); }
+  .confidence-banner { border-radius: 8px; padding: 10px 14px;
+    margin-bottom: 12px; font-size: 13px; }
+  .confidence-banner.high { background: #0d2e1b; color: #6fe2a0;
+    border: 1px solid #1f6b3f; }
+  .confidence-banner.medium { background: #2e2a0d; color: #e2c96f;
+    border: 1px solid #6b5a1f; }
+  .confidence-banner.low { background: #2e1a0d; color: #e29a6f;
+    border: 1px solid #6b3a1f; }
+  .basis-tag { display: inline-block; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 2px 6px; border-radius: 4px; margin-right: 6px; }
+  .basis-tag.signal { background: #0d2e1b; color: #6fe2a0; }
+  .basis-tag.observation { background: #0d1f2e; color: #6fb6e2; }
+  .basis-tag.hypothesis { background: #2e1a0d; color: #e29a6f; }
+  .conf-tag { display: inline-block; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 2px 6px; border-radius: 4px; margin-right: 6px;
+    background: #1d1d1f; color: var(--muted); }
   pre { white-space: pre-wrap; word-break: break-word; }
   label { display: block; font-size: 12px; color: var(--muted);
     margin-bottom: 4px; }
@@ -875,10 +893,22 @@ async function viewGenerator() {
         return;
       }
 
+      // ---- Confidence banner (high/medium/low) ----
+      const confLevel = (r.confidence_level || (r.input_quality && r.input_quality.confidence_level) || "high").toLowerCase();
+      const confBanner = h("div", {class: "confidence-banner " + confLevel});
+      const confHeadlines = {
+        high: "HIGH confidence — strong signals available. Messages are sharp and signal-driven.",
+        medium: "MEDIUM confidence — pattern-based messages anchored in profile and market context.",
+        low: "LOW confidence — hypothesis-based messages leaning on role and market patterns. Add a signal, note, or richer profile for sharper output.",
+      };
+      confBanner.append(h("div", {}, confHeadlines[confLevel] || confHeadlines.high));
+      out.append(confBanner);
+
       // ---- Pipeline summary / provider + stages + degradation flags ----
       const pipelineCard = h("div",{class:"card"});
       pipelineCard.append(h("h2",{},"Pipeline"));
       const provLine = "Provider: " + (r.provider || "?") +
+        " • confidence: " + confLevel +
         (r.minimal_mode ? " • minimal mode" : "") +
         (r.insight_source ? " • insights: " + r.insight_source : "") +
         (r.insight_error ? " • insight_error: " + r.insight_error : "");
@@ -943,6 +973,28 @@ async function viewGenerator() {
         out.append(insCard);
       }
 
+      // ---- Context expansion / hypotheses ----
+      const expansion = r.context_expansion || {};
+      if ((expansion.hypotheses||[]).length) {
+        const hypCard = h("div",{class:"card"});
+        hypCard.append(h("h2",{},"Context Expansion — Hypotheses"));
+        hypCard.append(h("div",{class:"muted"},
+          "Inferred role: "+(expansion.inferred_role_family||"unknown")+
+          " • market: "+(expansion.inferred_market||"unknown")+
+          " • activity: "+(expansion.inferred_activity||"unknown")+
+          " • confidence: "+(expansion.confidence_level||"?")));
+        hypCard.append(h("div",{class:"muted", style:"margin-bottom:8px"},
+          "These are plausible situational possibilities inferred from role and market context. They are NOT facts about this person — they frame how low-confidence messages are written."));
+        expansion.hypotheses.forEach(hy => {
+          hypCard.append(h("div",{class:"mb"},
+            h("div",{}, hy.text),
+            h("div",{class:"muted"},
+              "[" + (hy.basis||"?") + "] strength: " + (hy.strength||"?")),
+          ));
+        });
+        out.append(hypCard);
+      }
+
       // ---- Strategies chosen ----
       if ((r.strategies||[]).length) {
         const stCard = h("div",{class:"card"});
@@ -979,12 +1031,32 @@ async function viewGenerator() {
         if (r.playbook.reasoning) pbCard.append(h("div",{class:"muted"},r.playbook.reasoning));
         out.append(pbCard);
       }
-      if (!(r.candidates||[]).length && !(r.rejected||[]).length) {
+      if (!(r.candidates||[]).length && !(r.rejected||[]).length && !(r.low_context_candidates||[]).length) {
         okCard.append(h("div",{class:"muted"},
-          "No candidates were generated. Add a signal, note, headline, featured topics, or paste profile/about text so the generator has something concrete to anchor on."));
+          "No candidates were generated. The pipeline will try hypothesis-based messages even on thin context — if you're seeing this, something in the provider or validator pipeline likely failed. Check the Pipeline card above for stage errors."));
       }
       const renderCandidate = (c) => {
       const wrap = h("div",{class:"candidate mb"});
+      // Basis + confidence badges so the user can see at a glance
+      // whether a message is signal-based, observation-based, or
+      // hypothesis-based, and at what confidence level.
+      const basis = (c.message_basis || "observation_based");
+      const basisLabel = {
+        signal_based: "signal-based",
+        observation_based: "observation-based",
+        hypothesis_based: "hypothesis-based",
+      }[basis] || basis;
+      const basisClass = {
+        signal_based: "signal",
+        observation_based: "observation",
+        hypothesis_based: "hypothesis",
+      }[basis] || "observation";
+      const badgeRow = h("div", {class: "mb"});
+      badgeRow.append(h("span", {class: "basis-tag " + basisClass}, basisLabel));
+      if (c.confidence_level) {
+        badgeRow.append(h("span", {class: "conf-tag"}, c.confidence_level + " confidence"));
+      }
+      wrap.append(badgeRow);
       wrap.append(h("pre",{},c.body));
       const ac = c.anti_copy || {};
       wrap.append(h("div",{class:"muted"},
@@ -1061,9 +1133,9 @@ async function viewGenerator() {
 
       if ((r.low_context_candidates||[]).length) {
         const lcc = h("div",{class:"card"});
-        lcc.append(h("h2",{},"Low-context options"));
+        lcc.append(h("h2",{},"Flagged as thin on specificity"));
         lcc.append(h("div",{class:"muted"},
-          "These use weak inputs only. Add a signal, note, or profile context for stronger options."));
+          "These candidates were demoted by the anti-generic validator at high confidence — they read as broad even though real signals were available. Use them as drafts rather than as final messages."));
         r.low_context_candidates.forEach(c => lcc.append(renderCandidate(c)));
         out.append(lcc);
       }

@@ -162,23 +162,50 @@ def _score_peer_credibility(body: str, facts_used: list[str]) -> float:
 def _score_genericity(
     body: str,
     anti_generic_verdict: dict,
+    confidence_level: str = "high",
 ) -> float:
-    """Pull from the existing anti-generic verdict so the two layers agree."""
+    """Pull from the existing anti-generic verdict so the two layers agree.
+
+    At HIGH confidence we bump genericity if the anti-generic
+    specificity signals didn't fire ("could be sent to 200 people"
+    penalty). At MEDIUM we bump it less. At LOW confidence we skip
+    the bump entirely — a broad pattern-based message is expected
+    and shouldn't be double-penalized for not anchoring on a
+    specific signal that never existed.
+    """
     score = float(anti_generic_verdict.get("genericity_score") or 0.0)
-    # Bump genericity if none of the anti-generic specificity signals
-    # fired. This is the "could be sent to 200 people" penalty.
     specificity = float(anti_generic_verdict.get("specificity_score") or 0.0)
     if specificity < 0.4:
-        score = min(1.0, score + 0.2)
+        if confidence_level == "high":
+            score = min(1.0, score + 0.2)
+        elif confidence_level == "medium":
+            score = min(1.0, score + 0.1)
+        # low: no bump
     return max(0.0, min(1.0, score))
 
 
-def _verdict_from_scores(overall: float, hard_fail: bool) -> str:
+def _verdict_from_scores(
+    overall: float,
+    hard_fail: bool,
+    confidence_level: str = "high",
+) -> str:
     if hard_fail:
         return "reject"
-    if overall >= ACCEPT_THRESHOLD:
+    # Slide the accept/reject thresholds for low-confidence runs so
+    # thoughtful pattern-based messages don't get rejected purely on
+    # their lower baseline specificity score.
+    if confidence_level == "low":
+        accept = 0.45
+        reject_below = 0.25
+    elif confidence_level == "medium":
+        accept = 0.55
+        reject_below = 0.32
+    else:
+        accept = ACCEPT_THRESHOLD
+        reject_below = REJECT_THRESHOLD
+    if overall >= accept:
         return "accept"
-    if overall >= REJECT_THRESHOLD:
+    if overall >= reject_below:
         return "rewrite"
     return "reject"
 
@@ -204,12 +231,26 @@ def critique_candidate(
     anti_copy_verdict = candidate.get("anti_copy") or {}
     anti_generic_verdict = candidate.get("anti_generic") or {}
 
+    # Read the confidence level off the anti-generic verdict (which is
+    # written by the confidence-aware anti_generic_validator). Fall back
+    # to deriving from the candidate's own ``low_context`` flag or the
+    # context's ``input_quality`` if the verdict hasn't been attached
+    # yet (e.g. rewrite tests).
+    confidence_level = (
+        (anti_generic_verdict.get("confidence_level") or "").lower()
+        or (
+            (context.get("input_quality") or {}).get("confidence_level") or ""
+        ).lower()
+    )
+    if not confidence_level:
+        confidence_level = "low" if candidate.get("low_context") else "high"
+
     specificity = _score_specificity(
         body, facts_used, signal_ids, notes_used, profile_fields_used,
     )
     naturalness = _score_naturalness(body)
     insightfulness = _score_insightfulness(body, len(insights or []))
-    genericity = _score_genericity(body, anti_generic_verdict)
+    genericity = _score_genericity(body, anti_generic_verdict, confidence_level)
     pressure = _score_pressure(body)
     peer_cred = _score_peer_credibility(body, facts_used)
 
@@ -217,11 +258,26 @@ def critique_candidate(
     grounding = float(grounding_verdict.get("score") or 0.5)
 
     # Hard-fail conditions — no matter the score, we reject these.
+    # The specificity floor moves with the confidence level: on low
+    # confidence a broad but thoughtful message is acceptable; on high
+    # confidence it isn't, because real signals were available.
+    if confidence_level == "high":
+        specificity_floor = 0.15
+        genericity_ceiling = 0.7
+    elif confidence_level == "medium":
+        specificity_floor = 0.08
+        genericity_ceiling = 0.8
+    else:
+        # Low confidence: we don't hard-fail on low specificity.
+        # ``anti_copy`` + grounding + pressure still apply.
+        specificity_floor = 0.0
+        genericity_ceiling = 0.9
+
     hard_fail = bool(
         (anti_copy_verdict.get("violations") or [])
         or (grounding_verdict.get("violations") or [])
-        or genericity >= 0.7
-        or specificity < 0.15
+        or genericity >= genericity_ceiling
+        or specificity < specificity_floor
         or pressure >= 0.6
     )
 
@@ -266,8 +322,9 @@ def critique_candidate(
             "grounding": round(grounding, 3),
         },
         "overall_score": round(overall, 3),
-        "verdict": _verdict_from_scores(overall, hard_fail),
+        "verdict": _verdict_from_scores(overall, hard_fail, confidence_level),
         "hard_fail": hard_fail,
+        "confidence_level": confidence_level,
         "notes": notes,
         "source": "heuristic",
     }
@@ -305,8 +362,11 @@ def critique_candidate(
             return {
                 "scores": merged_scores,
                 "overall_score": merged_overall,
-                "verdict": _verdict_from_scores(merged_overall, hard_fail),
+                "verdict": _verdict_from_scores(
+                    merged_overall, hard_fail, confidence_level,
+                ),
                 "hard_fail": hard_fail,
+                "confidence_level": confidence_level,
                 "notes": merged_notes,
                 "source": "hybrid",
             }
