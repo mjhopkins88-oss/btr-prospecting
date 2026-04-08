@@ -162,15 +162,18 @@ def create_signal():
 
 @bp.route("/api/signalstack/generate", methods=["POST"])
 def generate_messages():
+    print("[SignalStack] /api/signalstack/generate: request received")
     data = _json_body()
     pid = data.get("prospect_id")
     if not pid:
-        return jsonify({"error": "prospect_id required"}), 400
+        return jsonify({"error": "prospect_id required", "stage": "request_validation"}), 400
     try:
         n = int(data.get("n", 4))
     except (TypeError, ValueError):
         n = 4
+    print(f"[SignalStack] /api/signalstack/generate: pid={pid} n={n}")
     try:
+        print("[SignalStack] /api/signalstack/generate: calling generator.generate")
         result = generator.generate(
             pid,
             n=n,
@@ -178,17 +181,35 @@ def generate_messages():
             strategy_override=data.get("strategy"),
             profile_override=data.get("profile"),
         )
+        print(
+            f"[SignalStack] /api/signalstack/generate: generator.generate returned "
+            f"keys={list(result.keys()) if isinstance(result, dict) else type(result).__name__}"
+        )
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify(to_json_safe({
-            "ok": False,
-            "error": "generator_crashed",
-            "message": f"Generator crashed: {e}",
-            "stage": "generator",
-            "candidates": [],
-            "rejected": [],
-        })), 200
+        print(
+            f"[SignalStack] /api/signalstack/generate: generator crashed "
+            f"stage=generator err={type(e).__name__}: {e}"
+        )
+        try:
+            return jsonify(to_json_safe({
+                "ok": False,
+                "error": "generator_crashed",
+                "message": f"Generator crashed ({type(e).__name__}): {e}",
+                "stage": "generator",
+                "candidates": [],
+                "rejected": [],
+            })), 200
+        except Exception:
+            return jsonify({
+                "ok": False,
+                "error": "generator_crashed",
+                "message": str(e),
+                "stage": "generator",
+                "candidates": [],
+                "rejected": [],
+            }), 200
 
     # Primary path: sanitize the full result before handing it to Flask.
     # ``to_json_safe`` walks the response recursively and converts any
@@ -196,12 +217,37 @@ def generate_messages():
     # primitives, so ``jsonify`` cannot explode on nested candidate
     # metadata (playbook_entries_used, knowledge_entries_used, grounding,
     # anti_copy, anti_generic, strongest_observation_used, ...).
+    print("[SignalStack] /api/signalstack/generate: sanitizing result (pre-JSON)")
     try:
         safe_result = to_json_safe(result)
-        return jsonify(safe_result)
     except Exception as e:
         import traceback
         traceback.print_exc()
+        print(
+            f"[SignalStack] /api/signalstack/generate: to_json_safe FAILED "
+            f"stage=response_sanitize err={type(e).__name__}: {e}"
+        )
+        return jsonify({
+            "ok": False,
+            "error": "serialization_failed",
+            "message": f"to_json_safe crashed ({type(e).__name__}): {e}",
+            "stage": "response_sanitize",
+            "candidates": [],
+            "rejected": [],
+        }), 200
+
+    print("[SignalStack] /api/signalstack/generate: encoding JSON response")
+    try:
+        response = jsonify(safe_result)
+        print("[SignalStack] /api/signalstack/generate: response encoded OK")
+        return response
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(
+            f"[SignalStack] /api/signalstack/generate: jsonify FAILED "
+            f"stage=response_encode err={type(e).__name__}: {e}"
+        )
         try:
             offenders = describe_unsafe(result)[:20]
             print(f"[SignalStack] unsafe fields in generator result: {offenders}")
@@ -214,8 +260,8 @@ def generate_messages():
         minimal = {
             "ok": False,
             "error": "serialization_failed",
-            "message": f"Could not serialize generator result: {e}",
-            "stage": "response_serialization",
+            "message": f"Could not encode generator result ({type(e).__name__}): {e}",
+            "stage": "response_encode",
             "candidates": [],
             "rejected": [],
         }
@@ -229,7 +275,7 @@ def generate_messages():
                 "ok": False,
                 "error": "serialization_failed",
                 "message": str(final_err),
-                "stage": "response_serialization_fallback",
+                "stage": "response_encode_fallback",
                 "candidates": [],
                 "rejected": [],
             }), 200
