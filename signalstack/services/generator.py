@@ -16,6 +16,7 @@ from typing import Optional
 from .. import repo
 from ..ai.provider import get_provider
 from ..grounding import validate_message, filter_safe_signals
+from ..knowledge import repo as knowledge_repo
 from . import strategy as strategy_engine
 from .signal_interpreter import interpret_signals
 from .anti_copy import check_message as anti_copy_check, shorten as anti_copy_shorten
@@ -62,6 +63,14 @@ def build_context(
     except Exception:
         principles = []
 
+    # Pull active knowledge entries from the dataset layer. These are
+    # strategy/style guidance — NOT prospect personalization. The
+    # generator surfaces them as tone/framing input only.
+    try:
+        knowledge_entries = knowledge_repo.list_active_entries_for_generator(limit=25)
+    except Exception:
+        knowledge_entries = []
+
     # Compress every raw signal into a short observation BEFORE the
     # generator sees it. This is the key fix for the bug where long
     # listing/post bodies were being pasted directly into messages.
@@ -75,6 +84,9 @@ def build_context(
         "notes": notes,
         "profile": profile,
         "principles": principles,
+        # Knowledge dataset entries — strategy/style guidance only.
+        # Tracked separately so we can attribute usage in metadata.
+        "knowledge_entries": knowledge_entries,
     }
 
 
@@ -174,6 +186,25 @@ def generate(
         if prof.get(k):
             raw_sources.append(prof[k])
 
+    # Pre-compute the active knowledge entries used as strategy guidance
+    # for this generation run. Every candidate inherits the same set
+    # because knowledge is generation-context, not personalization.
+    knowledge_entries = context.get("knowledge_entries") or []
+    knowledge_entry_summaries = [
+        {
+            "id": e.get("id"),
+            "source_id": e.get("source_id"),
+            "category": e.get("category"),
+            "principle_name": e.get("principle_name"),
+            "confidence": e.get("confidence"),
+        }
+        for e in knowledge_entries
+    ]
+    knowledge_source_ids_used = sorted({
+        e.get("source_id") for e in knowledge_entries if e.get("source_id")
+    })
+    knowledge_entry_ids_used = [e.get("id") for e in knowledge_entries if e.get("id")]
+
     candidates, rejected, low_context_candidates = [], [], []
     for cand in raw or []:
         body = cand.get("body", "") or ""
@@ -252,6 +283,12 @@ def generate(
             (distilled[0]["text"] if distilled else None)
         )
 
+        # Attribute knowledge usage. Knowledge entries are NOT prospect
+        # personalization — they shape tone, framing, and angle choice.
+        cand["knowledge_entries_used"] = knowledge_entry_summaries
+        cand["knowledge_source_ids_used"] = knowledge_source_ids_used
+        cand["knowledge_entry_ids_used"] = knowledge_entry_ids_used
+
         playbook_clean = not leaked
         ok = verdict["ok"] and anti["passes_anti_copy_check"] and playbook_clean
         if not anti["passes_anti_copy_check"]:
@@ -285,6 +322,13 @@ def generate(
             "note_count": len(context.get("notes") or []),
             "has_profile": bool(context.get("profile")),
             "principle_count": len(context.get("principles") or []),
+            "knowledge_entry_count": len(knowledge_entries),
+            "knowledge_source_count": len(knowledge_source_ids_used),
+        },
+        "knowledge": {
+            "entries": knowledge_entry_summaries,
+            "source_ids_used": knowledge_source_ids_used,
+            "entry_ids_used": knowledge_entry_ids_used,
         },
         "input_quality": {
             "input_quality_score": quality["input_quality_score"],
@@ -362,6 +406,9 @@ def save_draft(prospect_id: str, candidate: dict) -> dict:
                 "angle": candidate.get("angle"),
                 "playbook_entries_used": candidate.get("playbook_entries_used") or [],
                 "playbook_reasoning": candidate.get("playbook_reasoning"),
+                "knowledge_entries_used": candidate.get("knowledge_entries_used") or [],
+                "knowledge_source_ids_used": candidate.get("knowledge_source_ids_used") or [],
+                "knowledge_entry_ids_used": candidate.get("knowledge_entry_ids_used") or [],
             },
         })
     except Exception as e:

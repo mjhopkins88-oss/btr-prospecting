@@ -91,6 +91,44 @@ MESSAGE_OUTCOMES = (
     "negative",
 )
 
+# --- Knowledge dataset layer ---
+KNOWLEDGE_SOURCE_TYPES = (
+    "youtube_video",
+    "article",
+    "note",
+    "playbook",
+    "transcript",
+    "framework",
+    "manual_entry",
+    "podcast",
+    "other",
+)
+
+KNOWLEDGE_EXTRACTION_STATUS = (
+    "RAW",
+    "EXTRACTED",
+    "REVIEWED",
+    "ARCHIVED",
+)
+
+KNOWLEDGE_ENTRY_CATEGORIES = (
+    "trust_building",
+    "curiosity",
+    "relevance",
+    "specificity",
+    "social_proof",
+    "timing",
+    "objection_softening",
+    "conversational_tone",
+    "authority_without_chest_beating",
+    "anti_template",
+    "framing",
+    "outreach_angle",
+    "industry_pattern",
+    "tone",
+    "other",
+)
+
 
 def validate(value: str, allowed: tuple, field: str) -> str:
     if value is None:

@@ -67,6 +67,7 @@
     <a data-route="/companies">Companies</a>
     <a data-route="/generator">Generator</a>
     <a data-route="/messages">Messages</a>
+    <a data-route="/knowledge">Knowledge</a>
     <a data-route="/settings">Settings</a>
   </nav>
 </header>
@@ -120,6 +121,9 @@ const routes = {
   "/companies/:id": viewCompany,
   "/generator": viewGenerator,
   "/messages": viewMessages,
+  "/knowledge": viewKnowledgeList,
+  "/knowledge/new": viewKnowledgeNew,
+  "/knowledge/:id": viewKnowledgeDetail,
   "/settings": viewSettings,
 };
 
@@ -473,6 +477,14 @@ async function viewGenerator() {
           "Playbook entries used: " +
           c.playbook_entries_used.map(e => "["+e.category+"] "+e.title).join(" • ")));
       }
+      if ((c.knowledge_entries_used||[]).length) {
+        const used = c.knowledge_entries_used;
+        const sample = used.slice(0,4).map(e => "["+e.category+"] "+e.principle_name).join(" • ");
+        const more = used.length > 4 ? " (+"+(used.length-4)+" more)" : "";
+        wrap.append(h("div",{class:"muted"},
+          "Knowledge dataset: " + sample + more +
+          "  · " + (c.knowledge_source_ids_used||[]).length + " sources"));
+      }
       if (c.playbook_reasoning) {
         wrap.append(h("div",{class:"muted"},"Why: "+c.playbook_reasoning));
       }
@@ -530,6 +542,322 @@ async function viewMessages() {
   v.append(h("div",{class:"card"},tbl));
 }
 
+// ----------------- Knowledge Dataset -----------------
+
+function _ksTypeLabel(t) {
+  return ({
+    youtube_video: "YouTube",
+    article: "Article",
+    note: "Note",
+    playbook: "Playbook",
+    transcript: "Transcript",
+    framework: "Framework",
+    manual_entry: "Manual",
+    podcast: "Podcast",
+    other: "Other",
+  })[t] || t;
+}
+
+async function viewKnowledgeList() {
+  const v = $("#view");
+  v.append(h("h2",{},"Knowledge dataset"));
+  v.append(h("div",{class:"muted mb"},
+    "Reusable strategy/style/angle knowledge. Videos, articles, " +
+    "notes, podcasts, frameworks, playbooks. Used by the generator " +
+    "for tone and framing — never as prospect personalization."));
+
+  // Stats row
+  const statsWrap = h("div",{class:"grid"});
+  v.append(statsWrap);
+  try {
+    const s = await api("/knowledge/stats");
+    const stat = (l,n) => statsWrap.append(h("div",{class:"stat"},
+      h("div",{class:"n"}, String(n)), h("div",{class:"l"}, l)));
+    stat("Total sources", s.total_sources);
+    stat("Active sources", s.active_sources);
+    stat("Extracted entries", s.total_entries);
+    stat("Videos", s.videos);
+    stat("Articles", s.articles);
+    stat("Notes", (s.notes||0) + (s.manual_entries||0));
+    stat("Podcasts", s.podcasts);
+    stat("Playbooks", s.playbooks);
+  } catch (e) {
+    statsWrap.append(h("div",{class:"card"},"Stats unavailable: "+e.message));
+  }
+
+  // Toolbar: add + filters
+  const tools = h("div",{class:"card"});
+  const top = h("div",{class:"row"});
+  const addBtn = h("button",{}, "Add source");
+  addBtn.onclick = () => location.hash = "#/knowledge/new";
+  const search = h("input",{placeholder:"search title / summary / notes…"});
+
+  const typeSel = h("select");
+  typeSel.append(h("option",{value:""},"All types"));
+  (META.knowledge_source_types||[]).forEach(t =>
+    typeSel.append(h("option",{value:t}, _ksTypeLabel(t))));
+
+  const activeSel = h("select");
+  ["all","active","inactive"].forEach(s => activeSel.append(h("option",{value:s}, s)));
+
+  const statusSel = h("select");
+  statusSel.append(h("option",{value:""},"Any status"));
+  (META.knowledge_extraction_status||[]).forEach(s =>
+    statusSel.append(h("option",{value:s}, s)));
+
+  const tagInput = h("input",{placeholder:"tag…"});
+
+  top.append(
+    h("div",{}, h("label",{},"Add"), addBtn),
+    h("div",{}, h("label",{},"Search"), search),
+    h("div",{}, h("label",{},"Type"), typeSel),
+    h("div",{}, h("label",{},"Active"), activeSel),
+    h("div",{}, h("label",{},"Status"), statusSel),
+    h("div",{}, h("label",{},"Tag"), tagInput),
+  );
+  tools.append(top);
+  v.append(tools);
+
+  // Source table
+  const listCard = h("div",{class:"card"});
+  v.append(listCard);
+
+  async function reload() {
+    const params = new URLSearchParams();
+    if (search.value) params.set("q", search.value);
+    if (typeSel.value) params.set("source_type", typeSel.value);
+    if (activeSel.value && activeSel.value !== "all") params.set("active", activeSel.value === "active" ? "true" : "false");
+    if (statusSel.value) params.set("extraction_status", statusSel.value);
+    if (tagInput.value) params.set("tag", tagInput.value);
+    let items = [];
+    try { items = await api("/knowledge/sources?" + params.toString()); }
+    catch (e) { listCard.innerHTML = ""; listCard.append("Error: "+e.message); return; }
+    listCard.innerHTML = "";
+    if (!items.length) {
+      listCard.append(h("div",{class:"muted"},"No knowledge sources match these filters yet."));
+      return;
+    }
+    const tbl = h("table");
+    tbl.append(h("tr",{},
+      h("th",{},"Title"),
+      h("th",{},"Type"),
+      h("th",{},"Status"),
+      h("th",{},"Active"),
+      h("th",{},"Entries"),
+      h("th",{},"Tags"),
+      h("th",{},"Created"),
+      h("th",{},"Actions"),
+    ));
+    items.forEach(s => {
+      const tr = h("tr");
+      const titleCell = h("td",{},
+        h("a",{href:"#/knowledge/"+s.id}, s.title||"(untitled)"),
+        s.source_url ? h("div",{class:"muted",style:"font-size:11px"}, s.source_url) : null,
+      );
+      tr.append(titleCell);
+      tr.append(h("td",{}, h("span",{class:"pill"}, _ksTypeLabel(s.source_type))));
+      tr.append(h("td",{}, h("span",{class:"pill " + (s.extraction_status==="EXTRACTED"?"good":(s.extraction_status==="ARCHIVED"?"bad":"warn"))}, s.extraction_status||"RAW")));
+      tr.append(h("td",{}, h("span",{class:"pill " + (s.active?"good":"bad")}, s.active?"yes":"no")));
+      tr.append(h("td",{}, String(s.entry_count||0)));
+      tr.append(h("td",{}, (s.tags||[]).map(t => h("span",{class:"pill"},t))));
+      tr.append(h("td",{}, (s.created_at||"").slice(0,10)));
+      const view = h("a",{href:"#/knowledge/"+s.id},"View");
+      const ext = h("a",{},"Extract");
+      ext.onclick = async (ev) => {
+        ev.preventDefault();
+        ext.textContent = "Extracting…";
+        try { await api("/knowledge/sources/"+s.id+"/extract",{method:"POST"}); reload(); }
+        catch (e) { ext.textContent = "Failed"; }
+      };
+      const arch = h("a",{},"Archive");
+      arch.onclick = async (ev) => {
+        ev.preventDefault();
+        if (!confirm("Archive this source?")) return;
+        try { await api("/knowledge/sources/"+s.id+"/archive",{method:"POST"}); reload(); }
+        catch (e) { alert("Failed: "+e.message); }
+      };
+      tr.append(h("td",{}, view, " · ", ext, " · ", arch));
+      tbl.append(tr);
+    });
+    listCard.append(tbl);
+  }
+  search.oninput = reload;
+  typeSel.onchange = reload;
+  activeSel.onchange = reload;
+  statusSel.onchange = reload;
+  tagInput.oninput = reload;
+  reload();
+}
+
+async function viewKnowledgeNew() {
+  const v = $("#view");
+  v.append(h("h2",{},"Add knowledge source"));
+  v.append(h("div",{class:"muted mb"},
+    "Save a video, article, podcast, note, framework, or playbook. " +
+    "Optionally extract structured knowledge entries from the source text."));
+
+  const card = h("div",{class:"card"});
+  const title = h("input",{placeholder:"Title"});
+  const typeSel = h("select");
+  (META.knowledge_source_types||[]).forEach(t =>
+    typeSel.append(h("option",{value:t}, _ksTypeLabel(t))));
+  typeSel.value = "manual_entry";
+  const url = h("input",{placeholder:"Source URL (optional)"});
+  const summary = h("textarea",{placeholder:"Summary (optional)"});
+  const raw = h("textarea",{placeholder:"Pasted source text / transcript / article body"});
+  const notes = h("textarea",{placeholder:"Notes (optional)"});
+  const tags = h("input",{placeholder:"tags (comma separated)"});
+  const active = h("input",{type:"checkbox"}); active.checked = true;
+  const activeWrap = h("label",{}, active, " active and usable in generation");
+
+  card.append(h("label",{},"Title"), title);
+  card.append(h("div",{class:"row"},
+    h("div",{}, h("label",{},"Source type"), typeSel),
+    h("div",{}, h("label",{},"Source URL"), url),
+  ));
+  card.append(h("label",{},"Summary"), summary);
+  card.append(h("label",{},"Source text / transcript"), raw);
+  card.append(h("label",{},"Notes"), notes);
+  card.append(h("label",{},"Tags"), tags);
+  card.append(activeWrap);
+
+  const saveBtn = h("button",{},"Save source");
+  const saveExtractBtn = h("button",{},"Save and extract knowledge");
+  saveExtractBtn.style.marginLeft = "8px";
+  card.append(h("div",{class:"mb"}, saveBtn, saveExtractBtn));
+  v.append(card);
+
+  function payload() {
+    return {
+      title: title.value.trim(),
+      source_type: typeSel.value,
+      source_url: url.value.trim() || null,
+      raw_text: raw.value || null,
+      summary: summary.value || null,
+      notes: notes.value || null,
+      tags: tags.value || "",
+      active: active.checked,
+    };
+  }
+
+  saveBtn.onclick = async () => {
+    const p = payload();
+    if (!p.title) return alert("Title is required.");
+    try {
+      const created = await api("/knowledge/sources",{method:"POST", body: p});
+      location.hash = "#/knowledge/"+created.id;
+    } catch (e) { alert("Save failed: "+e.message); }
+  };
+  saveExtractBtn.onclick = async () => {
+    const p = payload();
+    if (!p.title) return alert("Title is required.");
+    p.extract_after_save = true;
+    saveExtractBtn.disabled = true;
+    saveExtractBtn.textContent = "Saving + extracting…";
+    try {
+      const created = await api("/knowledge/sources",{method:"POST", body: p});
+      location.hash = "#/knowledge/"+created.id;
+    } catch (e) {
+      saveExtractBtn.disabled = false;
+      saveExtractBtn.textContent = "Save and extract knowledge";
+      alert("Save failed: "+e.message);
+    }
+  };
+}
+
+async function viewKnowledgeDetail({id}) {
+  const v = $("#view");
+  let s;
+  try { s = await api("/knowledge/sources/"+id); }
+  catch (e) { v.append(h("div",{class:"card"},"Error: "+e.message)); return; }
+
+  v.append(h("h2",{}, s.title || "(untitled)"));
+  v.append(h("div",{class:"muted mb"},
+    _ksTypeLabel(s.source_type)+" • "+s.extraction_status+" • created "+(s.created_at||"").slice(0,10)));
+
+  // Source detail card
+  const src = h("div",{class:"card"});
+  src.append(h("h2",{},"Source"));
+  if (s.source_url) src.append(h("div",{class:"mb"},
+    h("span",{class:"muted"},"URL: "), h("a",{href:s.source_url, target:"_blank"}, s.source_url)));
+  if (s.tags && s.tags.length) src.append(h("div",{class:"mb"},
+    (s.tags||[]).map(t => h("span",{class:"pill"},t))));
+  if (s.summary) {
+    src.append(h("div",{class:"mb"}, h("label",{},"Summary"), h("pre",{}, s.summary)));
+  }
+  if (s.notes) {
+    src.append(h("div",{class:"mb"}, h("label",{},"Notes"), h("pre",{}, s.notes)));
+  }
+  if (s.raw_text) {
+    src.append(h("div",{class:"mb"}, h("label",{},"Raw text"), h("pre",{}, s.raw_text)));
+  }
+
+  // Toggle active
+  const toggle = h("button",{class:"ghost"}, s.active ? "Deactivate" : "Activate");
+  toggle.onclick = async () => {
+    try {
+      await api("/knowledge/sources/"+id, {method:"PATCH", body: {active: !s.active}});
+      render();
+    } catch (e) { alert("Failed: "+e.message); }
+  };
+  const extract = h("button",{}, "Re-run extraction");
+  extract.onclick = async () => {
+    extract.disabled = true; extract.textContent = "Extracting…";
+    try { await api("/knowledge/sources/"+id+"/extract", {method:"POST"}); render(); }
+    catch (e) { extract.disabled = false; extract.textContent = "Re-run extraction"; alert("Failed: "+e.message); }
+  };
+  const arch = h("button",{class:"ghost"}, "Archive");
+  arch.onclick = async () => {
+    if (!confirm("Archive this source?")) return;
+    try { await api("/knowledge/sources/"+id+"/archive",{method:"POST"}); location.hash = "#/knowledge"; }
+    catch (e) { alert("Failed: "+e.message); }
+  };
+  const back = h("a",{href:"#/knowledge", class:""},"← back to dataset");
+  src.append(h("div",{class:"row"}, toggle, extract, arch));
+  src.append(h("div",{class:"mb"}, back));
+  v.append(src);
+
+  // Entries
+  const entries = s.entries || [];
+  const ec = h("div",{class:"card"});
+  ec.append(h("h2",{},"Extracted knowledge entries ("+entries.length+")"));
+  if (!entries.length) {
+    ec.append(h("div",{class:"muted"},"No entries yet. Click 'Re-run extraction' above to generate starter entries from the source text."));
+  }
+  entries.forEach(e => {
+    const wrap = h("div",{class:"candidate mb"});
+    wrap.append(h("div",{},
+      h("span",{class:"pill"}, e.category),
+      " ",
+      h("strong",{}, e.principle_name),
+      " ",
+      h("span",{class:"pill " + (e.active?"good":"bad")}, e.active?"active":"inactive"),
+      " ",
+      h("span",{class:"muted"}, "conf "+(e.confidence||0).toFixed(2)),
+    ));
+    if (e.description) wrap.append(h("div",{class:"muted"}, e.description));
+    if (e.practical_use_case) wrap.append(h("div",{class:"muted"}, "Use case: "+e.practical_use_case));
+    if (e.example_pattern) wrap.append(h("div",{class:"muted"}, "Example: "+e.example_pattern));
+    if (e.anti_pattern) wrap.append(h("div",{class:"muted"}, "Anti-pattern: "+e.anti_pattern));
+    const toggleE = h("a",{}, e.active ? "Deactivate" : "Activate");
+    toggleE.onclick = async (ev) => {
+      ev.preventDefault();
+      try { await api("/knowledge/entries/"+e.id, {method:"PATCH", body:{active: !e.active}}); render(); }
+      catch (err) { alert("Failed: "+err.message); }
+    };
+    const delE = h("a",{}, "Delete");
+    delE.onclick = async (ev) => {
+      ev.preventDefault();
+      if (!confirm("Delete this entry?")) return;
+      try { await api("/knowledge/entries/"+e.id, {method:"DELETE"}); render(); }
+      catch (err) { alert("Failed: "+err.message); }
+    };
+    wrap.append(h("div",{class:"mb"}, toggleE, " · ", delE));
+    ec.append(wrap);
+  });
+  v.append(ec);
+}
+
 async function viewSettings() {
   const v = $("#view");
   v.append(h("h2",{},"Settings"));
@@ -537,6 +865,12 @@ async function viewSettings() {
     h("p",{},"AI provider: ", h("code",{},"mock"),
       " (set ", h("code",{},"SIGNALSTACK_AI_PROVIDER=claude"), " to swap when wired)."),
     h("p",{class:"muted"},"Prompt templates live in signalstack/ai/prompts/. Edit and redeploy.")));
+  v.append(h("div",{class:"card"},
+    h("h2",{},"Knowledge dataset"),
+    h("p",{class:"muted"},
+      "Manage the reusable strategy/style knowledge layer. " +
+      "Videos, articles, notes, podcasts, playbooks, frameworks."),
+    h("a",{href:"#/knowledge"},"Open Knowledge dataset →")));
 }
 
 render();
