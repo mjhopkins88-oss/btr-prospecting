@@ -205,6 +205,64 @@ def _compose_from_thought(angle: str, first: str, thought_text: str) -> str:
     )
 
 
+def _compose_from_thought_by_style(
+    style_mode: str,
+    first: str,
+    thought_text: str,
+) -> str:
+    """
+    Style-mode-aware composer. Builds a short message using the
+    pacing + voice rules of a specific style mode so two options
+    generated in the same request land in genuinely different
+    voices, not just different angle names.
+
+    The thought text is the single source of truth — we do not
+    stitch in profile keywords or raw signal text. We only wrap it
+    with a lead-in / close-out that matches the style mode.
+    """
+    t = (thought_text or "").strip().rstrip(".")
+    if not t:
+        return (
+            f"Hey {first} — no agenda, just opening a line. "
+            f"Curious what you're watching right now."
+        )
+    # Drop any "Hi/Hey X —" greeting the thought carried.
+    t = re.sub(r"^(hi|hey)\s+\w+\s*[—-]\s*", "", t, flags=re.IGNORECASE)
+
+    if style_mode == "curious_insider":
+        # Short observation -> single real question -> stop.
+        return (
+            f"Hey {first} — {t}. "
+            f"Is that how it's lining up from where you sit?"
+        )
+    if style_mode == "quiet_contrarian":
+        # Default read -> contrast -> soft pushback invitation.
+        return (
+            f"Hi {first} — the easy read is the obvious one, but "
+            f"my take is {t}. Tell me I'm reading it wrong."
+        )
+    if style_mode == "pattern_spotter":
+        # Plural observation -> interpretation -> compare-notes ask.
+        return (
+            f"Hi {first} — pattern I keep noticing across similar "
+            f"desks: {t}. Does that track with what you're seeing?"
+        )
+    if style_mode == "low_ego_peer":
+        # Soft observation -> understated thought -> no-ask close.
+        return (
+            f"Hey {first} — no real agenda here, {t}. Just wanted "
+            f"to open a line in case it's useful down the road."
+        )
+    if style_mode == "sharp_operator":
+        # One-line interpretation -> short peer ask.
+        return (
+            f"Hi {first} — my read right now is {t}. "
+            f"Curious whether that matches your side of the table."
+        )
+    # Fallback: plain peer voice.
+    return f"Hey {first} — {t}. Curious how you're reading it."
+
+
 def _compose_hypothesis(angle: str, first: str, hypothesis_text: str) -> str:
     """
     Build a low-confidence opener anchored on a context_expansion
@@ -343,15 +401,27 @@ class MockAiProvider:
         for i, spec in enumerate(strategies[:n]):
             anchor_text, src = anchors[i % len(anchors)]
             angle = spec.get("angle") or "curiosity"
+            style_mode = spec.get("style_mode")
+            psychology_angle = spec.get("psychology_angle")
             # Prefer composing from an internal thought when available.
             # The thought is already in peer voice and stripped of CRM
             # tag stacks, so the composer can wrap it directly without
             # touching the profile or the raw signal text.
+            #
+            # When a style mode has been assigned by the planner, use
+            # the style-mode-aware composer so two options in the same
+            # request land in DIFFERENT voices — not just different
+            # angle names.
             thought = None
             if internal_thoughts:
                 thought = internal_thoughts[i % len(internal_thoughts)]
             if thought and thought.get("text"):
-                body = _compose_from_thought(angle, first, thought.get("text"))
+                if style_mode:
+                    body = _compose_from_thought_by_style(
+                        style_mode, first, thought.get("text"),
+                    )
+                else:
+                    body = _compose_from_thought(angle, first, thought.get("text"))
             elif src.get("is_hypothesis"):
                 # Hypothesis-anchored: use the dedicated low-confidence
                 # composer so we preserve the "likely / possibly" framing.
@@ -407,6 +477,21 @@ class MockAiProvider:
                 rationale_tail = "no_anchor"
                 message_basis = "hypothesis_based"
 
+            # Build the product-spec output fields directly. These are
+            # ALSO set downstream by the generator via
+            # _decorate_candidate_with_output_format, but setting them
+            # here means the mock provider's raw output is already in
+            # the new shape and consumers that read straight from the
+            # provider see the same structure.
+            thought_text = (thought or {}).get("text") if thought else None
+            thought_id = (thought or {}).get("id") if thought else None
+            thought_type = (thought or {}).get("thought_type") if thought else None
+            why_it_works = (
+                f"Voice: {style_mode or 'peer'}. "
+                f"Lever: {psychology_angle or 'curiosity'}. "
+                f"Thought type: {thought_type or 'pattern_recognition'}."
+            )
+
             results.append({
                 "observation": {
                     "summary": obs.get("summary"),
@@ -414,8 +499,16 @@ class MockAiProvider:
                     "signal_id": obs.get("signal_id"),
                 } if obs else None,
                 "body": body,
+                "final_message": body,
+                "thought": thought_text,
+                "thought_id": thought_id,
+                "thought_type": thought_type,
+                "psychology_angle": psychology_angle,
+                "style_mode": style_mode,
+                "why_it_works": why_it_works,
                 "rationale": (
-                    f"Angle: {angle}. Grounded in {rationale_tail}"
+                    f"Angle: {angle}. Style: {style_mode or 'default'}. "
+                    f"Grounded in {rationale_tail}"
                     + (f". Instruction: {instruction!r}." if instruction else ".")
                 ),
                 "angle": angle,
@@ -584,6 +677,7 @@ def _summarize_context_for_prompt(context: dict) -> dict:
                 "id": t.get("id"),
                 "based_on_insight_id": t.get("based_on_insight_id"),
                 "text": t.get("text"),
+                "thought_type": t.get("thought_type") or t.get("angle_hint"),
                 "angle_hint": t.get("angle_hint"),
             }
             for t in internal_thoughts[:5]

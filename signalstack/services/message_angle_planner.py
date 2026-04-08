@@ -5,12 +5,32 @@ Selects 3–5 *distinct* angles for a single generation request. Each
 generated message option must use a different angle so we stop shipping
 "3 minor rewrites of the same line".
 
+In addition to the older "angle" axis (curiosity, market_pattern, etc)
+the planner now also assigns:
+
+  * a ``style_mode`` from ``style_modes.STYLE_MODES`` — the voice the
+    message is written in (curious_insider, quiet_contrarian,
+    pattern_spotter, low_ego_peer, sharp_operator).
+  * a ``psychology_angle`` drawn from the style mode's allowed list —
+    the single ethical lever the message is allowed to lean on.
+
+Style modes are rotated across the returned strategies so two
+options NEVER land in the same voice. This is the fix for the
+long-standing failure mode where the generator produced 4 options
+that shared the same rhythm and opener.
+
 This sits on top of the older strategy engine but is the canonical
 source of truth for angle selection going forward.
 """
 from __future__ import annotations
 
 from typing import Optional
+
+from .style_modes import (
+    STYLE_MODES,
+    default_psychology_for,
+    rotate_style_modes,
+)
 
 ANGLES = [
     {
@@ -153,13 +173,37 @@ def plan(
         order = {a: i for i, a in enumerate(playbook_preferred_angles)}
         candidates.sort(key=lambda a: order.get(a["angle"], 99))
 
+    # Rotate through the full set of style modes so every returned
+    # strategy carries a DIFFERENT voice mode. The starting offset is
+    # derived from the strongest signal type so two consecutive
+    # generations on related prospects don't always land in the same
+    # mode order.
+    strongest_type = (quality.get("strongest_available_signal") or {}).get("type") or ""
+    start_index = sum(ord(c) for c in strongest_type) % len(STYLE_MODES)
+    rotated_modes = rotate_style_modes(n, start_index=start_index)
+
     out: list[dict] = []
-    seen = set()
+    seen: set[str] = set()
     for spec in candidates:
         if spec["angle"] in seen:
             continue
         merged = {**spec, **{k: v for k, v in override.items() if v}}
         merged["modifiers"] = override.get("modifiers") or []
+
+        # Assign a style mode + psychology angle. Every option gets
+        # a distinct mode (rotation), and the psychology angle is
+        # chosen from the mode's allowed list so the voice and lever
+        # are internally consistent.
+        idx = len(out)
+        mode_spec = rotated_modes[idx % len(rotated_modes)]
+        merged["style_mode"] = mode_spec["mode"]
+        merged["style_mode_description"] = mode_spec["description"]
+        merged["style_mode_guidelines"] = list(
+            mode_spec.get("voice_guidelines") or []
+        )
+        merged["style_mode_pacing"] = mode_spec.get("pacing")
+        merged["psychology_angle"] = default_psychology_for(mode_spec["mode"])
+
         out.append(merged)
         seen.add(spec["angle"])
         if len(out) >= n:
