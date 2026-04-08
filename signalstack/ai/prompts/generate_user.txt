@@ -1,5 +1,12 @@
 Draft {n} distinct LinkedIn outreach options for this prospect.
 
+You are writing AS this operator:
+{sender_persona_line}
+
+Full sender persona (identity + strengths + market context + hard
+bans) — never treat any of this as prospect personalization:
+{sender_persona_block}
+
 CONFIDENCE_LEVEL: {confidence_level}
 
 ====================================================================
@@ -34,6 +41,14 @@ HARD BANS — never produce any of these
 - Fake scarcity or reverse-psychology gimmicks.
 - Performative contrarianism — disagreement has to be earned, not
   theatrical.
+- Anything that reads like a broker, an SDR, or a vendor pitch.
+  You are a market participant who sees many deals, not a
+  salesperson asking for time.
+- Any mention of selling insurance, pricing, quotes, or "I run an
+  insurance program" — the sender deliberately does NOT pitch
+  early. The partnership angle is carried by POV and pattern,
+  never by stating the role.
+- Any ask for a call, meeting, or quick chat.
 
 ====================================================================
 MESSAGE STRUCTURE (use unless the style mode needs otherwise)

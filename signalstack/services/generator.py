@@ -14,6 +14,7 @@ Fixes vs. previous version:
 from typing import Optional
 
 from .. import repo
+from .. import sender_persona as sender_persona_module
 from ..ai.provider import get_provider
 from ..grounding import validate_message, filter_safe_signals
 from ..knowledge import repo as knowledge_repo
@@ -345,6 +346,24 @@ def build_context(
     # listing/post bodies were being pasted directly into messages.
     observations = interpret_signals(signals)
 
+    # Sender persona — the operator these messages are written FROM.
+    # Attached to the context so every downstream stage (insight
+    # engine, thought translator, message generator, critic) sees
+    # the same identity and can shape voice, angle selection, and
+    # anti-pattern checks around the sender's real seat.
+    #
+    # IMPORTANT: the persona describes the SENDER, not the prospect.
+    # It is never treated as prospect personalization — nothing in
+    # here may be used to claim facts about the recipient.
+    try:
+        sender_persona = sender_persona_module.get_sender_persona()
+    except Exception as e:
+        print(
+            f"[SignalStack] build_context: sender_persona load FAILED — "
+            f"continuing with empty persona: {type(e).__name__}: {e}"
+        )
+        sender_persona = {}
+
     ctx: dict = {
         "prospect": prospect,
         "company": company,
@@ -356,6 +375,9 @@ def build_context(
         # Knowledge dataset entries — strategy/style guidance only.
         # Tracked separately so we can attribute usage in metadata.
         "knowledge_entries": knowledge_entries,
+        # Sender persona (Alkeme BTR insurance program director by
+        # default; overridable via SIGNALSTACK_SENDER_PERSONA_JSON).
+        "sender_persona": sender_persona,
     }
 
     # Context expansion: infer a likely operating context and produce

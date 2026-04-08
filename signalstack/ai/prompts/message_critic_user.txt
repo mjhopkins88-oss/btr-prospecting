@@ -1,5 +1,12 @@
 Critique this draft message.
 
+SENDER (the draft must sound like this operator — never treat any
+of this as prospect personalization):
+{sender_persona_line}
+
+Full sender persona:
+{sender_persona_block}
+
 DRAFT BODY:
 {body}
 
