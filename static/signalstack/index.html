@@ -874,6 +874,90 @@ async function viewGenerator() {
         out.append(h("div",{class:"card"}, r.message || r.error));
         return;
       }
+
+      // ---- Pipeline summary / provider + stages + degradation flags ----
+      const pipelineCard = h("div",{class:"card"});
+      pipelineCard.append(h("h2",{},"Pipeline"));
+      const provLine = "Provider: " + (r.provider || "?") +
+        (r.minimal_mode ? " • minimal mode" : "") +
+        (r.insight_source ? " • insights: " + r.insight_source : "") +
+        (r.insight_error ? " • insight_error: " + r.insight_error : "");
+      pipelineCard.append(h("div",{class:"muted"}, provLine));
+      if (r.warning) {
+        pipelineCard.append(h("div",{class:"muted", style:"color:var(--warn)"}, r.warning));
+      }
+      if (r.stages) {
+        const degraded = Object.entries(r.stages)
+          .filter(([k,v]) => typeof v === "string" && (v.includes("failed") || v.includes("degraded") || v.includes("skipped")))
+          .map(([k,v]) => k+"="+v);
+        if (degraded.length) {
+          pipelineCard.append(h("div",{class:"muted"}, "Non-OK stages: " + degraded.join(", ")));
+        }
+        const cs = r.stages.candidate_validation_summary;
+        if (cs) {
+          pipelineCard.append(h("div",{class:"muted"},
+            "Validation: raw="+cs.raw+" accepted="+cs.accepted+" low_context="+cs.low_context+" rejected="+cs.rejected));
+        }
+        const ms = r.stages.message_critic_summary;
+        if (ms) {
+          pipelineCard.append(h("div",{class:"muted"},
+            "Critic: accepted="+(ms.accepted||0)+" rewrite="+(ms.rewrite||0)+" rejected="+(ms.rejected||0)));
+        }
+      }
+      // Input quality summary
+      if (r.input_quality) {
+        const iq = r.input_quality;
+        pipelineCard.append(h("div",{class:"muted"},
+          "Input quality tier "+iq.tier+" ("+iq.input_quality_score+") • strongest signal: "+
+          (iq.strongest_signal_type||"none")+
+          " • strongest observation: "+(iq.strongest_observation||"none")));
+      }
+      out.append(pipelineCard);
+
+      // ---- Observations ----
+      if ((r.distilled_observations||[]).length) {
+        const obsCard = h("div",{class:"card"});
+        obsCard.append(h("h2",{},"Observations"));
+        r.distilled_observations.forEach(o => {
+          obsCard.append(h("div",{class:"mb"},
+            h("div",{}, o.text),
+            h("div",{class:"muted"},
+              "[" + (o.source||"?") + "] strength: " + (o.strength||"?")),
+          ));
+        });
+        out.append(obsCard);
+      }
+
+      // ---- Insights ----
+      if ((r.insights||[]).length) {
+        const insCard = h("div",{class:"card"});
+        insCard.append(h("h2",{},"Insights"));
+        r.insights.forEach(i => {
+          insCard.append(h("div",{class:"mb"},
+            h("div",{}, i.text),
+            h("div",{class:"muted"},
+              "[" + (i.type||"?") + "] confidence: " + (i.confidence||"?") +
+              " • source: " + (i.source||"heuristic")),
+          ));
+        });
+        out.append(insCard);
+      }
+
+      // ---- Strategies chosen ----
+      if ((r.strategies||[]).length) {
+        const stCard = h("div",{class:"card"});
+        stCard.append(h("h2",{},"Strategies selected"));
+        r.strategies.forEach(s => {
+          stCard.append(h("div",{class:"mb"},
+            h("div",{}, s.angle + " • " + (s.message_type||"?") + " • " + (s.primary_trigger||"?")),
+            (s.reasons && s.reasons.length)
+              ? h("div",{class:"muted"}, "why: " + s.reasons.join(", "))
+              : null,
+          ));
+        });
+        out.append(stCard);
+      }
+
       const okCard = h("div",{class:"card"});
       okCard.append(h("h2",{},"Candidates"));
       if (r.playbook && r.playbook.name) {
@@ -899,16 +983,28 @@ async function viewGenerator() {
         okCard.append(h("div",{class:"muted"},
           "No candidates were generated. Add a signal, note, headline, featured topics, or paste profile/about text so the generator has something concrete to anchor on."));
       }
-      (r.candidates||[]).forEach(c => {
+      const renderCandidate = (c) => {
       const wrap = h("div",{class:"candidate mb"});
       wrap.append(h("pre",{},c.body));
       const ac = c.anti_copy || {};
       wrap.append(h("div",{class:"muted"},
         c.message_type+" • "+c.primary_trigger
-        +" • grounding "+c.grounding.score
+        +" • grounding "+(c.grounding && c.grounding.score)
         +" • "+(ac.char_count||c.body.length)+" chars"
         +" • overlap "+(ac.raw_source_overlap_score ?? 0)
         +(ac.passes_anti_copy_check===false ? " • COPY-FAIL" : "")));
+      if (c.critique) {
+        const cr = c.critique;
+        const s = cr.scores || {};
+        wrap.append(h("div",{class:"muted"},
+          "Critique: "+cr.verdict+" ("+cr.overall_score+") • "+
+          "spec "+(s.specificity||0)+" • natural "+(s.naturalness||0)+" • "+
+          "insight "+(s.insightfulness||0)+" • generic "+(s.genericity||0)+" • "+
+          "peer "+(s.peer_credibility||0)));
+        if ((cr.notes||[]).length) {
+          wrap.append(h("div",{class:"muted"}, "Critic notes: "+cr.notes.join(", ")));
+        }
+      }
       if (c.observation && c.observation.safe_reference_text) {
         wrap.append(h("div",{class:"muted"},
           "Observation: "+c.observation.safe_reference_text));
@@ -916,6 +1012,12 @@ async function viewGenerator() {
       wrap.append(h("div",{class:"muted"},"Rationale: "+c.rationale));
       if (c.selected_angle) {
         wrap.append(h("div",{class:"muted"},"Selected angle: "+c.selected_angle));
+      }
+      if (c.insight_id) {
+        const used = (r.insights||[]).find(i => i.id === c.insight_id);
+        if (used) {
+          wrap.append(h("div",{class:"muted"},"Insight used: "+used.text));
+        }
       }
       if ((c.playbook_entries_used||[]).length) {
         wrap.append(h("div",{class:"muted"},
@@ -945,15 +1047,41 @@ async function viewGenerator() {
         save.textContent = "Saved";
       };
       wrap.append(save);
-      okCard.append(wrap);
-    });
+      return wrap;
+      };
+      (r.candidates||[]).forEach(c => okCard.append(renderCandidate(c)));
       out.append(okCard);
+
+      if ((r.rewrite_candidates||[]).length) {
+        const rwc = h("div",{class:"card"});
+        rwc.append(h("h2",{},"Needs rewrite (flagged by critic)"));
+        r.rewrite_candidates.forEach(c => rwc.append(renderCandidate(c)));
+        out.append(rwc);
+      }
+
+      if ((r.low_context_candidates||[]).length) {
+        const lcc = h("div",{class:"card"});
+        lcc.append(h("h2",{},"Low-context options"));
+        lcc.append(h("div",{class:"muted"},
+          "These use weak inputs only. Add a signal, note, or profile context for stronger options."));
+        r.low_context_candidates.forEach(c => lcc.append(renderCandidate(c)));
+        out.append(lcc);
+      }
+
       if (r.rejected?.length) {
         const rc = h("div",{class:"card rejected"});
         rc.append(h("h2",{},"Rejected by grounding"));
-        r.rejected.forEach(c => rc.append(h("div",{class:"candidate mb"},
-          h("pre",{},c.body),
-          h("div",{class:"muted"},"Violations: "+ ((c.grounding&&c.grounding.violations||[]).join(", "))))));
+        r.rejected.forEach(c => {
+          const reasons = [];
+          if (c.grounding && c.grounding.violations) reasons.push(...c.grounding.violations);
+          if (c.critique && c.critique.verdict === "reject") {
+            reasons.push("critic:"+c.critique.verdict);
+            if (c.critique.notes) reasons.push(...c.critique.notes);
+          }
+          rc.append(h("div",{class:"candidate mb"},
+            h("pre",{},c.body),
+            h("div",{class:"muted"}, "Reasons: " + reasons.join(", "))));
+        });
         out.append(rc);
       }
     } catch (err) {
