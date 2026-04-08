@@ -74,6 +74,7 @@ def _merge_profile(stored: Optional[dict], override: Optional[dict]) -> dict:
 def build_context(
     prospect_id: str,
     profile_override: Optional[dict] = None,
+    minimal: bool = False,
 ) -> Optional[dict]:
     prospect = repo.get_prospect(prospect_id)
     if not prospect:
@@ -92,19 +93,26 @@ def build_context(
     stored_profile = repo.get_profile_context(prospect_id)
     profile = _merge_profile(stored_profile, profile_override)
 
-    # Pull a small set of active principles for the provider to consult.
-    try:
-        principles = repo.list_principles(active_only=True)
-    except Exception:
+    # Minimal mode: skip all optional/strategy-layer loads. The base
+    # pipeline needs to be proven stable before these layers go back
+    # in front of it.
+    if minimal:
         principles = []
-
-    # Pull active knowledge entries from the dataset layer. These are
-    # strategy/style guidance — NOT prospect personalization. The
-    # generator surfaces them as tone/framing input only.
-    try:
-        knowledge_entries = knowledge_repo.list_active_entries_for_generator(limit=25)
-    except Exception:
         knowledge_entries = []
+    else:
+        # Pull a small set of active principles for the provider to consult.
+        try:
+            principles = repo.list_principles(active_only=True)
+        except Exception:
+            principles = []
+
+        # Pull active knowledge entries from the dataset layer. These are
+        # strategy/style guidance — NOT prospect personalization. The
+        # generator surfaces them as tone/framing input only.
+        try:
+            knowledge_entries = knowledge_repo.list_active_entries_for_generator(limit=25)
+        except Exception:
+            knowledge_entries = []
 
     # Compress every raw signal into a short observation BEFORE the
     # generator sees it. This is the key fix for the bug where long
@@ -140,12 +148,36 @@ def generate(
     instruction: Optional[str] = None,
     strategy_override: Optional[dict] = None,
     profile_override: Optional[dict] = None,
+    minimal: bool = False,
 ) -> dict:
-    context = build_context(prospect_id, profile_override=profile_override)
+    # Stage tracker: tells the route / UI / logs which pipeline steps
+    # actually ran, which were skipped (e.g. by minimal mode), and which
+    # failed. Consumed by routes.py and surfaced in the response so
+    # Step-2 stability testing can see the exact pipeline shape without
+    # reading logs.
+    stages: dict[str, str] = {}
+
+    def _stage(name: str, status: str) -> None:
+        stages[name] = status
+        print(f"[SignalStack] generator: stage {name}={status}")
+
+    _stage("build_context", "running")
+    context = build_context(
+        prospect_id,
+        profile_override=profile_override,
+        minimal=minimal,
+    )
     if context is None:
-        return {"error": "prospect_not_found"}
+        _stage("build_context", "prospect_not_found")
+        return {
+            "error": "prospect_not_found",
+            "stages": stages,
+            "minimal_mode": minimal,
+        }
+    _stage("build_context", "ok")
 
     if not _has_any_grounding(context):
+        _stage("grounding_check", "no_grounding")
         return {
             "candidates": [],
             "rejected": [],
@@ -155,37 +187,77 @@ def generate(
                 "Add at least one observation, paste profile context, or write a "
                 "note before generating outreach."
             ),
+            "stages": stages,
+            "minimal_mode": minimal,
         }
+    _stage("grounding_check", "ok")
 
     # 1) Score input quality. This decides whether we allow high-quality
     #    personalized outreach or only a low-context fallback.
+    _stage("input_quality", "running")
     quality = score_inputs(context)
+    _stage("input_quality", "ok")
 
     # 2) Distill 1–3 sharp observations from the raw material. The
     #    generator reasons about these — not the raw source blobs.
+    _stage("observation_distill", "running")
     distilled = distill_observations(context)
     context["distilled_observations"] = distilled
+    _stage("observation_distill", "ok")
 
     # 2.5) Load industry playbook intelligence (BTR/CRE today). This
     #      shapes angle selection, anti-pattern avoidance, and the
     #      "why this angle" trail returned to the UI. Playbook entries
     #      are NEVER copy-pasted into messages as personalization.
-    playbook_bundle = playbook_loader.load_relevant_entries(
-        context, instruction=instruction
-    )
-    pb_entries = playbook_bundle.get("entries") or []
-    pb_preferred = playbook_loader.preferred_angles(pb_entries)
-    pb_anti_patterns = playbook_loader.collect_anti_patterns(pb_entries)
+    #
+    #      Minimal mode: skip this entire branch. The base pipeline
+    #      must be provably stable before the playbook layer is put
+    #      back in front of it.
+    if minimal:
+        _stage("playbook_load", "skipped_minimal")
+        playbook_bundle = {
+            "playbook": None,
+            "entries": [],
+            "categories": [],
+            "reasoning": "skipped (minimal mode)",
+        }
+        pb_entries = []
+        pb_preferred = []
+        pb_anti_patterns = []
+    else:
+        _stage("playbook_load", "running")
+        try:
+            playbook_bundle = playbook_loader.load_relevant_entries(
+                context, instruction=instruction
+            )
+            pb_entries = playbook_bundle.get("entries") or []
+            pb_preferred = playbook_loader.preferred_angles(pb_entries)
+            pb_anti_patterns = playbook_loader.collect_anti_patterns(pb_entries)
+            _stage("playbook_load", "ok")
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(f"[SignalStack] generator: playbook_load FAILED — continuing without: {type(e).__name__}: {e}")
+            playbook_bundle = {
+                "playbook": None,
+                "entries": [],
+                "categories": [],
+                "reasoning": f"playbook load failed ({type(e).__name__})",
+            }
+            pb_entries, pb_preferred, pb_anti_patterns = [], [], []
+            _stage("playbook_load", "failed_soft")
     context["playbook"] = playbook_bundle
     context["playbook_anti_patterns"] = pb_anti_patterns
 
     # 3) Plan distinct angles for the options. Weak-input cases get
     #    restricted to low-pressure / networking angles only.
+    _stage("strategy_plan", "running")
     strategies = plan_angles(
         quality, n=n,
         override=strategy_override,
         playbook_preferred_angles=pb_preferred or None,
     )
+    _stage("strategy_plan", "ok")
 
     provider = get_provider()
     provider_name = type(provider).__name__
@@ -193,8 +265,9 @@ def generate(
         f"[SignalStack] generator: calling provider={provider_name} "
         f"n={n} strategies={len(strategies or [])} "
         f"signals={len(context.get('signals') or [])} "
-        f"has_instruction={bool(instruction)}"
+        f"has_instruction={bool(instruction)} minimal={minimal}"
     )
+    _stage("provider_call", "running")
     raw = None
     try:
         try:
@@ -213,6 +286,7 @@ def generate(
             f"[SignalStack] generator: provider={provider_name} "
             f"call FAILED at stage=provider_call err={type(e).__name__}: {e}"
         )
+        _stage("provider_call", "failed")
         return {
             "candidates": [],
             "rejected": [],
@@ -220,7 +294,10 @@ def generate(
             "stage": "provider_call",
             "provider": provider_name,
             "message": f"AI provider error ({type(e).__name__}): {e}",
+            "stages": stages,
+            "minimal_mode": minimal,
         }
+    _stage("provider_call", "ok")
     print(
         f"[SignalStack] generator: provider={provider_name} returned "
         f"{len(raw or [])} raw candidates"
@@ -231,6 +308,7 @@ def generate(
     # Both stages are logged and wrapped so a parse failure returns a
     # structured error instead of a hard 500.
     if isinstance(raw, (str, bytes, bytearray)):
+        _stage("provider_response_parse", "running")
         print("[SignalStack] generator: parsing provider JSON response")
         try:
             import json as _json
@@ -242,6 +320,7 @@ def generate(
                 f"[SignalStack] generator: JSON parse FAILED at "
                 f"stage=provider_response_parse err={type(e).__name__}: {e}"
             )
+            _stage("provider_response_parse", "failed")
             return {
                 "candidates": [],
                 "rejected": [],
@@ -249,14 +328,20 @@ def generate(
                 "stage": "provider_response_parse",
                 "provider": provider_name,
                 "message": f"Could not parse provider JSON response ({type(e).__name__}): {e}",
+                "stages": stages,
+                "minimal_mode": minimal,
             }
+        _stage("provider_response_parse", "ok")
         print("[SignalStack] generator: parsed provider JSON response OK")
+    else:
+        _stage("provider_response_parse", "skipped_not_string")
 
     if raw is not None and not isinstance(raw, list):
         print(
             f"[SignalStack] generator: provider returned unexpected type "
             f"{type(raw).__name__}; coercing to empty list"
         )
+        _stage("provider_response_shape", "failed")
         return {
             "candidates": [],
             "rejected": [],
@@ -266,7 +351,10 @@ def generate(
             "message": (
                 f"Provider returned {type(raw).__name__}, expected list of candidates."
             ),
+            "stages": stages,
+            "minimal_mode": minimal,
         }
+    _stage("provider_response_shape", "ok")
 
     # Build the raw source corpus the anti-copy validator compares
     # messages against. We include every raw signal body, note body,
@@ -304,6 +392,7 @@ def generate(
         str(e.get("id")) for e in knowledge_entries if e.get("id")
     ]
 
+    _stage("candidate_validation", "running")
     candidates, rejected, low_context_candidates = [], [], []
     for cand in raw or []:
         body = cand.get("body", "") or ""
@@ -394,6 +483,7 @@ def generate(
             low_context_candidates.append(cand)
         else:
             candidates.append(cand)
+    _stage("candidate_validation", "ok")
 
     # Note: we deliberately do NOT return the full `context` here. It can
     # contain DB rows whose types (datetime, Decimal, bytes from Postgres)
@@ -407,6 +497,9 @@ def generate(
         )
 
     return {
+        "ok": True,
+        "minimal_mode": minimal,
+        "stages": stages,
         "context_summary": {
             "signal_count": len(context.get("signals") or []),
             "note_count": len(context.get("notes") or []),

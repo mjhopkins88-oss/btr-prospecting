@@ -171,7 +171,15 @@ def generate_messages():
         n = int(data.get("n", 4))
     except (TypeError, ValueError):
         n = 4
-    print(f"[SignalStack] /api/signalstack/generate: pid={pid} n={n}")
+    # Minimal mode: smallest working path for stability testing. When
+    # set, the generator skips knowledge/playbook/principle loading and
+    # just exercises context build -> provider call -> candidate
+    # validation. Accept it via JSON body (``minimal``) or query string
+    # (``?minimal=1``) so it can be toggled quickly from curl or the UI.
+    minimal = bool(data.get("minimal")) or (
+        request.args.get("minimal", "").lower() in ("1", "true", "yes", "on")
+    )
+    print(f"[SignalStack] /api/signalstack/generate: pid={pid} n={n} minimal={minimal}")
     try:
         print("[SignalStack] /api/signalstack/generate: calling generator.generate")
         result = generator.generate(
@@ -180,6 +188,7 @@ def generate_messages():
             instruction=data.get("instruction"),
             strategy_override=data.get("strategy"),
             profile_override=data.get("profile"),
+            minimal=minimal,
         )
         print(
             f"[SignalStack] /api/signalstack/generate: generator.generate returned "
@@ -198,6 +207,7 @@ def generate_messages():
                 "error": "generator_crashed",
                 "message": f"Generator crashed ({type(e).__name__}): {e}",
                 "stage": "generator",
+                "minimal_mode": minimal,
                 "candidates": [],
                 "rejected": [],
             })), 200
@@ -207,6 +217,7 @@ def generate_messages():
                 "error": "generator_crashed",
                 "message": str(e),
                 "stage": "generator",
+                "minimal_mode": minimal,
                 "candidates": [],
                 "rejected": [],
             }), 200
