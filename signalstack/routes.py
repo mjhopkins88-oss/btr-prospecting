@@ -22,6 +22,7 @@ from flask import Blueprint, request, jsonify, send_from_directory
 from . import repo
 from .services import generator, analytics
 from .knowledge import repo as knowledge_repo, extractor as knowledge_extractor
+from .serialization import to_json_safe, describe_unsafe
 from .types import (
     PROSPECT_STATUS, SIGNAL_TYPES, SIGNAL_SOURCES, MESSAGE_TYPES,
     PRIMARY_TRIGGERS, COMMUNICATION_STYLES, OUTREACH_GOALS,
@@ -180,25 +181,58 @@ def generate_messages():
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({
+        return jsonify(to_json_safe({
+            "ok": False,
             "error": "generator_crashed",
             "message": f"Generator crashed: {e}",
+            "stage": "generator",
             "candidates": [],
             "rejected": [],
-        }), 200
+        })), 200
+
+    # Primary path: sanitize the full result before handing it to Flask.
+    # ``to_json_safe`` walks the response recursively and converts any
+    # Postgres-derived datetime/Decimal/memoryview/etc values into JSON
+    # primitives, so ``jsonify`` cannot explode on nested candidate
+    # metadata (playbook_entries_used, knowledge_entries_used, grounding,
+    # anti_copy, anti_generic, strongest_observation_used, ...).
     try:
-        return jsonify(result)
+        safe_result = to_json_safe(result)
+        return jsonify(safe_result)
     except Exception as e:
-        # Last-ditch: strip non-serializable context and try again.
         import traceback
         traceback.print_exc()
-        safe = {
+        try:
+            offenders = describe_unsafe(result)[:20]
+            print(f"[SignalStack] unsafe fields in generator result: {offenders}")
+        except Exception:
+            pass
+        # Fallback path: build a minimal, independently-sanitized error
+        # payload. We deliberately do NOT carry over the original
+        # candidates — they are the most likely source of the original
+        # failure and would re-poison the fallback response.
+        minimal = {
+            "ok": False,
             "error": "serialization_failed",
             "message": f"Could not serialize generator result: {e}",
-            "candidates": result.get("candidates", []) if isinstance(result, dict) else [],
-            "rejected": result.get("rejected", []) if isinstance(result, dict) else [],
+            "stage": "response_serialization",
+            "candidates": [],
+            "rejected": [],
         }
-        return jsonify(safe), 200
+        try:
+            return jsonify(to_json_safe(minimal)), 200
+        except Exception as final_err:
+            # Absolute last resort: hand-built dict of strings only. This
+            # cannot fail because every value is already a str/bool.
+            traceback.print_exc()
+            return jsonify({
+                "ok": False,
+                "error": "serialization_failed",
+                "message": str(final_err),
+                "stage": "response_serialization_fallback",
+                "candidates": [],
+                "rejected": [],
+            }), 200
 
 
 # ===================== Profile Context =====================
