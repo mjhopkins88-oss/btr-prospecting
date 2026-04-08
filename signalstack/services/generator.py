@@ -188,21 +188,84 @@ def generate(
     )
 
     provider = get_provider()
+    provider_name = type(provider).__name__
+    print(
+        f"[SignalStack] generator: calling provider={provider_name} "
+        f"n={n} strategies={len(strategies or [])} "
+        f"signals={len(context.get('signals') or [])} "
+        f"has_instruction={bool(instruction)}"
+    )
+    raw = None
     try:
-        raw = provider.generate_messages(
-            context, n=n,
-            strategies=strategies,
-            instruction=instruction,
-        )
-    except TypeError:
-        # Backwards compat with older provider signatures.
-        raw = provider.generate_messages(context, n=n)
+        try:
+            raw = provider.generate_messages(
+                context, n=n,
+                strategies=strategies,
+                instruction=instruction,
+            )
+        except TypeError:
+            # Backwards compat with older provider signatures.
+            raw = provider.generate_messages(context, n=n)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(
+            f"[SignalStack] generator: provider={provider_name} "
+            f"call FAILED at stage=provider_call err={type(e).__name__}: {e}"
+        )
         return {
             "candidates": [],
             "rejected": [],
             "error": "provider_failed",
-            "message": f"AI provider error: {e}",
+            "stage": "provider_call",
+            "provider": provider_name,
+            "message": f"AI provider error ({type(e).__name__}): {e}",
+        }
+    print(
+        f"[SignalStack] generator: provider={provider_name} returned "
+        f"{len(raw or [])} raw candidates"
+    )
+
+    # The provider may return a JSON string (Claude) or a pre-parsed list
+    # (mock). Normalize to a list[dict] here so downstream code is safe.
+    # Both stages are logged and wrapped so a parse failure returns a
+    # structured error instead of a hard 500.
+    if isinstance(raw, (str, bytes, bytearray)):
+        print("[SignalStack] generator: parsing provider JSON response")
+        try:
+            import json as _json
+            raw = _json.loads(raw)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(
+                f"[SignalStack] generator: JSON parse FAILED at "
+                f"stage=provider_response_parse err={type(e).__name__}: {e}"
+            )
+            return {
+                "candidates": [],
+                "rejected": [],
+                "error": "provider_response_parse_failed",
+                "stage": "provider_response_parse",
+                "provider": provider_name,
+                "message": f"Could not parse provider JSON response ({type(e).__name__}): {e}",
+            }
+        print("[SignalStack] generator: parsed provider JSON response OK")
+
+    if raw is not None and not isinstance(raw, list):
+        print(
+            f"[SignalStack] generator: provider returned unexpected type "
+            f"{type(raw).__name__}; coercing to empty list"
+        )
+        return {
+            "candidates": [],
+            "rejected": [],
+            "error": "provider_response_invalid",
+            "stage": "provider_response_shape",
+            "provider": provider_name,
+            "message": (
+                f"Provider returned {type(raw).__name__}, expected list of candidates."
+            ),
         }
 
     # Build the raw source corpus the anti-copy validator compares
