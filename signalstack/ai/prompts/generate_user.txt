@@ -2,28 +2,50 @@ Draft {n} distinct LinkedIn outreach options for this prospect.
 
 CONFIDENCE_LEVEL: {confidence_level}
 
+PRIMARY SOURCE — READ THIS FIRST:
+The INTERNAL THOUGHTS below are plain-language, peer-voice rewrites
+of the insights. Each thought is a single sentence a smart operator
+might actually think. Your job is to turn ONE internal thought into
+ONE LinkedIn message. Write FROM the thought — do not stitch
+together the raw insight, the profile blob, or the keyword list.
+
+HARD BANS — never produce any of these:
+- Comma-separated topic lists ("build to rent, commercial real
+  estate, insurance").
+- Repeated keyword phrases from featured_topics, headline, or any
+  other CRM-tag field.
+- "X, Y, and Z" structures where X/Y/Z are industry tags.
+- Anything that reads like a profile summary ("given your focus on
+  X, Y, and Z, curious how...").
+- Anything that reads like a CRM tag line flattened into prose.
+
 Behaviour by confidence level:
-- HIGH: lead with the strongest distilled observation and/or insight.
-  Be specific, be timely, reference what is actually in context.
-- MEDIUM: lean on profile, industry, market, and role context.
-  Pattern-based framing is fine. Do not claim specific deals.
-- LOW: anchor on the HYPOTHESES below. These are plausible
-  situational guesses, NOT facts. Every LOW-confidence message
-  must preserve "likely / possibly / may be / tends to / I'm
-  seeing a lot of X lately" framing. Do not assert the hypothesis
-  as a claim about the individual.
+- HIGH: lead with the strongest distilled observation and/or
+  internal thought. Be specific, be timely, reference what is
+  actually in context — but always through the peer-voice thought,
+  never through the raw profile keywords.
+- MEDIUM: lean on the internal thoughts (which are already
+  grounded in profile, industry, market, and role). Pattern-based
+  framing is fine. Do not claim specific deals.
+- LOW: anchor on the internal thoughts or the HYPOTHESES below.
+  Every LOW-confidence message must preserve "likely / possibly /
+  may be / tends to / I'm seeing a lot of X lately" framing. Do
+  not assert any thought as a claim about the individual.
 
 Hard rules (all confidence levels):
 - Use ONLY the facts that are in CONTEXT. Never invent metrics,
   history, relationships, deals, or life details.
-- Each option must use a DIFFERENT angle from the STRATEGIES
-  list — a different framing, opening, rhythm, and ask. No
-  minor rewrites.
+- Each option must use a DIFFERENT angle from the STRATEGIES list —
+  a different framing, opening, rhythm, and ask. No minor rewrites.
 - Keep messages short, sharp, peer-toned. Lower the cost of "no".
-- If you use a hypothesis, set "message_basis": "hypothesis_based"
-  on that option. If you use a real signal or note, set it to
-  "signal_based". If you lean on profile/market context without
-  a specific signal, set it to "observation_based".
+- Preferred structure: (1) light observation, (2) interpreted
+  thought, (3) soft curiosity. Example: "Feels like [interpreted
+  pattern] — curious if that's showing up in your world too."
+- If you use an internal thought, put its id in "thought_id".
+- If you use a hypothesis, set "message_basis": "hypothesis_based".
+- If you use a real signal or note, set it to "signal_based".
+- If you lean on profile/market context without a specific signal,
+  set it to "observation_based".
 
 PROSPECT:
 {prospect_line}
@@ -31,10 +53,13 @@ PROSPECT:
 CONTEXT:
 {context_json}
 
-DISTILLED OBSERVATIONS:
+INTERNAL THOUGHTS (primary source — write FROM these):
+{thoughts_json}
+
+DISTILLED OBSERVATIONS (secondary — for grounding only):
 {observations_json}
 
-INSIGHTS (use these to make the message NON-GENERIC):
+INSIGHTS (reference — the thoughts above are the translated form):
 {insights_json}
 
 HYPOTHESES (fallback for low-confidence generation — these are
