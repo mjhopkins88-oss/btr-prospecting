@@ -14,13 +14,15 @@ treat as prospect personalization)
 {sender_persona_block}
 
 Score voice and credibility against THIS operator. The draft must
-sound like a market participant who sees many deals and thinks in
-portfolios — not like a broker, salesperson, or SDR. The sender is
-deliberately NOT selling, NOT pitching pricing, and NOT asking for a
-call. If the draft does any of those things it is a HARD REJECT.
+sound like someone who sees risk across many deals and is usually
+brought in too late — not like a broker, salesperson, SDR, market
+analyst, or newsletter author. The sender is deliberately NOT
+selling, NOT pitching pricing, and NOT asking for a call. If the
+draft does any of those things it is a HARD REJECT.
 
 Score each axis in [0, 1]. For specificity, naturalness,
-insightfulness, anti_copy, peer_credibility, grounding, anchoring:
+insightfulness, anti_copy, peer_credibility, grounding, anchoring,
+lensing:
   higher = better.
 For genericity and pressure_level:
   higher = worse.
@@ -43,6 +45,17 @@ Anchoring:          does the message land on a real operating
                     segment", "this kind of market", "the current
                     environment", "today's market" are NOT anchors
                     and force the anchoring score down.
+Lensing:            is the observation filtered through the
+                    sender's lens (risk, timing, deal execution,
+                    being pulled in too late)? Or is it a neutral
+                    market take that could have been written by a
+                    newsletter author or analyst? A draft that
+                    reads like neutral market commentary — even
+                    if it is well-anchored and grounded — scores
+                    low on lensing and should be reworked. A draft
+                    that clearly comes from someone inside the
+                    deal process, watching the same issue surface
+                    late across many deals, scores high.
 
 HARD REJECT if any of the following are true:
 - Uses "noticed your work as", "saw your profile",
@@ -64,6 +77,13 @@ HARD REJECT if any of the following are true:
   of the market", "this space", "this slice", "this slice of the
   market", "this segment", "this kind of market", "this side of
   the business", "the current environment", "today's market".
+- Reads like neutral market commentary with no lens — the kind of
+  thing a newsletter author or analyst would write from outside
+  the deal process. The sender is always INSIDE the process.
+- Uses "pattern I keep noticing" / "the pattern I keep seeing is"
+  / "trend I'm watching" / "feels like the market is" or similar
+  analyst / newsletter phrasings. These sound like an observer,
+  not an operator. HARD REJECT.
 
 OUTPUT FORMAT (JSON, no prose):
 {
@@ -76,7 +96,8 @@ OUTPUT FORMAT (JSON, no prose):
     "anti_copy": 0.0,
     "peer_credibility": 0.0,
     "grounding": 0.0,
-    "anchoring": 0.0
+    "anchoring": 0.0,
+    "lensing": 0.0
   },
   "overall_score": 0.0,
   "verdict": "accept|rewrite|reject",

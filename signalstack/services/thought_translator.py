@@ -161,16 +161,82 @@ def _replace_vague_anchors(text: str) -> str:
     return out
 
 # Peer-voice lead-ins. These are used by the deterministic rewriter
-# when it needs to turn a third-person insight ("teams leaning into X
-# are solving for Y") into a first-person thought ("most groups
-# right now seem more focused on Y than on X").
+# when it needs to turn a third-person insight into a first-person
+# thought written THROUGH the sender's lens (risk, timing, deal
+# execution, being pulled in late).
+#
+# The lead-ins intentionally use lens-first phrasings ("we see this
+# a lot when…", "this usually shows up once…", "we often get pulled
+# in when…") so every thought sounds like it came from inside the
+# deal process, not from an outside market commentator. The old
+# "pattern I keep noticing" phrasing is deliberately EXCLUDED — it
+# reads like a newsletter, not an operator.
 _PEER_LEAD_INS = (
-    "most groups right now seem",
-    "the pattern I keep noticing is that most teams",
-    "my read right now is that a lot of folks",
-    "feels like the real constraint right now is",
-    "what I keep seeing is that teams",
+    "we see this a lot when",
+    "this usually shows up once",
+    "we often get pulled in when",
+    "by the time this hits our desk",
+    "the thing we keep running into is",
 )
+
+# Phrasings that used to slip through from the insight engine and
+# made thoughts read like newsletter commentary instead of operator
+# voice. When we see these at the head of an insight we strip them
+# and let the lens-first lead-in take over.
+#
+# Each entry is (pattern, replacement). Use short, anchored
+# replacements so the rewrite still reads as a complete sentence.
+_ANALYST_OPENER_REWRITES: tuple[tuple[str, str], ...] = (
+    (r"^the pattern i keep noticing is that\s+", "we see this a lot when "),
+    (r"^the pattern i keep seeing is that\s+", "we see this a lot when "),
+    (r"^the pattern i keep noticing is\s+", "we see this a lot when "),
+    (r"^the pattern i keep seeing is\s+", "we see this a lot when "),
+    (r"^a pattern i keep noticing is\s+", "we see this a lot when "),
+    (r"^the trend suggests that\s+", "we see this a lot when "),
+    (r"^the trend suggests\s+", "we see this a lot when "),
+    (r"^what i keep seeing is that\s+", "we see this a lot when "),
+    (r"^what i keep seeing is\s+", "we see this a lot when "),
+    (r"^i keep seeing that\s+", "we see this a lot when "),
+    (r"^feels like the market is\s+", "we see this a lot when the market is "),
+)
+
+
+_TAIL_PREPOSITIONS = ("on ", "in ", "once ", "when ", "during ", "at ", "after ", "before ")
+
+
+def _rewrite_analyst_openers(text: str) -> str:
+    """
+    Strip analyst / newsletter openers ("the pattern I keep noticing
+    is…") and replace them with lens-first operator voice ("we see
+    this a lot when…"). This keeps the thought grounded in the
+    sender's seat instead of drifting into market commentary.
+
+    When the tail after the opener already starts with a preposition
+    ("on newer deals", "in the pipeline", "once deals get…"), we
+    drop the trailing "when " from the replacement to avoid
+    double-preposition phrasing like "we see this a lot when on
+    newer deals". The result reads more naturally as "we see this
+    a lot on newer deals".
+    """
+    if not text:
+        return text
+    out = text.strip()
+    lowered = out.lower()
+    for pattern, replacement in _ANALYST_OPENER_REWRITES:
+        match = re.match(pattern, lowered)
+        if not match:
+            continue
+        tail = out[match.end():]
+        tail_lower = tail.lower().lstrip()
+        # Strip the trailing "when " from the replacement when the
+        # tail already carries a preposition of its own.
+        if replacement.endswith("when ") and any(
+            tail_lower.startswith(p) for p in _TAIL_PREPOSITIONS
+        ):
+            replacement = replacement[: -len("when ")]
+        out = replacement + tail
+        break
+    return out
 
 
 def _strip_tag_stacks(text: str) -> str:
@@ -293,8 +359,9 @@ def _deterministic_thought(
     """Produce one peer-voice thought from one insight.
 
     Never invents facts. Only rewrites the insight text into a
-    plain-language thought, strips tag stacks, and truncates to the
-    max thought length. Every returned thought carries a
+    plain-language thought, strips tag stacks, swaps analyst
+    openers for lens-first phrasings, and truncates to the max
+    thought length. Every returned thought carries a
     ``thought_type`` from the closed product vocabulary so the
     downstream generator can reason about the KIND of thought it
     is working with (pattern recognition vs timing vs contrarian
@@ -304,7 +371,8 @@ def _deterministic_thought(
     if not insight_text:
         return None
 
-    rewritten = _to_peer_voice(insight_text)
+    rewritten = _rewrite_analyst_openers(insight_text)
+    rewritten = _to_peer_voice(rewritten)
     rewritten = _strip_tag_stacks(rewritten)
     rewritten = _replace_vague_anchors(rewritten)
     if not rewritten:
@@ -312,26 +380,35 @@ def _deterministic_thought(
 
     # If the rewrite didn't already start with a peer lead-in, pick
     # one based on the insight type so the thought sounds like an
-    # internal observation rather than a subject-less clause.
+    # operator observation from inside the deal process rather than
+    # a subject-less clause. The lead-ins are all lens-first: they
+    # put the sender inside the process ("we see this a lot when",
+    # "we often get pulled in when", etc.) instead of outside
+    # commenting on the market.
     lower = rewritten.lower()
     already_peer = any(
         lower.startswith(p) for p in (
-            "most", "feels like", "my read", "what i keep",
-            "a lot of", "i keep", "the pattern",
+            "we see", "we often", "by the time", "this usually",
+            "this tends", "the thing we keep", "we keep",
+            "most folks", "most groups",
         )
     )
     if not already_peer:
         insight_type = (insight.get("type") or "").lower()
-        if insight_type in ("market_pattern", "trend"):
-            lead = "feels like "
-        elif insight_type == "timing":
-            lead = "my read right now is that "
-        elif insight_type in ("tension", "second_order"):
-            lead = "the pattern I keep noticing is that "
-        elif insight_type == "peer_pov":
+        if insight_type in ("market_pattern", "trend", "pattern_recognition"):
+            lead = "we see this a lot when "
+        elif insight_type in ("timing", "timing_insight"):
+            lead = "this usually shows up once "
+        elif insight_type in ("tension", "tension_tradeoff"):
+            lead = "the thing we keep running into is that "
+        elif insight_type in ("second_order", "second_order_effect"):
+            lead = "by the time this hits our desk, "
+        elif insight_type in ("contrarian", "contrarian_observation"):
+            lead = "the default read is one thing, but we see this a lot when "
+        elif insight_type in ("peer_pov", "self_relevance"):
             lead = "most folks in this seat seem to "
         else:
-            lead = "what I keep seeing is that "
+            lead = "we see this a lot when "
         rewritten = lead + rewritten
 
     if len(rewritten) > MAX_THOUGHT_CHARS:
@@ -354,37 +431,44 @@ def _deterministic_thought(
 # never as claims — and each one is typed to a DIFFERENT product
 # vocabulary slot so the final set of 5 carries genuine diversity.
 #
-# Every fallback is ANCHORED on a real operating surface ("on newer
-# deals", "in the pipeline", "when underwriting gets deeper", "on
-# newer communities", "once deals get closer to execution", etc.).
+# Every fallback is:
+#   * ANCHORED on a real operating surface ("on newer deals", "in
+#     the pipeline", "when underwriting gets deeper", "on newer
+#     communities", "once deals get closer to execution", etc.);
+#   * LENSED through the sender's seat — risk, timing, deal
+#     execution, being pulled in too late. Neutral market
+#     commentary is deliberately avoided.
+#
 # Floating phrases like "this part of the market", "this space",
-# "this slice", "this slice of the market" are explicitly banned —
+# "this slice", "this slice of the market" are explicitly banned.
+# "Pattern I keep noticing" / newsletter voice is also banned —
 # the whole point of the fallback is to sound like someone who
-# actually sees deals, not a market-commentary bot.
+# sees risk across many deals and is usually pulled in too late,
+# not a market-commentary bot.
 _FALLBACK_THOUGHTS_BY_TYPE: dict[str, list[str]] = {
     "pattern_recognition": [
-        "on newer deals it feels like most groups are spending more time on cost discipline than on growth",
-        "the pattern I keep noticing in the pipeline is that the teams still moving are the ones who already rebuilt their assumptions",
+        "we see this a lot on newer BTR deals — the groups still moving are usually the ones who already rebuilt their risk assumptions before underwriting went deep",
+        "we see this a lot when the pipeline starts moving faster than the risk work behind it — the trouble usually lands later, not up front",
     ],
     "tension_tradeoff": [
-        "when underwriting gets deeper, the real tension seems less about demand and more about whether the operating stack can keep pace with what the capital side wants",
-        "on newer deals the real tradeoff feels like sourcing speed versus underwriting discipline, not deal flow",
+        "the thing we keep running into when underwriting gets deeper is that the real tradeoff isn't demand, it's whether the risk side can keep pace with the capital side",
+        "on newer deals, the tradeoff we keep running into is sourcing speed versus how much of the risk work has actually been done",
     ],
     "contrarian_observation": [
-        "on newer communities the interesting question may not be growth, it may be who can still move efficiently",
-        "the default read on the pipeline is that deal flow is the constraint — my guess is it's actually the bar for conviction that's moved",
+        "the default read on newer communities is that growth is the question — but by the time deals hit our desk, it's usually about who can still execute without the risk side slipping",
+        "the default read on the pipeline is that deal flow is the constraint — we see this a lot when it's actually the risk bar that's moved, not the flow",
     ],
     "timing_insight": [
-        "my read right now is that once deals get closer to execution, the window for the next set of decisions is narrower than it looked six months ago",
-        "on newer deals it feels like the groups still moving have already decided; the rest are waiting for another data point before they underwrite",
+        "this usually shows up once deals get closer to execution — the window for the next set of risk-side decisions is narrower than most timelines assume",
+        "we often get pulled in when the timing of a decision has already started shaping the deal, rather than the other way around",
     ],
     "second_order_effect": [
-        "a capital allocation shift on newer communities usually reshuffles what gets prioritized on the ops side inside a quarter",
-        "one downstream thing I keep seeing on newer deals is that capital shifts show up in sourcing before they show up anywhere else",
+        "a capital allocation shift on newer communities usually reshuffles what shows up on the risk side of underwriting inside a quarter",
+        "by the time this hits our desk, the downstream thing we keep seeing is that a capital shift on newer deals lands in sourcing before anywhere else",
     ],
     "self_relevance": [
-        "most folks in this seat seem to be weighing the same question on newer deals — whether the read they were underwriting against six months ago still holds",
-        "if I were sitting in that seat on a new deal right now, I'd probably care more about who's still lending at real terms than about deal flow",
+        "most folks in this seat seem to be weighing the same question on newer deals — whether the read they were underwriting against six months ago still holds, and where the risk side sits now",
+        "we often get pulled in on newer deals exactly at the point where someone in that seat is trying to figure out which of their assumptions still holds",
     ],
 }
 

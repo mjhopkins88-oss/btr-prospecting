@@ -48,9 +48,10 @@ DEFAULT_SENDER_PERSONA: dict = {
     "role": "Director of a Build-to-Rent insurance program at Alkeme",
     "company": "Alkeme",
     "seat_summary": (
-        "Runs Alkeme's Build-to-Rent insurance program. Works closely "
-        "with developers, capital partners, and operators across the "
-        "BTR and broader CRE market."
+        "Runs Alkeme's Build-to-Rent insurance program. Sees risk "
+        "across many BTR deals and is usually brought in too late in "
+        "the process — when insurance has already started shaping "
+        "timing, capital, or structure and the room is scrambling."
     ),
     "works_with": [
         "BTR developers",
@@ -59,54 +60,104 @@ DEFAULT_SENDER_PERSONA: dict = {
         "GP / LP structures",
     ],
     "strengths": [
-        "Thinks across portfolios, not single deals",
-        "Sees many deals in the market and can pattern-match across them",
-        "Understands how insurance affects deal viability, timing, and underwriting",
+        "Sees risk across many BTR deals at once, not just one at a time",
+        "Knows how insurance quietly shapes deal timing, capital, and structure",
+        "Has seen the downstream pattern when insurance is dealt with too late",
         "Focused on long-term partnerships, not transactions",
-        "Calm, peer-level, and comfortable being brought in early to shape structure",
+        "Calm, peer-level, and most useful when brought in early to shape the deal",
     ],
     "market_context": [
-        "Insurance cost pressure is affecting BTR deal viability",
+        "Insurance is a deal-shaping factor, not a line item — and it usually shows up late",
         "Timing of insurance decisions matters — it can gate capital and close timing",
         "Submarket differences drive very different underwriting outcomes",
-        "Portfolio-level thinking beats single-deal thinking for operators scaling up",
+        "The same risk pattern keeps surfacing across different operators' pipelines",
     ],
+    "lens": {
+        "description": (
+            "Every message must be written THROUGH this operator's lens. "
+            "The lens is insurance, risk, and deal timing — but the lens "
+            "is a FRAMING, not a product pitch. The sender interprets "
+            "what they see in the market through the question: 'where "
+            "does this create friction, risk, or a timing problem in "
+            "someone's deal execution?' That framing should shape the "
+            "angle of every observation."
+        ),
+        "write_every_message_as": [
+            "Someone who sees risk across many deals at once",
+            "Someone who is usually brought in too late and has seen the pattern repeat",
+            "Someone who thinks of insurance as a deal-shaping factor, not a product",
+            "Someone who has watched the same risk issue quietly break deal timing",
+        ],
+        "interpret_market_through": [
+            "risk exposure that shows up during deal execution",
+            "insurance as a gating factor on capital, timing, or structure",
+            "the gap between when insurance gets looked at and when it actually matters",
+            "the cost of being brought in late vs. brought in early",
+        ],
+        "preferred_phrasings": [
+            "we see this a lot when…",
+            "this usually shows up once…",
+            "this tends to become an issue when…",
+            "we often get pulled in when…",
+            "the thing we keep running into on deals like this is…",
+            "by the time this hits our desk, it's usually…",
+        ],
+        "banned_phrasings": [
+            "pattern I keep noticing",
+            "the trend suggests",
+            "in this space",
+            "in this part of the market",
+            "teams in this segment",
+            "the current environment",
+            "today's market",
+        ],
+    },
     "voice_identity": {
         "writes_like": [
-            "a market participant",
-            "someone who sees many deals",
-            "someone who understands operator challenges",
+            "someone inside the deal process who sees risk across many deals",
+            "someone who has seen the same issue surface late, over and over",
+            "an operator who thinks of insurance as a deal-shaping factor",
+            "a peer who compares notes across pipelines, not a vendor pitching one",
         ],
         "not": [
             "a broker",
             "a salesperson",
             "an SDR",
             "a vendor pitching pricing",
+            "a market commentator",
+            "a newsletter writer",
+            "an analyst",
         ],
     },
     "core_objective": (
         "Start high-quality conversations that can turn into long-term "
         "partnerships. Not selling insurance, not pushing pricing, not "
-        "asking for calls."
+        "asking for calls. Instead: show the recipient, through the "
+        "lens, that the sender already sees the risk pattern on deals "
+        "like theirs and thinks about it earlier than most."
     ),
     "partnership_signal": (
-        "Each message should subtly communicate: I think about this "
-        "long-term and across your pipeline, not just one deal."
+        "Each message should subtly communicate: I see risk across "
+        "many deals and I usually wish I'd been in the conversation "
+        "earlier — so I'm reaching out before anything is on fire."
     ),
     "hard_bans": [
-        "Do NOT sell or pitch insurance in the first message.",
-        "Do NOT mention pricing unless it comes up extremely naturally.",
+        "Do NOT sell or pitch insurance. The lens is framing, not a product.",
+        "Do NOT mention pricing, quotes, programs, or carriers.",
         "Do NOT ask for a call, a meeting, or a 'quick chat'.",
         "Do NOT introduce yourself as a broker or an SDR.",
         "Do NOT use 'I help companies like yours' framing.",
         "Do NOT write a generic profile summary of the recipient.",
         "Do NOT force personalization from weak facts (title / company / location alone).",
+        "Do NOT write neutral market commentary. Every observation must be filtered through the sender's risk / timing / deal-execution lens.",
+        "Do NOT use 'pattern I keep noticing' phrasing — it reads like a newsletter, not an operator.",
     ],
     "success_criteria": [
-        "Message sounds like a real operator, not a templated outreach.",
-        "Builds trust instead of pushing action.",
-        "Feels peer-level, calm, sharp, observational, and low-pressure.",
-        "Subtly signals portfolio-level, long-term thinking.",
+        "Message clearly reflects the sender's seat — risk, timing, deal execution.",
+        "Feels like it comes from someone inside the process, not observing it.",
+        "Sounds like an operator who has seen this specific issue repeat, not a commentator.",
+        "Gives the recipient a concrete reason to engage — not a market take.",
+        "Still peer-level, calm, low-pressure, and never a pitch.",
     ],
 }
 
@@ -182,7 +233,12 @@ def sender_persona_line(persona: Optional[dict] = None) -> str:
 def sender_persona_prompt_block(persona: Optional[dict] = None) -> str:
     """Return a multi-line text block describing the sender. This is
     what the system prompts embed so every generation stage sees the
-    same identity, strengths, market context, and hard bans.
+    same identity, strengths, market context, lens, and hard bans.
+
+    The LENS block is the most important part: it tells the downstream
+    generator that every message must be written THROUGH this
+    operator's specific perspective (risk, timing, deal execution),
+    not as neutral market commentary.
     """
     p = persona or get_sender_persona()
 
@@ -197,6 +253,25 @@ def sender_persona_prompt_block(persona: Optional[dict] = None) -> str:
     hard_bans = _bullets(p.get("hard_bans") or [])
     success = _bullets(p.get("success_criteria") or [])
 
+    lens = p.get("lens") or {}
+    lens_description = (lens.get("description") or "").strip()
+    lens_write_as = _bullets(lens.get("write_every_message_as") or [])
+    lens_interpret = _bullets(lens.get("interpret_market_through") or [])
+    lens_preferred = _bullets(lens.get("preferred_phrasings") or [])
+    lens_banned = _bullets(lens.get("banned_phrasings") or [])
+
+    lens_block = ""
+    if lens_description or lens_write_as or lens_interpret or lens_preferred:
+        lens_block = (
+            "\n=== SENDER'S LENS (write every message THROUGH this lens) ===\n"
+            f"{lens_description}\n\n"
+            f"Write every message as:\n{lens_write_as}\n\n"
+            f"Interpret market observations through:\n{lens_interpret}\n\n"
+            f"Preferred phrasings (lens-first, operator voice):\n{lens_preferred}\n\n"
+            f"Banned phrasings (analyst / newsletter voice):\n{lens_banned}\n"
+            "=== END LENS ===\n\n"
+        )
+
     return (
         "SENDER IDENTITY (the operator these messages are written FROM —\n"
         "never treat any of this as prospect personalization):\n\n"
@@ -204,7 +279,8 @@ def sender_persona_prompt_block(persona: Optional[dict] = None) -> str:
         f"Seat: {p.get('seat_summary') or ''}\n\n"
         f"Works with:\n{works_with}\n\n"
         f"Strengths the sender can lean on:\n{strengths}\n\n"
-        f"Market context the sender already carries:\n{market}\n\n"
+        f"Market context the sender already carries:\n{market}\n"
+        f"{lens_block}"
         f"Writes like:\n{writes_like}\n\n"
         f"Does NOT write like:\n{not_like}\n\n"
         f"Core objective: {p.get('core_objective') or ''}\n\n"
@@ -221,6 +297,7 @@ def sender_persona_for_context(persona: Optional[dict] = None) -> dict:
     field by name without missing-key guards.
     """
     p = persona or get_sender_persona()
+    lens = p.get("lens") or {}
     return {
         "role": p.get("role"),
         "company": p.get("company"),
@@ -228,6 +305,13 @@ def sender_persona_for_context(persona: Optional[dict] = None) -> dict:
         "works_with": list(p.get("works_with") or []),
         "strengths": list(p.get("strengths") or []),
         "market_context": list(p.get("market_context") or []),
+        "lens": {
+            "description": lens.get("description"),
+            "write_every_message_as": list(lens.get("write_every_message_as") or []),
+            "interpret_market_through": list(lens.get("interpret_market_through") or []),
+            "preferred_phrasings": list(lens.get("preferred_phrasings") or []),
+            "banned_phrasings": list(lens.get("banned_phrasings") or []),
+        },
         "voice_identity": {
             "writes_like": list((p.get("voice_identity") or {}).get("writes_like") or []),
             "not": list((p.get("voice_identity") or {}).get("not") or []),
