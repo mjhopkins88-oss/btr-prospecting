@@ -75,6 +75,29 @@ VAGUE_ANCHOR_PHRASES = [
     r"\btoday'?s market\b",
 ]
 
+# Analyst / newsletter voice. A message leaning on any of these is
+# written from OUTSIDE the deal process — the sender is supposed to
+# be an operator INSIDE the process, watching the same risk /
+# timing / execution issue surface across many deals. These
+# phrasings drift the voice back to a market commentator, and the
+# lens is lost.
+#
+# The pipeline prompts already tell the model not to use these, but
+# we enforce it here too as a defense in depth: if one slips
+# through, the validator treats it as a hard violation so the
+# message is rejected before it reaches the user.
+ANALYST_VOICE_PHRASES = [
+    r"\bpattern i keep noticing\b",
+    r"\bpattern i keep seeing\b",
+    r"\ba pattern i (?:keep )?(?:notice|see)\b",
+    r"\bthe pattern i'?m noticing\b",
+    r"\btrend i'?m watching\b",
+    r"\bthe trend suggests\b",
+    r"\bteams in this segment\b",
+    r"\bfolks in this space\b",
+    r"\bfeels like the market is\b",
+]
+
 # Allow-list of contextual anchor phrases. When a message contains
 # any of these (or a close variant), it is considered to land on a
 # real operating surface. Absence of an anchor at HIGH/MEDIUM
@@ -155,6 +178,15 @@ def validate(
     for h in vague_hits:
         violations.append(f"vague_anchor:{h}")
 
+    # Analyst / newsletter voice. These phrasings are banned because
+    # they make the sender sound like an outside observer instead of
+    # an operator inside the deal process. The lens is lost when the
+    # message drifts into market commentary. We treat these as hard
+    # violations at every confidence level.
+    analyst_hits = _contains_any(body_lo, ANALYST_VOICE_PHRASES)
+    for h in analyst_hits:
+        violations.append(f"analyst_voice:{h}")
+
     # Does the message land on a real operating surface? We look for
     # any of the allow-listed contextual anchor phrases. A message
     # missing all of them has no "where this shows up" beat.
@@ -207,6 +239,10 @@ def validate(
     # at all raises it less, but still tips the message toward the
     # "could be sent to 200 people" end of the scale.
     genericity_score += 0.35 * len(vague_hits)
+    # Analyst / newsletter voice is an even bigger genericity hit —
+    # it makes the message read like it was written by a commentator
+    # instead of someone inside the process.
+    genericity_score += 0.4 * len(analyst_hits)
     if not has_contextual_anchor and not vague_hits:
         genericity_score += 0.15
     # At HIGH confidence, weak-fact-only anchoring is a strong
@@ -263,15 +299,16 @@ def validate(
         )
     elif confidence_level == "medium":
         # Medium: allow broader framing but still reject hard
-        # violations, vague anchors, and the worst of the
-        # buzzword/template openers. A missing anchor at medium is
-        # also a fail — the pipeline has enough context to ground
-        # on a real operating surface.
+        # violations, vague anchors, analyst voice, and the worst
+        # of the buzzword/template openers. A missing anchor at
+        # medium is also a fail — the pipeline has enough context
+        # to ground on a real operating surface.
         hard_violations = [
             v for v in violations
             if v.startswith("banned_opener:")
             or v.startswith("buzzword:")
             or v.startswith("vague_anchor:")
+            or v.startswith("analyst_voice:")
             or v == "no_contextual_anchor"
         ]
         passes = (
@@ -280,17 +317,18 @@ def validate(
         )
     else:
         # Low: only the hardest violations disqualify — banned sales
-        # template openers, buzzwords, and vague floating phrases.
-        # A missing anchor is NOT a hard fail at low confidence
-        # because the heuristic fallback messages may still ground
-        # on pattern framing without a canonical anchor phrase; we
-        # still penalize it on the genericity score so the critic
-        # can prefer anchored drafts.
+        # template openers, buzzwords, vague floating phrases, and
+        # analyst / newsletter voice. A missing anchor is NOT a
+        # hard fail at low confidence because the heuristic fallback
+        # messages may still ground on pattern framing without a
+        # canonical anchor phrase; we still penalize it on the
+        # genericity score so the critic can prefer anchored drafts.
         hard_violations = [
             v for v in violations
             if v.startswith("banned_opener:")
             or v.startswith("buzzword:")
             or v.startswith("vague_anchor:")
+            or v.startswith("analyst_voice:")
         ]
         passes = not hard_violations
 

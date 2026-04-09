@@ -3,20 +3,64 @@ Draft {n} distinct LinkedIn outreach options for this prospect.
 You are writing AS this operator:
 {sender_persona_line}
 
-Full sender persona (identity + strengths + market context + hard
-bans) — never treat any of this as prospect personalization:
+Full sender persona (identity + strengths + lens + market context
++ hard bans) — never treat any of this as prospect personalization:
 {sender_persona_block}
 
 CONFIDENCE_LEVEL: {confidence_level}
 
 ====================================================================
-PRIMARY SOURCE — READ THIS FIRST
+THE SENDER'S LENS (READ THIS BEFORE YOU WRITE ANYTHING)
+====================================================================
+
+Every message must be written THROUGH the sender's lens. The lens
+is: sees risk across many deals, usually brought in too late,
+thinks of insurance as a deal-shaping factor (not a product).
+
+The lens is a FRAMING DEVICE, not a pitch. The sender does not
+mention insurance, pricing, quotes, carriers, or programs. The
+sender's seat shows up in HOW the observation is framed, not in
+what's being sold.
+
+Before drafting each message, answer:
+
+  - Where does this create friction, risk, or timing pressure in
+    the prospect's deal execution?
+  - What's the thing that usually surfaces too late on deals like
+    this?
+  - When would the sender usually get pulled into this conversation
+    — and what's the cost of being pulled in late?
+
+Use the answers to shape the observation. If your message could
+have been written by a newsletter author, a market analyst, or
+anyone OUTSIDE the deal process — it is NOT lensed, and it will
+be rejected.
+
+PREFERRED OPENINGS (lens-first, operator voice):
+  - "we see this a lot when…"
+  - "this usually shows up once…"
+  - "this tends to become an issue when…"
+  - "we often get pulled in when…"
+  - "the thing we keep running into on deals like this is…"
+  - "by the time this hits our desk, it's usually…"
+
+BANNED OPENINGS (analyst / newsletter voice — HARD REJECT):
+  - "pattern I keep noticing"
+  - "the pattern I keep seeing is"
+  - "the trend suggests"
+  - "teams in this segment"
+  - "in today's market"
+  - "in the current environment"
+
+====================================================================
+PRIMARY SOURCE — READ THIS SECOND
 ====================================================================
 
 The INTERNAL THOUGHTS below are plain-language, peer-voice thoughts.
 Each one is a single sentence a smart operator might actually
 think. Your job is to turn ONE internal thought into ONE LinkedIn
-message. Write FROM the thought — do not stitch together the raw
+message — and to write that message THROUGH THE LENS described
+above. Write FROM the thought — do not stitch together the raw
 insight, the profile blob, or the keyword list.
 
 Every option must be written FROM A DIFFERENT THOUGHT and in A
@@ -42,12 +86,12 @@ HARD BANS — never produce any of these
 - Performative contrarianism — disagreement has to be earned, not
   theatrical.
 - Anything that reads like a broker, an SDR, or a vendor pitch.
-  You are a market participant who sees many deals, not a
-  salesperson asking for time.
-- Any mention of selling insurance, pricing, quotes, or "I run an
-  insurance program" — the sender deliberately does NOT pitch
-  early. The partnership angle is carried by POV and pattern,
-  never by stating the role.
+  You are an operator who sees risk across many deals and is
+  usually brought in too late — not a salesperson asking for time.
+- Any mention of selling insurance, pricing, quotes, carriers,
+  programs, or "I run an insurance program" — the sender's lens
+  is FRAMING, not a pitch. The partnership angle is carried by
+  POV (risk, timing, deal execution), never by naming the product.
 - Any ask for a call, meeting, or quick chat.
 - Any vague, floating market commentary. Every message must have
   a "where this shows up" anchor. Phrases like "this part of the
@@ -55,6 +99,12 @@ HARD BANS — never produce any of these
   "this segment", "this kind of market", "this side of the
   business", "the current environment", "today's market" are
   BANNED — they have no anchor.
+- Any neutral market observation that is not filtered through the
+  sender's lens. Observation without lens = newsletter voice =
+  HARD REJECT.
+- "Pattern I keep noticing" / "the pattern I keep seeing is" /
+  "trend I'm watching" — analyst voice, not operator voice.
+  HARD REJECT.
 
 ====================================================================
 CONTEXTUAL ANCHOR (do this BEFORE writing each message)
@@ -84,30 +134,50 @@ operating surface):
 Two options in the same batch should lean on DIFFERENT anchors
 where possible — not every message on the same surface.
 
-BAD  (floats, no anchor):
+BAD  (floats, no anchor, no lens):
   "the trend suggests where capital is moving"
 
-GOOD (anchored on newer deals + underwriting):
-  "on newer BTR deals, capital still shows up, but it's getting
-   more selective the deeper you get into underwriting"
+BAD  (anchored but NOT lensed — sounds like a newsletter):
+  "on newer BTR deals, capital is getting more selective the
+   deeper you get into underwriting"
+
+GOOD (anchored + lensed through risk / timing / being pulled in
+      late):
+  "we see this a lot on newer BTR deals — capital still shows up,
+   but the real hang-up lands later, once the risk side of
+   underwriting catches up. curious if that timing is matching
+   what you're seeing."
 
 ====================================================================
 MESSAGE STRUCTURE (use unless the style mode needs otherwise)
 ====================================================================
 
-  1. anchored observation  — "where this shows up". Name the real
-                             operating surface (pipeline,
-                             underwriting, newer deals, lease-up,
-                             capital allocation, etc.).
-  2. interpretation        — the internal thought, in peer voice.
+  1. lensed observation    — observation filtered through the
+                             sender's lens (risk, timing, deal
+                             execution, being pulled in late) AND
+                             anchored on a real operating surface
+                             (pipeline, underwriting, newer deals,
+                             lease-up, capital allocation, etc.).
+                             The lens is the "why this matters from
+                             my seat"; the anchor is the "where this
+                             shows up in your world". Both required.
+  2. interpretation        — the internal thought, in peer voice,
+                             framed from inside the deal process.
   3. light curiosity       — a low-pressure compare-notes question.
 
-Example shape:
-  "On newer deals, [interpreted pattern] — curious if that's
-   showing up in your pipeline too."
+Example shapes:
+  "we see this a lot when [anchor / operating surface], and the
+   thing that tends to get missed is [interpretation]. curious how
+   it's landing on your side."
+  "this usually shows up once [anchor / timing surface] — by then,
+   [interpretation]. wanted to compare notes before that's where
+   you end up."
+  "we often get pulled in when [anchor / execution surface] —
+   [interpretation]. curious if that's matching what you're seeing."
 
 Tone: sharp, low-pressure, human, calm, peer-like, slightly
-understated.
+understated. Always from INSIDE the deal process, never OUTSIDE
+commenting on it.
 
 ====================================================================
 STYLE MODES (REQUIRED — ONE PER OPTION, NO REPEATS)
@@ -224,6 +294,9 @@ Return an object of shape:
 Every option must be written from a DIFFERENT thought, a DIFFERENT
 style mode, a DIFFERENT psychology angle, and a DIFFERENT opening
 line. Every option must carry its OWN contextual anchor (the
-"where this shows up" surface). Minor rewrites of the same line
-are a hard failure. Unanchored abstract market commentary is a
-hard failure.
+"where this shows up" surface) AND be written THROUGH the sender's
+lens (risk, timing, deal execution, being pulled in late). Minor
+rewrites of the same line are a hard failure. Unanchored abstract
+market commentary is a hard failure. Any message that reads like
+neutral market commentary — written by an outside observer rather
+than someone inside the deal process — is a hard failure.
