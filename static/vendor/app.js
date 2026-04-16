@@ -1371,6 +1371,8 @@ function App({
     user: user
   }), activeTab === 'feed' && /*#__PURE__*/React.createElement(LiveIntelligenceFeed, null), activeTab === 'intent' && /*#__PURE__*/React.createElement(DeveloperIntentPanel, null), activeTab === 'capital' && /*#__PURE__*/React.createElement(CapitalFlowPanel, null), activeTab === 'signal_quality' && /*#__PURE__*/React.createElement(SignalIntelligencePanel, null), activeTab === 'predictions' && user?.role !== 'broker' && /*#__PURE__*/React.createElement(PredictedDevelopments, null), activeTab === 'markets' && user?.role !== 'broker' && /*#__PURE__*/React.createElement(MarketExpansion, null), activeTab === 'dealboard' && /*#__PURE__*/React.createElement(DealBoardPage, {
     user: user
+  }), activeTab === 'capital_groups' && /*#__PURE__*/React.createElement(CapitalGroupsPage, {
+    user: user
   }), activeTab === 'linkedinhub' && /*#__PURE__*/React.createElement(LinkedInHub, {
     user: user
   }), activeTab === 'admin' && user && user.is_super_admin && /*#__PURE__*/React.createElement(AdminPage, {
@@ -1780,6 +1782,507 @@ function LinkedInHub({
   })))))));
 }
 // ===================================================================
+// CAPITAL GROUPS — relationship tracking for repeat capital deployers
+// ===================================================================
+
+function CapitalGroupsPage({ user }) {
+  const [groups, setGroups] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [selectedGroup, setSelectedGroup] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [editingGroup, setEditingGroup] = useState(null);
+  const [showTpForm, setShowTpForm] = useState(false);
+
+  const [fName, setFName] = useState('');
+  const [fType, setFType] = useState('developer');
+  const [fMarkets, setFMarkets] = useState('');
+  const [fStrategy, setFStrategy] = useState('');
+  const [fNotes, setFNotes] = useState('');
+  const [fStatus, setFStatus] = useState('prospect');
+  const [fWarmth, setFWarmth] = useState(1);
+
+  const [tpType, setTpType] = useState('call');
+  const [tpOutcome, setTpOutcome] = useState('');
+  const [tpNotes, setTpNotes] = useState('');
+
+  const typeLabels = { developer: 'Developer', capital_partner: 'Capital Partner', operator: 'Operator', broker: 'Broker' };
+  const statusLabels = { prospect: 'Prospect', warm: 'Warm', engaged: 'Engaged', partner: 'Partner', dormant: 'Dormant', cold: 'Cold' };
+  const statusColors = { prospect: '#94a3b8', warm: '#fbbf24', engaged: '#60a5fa', partner: '#34d399', dormant: '#a78bfa', cold: '#ef4444' };
+
+  const loadGroups = async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (search) params.set('q', search);
+      if (typeFilter) params.set('type', typeFilter);
+      if (statusFilter) params.set('status', statusFilter);
+      const res = await fetch(`${API_BASE}/api/capital-groups?${params}`);
+      const d = await res.json();
+      setGroups(d.capital_groups || []);
+    } catch (e) {
+      console.error('Failed to load capital groups', e);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { loadGroups(); }, [search, typeFilter, statusFilter]);
+
+  const loadDetail = async (id) => {
+    setDetailLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/capital-groups/${id}`);
+      const d = await res.json();
+      if (d.error) { alert(d.error); return; }
+      setSelectedGroup(d);
+    } catch (e) {
+      console.error('Failed to load group detail', e);
+    }
+    setDetailLoading(false);
+  };
+
+  const openCreate = () => {
+    setEditingGroup(null);
+    setFName(''); setFType('developer'); setFMarkets(''); setFStrategy('');
+    setFNotes(''); setFStatus('prospect'); setFWarmth(1);
+    setShowForm(true);
+  };
+
+  const openEdit = (g) => {
+    setEditingGroup(g);
+    setFName(g.name || '');
+    setFType(g.type || 'developer');
+    setFMarkets(Array.isArray(g.markets) ? g.markets.join(', ') : '');
+    setFStrategy(g.strategy || '');
+    setFNotes(g.notes || '');
+    setFStatus(g.relationship_status || 'prospect');
+    setFWarmth(g.warmth_score || 1);
+    setShowForm(true);
+  };
+
+  const saveForm = async () => {
+    const payload = {
+      name: fName, type: fType, markets: fMarkets, strategy: fStrategy,
+      notes: fNotes, relationship_status: fStatus, warmth_score: fWarmth
+    };
+    try {
+      const url = editingGroup
+        ? `${API_BASE}/api/capital-groups/${editingGroup.id}`
+        : `${API_BASE}/api/capital-groups`;
+      const res = await fetch(url, {
+        method: editingGroup ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const d = await res.json();
+      if (d.error) { alert(d.error); return; }
+      setShowForm(false);
+      loadGroups();
+      if (selectedGroup && editingGroup) loadDetail(editingGroup.id);
+    } catch (e) {
+      alert('Error saving group');
+    }
+  };
+
+  const deleteGroup = async (id) => {
+    if (!confirm('Delete this capital group? Properties will be unlinked, not deleted.')) return;
+    try {
+      await fetch(`${API_BASE}/api/capital-groups/${id}`, { method: 'DELETE' });
+      if (selectedGroup?.id === id) setSelectedGroup(null);
+      loadGroups();
+    } catch (e) {
+      alert('Error deleting group');
+    }
+  };
+
+  const quickStatus = async (id, newStatus) => {
+    try {
+      await fetch(`${API_BASE}/api/capital-groups/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ relationship_status: newStatus })
+      });
+      loadGroups();
+      if (selectedGroup?.id === id) loadDetail(id);
+    } catch (e) {
+      console.error('Status update failed', e);
+    }
+  };
+
+  const saveTouchpoint = async () => {
+    if (!selectedGroup) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/capital-groups/${selectedGroup.id}/touchpoints`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: tpType, outcome: tpOutcome, notes: tpNotes })
+      });
+      const d = await res.json();
+      if (d.error) { alert(d.error); return; }
+      setShowTpForm(false);
+      setTpType('call'); setTpOutcome(''); setTpNotes('');
+      loadDetail(selectedGroup.id);
+      loadGroups();
+    } catch (e) {
+      alert('Error logging touchpoint');
+    }
+  };
+
+  const warmthBar = (score) => {
+    const pct = (score / 10) * 100;
+    const color = score >= 7 ? '#34d399' : score >= 4 ? '#fbbf24' : '#ef4444';
+    return React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } },
+      React.createElement('div', { style: { flex: 1, height: '6px', background: '#334155', borderRadius: '3px', overflow: 'hidden', maxWidth: '80px' } },
+        React.createElement('div', { style: { width: `${pct}%`, height: '100%', background: color, borderRadius: '3px', transition: 'width 0.3s' } })
+      ),
+      React.createElement('span', { style: { fontSize: '0.75rem', color, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" } }, score)
+    );
+  };
+
+  const statusBadge = (status) => React.createElement('span', {
+    style: {
+      display: 'inline-block', fontSize: '0.7rem', fontWeight: 600,
+      padding: '0.15rem 0.55rem', borderRadius: '9999px',
+      background: `${statusColors[status] || '#94a3b8'}22`,
+      color: statusColors[status] || '#94a3b8',
+      textTransform: 'uppercase', letterSpacing: '0.04em'
+    }
+  }, statusLabels[status] || status);
+
+  const typeBadge = (type) => React.createElement('span', {
+    style: {
+      display: 'inline-block', fontSize: '0.7rem', fontWeight: 500,
+      padding: '0.15rem 0.5rem', borderRadius: '0.25rem',
+      background: '#334155', color: '#94a3b8'
+    }
+  }, typeLabels[type] || type);
+
+  const timeAgo = (dateStr) => {
+    if (!dateStr) return 'never';
+    const d = new Date(dateStr);
+    const now = new Date();
+    const days = Math.floor((now - d) / 86400000);
+    if (days === 0) return 'today';
+    if (days === 1) return 'yesterday';
+    if (days < 30) return `${days}d ago`;
+    if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+    return `${Math.floor(days / 365)}y ago`;
+  };
+
+  const renderFormModal = () => showForm && React.createElement('div', {
+    style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
+    onClick: e => { if (e.target === e.currentTarget) setShowForm(false); }
+  },
+    React.createElement('div', {
+      style: { background: '#1e293b', border: '1px solid #334155', borderRadius: '1rem', padding: '1.5rem', width: '480px', maxWidth: '95vw', maxHeight: '90vh', overflow: 'auto' }
+    },
+      React.createElement('h3', { style: { color: '#e2e8f0', fontSize: '1.1rem', fontFamily: "'Orbitron', sans-serif", margin: '0 0 1rem' } },
+        editingGroup ? 'Edit Capital Group' : 'New Capital Group'
+      ),
+      React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.75rem' } },
+        React.createElement('input', {
+          value: fName, onChange: e => setFName(e.target.value),
+          placeholder: 'Group name *',
+          style: { ...styles.input, width: '100%', minWidth: 0, boxSizing: 'border-box' }
+        }),
+        React.createElement('div', { style: { display: 'flex', gap: '0.5rem' } },
+          React.createElement('select', {
+            value: fType, onChange: e => setFType(e.target.value),
+            style: { ...styles.select, flex: 1 }
+          },
+            React.createElement('option', { value: 'developer' }, 'Developer'),
+            React.createElement('option', { value: 'capital_partner' }, 'Capital Partner'),
+            React.createElement('option', { value: 'operator' }, 'Operator'),
+            React.createElement('option', { value: 'broker' }, 'Broker')
+          ),
+          React.createElement('select', {
+            value: fStatus, onChange: e => setFStatus(e.target.value),
+            style: { ...styles.select, flex: 1 }
+          },
+            React.createElement('option', { value: 'prospect' }, 'Prospect'),
+            React.createElement('option', { value: 'warm' }, 'Warm'),
+            React.createElement('option', { value: 'engaged' }, 'Engaged'),
+            React.createElement('option', { value: 'partner' }, 'Partner'),
+            React.createElement('option', { value: 'dormant' }, 'Dormant'),
+            React.createElement('option', { value: 'cold' }, 'Cold')
+          )
+        ),
+        React.createElement('input', {
+          value: fMarkets, onChange: e => setFMarkets(e.target.value),
+          placeholder: 'Markets (comma-separated, e.g. Dallas, Phoenix, Tampa)',
+          style: { ...styles.input, width: '100%', minWidth: 0, boxSizing: 'border-box' }
+        }),
+        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.75rem' } },
+          React.createElement('label', { style: { color: '#94a3b8', fontSize: '0.85rem' } }, 'Warmth'),
+          React.createElement('input', {
+            type: 'range', min: 1, max: 10, value: fWarmth,
+            onChange: e => setFWarmth(parseInt(e.target.value)),
+            style: { flex: 1 }
+          }),
+          React.createElement('span', {
+            style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '0.85rem', color: fWarmth >= 7 ? '#34d399' : fWarmth >= 4 ? '#fbbf24' : '#ef4444', fontWeight: 600 }
+          }, fWarmth)
+        ),
+        React.createElement('input', {
+          value: fStrategy, onChange: e => setFStrategy(e.target.value),
+          placeholder: 'Strategy (e.g. ground-up BTR, value-add, conversion)',
+          style: { ...styles.input, width: '100%', minWidth: 0, boxSizing: 'border-box' }
+        }),
+        React.createElement('textarea', {
+          value: fNotes, onChange: e => setFNotes(e.target.value),
+          placeholder: 'Notes...',
+          rows: 3,
+          style: { ...styles.input, width: '100%', minWidth: 0, resize: 'vertical', boxSizing: 'border-box' }
+        }),
+        React.createElement('div', { style: { display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.5rem' } },
+          React.createElement('button', { onClick: () => setShowForm(false), style: styles.btn }, 'Cancel'),
+          React.createElement('button', { onClick: saveForm, style: styles.btnPrimary },
+            editingGroup ? 'Save Changes' : 'Create Group')
+        )
+      )
+    )
+  );
+
+  // ---- DETAIL VIEW ----
+  if (selectedGroup) {
+    const g = selectedGroup;
+    return React.createElement('div', null,
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' } },
+        React.createElement('button', {
+          onClick: () => setSelectedGroup(null),
+          style: { ...styles.btn, padding: '0.4rem 0.8rem', fontSize: '0.8rem' }
+        }, '\u2190 Back'),
+        React.createElement('div', { style: { flex: 1 } },
+          React.createElement('h2', { style: { ...styles.sectionTitle, fontSize: '1.3rem', margin: 0 } }, g.name),
+          React.createElement('div', { style: { display: 'flex', gap: '0.5rem', marginTop: '0.35rem', alignItems: 'center' } },
+            typeBadge(g.type), statusBadge(g.relationship_status), warmthBar(g.warmth_score || 1)
+          )
+        ),
+        React.createElement('div', { style: { display: 'flex', gap: '0.5rem' } },
+          React.createElement('button', {
+            onClick: () => openEdit(g),
+            style: { ...styles.btn, borderColor: '#3b82f6', color: '#60a5fa', padding: '0.4rem 0.8rem', fontSize: '0.8rem' }
+          }, 'Edit'),
+          React.createElement('button', {
+            onClick: () => deleteGroup(g.id),
+            style: { ...styles.btn, borderColor: '#ef4444', color: '#f87171', padding: '0.4rem 0.8rem', fontSize: '0.8rem' }
+          }, 'Delete')
+        )
+      ),
+
+      detailLoading
+        ? React.createElement('div', { style: { textAlign: 'center', padding: '2rem', color: '#64748b' } }, 'Loading...')
+        : React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' } },
+          React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '1.25rem' } },
+            React.createElement('div', { style: { ...styles.card, padding: '1.25rem' } },
+              React.createElement('h3', { style: { color: '#e2e8f0', fontSize: '0.9rem', fontWeight: 600, margin: '0 0 0.75rem', fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.04em' } }, 'DETAILS'),
+              g.markets && g.markets.length > 0 && React.createElement('div', { style: { marginBottom: '0.5rem' } },
+                React.createElement('span', { style: { color: '#64748b', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 600 } }, 'Markets'),
+                React.createElement('div', { style: { display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.25rem' } },
+                  g.markets.map(m => React.createElement('span', {
+                    key: m, style: { fontSize: '0.75rem', padding: '0.1rem 0.45rem', borderRadius: '0.25rem', background: '#0f172a', border: '1px solid #334155', color: '#94a3b8' }
+                  }, m))
+                )
+              ),
+              g.strategy && React.createElement('div', { style: { marginBottom: '0.5rem' } },
+                React.createElement('span', { style: { color: '#64748b', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 600 } }, 'Strategy'),
+                React.createElement('p', { style: { color: '#e2e8f0', fontSize: '0.85rem', margin: '0.25rem 0 0', lineHeight: 1.5 } }, g.strategy)
+              ),
+              g.notes && React.createElement('div', { style: { marginBottom: '0.5rem' } },
+                React.createElement('span', { style: { color: '#64748b', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 600 } }, 'Notes'),
+                React.createElement('p', { style: { color: '#e2e8f0', fontSize: '0.85rem', margin: '0.25rem 0 0', lineHeight: 1.5 } }, g.notes)
+              ),
+              React.createElement('div', { style: { display: 'flex', gap: '1.5rem', marginTop: '0.5rem', fontSize: '0.75rem', color: '#64748b' } },
+                React.createElement('span', null, 'Last contacted: ', React.createElement('strong', { style: { color: '#94a3b8' } }, timeAgo(g.last_contacted_at))),
+                React.createElement('span', null, 'Created: ', React.createElement('strong', { style: { color: '#94a3b8' } }, timeAgo(g.created_at)))
+              )
+            ),
+
+            React.createElement('div', { style: { ...styles.card, padding: '1.25rem' } },
+              React.createElement('h3', { style: { color: '#e2e8f0', fontSize: '0.9rem', fontWeight: 600, margin: '0 0 0.75rem', fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.04em' } }, 'LINKED PROPERTIES'),
+              (!g.properties || g.properties.length === 0)
+                ? React.createElement('p', { style: { color: '#475569', fontSize: '0.85rem' } }, 'No properties linked yet')
+                : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.5rem' } },
+                    g.properties.map(p => React.createElement('div', {
+                      key: p.id,
+                      style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0.75rem', background: '#0f172a', borderRadius: '0.5rem', border: '1px solid #1e293b' }
+                    },
+                      React.createElement('div', null,
+                        React.createElement('div', { style: { color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 500 } }, p.name || 'Unnamed'),
+                        React.createElement('div', { style: { color: '#64748b', fontSize: '0.75rem' } },
+                          [p.city, p.state].filter(Boolean).join(', '),
+                          p.unit_count ? ` \u00b7 ${p.unit_count} units` : '',
+                          p.project_type ? ` \u00b7 ${p.project_type}` : ''
+                        )
+                      ),
+                      p.status && React.createElement('span', {
+                        style: { fontSize: '0.7rem', padding: '0.1rem 0.4rem', borderRadius: '0.25rem', background: '#334155', color: '#94a3b8' }
+                      }, p.status)
+                    ))
+                  )
+            )
+          ),
+
+          React.createElement('div', { style: { ...styles.card, padding: '1.25rem' } },
+            React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' } },
+              React.createElement('h3', { style: { color: '#e2e8f0', fontSize: '0.9rem', fontWeight: 600, margin: 0, fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.04em' } }, 'ACTIVITY TIMELINE'),
+              React.createElement('button', {
+                onClick: () => { setShowTpForm(true); setTpType('call'); setTpOutcome(''); setTpNotes(''); },
+                style: { ...styles.btnPrimary, padding: '0.35rem 0.75rem', fontSize: '0.75rem' }
+              }, '+ Log Touchpoint')
+            ),
+
+            showTpForm && React.createElement('div', {
+              style: { background: '#0f172a', border: '1px solid #334155', borderRadius: '0.5rem', padding: '0.75rem', marginBottom: '0.75rem' }
+            },
+              React.createElement('div', { style: { display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' } },
+                React.createElement('select', {
+                  value: tpType, onChange: e => setTpType(e.target.value),
+                  style: { ...styles.select, flex: 1, minWidth: 0 }
+                },
+                  React.createElement('option', { value: 'call' }, 'Call'),
+                  React.createElement('option', { value: 'email' }, 'Email'),
+                  React.createElement('option', { value: 'meeting' }, 'Meeting'),
+                  React.createElement('option', { value: 'note' }, 'Note'),
+                  React.createElement('option', { value: 'linkedin' }, 'LinkedIn'),
+                  React.createElement('option', { value: 'referral' }, 'Referral')
+                ),
+                React.createElement('input', {
+                  value: tpOutcome, onChange: e => setTpOutcome(e.target.value),
+                  placeholder: 'Outcome (optional)',
+                  style: { ...styles.input, flex: 2, minWidth: 0 }
+                })
+              ),
+              React.createElement('textarea', {
+                value: tpNotes, onChange: e => setTpNotes(e.target.value),
+                placeholder: 'Notes...',
+                rows: 2,
+                style: { ...styles.input, width: '100%', minWidth: 0, resize: 'vertical', marginBottom: '0.5rem', boxSizing: 'border-box' }
+              }),
+              React.createElement('div', { style: { display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' } },
+                React.createElement('button', { onClick: () => setShowTpForm(false), style: { ...styles.btn, padding: '0.3rem 0.7rem', fontSize: '0.75rem' } }, 'Cancel'),
+                React.createElement('button', { onClick: saveTouchpoint, style: { ...styles.btnPrimary, padding: '0.3rem 0.7rem', fontSize: '0.75rem' } }, 'Save')
+              )
+            ),
+
+            (!g.touchpoints || g.touchpoints.length === 0)
+              ? React.createElement('p', { style: { color: '#475569', fontSize: '0.85rem' } }, 'No touchpoints yet. Log your first interaction above.')
+              : React.createElement('div', { style: { display: 'flex', flexDirection: 'column' } },
+                  g.touchpoints.map((tp, i) => React.createElement('div', {
+                    key: tp.id,
+                    style: { display: 'flex', gap: '0.75rem', paddingBottom: i < g.touchpoints.length - 1 ? '0.75rem' : 0, borderLeft: '2px solid #334155', paddingLeft: '0.75rem', marginLeft: '0.35rem', position: 'relative' }
+                  },
+                    React.createElement('div', {
+                      style: { position: 'absolute', left: '-5px', top: '2px', width: '8px', height: '8px', borderRadius: '50%', background: '#34d399' }
+                    }),
+                    React.createElement('div', { style: { flex: 1 } },
+                      React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                        React.createElement('span', { style: { fontSize: '0.8rem', fontWeight: 600, color: '#e2e8f0', textTransform: 'capitalize' } }, tp.type),
+                        React.createElement('span', { style: { fontSize: '0.7rem', color: '#64748b' } }, timeAgo(tp.occurred_at))
+                      ),
+                      tp.outcome && React.createElement('div', { style: { fontSize: '0.78rem', color: '#94a3b8', marginTop: '0.15rem' } }, tp.outcome),
+                      tp.notes && React.createElement('div', { style: { fontSize: '0.78rem', color: '#64748b', marginTop: '0.15rem', lineHeight: 1.4 } }, tp.notes)
+                    )
+                  ))
+                )
+          )
+        ),
+
+      renderFormModal()
+    );
+  }
+
+  // ---- LIST VIEW ----
+  return React.createElement('div', null,
+    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' } },
+      React.createElement('div', null,
+        React.createElement('h2', { style: { ...styles.sectionTitle, fontSize: '1.3rem', margin: 0 } }, 'Capital Groups'),
+        React.createElement('p', { style: { color: '#64748b', fontSize: '0.85rem', margin: '0.25rem 0 0' } },
+          `${groups.length} relationship${groups.length !== 1 ? 's' : ''} tracked`)
+      ),
+      React.createElement('button', { onClick: openCreate, style: styles.btnPrimary }, '+ New Group')
+    ),
+
+    React.createElement('div', { style: { display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' } },
+      React.createElement('input', {
+        value: search, onChange: e => setSearch(e.target.value),
+        placeholder: 'Search groups...',
+        style: { ...styles.input, flex: 1, minWidth: '180px' }
+      }),
+      React.createElement('select', { value: typeFilter, onChange: e => setTypeFilter(e.target.value), style: styles.select },
+        React.createElement('option', { value: '' }, 'All Types'),
+        React.createElement('option', { value: 'developer' }, 'Developer'),
+        React.createElement('option', { value: 'capital_partner' }, 'Capital Partner'),
+        React.createElement('option', { value: 'operator' }, 'Operator'),
+        React.createElement('option', { value: 'broker' }, 'Broker')
+      ),
+      React.createElement('select', { value: statusFilter, onChange: e => setStatusFilter(e.target.value), style: styles.select },
+        React.createElement('option', { value: '' }, 'All Statuses'),
+        React.createElement('option', { value: 'prospect' }, 'Prospect'),
+        React.createElement('option', { value: 'warm' }, 'Warm'),
+        React.createElement('option', { value: 'engaged' }, 'Engaged'),
+        React.createElement('option', { value: 'partner' }, 'Partner'),
+        React.createElement('option', { value: 'dormant' }, 'Dormant'),
+        React.createElement('option', { value: 'cold' }, 'Cold')
+      )
+    ),
+
+    loading
+      ? React.createElement('div', { style: { textAlign: 'center', padding: '3rem', color: '#64748b' } }, 'Loading capital groups...')
+      : groups.length === 0
+        ? React.createElement('div', { style: styles.empty },
+            React.createElement('div', { style: styles.emptyTitle }, 'No capital groups found'),
+            React.createElement('p', { style: styles.emptyText },
+              (search || typeFilter || statusFilter) ? 'Try adjusting your filters' : 'Add your first capital group to start tracking relationships'),
+            !(search || typeFilter || statusFilter) && React.createElement('button', { onClick: openCreate, style: { ...styles.btnPrimary, marginTop: '1rem' } }, '+ New Group')
+          )
+        : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.75rem' } },
+            groups.map(g => React.createElement('div', {
+              key: g.id,
+              style: { ...styles.card, borderRadius: '0.75rem', padding: '1rem 1.25rem', cursor: 'pointer', transition: 'border-color 0.2s' },
+              onClick: () => loadDetail(g.id)
+            },
+              React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
+                React.createElement('div', { style: { flex: 1, minWidth: 0 } },
+                  React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.35rem' } },
+                    React.createElement('span', { style: { ...styles.companyName, fontSize: '1rem', marginBottom: 0 } }, g.name),
+                    typeBadge(g.type),
+                    statusBadge(g.relationship_status)
+                  ),
+                  g.markets && g.markets.length > 0 && React.createElement('div', { style: { color: '#64748b', fontSize: '0.8rem', marginBottom: '0.25rem' } },
+                    g.markets.join(' \u00b7 ')
+                  ),
+                  g.strategy && React.createElement('div', { style: { color: '#94a3b8', fontSize: '0.8rem' } }, g.strategy)
+                ),
+                React.createElement('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.35rem', flexShrink: 0 } },
+                  warmthBar(g.warmth_score || 1),
+                  React.createElement('span', { style: { fontSize: '0.7rem', color: '#64748b' } }, 'Last contact: ', timeAgo(g.last_contacted_at)),
+                  React.createElement('select', {
+                    value: g.relationship_status,
+                    onClick: e => e.stopPropagation(),
+                    onChange: e => quickStatus(g.id, e.target.value),
+                    style: { ...styles.select, fontSize: '0.7rem', padding: '0.2rem 0.4rem', minWidth: 0 }
+                  },
+                    React.createElement('option', { value: 'prospect' }, 'Prospect'),
+                    React.createElement('option', { value: 'warm' }, 'Warm'),
+                    React.createElement('option', { value: 'engaged' }, 'Engaged'),
+                    React.createElement('option', { value: 'partner' }, 'Partner'),
+                    React.createElement('option', { value: 'dormant' }, 'Dormant'),
+                    React.createElement('option', { value: 'cold' }, 'Cold')
+                  )
+                )
+              )
+            ))
+          ),
+
+    renderFormModal()
+  );
+}
+
+// ===================================================================
 // COMMAND CENTER NAVIGATION — workflow-based 5-section top nav
 // ===================================================================
 
@@ -1798,10 +2301,11 @@ const NAV_SECTIONS = [
   },
   {
     id: 'deals',
-    label: 'Deals',
+    label: 'Prospecting',
     icon: '\u25B2', // ▲
     children: [
-      { id: 'search', label: 'Prospect Search' },
+      { id: 'search', label: 'Properties' },
+      { id: 'capital_groups', label: 'Capital Groups' },
       { id: 'linkedinhub', label: 'LinkedIn Hub' },
       { id: 'dealboard', label: 'Saved Prospects' }
     ]

@@ -1035,6 +1035,70 @@ def init_db():
         pass
 
     # ===================================================================
+    # CAPITAL GROUPS — Long-term relationship tracking
+    # Separate from properties/projects (which are transactional), capital
+    # groups represent the developers, capital partners, operators, and
+    # brokers who deploy capital repeatedly over time. The same group
+    # may drive many projects; tracking the relationship across those
+    # projects is where portfolio-level thinking lives.
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS capital_groups (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            type TEXT DEFAULT 'developer',
+            markets TEXT,
+            strategy TEXT,
+            notes TEXT,
+            relationship_status TEXT DEFAULT 'prospect',
+            warmth_score INTEGER DEFAULT 1,
+            last_contacted_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(name, type)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS capital_group_touchpoints (
+            id TEXT PRIMARY KEY,
+            capital_group_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            outcome TEXT,
+            notes TEXT,
+            occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Link projects to the capital group that owns/drives them. Nullable
+    # so the existing project graph keeps working unchanged; the FK is
+    # additive and only used when a user attaches a project to a group.
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'li_projects', 'capital_group_id', 'TEXT')
+
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_capital_groups_type ON capital_groups(type)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_capital_groups_status ON capital_groups(relationship_status)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_capital_groups_contacted ON capital_groups(last_contacted_at DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_capital_touchpoints_group ON capital_group_touchpoints(capital_group_id, occurred_at DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_projects_capital_group ON li_projects(capital_group_id)')
+    except Exception:
+        pass
+
+    # ===================================================================
     # DEVELOPMENT EVENT PATTERN DETECTION — Tables
     # ===================================================================
 
@@ -1967,6 +2031,7 @@ from api.routes.developer_network import developer_network_bp
 from api.routes.momentum import momentum_bp
 from api.routes.corridors import corridors_bp
 from api.routes.signal_discovery import signal_discovery_bp
+from api.routes.capital_groups import capital_groups_bp
 
 app.register_blueprint(leads_bp)
 app.register_blueprint(projects_bp)
@@ -1984,6 +2049,7 @@ app.register_blueprint(developer_network_bp)
 app.register_blueprint(momentum_bp)
 app.register_blueprint(corridors_bp)
 app.register_blueprint(signal_discovery_bp)
+app.register_blueprint(capital_groups_bp)
 
 
 # ===================================================================
