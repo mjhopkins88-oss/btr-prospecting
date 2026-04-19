@@ -2355,6 +2355,8 @@ function ProspectingPage({ user }) {
       ? renderProspectingSummary()
       : tab === 'groups'
         ? React.createElement(ProspectingGroupsTab)
+      : tab === 'sequences'
+        ? React.createElement(ProspectingSequencesTab)
         : React.createElement('div', {
             style: {
               background: '#1e293b',
@@ -2811,6 +2813,178 @@ function ProspectingGroupsTab() {
               }, g.nextAction)
             );
           })
+    )
+  );
+}
+
+// -- Prospecting Sequences tab: campaign cards --
+// Mock-only data for Phase 5. No backend wiring.
+
+const PROSP_MOCK_SEQUENCES = [
+  { id: 's1', name: 'New Relationship Nurture',   status: 'active', enrolled: 14, step: 3, totalSteps: 7, responseRate: 0.42, meetings: 3, lastUpdated: '2h ago',  description: 'Initial outreach to newly identified capital groups and developers.' },
+  { id: 's2', name: 'Warm Re-engagement',          status: 'active', enrolled: 8,  step: 2, totalSteps: 5, responseRate: 0.38, meetings: 2, lastUpdated: '1d ago',  description: 'Re-activate dormant relationships with tailored market intel.' },
+  { id: 's3', name: 'Market Intel Touch',          status: 'active', enrolled: 22, step: 4, totalSteps: 6, responseRate: 0.55, meetings: 5, lastUpdated: '4h ago',  description: 'Share proprietary market insights to stay top-of-mind.' },
+  { id: 's4', name: 'Owner Outreach',              status: 'active', enrolled: 6,  step: 1, totalSteps: 4, responseRate: 0.17, meetings: 0, lastUpdated: '3d ago',  description: 'Connect with property owners for portfolio insurance review.' },
+  { id: 's5', name: 'Capital Partner Follow-up',   status: 'draft',  enrolled: 0,  step: 0, totalSteps: 5, responseRate: 0,    meetings: 0, lastUpdated: '6d ago',  description: 'Systematic follow-up after initial capital partner meetings.' }
+];
+
+function ProspectingSequencesTab() {
+  const statusBadge = (status) => {
+    const meta = status === 'active'
+      ? { label: 'Active', color: '#34d399', bg: 'rgba(52,211,153,0.12)' }
+      : { label: 'Draft',  color: '#94a3b8', bg: 'rgba(148,163,184,0.12)' };
+    return React.createElement('span', {
+      style: {
+        fontSize: '0.66rem',
+        fontWeight: 600,
+        padding: '0.18rem 0.55rem',
+        borderRadius: '9999px',
+        background: meta.bg,
+        color: meta.color,
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em'
+      }
+    }, meta.label);
+  };
+
+  const metricBlock = (label, value, accent) => React.createElement('div', {
+    key: label,
+    style: { display: 'flex', flexDirection: 'column', gap: '0.15rem', minWidth: '80px' }
+  },
+    React.createElement('div', {
+      style: {
+        fontSize: '0.64rem',
+        color: '#64748b',
+        textTransform: 'uppercase',
+        fontWeight: 600,
+        letterSpacing: '0.05em'
+      }
+    }, label),
+    React.createElement('div', {
+      style: {
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: '1.05rem',
+        fontWeight: 700,
+        color: accent || '#e2e8f0',
+        lineHeight: 1.1
+      }
+    }, value)
+  );
+
+  const progressBar = (step, total) => {
+    const pct = total > 0 ? (step / total) * 100 : 0;
+    return React.createElement('div', {
+      style: {
+        height: '4px',
+        background: '#334155',
+        borderRadius: '2px',
+        overflow: 'hidden',
+        marginTop: '0.5rem'
+      }
+    },
+      React.createElement('div', {
+        style: {
+          width: `${pct}%`,
+          height: '100%',
+          background: '#34d399',
+          borderRadius: '2px'
+        }
+      })
+    );
+  };
+
+  const sequenceCard = (seq) => React.createElement('div', {
+    key: seq.id,
+    style: {
+      background: '#1e293b',
+      border: '1px solid rgba(51,65,85,0.5)',
+      borderRadius: '0.85rem',
+      padding: '1.1rem 1.25rem',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '0.65rem',
+      flex: '1 1 320px',
+      minWidth: '300px',
+      opacity: seq.status === 'draft' ? 0.78 : 1
+    }
+  },
+    React.createElement('div', {
+      style: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        gap: '0.75rem'
+      }
+    },
+      React.createElement('div', { style: { flex: 1, minWidth: 0 } },
+        React.createElement('div', {
+          style: {
+            fontSize: '0.98rem',
+            fontWeight: 600,
+            color: '#e2e8f0',
+            fontFamily: "'Inter', sans-serif"
+          }
+        }, seq.name),
+        React.createElement('div', {
+          style: {
+            fontSize: '0.76rem',
+            color: '#64748b',
+            marginTop: '0.2rem',
+            lineHeight: 1.4
+          }
+        }, seq.description)
+      ),
+      statusBadge(seq.status)
+    ),
+
+    React.createElement('div', {
+      style: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: '1.25rem',
+        paddingTop: '0.4rem',
+        borderTop: '1px solid rgba(51,65,85,0.4)',
+        marginTop: '0.15rem'
+      }
+    },
+      metricBlock('Enrolled', seq.enrolled, '#22d3ee'),
+      metricBlock('Step', `${seq.step}/${seq.totalSteps}`, '#e2e8f0'),
+      metricBlock('Response', `${Math.round(seq.responseRate * 100)}%`, '#34d399'),
+      metricBlock('Meetings', seq.meetings, '#a78bfa'),
+      metricBlock('Updated', seq.lastUpdated, '#94a3b8')
+    ),
+
+    progressBar(seq.step, seq.totalSteps)
+  );
+
+  const activeSeqs = PROSP_MOCK_SEQUENCES.filter(s => s.status === 'active');
+  const draftSeqs = PROSP_MOCK_SEQUENCES.filter(s => s.status === 'draft');
+
+  const sectionLabel = (text) => React.createElement('h3', {
+    style: {
+      fontSize: '0.78rem',
+      color: '#64748b',
+      textTransform: 'uppercase',
+      fontWeight: 600,
+      letterSpacing: '0.06em',
+      margin: '0 0 0.75rem'
+    }
+  }, text);
+
+  return React.createElement('div', {
+    style: { display: 'flex', flexDirection: 'column', gap: '1.75rem' }
+  },
+    React.createElement('div', null,
+      sectionLabel(`Active Sequences (${activeSeqs.length})`),
+      React.createElement('div', {
+        style: { display: 'flex', flexWrap: 'wrap', gap: '0.85rem' }
+      }, activeSeqs.map(sequenceCard))
+    ),
+    draftSeqs.length > 0 && React.createElement('div', null,
+      sectionLabel(`Drafts (${draftSeqs.length})`),
+      React.createElement('div', {
+        style: { display: 'flex', flexWrap: 'wrap', gap: '0.85rem' }
+      }, draftSeqs.map(sequenceCard))
     )
   );
 }
