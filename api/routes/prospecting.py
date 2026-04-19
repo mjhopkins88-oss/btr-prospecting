@@ -315,6 +315,40 @@ def list_contact_touchpoints(cid):
 
 
 # ---------------------------------------------------------------------------
+# CANVAS — portfolio-wide touchpoint aggregation for Relationship Canvas
+# ---------------------------------------------------------------------------
+
+@prospecting_bp.route('/canvas-stats', methods=['GET'])
+def canvas_stats():
+    total = fetch_one(
+        "SELECT COUNT(*) AS cnt FROM prospecting_touchpoints", []
+    )
+    contacts_touched = fetch_one(
+        "SELECT COUNT(DISTINCT contact_id) AS cnt FROM prospecting_touchpoints WHERE contact_id IS NOT NULL", []
+    )
+    groups_engaged = fetch_one(
+        "SELECT COUNT(DISTINCT group_id) AS cnt FROM prospecting_touchpoints WHERE group_id IS NOT NULL", []
+    )
+    replies = fetch_one(
+        "SELECT COUNT(*) AS cnt FROM prospecting_touchpoints WHERE direction = 'inbound'", []
+    )
+    mtgs = fetch_one(
+        "SELECT COUNT(*) AS cnt FROM prospecting_touchpoints WHERE channel IN ('meeting', 'call')", []
+    )
+    last_tp = fetch_one(
+        "SELECT occurred_at FROM prospecting_touchpoints ORDER BY occurred_at DESC LIMIT 1", []
+    )
+    return jsonify({
+        'total_touchpoints': (total or {}).get('cnt', 0),
+        'contacts_touched': (contacts_touched or {}).get('cnt', 0),
+        'groups_engaged': (groups_engaged or {}).get('cnt', 0),
+        'replies': (replies or {}).get('cnt', 0),
+        'meetings': (mtgs or {}).get('cnt', 0),
+        'last_touchpoint_at': (last_tp or {}).get('occurred_at')
+    })
+
+
+# ---------------------------------------------------------------------------
 # NOTICES — Daily Discovery matches awaiting user action
 # ---------------------------------------------------------------------------
 
