@@ -4145,19 +4145,14 @@ function ProspectingCanvasTab() {
   const [loadedSrc, setLoadedSrc] = useState(null);
   const [imgError, setImgError] = useState(null);
   const [dotGrid, setDotGrid] = useState(null);
-  const [contacts, setContacts] = useState([]);
-  const [contactId, setContactId] = useState('');
-  const [touchCount, setTouchCount] = useState(0);
-  const [restoringRef] = useState({ current: false });
-  const [touchpoints, setTouchpoints] = useState([]);
-  const [contactDetail, setContactDetail] = useState(null);
+  const [stats, setStats] = useState(null);
   const canvasRef = useRef(null);
 
   const DOT_SPACING = 5;
   const DOT_RADIUS = 2.4;
 
-  const persist = (src, cid) => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ src: src || null, contactId: cid || '' })); } catch (_) {}
+  const persist = (src) => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ src: src || null })); } catch (_) {}
   };
 
   const loadImage = (src, skipPersist) => {
@@ -4169,7 +4164,7 @@ function ProspectingCanvasTab() {
     img.onload = () => {
       setLoadedSrc(src);
       buildDotGrid(img);
-      if (!skipPersist) persist(src, contactId);
+      if (!skipPersist) persist(src);
     };
     img.onerror = () => setImgError('Could not load image. Check the URL or try another.');
     img.src = src;
@@ -4201,41 +4196,21 @@ function ProspectingCanvasTab() {
   };
 
   useEffect(() => {
-    fetch(API_BASE + '/api/prospecting/contacts')
+    fetch(API_BASE + '/api/prospecting/canvas-stats')
       .then(r => r.json())
-      .then(d => setContacts(Array.isArray(d) ? d : []))
+      .then(d => setStats(d))
       .catch(() => {});
 
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
       if (saved && saved.src) {
-        restoringRef.current = true;
-        if (saved.contactId) setContactId(saved.contactId);
-        if (saved.src.startsWith('data:')) {
-          loadImage(saved.src, true);
-        } else {
-          setImageUrl(saved.src);
-          loadImage(saved.src, true);
-        }
+        if (!saved.src.startsWith('data:')) setImageUrl(saved.src);
+        loadImage(saved.src, true);
       }
     } catch (_) {}
   }, []);
 
-  useEffect(() => {
-    if (!contactId) { setTouchCount(0); setTouchpoints([]); setContactDetail(null); return; }
-    fetch(API_BASE + '/api/prospecting/contacts/' + contactId + '/touchpoints')
-      .then(r => r.json())
-      .then(d => {
-        const tps = d.touchpoints || [];
-        setTouchpoints(tps);
-        setTouchCount(d.count || tps.length);
-      })
-      .catch(() => { setTouchCount(0); setTouchpoints([]); });
-    fetch(API_BASE + '/api/prospecting/contacts/' + contactId)
-      .then(r => r.json())
-      .then(d => { if (!d.error) setContactDetail(d); })
-      .catch(() => {});
-  }, [contactId]);
+  const touchCount = stats ? stats.total_touchpoints : 0;
 
   useEffect(() => {
     if (!dotGrid || !canvasRef.current) return;
@@ -4245,20 +4220,18 @@ function ProspectingCanvasTab() {
     const ctx = cvs.getContext('2d');
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(0, 0, cvs.width, cvs.height);
-    const filled = contactId ? Math.min(touchCount, dotGrid.total) : 0;
+    const filled = Math.min(touchCount, dotGrid.total);
     dotGrid.dots.forEach((d, i) => {
       ctx.beginPath();
       ctx.arc(d.x, d.y, DOT_RADIUS, 0, Math.PI * 2);
-      if (!contactId) {
-        ctx.fillStyle = `rgba(${d.r},${d.g},${d.b},${(d.a / 255).toFixed(2)})`;
-      } else if (i < filled) {
+      if (i < filled) {
         ctx.fillStyle = `rgba(${d.r},${d.g},${d.b},${(d.a / 255).toFixed(2)})`;
       } else {
         ctx.fillStyle = 'rgba(51,65,85,0.25)';
       }
       ctx.fill();
     });
-  }, [dotGrid, touchCount, contactId]);
+  }, [dotGrid, touchCount]);
 
   const handleFile = (e) => {
     const file = e.target.files?.[0];
@@ -4269,11 +4242,6 @@ function ProspectingCanvasTab() {
       loadImage(ev.target.result);
     };
     reader.readAsDataURL(file);
-  };
-
-  const handleContactChange = (cid) => {
-    setContactId(cid);
-    persist(loadedSrc, cid);
   };
 
   const pillStyle = {
@@ -4298,15 +4266,10 @@ function ProspectingCanvasTab() {
     boxSizing: 'border-box'
   };
 
-  const pctFilled = dotGrid && contactId ? Math.min(100, Math.round((touchCount / dotGrid.total) * 100)) : 0;
-  const replies = touchpoints.filter(t => t.direction === 'inbound').length;
-  const meetings = touchpoints.filter(t => t.channel === 'meeting' || t.channel === 'call').length;
-  const lastTouch = contactDetail ? contactDetail.last_touch_at : null;
-  const firstTouch = contactDetail ? contactDetail.first_reached_out_at : null;
-  const nba = contactDetail ? contactDetail.next_best_action : null;
-  const fmtDate = (d) => { if (!d) return '\u2014'; try { return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); } catch(_) { return '\u2014'; } };
+  const pctFilled = dotGrid ? Math.min(100, Math.round((touchCount / dotGrid.total) * 100)) : 0;
   const filledDots = dotGrid ? Math.min(touchCount, dotGrid.total) : 0;
   const totalDots = dotGrid ? dotGrid.total : 0;
+  const fmtDate = (d) => { if (!d) return '\u2014'; try { return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); } catch(_) { return '\u2014'; } };
   const statCell = (label, value, color) => React.createElement('div', { key: label },
     React.createElement('div', {
       style: { fontSize: '0.6rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, marginBottom: '0.2rem' }
@@ -4342,28 +4305,13 @@ function ProspectingCanvasTab() {
         }, 'Relationship Canvas'),
         React.createElement('span', {
           style: { ...pillStyle, background: 'rgba(52,211,153,0.12)', color: '#34d399' }
-        }, 'BETA')
+        }, 'PORTFOLIO')
       ),
 
       React.createElement('div', {
         style: { display: 'flex', gap: '0.75rem', alignItems: 'flex-end', flexWrap: 'wrap' }
       },
-        React.createElement('div', { style: { flex: '1 1 220px' } },
-          React.createElement('label', {
-            style: { fontSize: '0.68rem', color: '#64748b', display: 'block', marginBottom: '0.3rem', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }
-          }, 'Contact'),
-          React.createElement('select', {
-            value: contactId,
-            onChange: (e) => handleContactChange(e.target.value),
-            style: { ...inputStyle, width: '100%' }
-          },
-            React.createElement('option', { value: '' }, '\u2014 select contact \u2014'),
-            contacts.map(c => React.createElement('option', { key: c.id, value: c.id },
-              `${c.first_name || ''} ${c.last_name || ''}`.trim() + (c.group_name ? ` \u2014 ${c.group_name}` : '')
-            ))
-          )
-        ),
-        React.createElement('div', { style: { flex: '1 1 260px' } },
+        React.createElement('div', { style: { flex: '1 1 300px' } },
           React.createElement('label', {
             style: { fontSize: '0.68rem', color: '#64748b', display: 'block', marginBottom: '0.3rem', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }
           }, 'Image URL'),
@@ -4434,28 +4382,21 @@ function ProspectingCanvasTab() {
             },
               React.createElement('span', {
                 style: { fontSize: '0.78rem', color: '#94a3b8' }
-              }, contactId
-                ? `${Math.min(touchCount, dotGrid.total).toLocaleString()} / ${dotGrid.total.toLocaleString()} dots filled`
-                : `${dotGrid.total.toLocaleString()} dots mapped`
+              }, `${filledDots.toLocaleString()} / ${totalDots.toLocaleString()} dots filled`),
+              React.createElement('div', {
+                style: { display: 'flex', alignItems: 'center', gap: '0.5rem' }
+              },
+                React.createElement('div', {
+                  style: { width: '120px', height: '6px', background: '#1e293b', borderRadius: '3px', border: '1px solid #334155', overflow: 'hidden' }
+                },
+                  React.createElement('div', {
+                    style: { width: `${pctFilled}%`, height: '100%', background: pctFilled >= 100 ? '#34d399' : '#60a5fa', borderRadius: '3px', transition: 'width 0.4s' }
+                  })
+                ),
+                React.createElement('span', {
+                  style: { ...pillStyle, background: pctFilled >= 100 ? 'rgba(52,211,153,0.15)' : 'rgba(96,165,250,0.12)', color: pctFilled >= 100 ? '#34d399' : '#60a5fa' }
+                }, `${pctFilled}%`)
               ),
-              contactId
-                ? React.createElement('div', {
-                    style: { display: 'flex', alignItems: 'center', gap: '0.5rem' }
-                  },
-                    React.createElement('div', {
-                      style: { width: '120px', height: '6px', background: '#1e293b', borderRadius: '3px', border: '1px solid #334155', overflow: 'hidden' }
-                    },
-                      React.createElement('div', {
-                        style: { width: `${pctFilled}%`, height: '100%', background: pctFilled >= 100 ? '#34d399' : '#60a5fa', borderRadius: '3px', transition: 'width 0.4s' }
-                      })
-                    ),
-                    React.createElement('span', {
-                      style: { ...pillStyle, background: pctFilled >= 100 ? 'rgba(52,211,153,0.15)' : 'rgba(96,165,250,0.12)', color: pctFilled >= 100 ? '#34d399' : '#60a5fa' }
-                    }, `${pctFilled}%`)
-                  )
-                : React.createElement('span', {
-                    style: { ...pillStyle, background: 'rgba(96,165,250,0.12)', color: '#60a5fa' }
-                  }, 'TEMPLATE READY'),
               React.createElement('span', {
                 style: { fontSize: '0.72rem', color: '#64748b', fontFamily: "'JetBrains Mono', monospace" }
               }, `${dotGrid.width}\u00D7${dotGrid.height}px`)
@@ -4472,10 +4413,7 @@ function ProspectingCanvasTab() {
             }),
             React.createElement('p', {
               style: { fontSize: '0.75rem', color: '#64748b', textAlign: 'center', margin: 0, lineHeight: 1.5 }
-            }, contactId
-              ? `${touchCount} touchpoint${touchCount === 1 ? '' : 's'} logged. Each interaction fills the next dot in the portrait.`
-              : 'Select a contact above to track progress. Each touchpoint fills in a dot to reveal the portrait.'
-            )
+            }, `${touchCount} touchpoint${touchCount === 1 ? '' : 's'} across all contacts. Every interaction fills the next dot.`)
           )
         : React.createElement('div', {
             style: { textAlign: 'center', padding: '3rem' }
@@ -4492,7 +4430,7 @@ function ProspectingCanvasTab() {
           )
     ),
 
-    contactId ? React.createElement('div', {
+    stats ? React.createElement('div', {
       style: {
         background: '#1e293b',
         border: '1px solid rgba(51,65,85,0.5)',
@@ -4503,25 +4441,14 @@ function ProspectingCanvasTab() {
         gap: '0.5rem 1rem'
       }
     },
-      statCell('Total Touches', touchCount, '#e2e8f0'),
-      statCell('Replies', replies, replies > 0 ? '#34d399' : '#64748b'),
-      statCell('Meetings', meetings, meetings > 0 ? '#60a5fa' : '#64748b'),
-      statCell('Last Touch', fmtDate(lastTouch), '#e2e8f0'),
-      statCell('First Touch', fmtDate(firstTouch), '#94a3b8'),
+      statCell('Total Touches', stats.total_touchpoints, '#e2e8f0'),
+      statCell('Contacts', stats.contacts_touched, '#34d399'),
+      statCell('Groups', stats.groups_engaged, '#60a5fa'),
+      statCell('Replies', stats.replies, stats.replies > 0 ? '#34d399' : '#64748b'),
+      statCell('Meetings', stats.meetings, stats.meetings > 0 ? '#60a5fa' : '#64748b'),
+      statCell('Last Touch', fmtDate(stats.last_touchpoint_at), '#e2e8f0'),
       statCell('Canvas', dotGrid ? `${filledDots} / ${totalDots.toLocaleString()}` : '\u2014', '#60a5fa'),
-      statCell('Completion', dotGrid ? `${pctFilled}%` : '\u2014', pctFilled >= 100 ? '#34d399' : '#f59e0b'),
-      React.createElement('div', { key: 'nba', style: { gridColumn: 'span 2', minWidth: 0 } },
-        React.createElement('div', {
-          style: { fontSize: '0.6rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, marginBottom: '0.2rem' }
-        }, 'Next Best Action'),
-        React.createElement('div', {
-          style: {
-            fontSize: '0.82rem', fontWeight: 500, color: nba ? '#f59e0b' : '#475569',
-            fontFamily: "'Inter', sans-serif",
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
-          }
-        }, nba ? nba.title : 'No pending actions')
-      )
+      statCell('Completion', dotGrid ? `${pctFilled}%` : '\u2014', pctFilled >= 100 ? '#34d399' : '#f59e0b')
     ) : null
   );
 }
