@@ -2285,7 +2285,7 @@ function CapitalGroupsPage({ user }) {
 }
 
 // ===================================================================
-// PROSPECTING PAGE — shell with tabs (Phase 1: placeholders only)
+// PROSPECTING PAGE
 // ===================================================================
 
 function ProspectingPage({ user }) {
@@ -2950,10 +2950,11 @@ function ProspectingContactsTab({ user }) {
   };
 
   const nbaBadge = (nba) => {
-    if (!nba || !nba.type || nba.type === 'none') {
+    const nbaType = nba && (nba.next_best_action_type || nba.type);
+    if (!nbaType || nbaType === 'none') {
       return React.createElement('span', { style: { fontSize: '0.78rem', color: '#475569' } }, '\u2014');
     }
-    const label = NBA_TYPE_LABELS[nba.type] || nba.type;
+    const label = NBA_TYPE_LABELS[nbaType] || nbaType;
     return React.createElement('span', {
       style: { fontSize: '0.78rem', color: '#94a3b8' }
     }, label);
