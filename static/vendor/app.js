@@ -2874,15 +2874,218 @@ function ProspectingContactsTab({ user }) {
 }
 
 function ProspectingNoticesTab() {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState('new');
+
+  const load = () => {
+    setLoading(true);
+    fetch(API_BASE + '/api/prospecting/notices?status=' + encodeURIComponent(statusFilter))
+      .then(r => r.json())
+      .then(d => { setRows(Array.isArray(d) ? d : []); setLoading(false); })
+      .catch(() => { setRows([]); setLoading(false); });
+  };
+
+  useEffect(() => { load(); }, [statusFilter]);
+
+  const patchNotice = (nid, newStatus) => {
+    fetch(API_BASE + '/api/prospecting/notices/' + nid, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus })
+    }).then(() => {
+      setRows(prev => prev.filter(r => r.id !== nid));
+    }).catch(() => {});
+  };
+
+  const selectStyle = {
+    background: '#0f172a',
+    border: '1px solid #334155',
+    color: '#e2e8f0',
+    padding: '0.5rem 0.75rem',
+    borderRadius: '0.5rem',
+    fontSize: '0.82rem',
+    fontFamily: "'Inter', sans-serif",
+    outline: 'none',
+    cursor: 'pointer'
+  };
+
+  const actionBtn = (label, onClick, accent) => React.createElement('button', {
+    onClick: onClick,
+    style: {
+      background: accent ? 'rgba(52,211,153,0.12)' : 'transparent',
+      border: '1px solid ' + (accent ? '#34d399' : '#334155'),
+      color: accent ? '#34d399' : '#94a3b8',
+      padding: '0.3rem 0.65rem',
+      borderRadius: '0.4rem',
+      fontSize: '0.72rem',
+      fontWeight: 600,
+      cursor: 'pointer',
+      fontFamily: "'Inter', sans-serif",
+      whiteSpace: 'nowrap'
+    }
+  }, label);
+
+  const scopeBadge = (scope) => {
+    const isCompany = scope === 'company';
+    return React.createElement('span', {
+      style: {
+        fontSize: '0.66rem',
+        fontWeight: 600,
+        padding: '0.18rem 0.55rem',
+        borderRadius: '9999px',
+        background: isCompany ? 'rgba(96,165,250,0.12)' : 'rgba(251,191,36,0.12)',
+        color: isCompany ? '#60a5fa' : '#fbbf24',
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em'
+      }
+    }, isCompany ? 'Company' : 'Industry');
+  };
+
+  const fmtDate = (d) => {
+    if (!d) return '\u2014';
+    try {
+      const dt = new Date(d);
+      if (isNaN(dt.getTime())) return '\u2014';
+      return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
+    } catch(e) { return '\u2014'; }
+  };
+
+  const COLS = '2.2fr 1fr 1.5fr 1.3fr 0.8fr 0.8fr 1.8fr';
+
+  const headerCell = (label) => React.createElement('span', {
+    key: label,
+    style: {
+      fontSize: '0.68rem',
+      color: '#64748b',
+      textTransform: 'uppercase',
+      fontWeight: 600,
+      letterSpacing: '0.05em'
+    }
+  }, label);
+
+  if (loading) return React.createElement('div', { style: { color: '#64748b', padding: '2rem', textAlign: 'center' } }, 'Loading notices...');
+
   return React.createElement('div', {
-    style: { padding: '3rem 2rem', textAlign: 'center', color: '#64748b' }
+    style: { display: 'flex', flexDirection: 'column', gap: '1rem' }
   },
     React.createElement('div', {
-      style: { fontSize: '1.1rem', marginBottom: '0.5rem', color: '#475569' }
-    }, 'Notices'),
+      style: { display: 'flex', gap: '0.5rem', alignItems: 'center' }
+    },
+      React.createElement('select', {
+        value: statusFilter,
+        onChange: e => setStatusFilter(e.target.value),
+        style: selectStyle
+      },
+        React.createElement('option', { value: 'new' }, 'New'),
+        React.createElement('option', { value: 'converted' }, 'Converted'),
+        React.createElement('option', { value: 'dismissed' }, 'Dismissed')
+      ),
+      React.createElement('span', {
+        style: { fontSize: '0.78rem', color: '#64748b', marginLeft: '0.5rem' }
+      }, rows.length + ' notice' + (rows.length !== 1 ? 's' : ''))
+    ),
+
     React.createElement('div', {
-      style: { fontSize: '0.82rem' }
-    }, 'Signal notices will be built in a future step.')
+      style: {
+        background: '#1e293b',
+        border: '1px solid rgba(51,65,85,0.5)',
+        borderRadius: '0.75rem',
+        overflow: 'hidden'
+      }
+    },
+      React.createElement('div', {
+        style: {
+          display: 'grid',
+          gridTemplateColumns: COLS,
+          gap: '0.5rem',
+          padding: '0.65rem 1rem',
+          borderBottom: '1px solid #334155',
+          background: '#0f172a'
+        }
+      },
+        headerCell('Title'),
+        headerCell('Scope'),
+        headerCell('Group / Contact'),
+        headerCell('Summary'),
+        headerCell('Importance'),
+        headerCell('Date'),
+        headerCell('Actions')
+      ),
+      rows.length === 0
+        ? React.createElement('div', {
+            style: { padding: '3rem 2rem', textAlign: 'center', color: '#64748b' }
+          },
+            React.createElement('div', {
+              style: { fontSize: '1.1rem', marginBottom: '0.5rem', color: '#475569' }
+            }, statusFilter === 'new' ? 'No new notices' : 'No ' + statusFilter + ' notices'),
+            React.createElement('div', {
+              style: { fontSize: '0.82rem' }
+            }, statusFilter === 'new'
+              ? 'When Daily Discovery finds signals matching your groups, notices will appear here.'
+              : 'Notices you have ' + statusFilter + ' will appear here.')
+          )
+        : rows.map(n => {
+            const contactName = [n.first_name, n.last_name].filter(Boolean).join(' ');
+            const relation = n.group_name
+              ? (contactName ? n.group_name + ' \u00B7 ' + contactName : n.group_name)
+              : (contactName || '\u2014');
+            return React.createElement('div', {
+              key: n.id,
+              style: {
+                display: 'grid',
+                gridTemplateColumns: COLS,
+                gap: '0.5rem',
+                padding: '0.7rem 1rem',
+                borderBottom: '1px solid rgba(51,65,85,0.3)',
+                alignItems: 'center'
+              }
+            },
+              React.createElement('div', { style: { minWidth: 0 } },
+                React.createElement('div', {
+                  style: { fontSize: '0.86rem', fontWeight: 600, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+                }, n.title || '\u2014'),
+                n.source_url
+                  ? React.createElement('a', {
+                      href: n.source_url,
+                      target: '_blank',
+                      rel: 'noopener noreferrer',
+                      style: { fontSize: '0.68rem', color: '#60a5fa', textDecoration: 'none' }
+                    }, 'source')
+                  : null
+              ),
+              scopeBadge(n.signal_scope),
+              React.createElement('span', {
+                style: { fontSize: '0.78rem', color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+              }, relation),
+              React.createElement('span', {
+                style: { fontSize: '0.76rem', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+              }, n.summary || '\u2014'),
+              React.createElement('span', {
+                style: {
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  color: (n.importance || 0) >= 7 ? '#34d399' : (n.importance || 0) >= 4 ? '#fbbf24' : '#94a3b8',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  textAlign: 'center'
+                }
+              }, n.importance != null ? n.importance : '\u2014'),
+              React.createElement('span', {
+                style: { fontSize: '0.78rem', color: '#94a3b8' }
+              }, fmtDate(n.created_at)),
+              statusFilter === 'new'
+                ? React.createElement('div', {
+                    style: { display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }
+                  },
+                    actionBtn('Convert', () => patchNotice(n.id, 'converted'), true),
+                    actionBtn('Dismiss', () => patchNotice(n.id, 'dismissed'), false)
+                  )
+                : React.createElement('span', {
+                    style: { fontSize: '0.72rem', color: '#475569', textTransform: 'uppercase', fontWeight: 600 }
+                  }, n.status)
+            );
+          })
+    )
   );
 }
 
