@@ -420,6 +420,12 @@ def init_db():
     c.safe_execute('CREATE INDEX IF NOT EXISTS idx_lead_activity_lead ON lead_activity(lead_id, created_at DESC)')
     c.safe_execute('CREATE INDEX IF NOT EXISTS idx_lead_activity_actor ON lead_activity(actor_user_id, created_at DESC)')
 
+    # --- CRM leads: prospecting context columns ---
+    _col_target = _real_cursor if _is_postgres() else c
+    _safe_add_column(_col_target, 'crm_leads', 'group_id', 'TEXT')
+    _safe_add_column(_col_target, 'crm_leads', 'contact_id', 'TEXT')
+    _safe_add_column(_col_target, 'crm_leads', 'source', "TEXT DEFAULT 'manual'")
+
     # --- Trend Detection & Weekly Briefs Tables ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS trend_signals (
@@ -3325,6 +3331,54 @@ def api_crm_upsert_lead():
     return jsonify({'success': True, 'lead': lead})
 
 
+@app.route('/api/crm/lead/from-prospecting', methods=['POST'])
+@require_auth
+@require_any_role('admin', 'producer')
+def api_crm_lead_from_prospecting():
+    """Create a CRM lead from a prospecting contact/group."""
+    if not g.user:
+        return jsonify({'success': False, 'message': 'Auth required'}), 401
+    data = request.json or {}
+    group_id = data.get('group_id')
+    contact_id = data.get('contact_id')
+    company_name = data.get('company_name', '').strip()
+    if not company_name:
+        return jsonify({'success': False, 'message': 'company_name required'}), 400
+
+    conn = _get_db_conn()
+    c = conn.cursor()
+    ws = g.workspace_id
+    prospect_key = 'prosp_' + (group_id or contact_id or str(uuid.uuid4()))
+
+    # Find or create crm_company
+    c.execute('SELECT id FROM crm_companies WHERE workspace_id = ? AND prospect_key = ?', (ws, prospect_key))
+    row = c.fetchone()
+    if row:
+        company_id = row[0]
+    else:
+        company_id = str(uuid.uuid4())
+        website = data.get('website') or None
+        c.execute('INSERT INTO crm_companies (id, workspace_id, prospect_key, company_name, website) VALUES (?, ?, ?, ?, ?)',
+                  (company_id, ws, prospect_key, company_name, website))
+
+    # Check if lead already exists for this company
+    c.execute('SELECT id, status FROM crm_leads WHERE workspace_id = ? AND company_id = ?', (ws, company_id))
+    existing = c.fetchone()
+    if existing:
+        conn.close()
+        return jsonify({'success': True, 'lead': {'id': existing[0], 'status': existing[1]}, 'already_exists': True})
+
+    lead_id = str(uuid.uuid4())
+    c.execute('''INSERT INTO crm_leads (id, workspace_id, company_id, owner_user_id, status, group_id, contact_id, source)
+                 VALUES (?, ?, ?, ?, 'New', ?, ?, 'prospecting')''',
+              (lead_id, ws, company_id, g.user['id'], group_id, contact_id))
+    _log_lead_activity(c, lead_id, g.user['id'], 'SAVED')
+    _log_lead_activity(c, lead_id, g.user['id'], 'OWNER_ASSIGNED', None, g.user['id'])
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'lead': {'id': lead_id, 'status': 'New', 'company_name': company_name}})
+
+
 @app.route('/api/crm/leads', methods=['GET'])
 @require_auth
 @require_any_role('admin', 'producer')
@@ -3340,12 +3394,25 @@ def api_crm_list_leads():
         SELECT l.id, l.status, l.owner_user_id, l.last_touch_at, l.next_followup_at, l.priority, l.created_at,
                co.company_name, co.prospect_key, co.website,
                u.name as owner_name,
-               la.action_type as last_action_type, la.created_at as last_activity_at
+               la.action_type as last_action_type, la.created_at as last_activity_at,
+               l.group_id, l.contact_id, l.source,
+               pc.first_name as contact_first_name, pc.last_name as contact_last_name,
+               pc.title as contact_title, pc.relationship_stage,
+               cg.entity_name as group_name, cg.warmth_score,
+               ps.title as last_signal_title
         FROM crm_leads l
         JOIN crm_companies co ON l.company_id = co.id
         LEFT JOIN users u ON l.owner_user_id = u.id
         LEFT JOIN lead_activity la ON la.id = (
             SELECT la2.id FROM lead_activity la2 WHERE la2.lead_id = l.id ORDER BY la2.created_at DESC LIMIT 1
+        )
+        LEFT JOIN prospecting_contacts pc ON l.contact_id = pc.id
+        LEFT JOIN capital_groups cg ON l.group_id = cg.id
+        LEFT JOIN prospecting_signals ps ON ps.id = (
+            SELECT ps2.id FROM prospecting_signals ps2
+            WHERE (ps2.signal_scope = 'company' AND ps2.entity_name = co.company_name)
+               OR (l.group_id IS NOT NULL AND ps2.entity_name = cg.entity_name)
+            ORDER BY ps2.detected_at DESC LIMIT 1
         )
         WHERE l.workspace_id = ?
     '''
@@ -3379,6 +3446,11 @@ def api_crm_list_leads():
             'created_at': _safe_ts(r[6]), 'company_name': r[7], 'prospect_key': r[8],
             'website': r[9], 'owner_name': r[10],
             'last_action_type': r[11], 'last_activity_at': r[12],
+            'group_id': r[13], 'contact_id': r[14], 'source': r[15],
+            'contact_first_name': r[16], 'contact_last_name': r[17],
+            'contact_title': r[18], 'relationship_stage': r[19],
+            'group_name': r[20], 'warmth_score': r[21],
+            'last_signal_title': r[22],
         })
     conn.close()
     return jsonify({'success': True, 'leads': leads})
