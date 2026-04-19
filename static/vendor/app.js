@@ -2839,6 +2839,7 @@ function ProspectingContactsTab({ user }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [dragId, setDragId] = useState(null);
   const [dragOver, setDragOver] = useState(null);
+  const [assignId, setAssignId] = useState(null);
 
   const emptyForm = {
     first_name: '', last_name: '', title: '', group_id: '',
@@ -3243,6 +3244,51 @@ function ProspectingContactsTab({ user }) {
                           borderRadius: '0.25rem', whiteSpace: 'nowrap'
                         }
                       }, nbaLabel) : null
+                    ),
+                    React.createElement('div', {
+                      style: { marginTop: '0.3rem', borderTop: '1px solid rgba(51,65,85,0.3)', paddingTop: '0.3rem' }
+                    },
+                      assignId === c.id
+                        ? React.createElement('select', {
+                            autoFocus: true,
+                            value: c.group_id || '',
+                            onChange: function(e) {
+                              var gid = e.target.value || null;
+                              setAssignId(null);
+                              setRows(function(prev) { return prev.map(function(r) {
+                                if (r.id !== c.id) return r;
+                                var g = groups.find(function(gr) { return gr.id === gid; });
+                                return Object.assign({}, r, { group_id: gid, group_name: g ? g.entity_name : null });
+                              }); });
+                              fetch(API_BASE + '/api/prospecting/contacts/' + c.id, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ group_id: gid })
+                              }).then(function(r) {
+                                if (!r.ok) setRefreshKey(function(k) { return k + 1; });
+                              });
+                            },
+                            onBlur: function() { setAssignId(null); },
+                            style: {
+                              width: '100%', fontSize: '0.62rem', padding: '0.2rem 0.3rem',
+                              background: '#0f172a', color: '#94a3b8',
+                              border: '1px solid rgba(51,65,85,0.5)',
+                              borderRadius: '0.3rem', fontFamily: "'Inter', sans-serif"
+                            }
+                          },
+                            React.createElement('option', { value: '' }, '— None —'),
+                            groups.map(function(g) {
+                              return React.createElement('option', { key: g.id, value: g.id }, g.entity_name);
+                            })
+                          )
+                        : React.createElement('button', {
+                            onClick: function(e) { e.stopPropagation(); setAssignId(c.id); },
+                            style: {
+                              background: 'transparent', border: 'none', color: '#475569',
+                              fontSize: '0.6rem', cursor: 'pointer', padding: 0,
+                              fontFamily: "'Inter', sans-serif"
+                            }
+                          }, c.group_name ? 'Reassign Group' : 'Assign Group')
                     )
                   );
                 })
