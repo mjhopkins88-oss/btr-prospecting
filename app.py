@@ -2287,6 +2287,42 @@ app.register_blueprint(signal_discovery_bp)
 app.register_blueprint(capital_groups_bp)
 app.register_blueprint(prospecting_bp)
 
+# ===================================================================
+# DASHBOARD — Weather endpoint (WeatherAPI.com)
+# ===================================================================
+
+WEATHER_API_KEY = os.getenv('WEATHER_API_KEY', '')
+print(f"[Weather] API key loaded: {bool(WEATHER_API_KEY)}")
+
+
+@app.route('/api/dashboard/weather', methods=['GET'])
+def dashboard_weather():
+    if not WEATHER_API_KEY:
+        return jsonify({'error': 'Weather API key not configured'}), 503
+    try:
+        import requests as _wreq
+        resp = _wreq.get(
+            'https://api.weatherapi.com/v1/current.json',
+            params={'key': WEATHER_API_KEY, 'q': 'Phoenix'},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        d = resp.json()
+        loc = d.get('location', {})
+        cur = d.get('current', {})
+        cond = cur.get('condition', {})
+        return jsonify({
+            'location': loc.get('name', 'Phoenix'),
+            'region': loc.get('region', ''),
+            'time': loc.get('localtime', ''),
+            'temp': cur.get('temp_f'),
+            'condition': cond.get('text', ''),
+            'icon': cond.get('icon', ''),
+        })
+    except Exception as e:
+        print(f"[Weather] API error: {e}")
+        return jsonify({'error': 'Weather data unavailable'}), 500
+
 
 # ===================================================================
 # AUTH HELPERS & MIDDLEWARE
