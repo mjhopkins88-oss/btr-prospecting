@@ -440,6 +440,61 @@ def get_feed(type_filter='', limit=50):
     return result
 
 
+def get_todays_focus(limit=10):
+    now = _now()
+    today_end = (now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).isoformat()
+
+    rows = fetch_all(
+        "SELECT t.id, t.type, t.title, t.description, t.priority, t.due_at, "
+        "t.trigger_rule, t.capital_group_id, t.contact_id, t.signal_id, "
+        "t.generated_reason, t.next_best_action_type, t.channel, "
+        "g.name AS group_name, "
+        "c.first_name AS contact_first, c.last_name AS contact_last, "
+        "s.title AS signal_title, s.signal_type, s.summary AS signal_summary "
+        "FROM prospecting_tasks t "
+        "LEFT JOIN capital_groups g ON g.id = t.capital_group_id "
+        "LEFT JOIN prospecting_contacts c ON c.id = t.contact_id "
+        "LEFT JOIN prospecting_signals s ON s.id = t.signal_id "
+        "WHERE t.status = 'pending' AND (t.due_at <= ? OR t.next_best_action_type IS NOT NULL) "
+        "ORDER BY "
+        "CASE t.next_best_action_type "
+        "WHEN 'signal_company' THEN 1 "
+        "WHEN 'signal_industry' THEN 2 "
+        "WHEN 'overdue_followup' THEN 3 "
+        "WHEN 'stale_checkin' THEN 4 "
+        "WHEN 'initial_outreach' THEN 5 "
+        "ELSE 6 END, "
+        "t.priority DESC, t.due_at ASC "
+        "LIMIT ?",
+        [today_end, limit]
+    )
+
+    result = []
+    for r in rows:
+        contact_name = ' '.join(filter(None, [r.get('contact_first'), r.get('contact_last')])) or None
+        result.append({
+            'id': r['id'],
+            'type': r['type'],
+            'title': r['title'],
+            'description': r.get('description'),
+            'priority': r.get('priority', 5),
+            'due_at': r.get('due_at'),
+            'channel': r.get('channel'),
+            'group_name': r.get('group_name'),
+            'contact_name': contact_name,
+            'contact_id': r.get('contact_id'),
+            'capital_group_id': r.get('capital_group_id'),
+            'signal_id': r.get('signal_id'),
+            'signal_title': r.get('signal_title'),
+            'signal_type': r.get('signal_type'),
+            'signal_summary': r.get('signal_summary'),
+            'nba_type': r.get('next_best_action_type'),
+            'reason': r.get('generated_reason'),
+            'trigger_rule': r.get('trigger_rule'),
+        })
+    return result
+
+
 def complete_task(task_id):
     execute(
         "UPDATE prospecting_tasks SET status = 'completed', completed_at = ? WHERE id = ?",

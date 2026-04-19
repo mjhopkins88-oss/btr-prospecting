@@ -13,7 +13,7 @@ from services.task_engine import (
     get_groups_list, get_sequences_list, get_feed,
     complete_task, run_daily_scheduler,
     rule_new_group, rule_meeting_followup, rule_proposal_followup,
-    rule_signal
+    rule_signal, get_todays_focus
 )
 from services.prospecting_rules import (
     rule_initial_followup, rule_task_complete, compute_next_best_action,
@@ -34,6 +34,12 @@ def summary():
         'snapshot': get_summary_stats(),
         'buckets': get_task_buckets()
     })
+
+
+@prospecting_bp.route('/todays-focus', methods=['GET'])
+def todays_focus():
+    limit = request.args.get('limit', 10, type=int)
+    return jsonify(get_todays_focus(limit=min(limit, 25)))
 
 
 @prospecting_bp.route('/schedule', methods=['GET'])
