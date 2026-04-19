@@ -14267,7 +14267,27 @@ function PipelinePage({
     },
     value: lead.next_followup_at ? lead.next_followup_at.split('T')[0] : '',
     onChange: e => updateLead(lead.id, 'next_followup_at', e.target.value ? new Date(e.target.value).toISOString() : null)
-  })), lead.last_activity_at && /*#__PURE__*/React.createElement("span", {
+  })), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.72rem',
+      fontWeight: 600,
+      color: '#fbbf24',
+      background: 'rgba(251,191,36,0.1)',
+      padding: '0.2rem 0.55rem',
+      borderRadius: '0.35rem',
+      whiteSpace: 'nowrap',
+      fontFamily: "'Inter',sans-serif"
+    }
+  }, (() => {
+    const s = lead.status;
+    if (s === 'New') return 'Initial outreach';
+    if (s === 'Contacted') return 'Follow up';
+    if (s === 'InDiscussion') return 'Continue conversation';
+    if (s === 'Quoted') return 'Check decision status';
+    if (s === 'Nurture') return 'Re-engage after inactivity';
+    if (s === 'Won' || s === 'Lost') return 'Review account';
+    return 'Review account';
+  })()), lead.last_activity_at && /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: '0.7rem',
       color: '#475569'
