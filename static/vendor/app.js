@@ -2931,6 +2931,34 @@ function ProspectingContactsTab({ user }) {
     }
   }, 'SignalStack');
 
+  const createLeadFromContact = (contact) => {
+    var name = (contact.group_name || [contact.first_name, contact.last_name].filter(Boolean).join(' ') || 'Unknown');
+    fetch(API_BASE + '/api/crm/lead/from-prospecting', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        group_id: contact.group_id || null,
+        contact_id: contact.id,
+        company_name: name,
+        website: contact.linkedin_url || null
+      })
+    }).then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.success) {
+          alert(d.already_exists ? 'Lead already exists in pipeline.' : 'Lead created in pipeline!');
+        }
+      }).catch(function() { alert('Failed to create lead.'); });
+  };
+
+  const pipeBtn = (contact) => React.createElement('button', {
+    onClick: (e) => { e.stopPropagation(); createLeadFromContact(contact); },
+    style: {
+      background: 'transparent', border: '1px solid #334155', color: '#60a5fa',
+      padding: '0.25rem 0.5rem', borderRadius: '0.4rem', fontSize: '0.68rem',
+      fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter', sans-serif", whiteSpace: 'nowrap'
+    }
+  }, 'Create Lead');
+
   const fmtDate = (d) => {
     if (!d) return '\u2014';
     try {
@@ -3281,14 +3309,26 @@ function ProspectingContactsTab({ user }) {
                               return React.createElement('option', { key: g.id, value: g.id }, g.entity_name);
                             })
                           )
-                        : React.createElement('button', {
-                            onClick: function(e) { e.stopPropagation(); setAssignId(c.id); },
-                            style: {
-                              background: 'transparent', border: 'none', color: '#475569',
-                              fontSize: '0.6rem', cursor: 'pointer', padding: 0,
-                              fontFamily: "'Inter', sans-serif"
-                            }
-                          }, c.group_name ? 'Reassign Group' : 'Assign Group')
+                        : React.createElement('div', {
+                            style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' }
+                          },
+                            React.createElement('button', {
+                              onClick: function(e) { e.stopPropagation(); setAssignId(c.id); },
+                              style: {
+                                background: 'transparent', border: 'none', color: '#475569',
+                                fontSize: '0.6rem', cursor: 'pointer', padding: 0,
+                                fontFamily: "'Inter', sans-serif"
+                              }
+                            }, c.group_name ? 'Reassign' : 'Assign Group'),
+                            React.createElement('button', {
+                              onClick: function(e) { e.stopPropagation(); createLeadFromContact(c); },
+                              style: {
+                                background: 'transparent', border: 'none', color: '#60a5fa',
+                                fontSize: '0.6rem', cursor: 'pointer', padding: 0,
+                                fontFamily: "'Inter', sans-serif", fontWeight: 600
+                              }
+                            }, 'Create Lead')
+                          )
                     )
                   );
                 })
@@ -3362,7 +3402,10 @@ function ProspectingContactsTab({ user }) {
                   style: { fontSize: '0.78rem', color: '#94a3b8' }
                 }, fmtDate(c.last_touch_at)),
                 nbaBadge(c.next_best_action),
-                ssBtn(c)
+                React.createElement('div', { style: { display: 'flex', gap: '0.3rem' } },
+                  pipeBtn(c),
+                  ssBtn(c)
+                )
               ))
         )
   );
@@ -14085,7 +14128,11 @@ function PipelinePage({
       flexDirection: 'column',
       gap: '0.75rem'
     }
-  }, leads.map(lead => /*#__PURE__*/React.createElement("div", {
+  }, leads.map(lead => {
+    const contactName = [lead.contact_first_name, lead.contact_last_name].filter(Boolean).join(' ');
+    const heatColor = lead.warmth_score >= 70 ? '#34d399' : lead.warmth_score >= 40 ? '#fbbf24' : lead.warmth_score >= 1 ? '#fb923c' : '#475569';
+    const stageMeta = { cold: 'Cold', initial_outreach: 'Outreach', light_conversation: 'Follow-Up', active: 'Active', warm: 'Warm', strategic: 'Strategic', dormant: 'Dormant' };
+    return /*#__PURE__*/React.createElement("div", {
     key: lead.id,
     style: {
       background: '#1e293b',
@@ -14110,12 +14157,29 @@ function PipelinePage({
       color: '#f1f5f9',
       marginBottom: '0.2rem'
     }
-  }, lead.company_name), /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: '0.75rem',
-      color: '#64748b'
-    }
-  }, lead.owner_user_id === user?.id ? 'Owned by: Me' : lead.owner_name ? `Owned by: ${lead.owner_name}` : 'Unassigned')), /*#__PURE__*/React.createElement("select", {
+  }, lead.company_name), /*#__PURE__*/React.createElement("div", {
+    style: { display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '0.2rem' }
+  },
+    /*#__PURE__*/React.createElement("span", {
+      style: { fontSize: '0.75rem', color: '#64748b' }
+    }, lead.owner_user_id === user?.id ? 'Me' : lead.owner_name || 'Unassigned'),
+    contactName && /*#__PURE__*/React.createElement("span", {
+      style: { fontSize: '0.72rem', color: '#94a3b8' }
+    }, '\u00B7 ' + contactName + (lead.contact_title ? ' (' + lead.contact_title + ')' : '')),
+    lead.relationship_stage && /*#__PURE__*/React.createElement("span", {
+      style: { fontSize: '0.6rem', padding: '0.1rem 0.4rem', borderRadius: '9999px', background: 'rgba(96,165,250,0.15)', color: '#60a5fa', fontWeight: 600 }
+    }, stageMeta[lead.relationship_stage] || lead.relationship_stage),
+    lead.warmth_score > 0 && /*#__PURE__*/React.createElement("span", {
+      style: { fontSize: '0.6rem', padding: '0.1rem 0.4rem', borderRadius: '9999px', background: heatColor + '22', color: heatColor, fontWeight: 600 }
+    }, 'Heat ' + lead.warmth_score),
+    lead.source && lead.source !== 'manual' && /*#__PURE__*/React.createElement("span", {
+      style: { fontSize: '0.58rem', padding: '0.1rem 0.35rem', borderRadius: '0.2rem', background: 'rgba(167,139,250,0.15)', color: '#a78bfa', fontWeight: 500 }
+    }, lead.source)
+  ),
+    lead.last_signal_title && /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: '0.68rem', color: '#475569', fontStyle: 'italic' }
+    }, '\u26A1 ' + lead.last_signal_title)
+  ), /*#__PURE__*/React.createElement("select", {
     style: {
       ...styles.select,
       fontSize: '0.8rem',
@@ -14215,7 +14279,24 @@ function PipelinePage({
       lead_id: lead.id,
       company_name: lead.company_name
     })
-  }, "View Activity")))), touchpointTarget && /*#__PURE__*/React.createElement(TouchpointModal, {
+  }, "View Activity"),
+    lead.group_id && /*#__PURE__*/React.createElement("span", {
+      style: { fontSize: '0.68rem', color: '#60a5fa', padding: '0.25rem 0.5rem', border: '1px solid #334155', borderRadius: '0.4rem' }
+    }, (lead.group_name || 'Linked Group')),
+    lead.contact_id && /*#__PURE__*/React.createElement("button", {
+      className: "action-btn",
+      style: { ...styles.actionBtn, fontSize: '0.75rem', color: '#6ee7b7', borderColor: '#334155' },
+      onClick: () => {
+        _launchSignalStack({
+          contact: { first_name: lead.contact_first_name, last_name: lead.contact_last_name, title: lead.contact_title },
+          group: lead.group_name ? { name: lead.group_name } : lead.company_name ? { name: lead.company_name } : null,
+          relationship_stage: lead.relationship_stage,
+          channel: 'email',
+          title: 'Outreach \u2014 ' + (contactName || lead.company_name)
+        });
+      }
+    }, "SignalStack")
+  )})), touchpointTarget && /*#__PURE__*/React.createElement(TouchpointModal, {
     target: touchpointTarget,
     onClose: () => setTouchpointTarget(null),
     onSaved: loadLeads
