@@ -2299,16 +2299,6 @@ function ProspectingPage({ user }) {
     { id: 'sequences', label: 'Sequences' }
   ];
 
-  const placeholderCopy = {
-    summary: 'Relationship snapshot, task buckets, capital groups tracking, and sequence overview will live here.',
-    schedule: 'Follow-ups, meetings, and sequence steps due today and this week will appear here.',
-    feed: 'Recent touchpoints, notes, status changes, and market signals tied to groups will stream here.',
-    groups: 'Dedicated list of capital groups with search, filters, and sort will render here.',
-    sequences: 'Active and draft sequences with performance metrics and enrolled groups will appear here.'
-  };
-
-  const activeTabMeta = tabs.find(t => t.id === tab);
-
   return React.createElement('div', null,
     React.createElement('div', { style: { marginBottom: '0.5rem' } },
       React.createElement('h2', {
@@ -2352,7 +2342,7 @@ function ProspectingPage({ user }) {
     ),
 
     tab === 'summary'
-      ? renderProspectingSummary()
+      ? React.createElement(ProspectingSummaryTab)
       : tab === 'groups'
         ? React.createElement(ProspectingGroupsTab)
       : tab === 'sequences'
@@ -2361,211 +2351,88 @@ function ProspectingPage({ user }) {
         ? React.createElement(ProspectingScheduleTab)
       : tab === 'feed'
         ? React.createElement(ProspectingFeedTab)
-        : React.createElement('div', {
-            style: {
-              background: '#1e293b',
-              border: '1px solid rgba(51,65,85,0.5)',
-              borderRadius: '1rem',
-              padding: '2rem',
-              minHeight: '280px'
-            }
-          },
-            React.createElement('h3', {
-              style: {
-                fontFamily: "'Orbitron', sans-serif",
-                fontSize: '1rem',
-                color: '#34d399',
-                margin: '0 0 0.75rem',
-                letterSpacing: '0.05em',
-                textTransform: 'uppercase'
-              }
-            }, activeTabMeta ? activeTabMeta.label : tab),
-            React.createElement('p', {
-              style: {
-                color: '#94a3b8',
-                fontSize: '0.9rem',
-                lineHeight: 1.5,
-                margin: 0
-              }
-            }, placeholderCopy[tab] || 'Coming soon.')
-          )
+        : null
   );
 }
 
-// -- Prospecting Summary tab: dashboard with stat cards + task buckets --
-// Mock-only data for Phase 3. No backend wiring.
-
-const PROSP_SNAPSHOT = [
-  { label: 'Active Groups',     value: 24, accent: '#34d399', sub: 'total tracked' },
-  { label: 'Warm Relationships', value: 11, accent: '#22d3ee', sub: 'warmth \u2265 5' },
-  { label: 'Due Today',          value: 8,  accent: '#fbbf24', sub: 'tasks pending' },
-  { label: 'Overdue',            value: 5,  accent: '#ef4444', sub: 'needs attention' },
-  { label: 'Inactive 30d+',      value: 3,  accent: '#a78bfa', sub: 'no recent touch' },
-  { label: 'Active Campaigns',   value: 4,  accent: '#60a5fa', sub: 'live sequences' }
-];
+// -- Prospecting tab components — backed by /api/prospecting endpoints --
 
 const PROSP_TASK_TYPE_META = [
-  { key: 'linkedin', label: 'LinkedIn',   color: '#0a66c2' },
-  { key: 'email',    label: 'Email',      color: '#f59e0b' },
-  { key: 'call',     label: 'Calls',      color: '#34d399' },
-  { key: 'meeting',  label: 'Meetings',   color: '#a78bfa' },
-  { key: 'research', label: 'Research',   color: '#60a5fa' },
-  { key: 'checkin',  label: 'Check-ins',  color: '#fb923c' }
+  { key: 'linkedin',      label: 'LinkedIn',   color: '#0a66c2' },
+  { key: 'email',         label: 'Email',      color: '#f59e0b' },
+  { key: 'call',          label: 'Calls',      color: '#34d399' },
+  { key: 'meeting',       label: 'Meetings',   color: '#a78bfa' },
+  { key: 'research',      label: 'Research',   color: '#60a5fa' },
+  { key: 'check_in',      label: 'Check-ins',  color: '#fb923c' },
+  { key: 'follow_up',     label: 'Follow-ups', color: '#fbbf24' },
+  { key: 'sequence_step', label: 'Sequences',  color: '#a78bfa' }
 ];
 
-const PROSP_TASK_BUCKETS = [
-  {
-    id: 'today', title: 'Due Today', accent: '#fbbf24', total: 8,
-    counts: { linkedin: 2, email: 2, call: 2, meeting: 1, research: 1, checkin: 0 }
-  },
-  {
-    id: 'overdue', title: 'Overdue', accent: '#ef4444', total: 5,
-    counts: { linkedin: 1, email: 1, call: 1, meeting: 0, research: 1, checkin: 1 }
-  },
-  {
-    id: 'week', title: 'This Week', accent: '#60a5fa', total: 12,
-    counts: { linkedin: 2, email: 3, call: 2, meeting: 2, research: 1, checkin: 2 }
-  }
-];
+function ProspectingSummaryTab() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-function renderProspectingSummary() {
+  useEffect(() => {
+    fetch(API_BASE + '/api/prospecting/summary')
+      .then(r => r.json())
+      .then(d => { setData(d); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  if (loading) return React.createElement('div', { style: { color: '#64748b', padding: '2rem', textAlign: 'center' } }, 'Loading summary...');
+  if (!data) return React.createElement('div', { style: { color: '#64748b', padding: '2rem', textAlign: 'center' } }, 'Unable to load summary data.');
+
+  const snapshot = data.snapshot || [];
+  const buckets = data.buckets || [];
+
   const sectionLabel = (text) => React.createElement('h3', {
-    style: {
-      fontSize: '0.78rem',
-      color: '#64748b',
-      textTransform: 'uppercase',
-      fontWeight: 600,
-      letterSpacing: '0.06em',
-      margin: '0 0 0.75rem'
-    }
+    style: { fontSize: '0.78rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.06em', margin: '0 0 0.75rem' }
   }, text);
 
   const statCard = (s) => React.createElement('div', {
     key: s.label,
-    style: {
-      background: '#1e293b',
-      border: '1px solid rgba(51,65,85,0.5)',
-      borderRadius: '0.75rem',
-      padding: '1rem 1.25rem',
-      flex: 1,
-      minWidth: '140px'
-    }
+    style: { background: '#1e293b', border: '1px solid rgba(51,65,85,0.5)', borderRadius: '0.75rem', padding: '1rem 1.25rem', flex: 1, minWidth: '140px' }
   },
-    React.createElement('div', {
-      style: {
-        fontSize: '0.68rem',
-        color: '#64748b',
-        textTransform: 'uppercase',
-        fontWeight: 600,
-        letterSpacing: '0.05em',
-        marginBottom: '0.35rem'
-      }
-    }, s.label),
-    React.createElement('div', {
-      style: {
-        fontFamily: "'JetBrains Mono', monospace",
-        fontSize: '1.6rem',
-        fontWeight: 700,
-        color: s.accent,
-        lineHeight: 1.1
-      }
-    }, s.value),
-    React.createElement('div', {
-      style: { fontSize: '0.72rem', color: '#475569', marginTop: '0.2rem' }
-    }, s.sub)
+    React.createElement('div', { style: { fontSize: '0.68rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em', marginBottom: '0.35rem' } }, s.label),
+    React.createElement('div', { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '1.6rem', fontWeight: 700, color: s.accent, lineHeight: 1.1 } }, s.value),
+    React.createElement('div', { style: { fontSize: '0.72rem', color: '#475569', marginTop: '0.2rem' } }, s.sub)
   );
 
   const bucketCard = (b) => React.createElement('div', {
     key: b.id,
-    style: {
-      background: '#1e293b',
-      border: '1px solid rgba(51,65,85,0.5)',
-      borderTop: `3px solid ${b.accent}`,
-      borderRadius: '0.75rem',
-      padding: '1.25rem',
-      flex: 1,
-      minWidth: '220px'
-    }
+    style: { background: '#1e293b', border: '1px solid rgba(51,65,85,0.5)', borderTop: '3px solid ' + b.accent, borderRadius: '0.75rem', padding: '1.25rem', flex: 1, minWidth: '220px' }
   },
-    React.createElement('div', {
-      style: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '0.85rem'
-      }
-    },
-      React.createElement('span', {
-        style: { fontSize: '0.9rem', fontWeight: 600, color: '#e2e8f0' }
-      }, b.title),
-      React.createElement('span', {
-        style: {
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '1.4rem',
-          fontWeight: 700,
-          color: b.accent,
-          lineHeight: 1
-        }
-      }, b.total)
+    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' } },
+      React.createElement('span', { style: { fontSize: '0.9rem', fontWeight: 600, color: '#e2e8f0' } }, b.title),
+      React.createElement('span', { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '1.4rem', fontWeight: 700, color: b.accent, lineHeight: 1 } }, b.total)
     ),
-    React.createElement('div', {
-      style: { display: 'flex', flexDirection: 'column', gap: '0.4rem' }
-    },
+    React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.4rem' } },
       PROSP_TASK_TYPE_META.map(t => React.createElement('div', {
         key: t.key,
-        style: {
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between'
-        }
+        style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' }
       },
-        React.createElement('div', {
-          style: { display: 'flex', alignItems: 'center', gap: '0.45rem' }
-        },
-          React.createElement('div', {
-            style: {
-              width: '8px',
-              height: '8px',
-              borderRadius: '2px',
-              background: t.color
-            }
-          }),
-          React.createElement('span', {
-            style: { fontSize: '0.8rem', color: '#94a3b8' }
-          }, t.label)
+        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.45rem' } },
+          React.createElement('div', { style: { width: '8px', height: '8px', borderRadius: '2px', background: t.color } }),
+          React.createElement('span', { style: { fontSize: '0.8rem', color: '#94a3b8' } }, t.label)
         ),
         React.createElement('span', {
-          style: {
-            fontSize: '0.85rem',
-            fontWeight: 600,
-            color: (b.counts[t.key] || 0) === 0 ? '#475569' : '#e2e8f0',
-            fontFamily: "'JetBrains Mono', monospace"
-          }
+          style: { fontSize: '0.85rem', fontWeight: 600, color: (b.counts[t.key] || 0) === 0 ? '#475569' : '#e2e8f0', fontFamily: "'JetBrains Mono', monospace" }
         }, b.counts[t.key] || 0)
       ))
     )
   );
 
-  return React.createElement('div', {
-    style: { display: 'flex', flexDirection: 'column', gap: '1.75rem' }
-  },
+  return React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '1.75rem' } },
     React.createElement('div', null,
       sectionLabel('Relationship Snapshot'),
-      React.createElement('div', {
-        style: { display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }
-      }, PROSP_SNAPSHOT.map(statCard))
+      React.createElement('div', { style: { display: 'flex', gap: '0.75rem', flexWrap: 'wrap' } }, snapshot.map(statCard))
     ),
     React.createElement('div', null,
       sectionLabel('Task Pipeline'),
-      React.createElement('div', {
-        style: { display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }
-      }, PROSP_TASK_BUCKETS.map(bucketCard))
+      React.createElement('div', { style: { display: 'flex', gap: '0.75rem', flexWrap: 'wrap' } }, buckets.map(bucketCard))
     )
   );
 }
-
-// -- Prospecting Groups tab: capital group relationship tracker --
-// Mock-only data for Phase 4. No backend wiring.
 
 const PROSP_TYPE_LABELS = {
   developer: 'Developer',
@@ -2583,36 +2450,25 @@ const PROSP_STATUS_META = {
   cold:     { label: 'Cold',     color: '#ef4444' }
 };
 
-const PROSP_MOCK_GROUPS = [
-  { id: 'g1', name: 'NexMetro Capital',              type: 'developer',       markets: ['Phoenix', 'Dallas', 'Tampa'],        status: 'partner',  warmth: 9, lastTouch: '2d ago',  communities: 12, nextAction: 'Q2 pipeline review call' },
-  { id: 'g2', name: 'Sunbelt Residential Partners',  type: 'capital_partner', markets: ['Atlanta', 'Charlotte', 'Nashville'], status: 'engaged',  warmth: 7, lastTouch: '4d ago',  communities: 8,  nextAction: 'Send market intel deck' },
-  { id: 'g3', name: 'Trident Development Group',     type: 'developer',       markets: ['Tampa', 'Orlando', 'Jacksonville'],  status: 'warm',     warmth: 5, lastTouch: '8d ago',  communities: 4,  nextAction: 'Follow up coverage proposal' },
-  { id: 'g4', name: 'Lone Star BTR Capital',         type: 'capital_partner', markets: ['Dallas', 'Austin', 'San Antonio'],   status: 'prospect', warmth: 3, lastTouch: 'never',   communities: 0,  nextAction: 'Initial outreach' },
-  { id: 'g5', name: 'Meridian Property Group',       type: 'operator',        markets: ['Phoenix', 'Tucson'],                 status: 'partner',  warmth: 8, lastTouch: '6d ago',  communities: 15, nextAction: 'Monthly check-in call' },
-  { id: 'g6', name: 'Cornerstone Brokerage',         type: 'broker',          markets: ['Dallas', 'Houston'],                 status: 'engaged',  warmth: 6, lastTouch: '3d ago',  communities: 0,  nextAction: 'Review new DFW listings' },
-  { id: 'g7', name: 'Pacific Crest Homes',           type: 'developer',       markets: ['Denver', 'Salt Lake City'],          status: 'dormant',  warmth: 2, lastTouch: '45d ago', communities: 6,  nextAction: 'Re-engagement outreach' },
-  { id: 'g8', name: 'Atlas Capital Ventures',        type: 'capital_partner', markets: ['Charlotte', 'Raleigh'],              status: 'warm',     warmth: 4, lastTouch: '5d ago',  communities: 3,  nextAction: 'Intro call scheduled' }
-];
-
 function ProspectingGroupsTab() {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [sort, setSort] = useState('warmth');
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const filtered = PROSP_MOCK_GROUPS.filter(g => {
-    if (search && !g.name.toLowerCase().includes(search.toLowerCase())) return false;
-    if (typeFilter && g.type !== typeFilter) return false;
-    if (statusFilter && g.status !== statusFilter) return false;
-    return true;
-  });
-
-  const rows = [...filtered].sort((a, b) => {
-    if (sort === 'warmth') return b.warmth - a.warmth;
-    if (sort === 'name') return a.name.localeCompare(b.name);
-    if (sort === 'communities') return b.communities - a.communities;
-    return 0;
-  });
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (typeFilter) params.set('type', typeFilter);
+    if (statusFilter) params.set('status', statusFilter);
+    if (sort) params.set('sort', sort);
+    fetch(API_BASE + '/api/prospecting/groups?' + params.toString())
+      .then(r => r.json())
+      .then(d => { setRows(Array.isArray(d) ? d : []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [search, typeFilter, statusFilter, sort]);
 
   const inputStyle = {
     background: '#0f172a',
@@ -2680,6 +2536,8 @@ function ProspectingGroupsTab() {
       ...(extra || {})
     }
   }, label);
+
+  if (loading) return React.createElement('div', { style: { color: '#64748b', padding: '2rem', textAlign: 'center' } }, 'Loading groups...');
 
   return React.createElement('div', {
     style: { display: 'flex', flexDirection: 'column', gap: '1rem' }
@@ -2821,18 +2679,18 @@ function ProspectingGroupsTab() {
   );
 }
 
-// -- Prospecting Sequences tab: campaign cards --
-// Mock-only data for Phase 5. No backend wiring.
-
-const PROSP_MOCK_SEQUENCES = [
-  { id: 's1', name: 'New Relationship Nurture',   status: 'active', enrolled: 14, step: 3, totalSteps: 7, responseRate: 0.42, meetings: 3, lastUpdated: '2h ago',  description: 'Initial outreach to newly identified capital groups and developers.' },
-  { id: 's2', name: 'Warm Re-engagement',          status: 'active', enrolled: 8,  step: 2, totalSteps: 5, responseRate: 0.38, meetings: 2, lastUpdated: '1d ago',  description: 'Re-activate dormant relationships with tailored market intel.' },
-  { id: 's3', name: 'Market Intel Touch',          status: 'active', enrolled: 22, step: 4, totalSteps: 6, responseRate: 0.55, meetings: 5, lastUpdated: '4h ago',  description: 'Share proprietary market insights to stay top-of-mind.' },
-  { id: 's4', name: 'Owner Outreach',              status: 'active', enrolled: 6,  step: 1, totalSteps: 4, responseRate: 0.17, meetings: 0, lastUpdated: '3d ago',  description: 'Connect with property owners for portfolio insurance review.' },
-  { id: 's5', name: 'Capital Partner Follow-up',   status: 'draft',  enrolled: 0,  step: 0, totalSteps: 5, responseRate: 0,    meetings: 0, lastUpdated: '6d ago',  description: 'Systematic follow-up after initial capital partner meetings.' }
-];
-
 function ProspectingSequencesTab() {
+  const [seqs, setSeqs] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(API_BASE + '/api/prospecting/sequences')
+      .then(r => r.json())
+      .then(d => { setSeqs(Array.isArray(d) ? d : []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  if (loading) return React.createElement('div', { style: { color: '#64748b', padding: '2rem', textAlign: 'center' } }, 'Loading sequences...');
   const statusBadge = (status) => {
     const meta = status === 'active'
       ? { label: 'Active', color: '#34d399', bg: 'rgba(52,211,153,0.12)' }
@@ -2961,8 +2819,8 @@ function ProspectingSequencesTab() {
     progressBar(seq.step, seq.totalSteps)
   );
 
-  const activeSeqs = PROSP_MOCK_SEQUENCES.filter(s => s.status === 'active');
-  const draftSeqs = PROSP_MOCK_SEQUENCES.filter(s => s.status === 'draft');
+  const activeSeqs = seqs.filter(s => s.status === 'active');
+  const draftSeqs = seqs.filter(s => s.status === 'draft');
 
   const sectionLabel = (text) => React.createElement('h3', {
     style: {
@@ -2975,14 +2833,18 @@ function ProspectingSequencesTab() {
     }
   }, text);
 
+  if (seqs.length === 0) return React.createElement('div', {
+    style: { background: '#1e293b', border: '1px solid rgba(51,65,85,0.5)', borderRadius: '0.85rem', padding: '2rem', textAlign: 'center', color: '#64748b' }
+  }, 'No sequences yet. Create one from the API to get started.');
+
   return React.createElement('div', {
     style: { display: 'flex', flexDirection: 'column', gap: '1.75rem' }
   },
     React.createElement('div', null,
       sectionLabel(`Active Sequences (${activeSeqs.length})`),
-      React.createElement('div', {
-        style: { display: 'flex', flexWrap: 'wrap', gap: '0.85rem' }
-      }, activeSeqs.map(sequenceCard))
+      activeSeqs.length === 0
+        ? React.createElement('div', { style: { color: '#64748b', fontSize: '0.85rem' } }, 'No active sequences.')
+        : React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '0.85rem' } }, activeSeqs.map(sequenceCard))
     ),
     draftSeqs.length > 0 && React.createElement('div', null,
       sectionLabel(`Drafts (${draftSeqs.length})`),
@@ -2993,56 +2855,29 @@ function ProspectingSequencesTab() {
   );
 }
 
-// -- Prospecting Schedule tab: time-based follow-ups + meetings + tasks --
-// Mock-only data for Phase 6. No backend wiring.
-
 const PROSP_SCHEDULE_TYPE_META = {
   follow_up:     { label: 'Follow-up',  color: '#fbbf24' },
   meeting:       { label: 'Meeting',    color: '#a78bfa' },
   sequence_step: { label: 'Sequence',   color: '#60a5fa' },
   check_in:      { label: 'Check-in',   color: '#fb923c' },
-  research:      { label: 'Research',   color: '#22d3ee' }
+  research:      { label: 'Research',   color: '#22d3ee' },
+  linkedin:      { label: 'LinkedIn',   color: '#0a66c2' },
+  email:         { label: 'Email',      color: '#f59e0b' },
+  call:          { label: 'Call',        color: '#34d399' }
 };
 
-const PROSP_MOCK_SCHEDULE = [
-  {
-    id: 'd1', day: 'Today', date: 'Sun, Apr 19',
-    items: [
-      { id: 'i1', time: '9:00 AM',  type: 'meeting',       title: 'Q2 pipeline review',              group: 'NexMetro Capital',       duration: '30 min' },
-      { id: 'i2', time: '10:30 AM', type: 'sequence_step', title: 'Market Intel Touch \u2014 Step 4', group: 'Atlas Capital Ventures', duration: '\u2014' },
-      { id: 'i3', time: '11:00 AM', type: 'follow_up',     title: 'Follow up on coverage proposal',  group: 'Trident Development',    duration: '15 min' },
-      { id: 'i4', time: '1:00 PM',  type: 'meeting',       title: 'Lunch with brokerage team',       group: 'Cornerstone Brokerage',  duration: '60 min' },
-      { id: 'i5', time: '2:30 PM',  type: 'research',      title: 'Pull Tampa corridor permits',     group: '\u2014',                   duration: '45 min' },
-      { id: 'i6', time: '4:00 PM',  type: 'check_in',      title: 'Monthly relationship review',     group: 'Sunbelt Residential',    duration: '20 min' }
-    ]
-  },
-  {
-    id: 'd2', day: 'Tomorrow', date: 'Mon, Apr 20',
-    items: [
-      { id: 'i7',  time: '9:00 AM',  type: 'meeting',       title: 'Discovery call',                       group: 'Lone Star BTR Capital',     duration: '45 min' },
-      { id: 'i8',  time: '11:00 AM', type: 'sequence_step', title: 'New Relationship Nurture \u2014 Step 3', group: 'Blackstone Residential',    duration: '\u2014' },
-      { id: 'i9',  time: '2:00 PM',  type: 'follow_up',     title: 'Send comp analysis',                   group: 'Atlas Capital Ventures',    duration: '15 min' },
-      { id: 'i10', time: '3:30 PM',  type: 'check_in',      title: 'Quarterly relationship review',        group: 'Meridian Property Group',   duration: '30 min' }
-    ]
-  },
-  {
-    id: 'd3', day: 'Tue, Apr 21', date: '',
-    items: [
-      { id: 'i11', time: '10:00 AM', type: 'meeting',       title: 'Portfolio review',                       group: 'Sunbelt Residential Partners', duration: '60 min' },
-      { id: 'i12', time: '1:30 PM',  type: 'sequence_step', title: 'Warm Re-engagement \u2014 Step 2',       group: 'Pacific Crest Homes',          duration: '\u2014' },
-      { id: 'i13', time: '3:00 PM',  type: 'research',      title: 'BTR pipeline analysis \u2014 Phoenix',   group: '\u2014',                         duration: '60 min' }
-    ]
-  },
-  {
-    id: 'd4', day: 'Wed, Apr 22', date: '',
-    items: [
-      { id: 'i14', time: '9:30 AM', type: 'meeting',   title: 'Site visit \u2014 Mesa project', group: 'NexMetro Capital',       duration: '2 hr' },
-      { id: 'i15', time: '2:00 PM', type: 'follow_up', title: 'Intro call',                    group: 'Atlas Capital Ventures', duration: '20 min' }
-    ]
-  }
-];
-
 function ProspectingScheduleTab() {
+  const [schedule, setSchedule] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(API_BASE + '/api/prospecting/schedule?days=5')
+      .then(r => r.json())
+      .then(d => { setSchedule(Array.isArray(d) ? d : []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  if (loading) return React.createElement('div', { style: { color: '#64748b', padding: '2rem', textAlign: 'center' } }, 'Loading schedule...');
   const typeChip = (type) => {
     const meta = PROSP_SCHEDULE_TYPE_META[type] || { label: type, color: '#94a3b8' };
     return React.createElement('span', {
@@ -3155,7 +2990,11 @@ function ProspectingScheduleTab() {
     }, day.items.map((it, i) => scheduleRow(it, i === day.items.length - 1)))
   );
 
-  const totalItems = PROSP_MOCK_SCHEDULE.reduce((n, d) => n + d.items.length, 0);
+  const totalItems = schedule.reduce((n, d) => n + d.items.length, 0);
+
+  if (schedule.length === 0) return React.createElement('div', {
+    style: { background: '#1e293b', border: '1px solid rgba(51,65,85,0.5)', borderRadius: '0.85rem', padding: '2rem', textAlign: 'center', color: '#64748b' }
+  }, 'No tasks scheduled. Create capital groups and log touchpoints to generate tasks.');
 
   return React.createElement('div', {
     style: { display: 'flex', flexDirection: 'column', gap: '1rem' }
@@ -3166,13 +3005,10 @@ function ProspectingScheduleTab() {
         color: '#64748b',
         fontFamily: "'Inter', sans-serif"
       }
-    }, `${totalItems} scheduled across ${PROSP_MOCK_SCHEDULE.length} days`),
-    PROSP_MOCK_SCHEDULE.map(daySection)
+    }, `${totalItems} scheduled across ${schedule.length} days`),
+    schedule.map(daySection)
   );
 }
-
-// -- Prospecting Feed tab: activity stream --
-// Mock-only data for Phase 7. No backend wiring.
 
 const PROSP_FEED_TYPE_META = {
   touchpoint:    { label: 'Touchpoint',   color: '#34d399' },
@@ -3183,29 +3019,21 @@ const PROSP_FEED_TYPE_META = {
   signal:        { label: 'Market Signal', color: '#fb923c' }
 };
 
-const PROSP_MOCK_FEED = [
-  { id: 'f1',  type: 'touchpoint',    action: 'Call completed',                  group: 'NexMetro Capital',             detail: 'Discussed Q2 pipeline \u2014 3 new communities in permitting', ts: '14 min ago' },
-  { id: 'f2',  type: 'note',          action: 'Note added',                      group: 'Sunbelt Residential Partners', detail: 'Interested in JV structure for Charlotte expansion',           ts: '1 hr ago' },
-  { id: 'f3',  type: 'status_change', action: 'Status \u2192 Engaged',           group: 'Atlas Capital Ventures',       detail: 'Upgraded after productive intro call',                         ts: '2 hr ago' },
-  { id: 'f4',  type: 'sequence',      action: 'Enrolled in Market Intel Touch',  group: 'Lone Star BTR Capital',        detail: 'Auto-enrolled after prospect tag',                             ts: '3 hr ago' },
-  { id: 'f5',  type: 'touchpoint',    action: 'Email sent',                      group: 'Trident Development Group',    detail: 'Coverage proposal for Orlando portfolio',                      ts: '5 hr ago' },
-  { id: 'f6',  type: 'group_added',   action: 'New group added',                 group: 'Blackstone Residential',       detail: 'Developer \u00b7 Markets: Austin, San Antonio',                ts: '7 hr ago' },
-  { id: 'f7',  type: 'signal',        action: 'Market signal detected',          group: 'NexMetro Capital',             detail: 'Permit filed for 280-unit BTR in Mesa, AZ',                    ts: 'yesterday' },
-  { id: 'f8',  type: 'touchpoint',    action: 'Meeting completed',               group: 'Cornerstone Brokerage',        detail: 'Reviewed 5 new BTR listings in DFW',                           ts: 'yesterday' },
-  { id: 'f9',  type: 'status_change', action: 'Status \u2192 Dormant',           group: 'Pacific Crest Homes',          detail: 'No response in 45 days \u2014 flagged for re-engagement',      ts: '2d ago' },
-  { id: 'f10', type: 'touchpoint',    action: 'LinkedIn message sent',           group: 'Meridian Property Group',      detail: 'Shared article on insurance cost trends in BTR',               ts: '3d ago' },
-  { id: 'f11', type: 'note',          action: 'Note added',                      group: 'NexMetro Capital',             detail: 'CEO mentioned potential Denver expansion at conference',       ts: '3d ago' },
-  { id: 'f12', type: 'sequence',      action: 'Sequence step completed',         group: 'Atlas Capital Ventures',       detail: 'Warm Re-engagement \u2014 Step 2 of 5',                        ts: '4d ago' },
-  { id: 'f13', type: 'signal',        action: 'Market signal detected',          group: 'Sunbelt Residential Partners', detail: 'Zoning variance approved \u2014 Nashville parcel',             ts: '5d ago' },
-  { id: 'f14', type: 'touchpoint',    action: 'Call completed',                  group: 'Meridian Property Group',      detail: 'Quarterly portfolio review \u2014 reviewed 4 renewals',        ts: '6d ago' }
-];
-
 function ProspectingFeedTab() {
   const [typeFilter, setTypeFilter] = useState('');
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const items = typeFilter
-    ? PROSP_MOCK_FEED.filter(it => it.type === typeFilter)
-    : PROSP_MOCK_FEED;
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (typeFilter) params.set('type', typeFilter);
+    fetch(API_BASE + '/api/prospecting/feed?' + params.toString())
+      .then(r => r.json())
+      .then(d => { setItems(Array.isArray(d) ? d : []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [typeFilter]);
+
+  if (loading) return React.createElement('div', { style: { color: '#64748b', padding: '2rem', textAlign: 'center' } }, 'Loading feed...');
 
   const filterChip = (value, label) => {
     const active = typeFilter === value;
