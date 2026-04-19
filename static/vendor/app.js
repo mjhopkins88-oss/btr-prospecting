@@ -2357,6 +2357,8 @@ function ProspectingPage({ user }) {
         ? React.createElement(ProspectingGroupsTab)
       : tab === 'sequences'
         ? React.createElement(ProspectingSequencesTab)
+      : tab === 'schedule'
+        ? React.createElement(ProspectingScheduleTab)
         : React.createElement('div', {
             style: {
               background: '#1e293b',
@@ -2986,6 +2988,184 @@ function ProspectingSequencesTab() {
         style: { display: 'flex', flexWrap: 'wrap', gap: '0.85rem' }
       }, draftSeqs.map(sequenceCard))
     )
+  );
+}
+
+// -- Prospecting Schedule tab: time-based follow-ups + meetings + tasks --
+// Mock-only data for Phase 6. No backend wiring.
+
+const PROSP_SCHEDULE_TYPE_META = {
+  follow_up:     { label: 'Follow-up',  color: '#fbbf24' },
+  meeting:       { label: 'Meeting',    color: '#a78bfa' },
+  sequence_step: { label: 'Sequence',   color: '#60a5fa' },
+  check_in:      { label: 'Check-in',   color: '#fb923c' },
+  research:      { label: 'Research',   color: '#22d3ee' }
+};
+
+const PROSP_MOCK_SCHEDULE = [
+  {
+    id: 'd1', day: 'Today', date: 'Sun, Apr 19',
+    items: [
+      { id: 'i1', time: '9:00 AM',  type: 'meeting',       title: 'Q2 pipeline review',              group: 'NexMetro Capital',       duration: '30 min' },
+      { id: 'i2', time: '10:30 AM', type: 'sequence_step', title: 'Market Intel Touch \u2014 Step 4', group: 'Atlas Capital Ventures', duration: '\u2014' },
+      { id: 'i3', time: '11:00 AM', type: 'follow_up',     title: 'Follow up on coverage proposal',  group: 'Trident Development',    duration: '15 min' },
+      { id: 'i4', time: '1:00 PM',  type: 'meeting',       title: 'Lunch with brokerage team',       group: 'Cornerstone Brokerage',  duration: '60 min' },
+      { id: 'i5', time: '2:30 PM',  type: 'research',      title: 'Pull Tampa corridor permits',     group: '\u2014',                   duration: '45 min' },
+      { id: 'i6', time: '4:00 PM',  type: 'check_in',      title: 'Monthly relationship review',     group: 'Sunbelt Residential',    duration: '20 min' }
+    ]
+  },
+  {
+    id: 'd2', day: 'Tomorrow', date: 'Mon, Apr 20',
+    items: [
+      { id: 'i7',  time: '9:00 AM',  type: 'meeting',       title: 'Discovery call',                       group: 'Lone Star BTR Capital',     duration: '45 min' },
+      { id: 'i8',  time: '11:00 AM', type: 'sequence_step', title: 'New Relationship Nurture \u2014 Step 3', group: 'Blackstone Residential',    duration: '\u2014' },
+      { id: 'i9',  time: '2:00 PM',  type: 'follow_up',     title: 'Send comp analysis',                   group: 'Atlas Capital Ventures',    duration: '15 min' },
+      { id: 'i10', time: '3:30 PM',  type: 'check_in',      title: 'Quarterly relationship review',        group: 'Meridian Property Group',   duration: '30 min' }
+    ]
+  },
+  {
+    id: 'd3', day: 'Tue, Apr 21', date: '',
+    items: [
+      { id: 'i11', time: '10:00 AM', type: 'meeting',       title: 'Portfolio review',                       group: 'Sunbelt Residential Partners', duration: '60 min' },
+      { id: 'i12', time: '1:30 PM',  type: 'sequence_step', title: 'Warm Re-engagement \u2014 Step 2',       group: 'Pacific Crest Homes',          duration: '\u2014' },
+      { id: 'i13', time: '3:00 PM',  type: 'research',      title: 'BTR pipeline analysis \u2014 Phoenix',   group: '\u2014',                         duration: '60 min' }
+    ]
+  },
+  {
+    id: 'd4', day: 'Wed, Apr 22', date: '',
+    items: [
+      { id: 'i14', time: '9:30 AM', type: 'meeting',   title: 'Site visit \u2014 Mesa project', group: 'NexMetro Capital',       duration: '2 hr' },
+      { id: 'i15', time: '2:00 PM', type: 'follow_up', title: 'Intro call',                    group: 'Atlas Capital Ventures', duration: '20 min' }
+    ]
+  }
+];
+
+function ProspectingScheduleTab() {
+  const typeChip = (type) => {
+    const meta = PROSP_SCHEDULE_TYPE_META[type] || { label: type, color: '#94a3b8' };
+    return React.createElement('span', {
+      style: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '0.35rem',
+        fontSize: '0.7rem',
+        fontWeight: 600,
+        color: meta.color,
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em',
+        minWidth: '90px'
+      }
+    },
+      React.createElement('span', {
+        style: {
+          width: '6px',
+          height: '6px',
+          borderRadius: '50%',
+          background: meta.color,
+          display: 'inline-block'
+        }
+      }),
+      meta.label
+    );
+  };
+
+  const scheduleRow = (item, isLast) => React.createElement('div', {
+    key: item.id,
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '90px 110px 1fr 1.2fr 70px',
+      gap: '0.75rem',
+      alignItems: 'center',
+      padding: '0.65rem 0.25rem',
+      borderBottom: isLast ? 'none' : '1px solid rgba(51,65,85,0.3)'
+    }
+  },
+    React.createElement('span', {
+      style: {
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: '0.82rem',
+        color: '#94a3b8'
+      }
+    }, item.time),
+    typeChip(item.type),
+    React.createElement('span', {
+      style: { fontSize: '0.88rem', color: '#e2e8f0', fontWeight: 500 }
+    }, item.title),
+    React.createElement('span', {
+      style: { fontSize: '0.8rem', color: '#64748b' }
+    }, item.group),
+    React.createElement('span', {
+      style: {
+        fontSize: '0.75rem',
+        color: '#475569',
+        fontFamily: "'JetBrains Mono', monospace",
+        textAlign: 'right'
+      }
+    }, item.duration)
+  );
+
+  const daySection = (day) => React.createElement('div', {
+    key: day.id,
+    style: {
+      background: '#1e293b',
+      border: '1px solid rgba(51,65,85,0.5)',
+      borderRadius: '0.85rem',
+      padding: '1.1rem 1.25rem'
+    }
+  },
+    React.createElement('div', {
+      style: {
+        display: 'flex',
+        alignItems: 'baseline',
+        justifyContent: 'space-between',
+        paddingBottom: '0.75rem',
+        borderBottom: '1px solid rgba(51,65,85,0.4)',
+        marginBottom: '0.25rem'
+      }
+    },
+      React.createElement('div', {
+        style: { display: 'flex', alignItems: 'baseline', gap: '0.6rem' }
+      },
+        React.createElement('h3', {
+          style: {
+            fontFamily: "'Orbitron', sans-serif",
+            fontSize: '0.95rem',
+            color: '#e2e8f0',
+            margin: 0,
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase'
+          }
+        }, day.day),
+        day.date && React.createElement('span', {
+          style: { fontSize: '0.78rem', color: '#64748b' }
+        }, day.date)
+      ),
+      React.createElement('span', {
+        style: {
+          fontSize: '0.72rem',
+          color: '#64748b',
+          fontFamily: "'JetBrains Mono', monospace"
+        }
+      }, `${day.items.length} ${day.items.length === 1 ? 'item' : 'items'}`)
+    ),
+    React.createElement('div', {
+      style: { display: 'flex', flexDirection: 'column' }
+    }, day.items.map((it, i) => scheduleRow(it, i === day.items.length - 1)))
+  );
+
+  const totalItems = PROSP_MOCK_SCHEDULE.reduce((n, d) => n + d.items.length, 0);
+
+  return React.createElement('div', {
+    style: { display: 'flex', flexDirection: 'column', gap: '1rem' }
+  },
+    React.createElement('div', {
+      style: {
+        fontSize: '0.78rem',
+        color: '#64748b',
+        fontFamily: "'Inter', sans-serif"
+      }
+    }, `${totalItems} scheduled across ${PROSP_MOCK_SCHEDULE.length} days`),
+    PROSP_MOCK_SCHEDULE.map(daySection)
   );
 }
 
