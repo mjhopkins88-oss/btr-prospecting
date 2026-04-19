@@ -4302,59 +4302,142 @@ def run_daily_discovery(is_scheduled=False):
 
 
 def _fanout_discovery_to_prospecting(results):
-    """Convert Daily Discovery output into prospecting_signals + notices + tasks.
+    """Route Daily Discovery output into the prospecting signal / notice / task
+    pipeline.
 
-    Matches signals to tracked capital_groups by name appearing in the signal
-    title/summary, creates a company-scoped signal + notice + task for matches,
-    and otherwise files the signal as industry-scoped.
+    Matching strategy (checked in order, first match wins):
+      1. ``entity_name`` from Claude classification matches a capital_groups name
+         (case-insensitive, must match a whole word or be ≥60% of the group name).
+      2. Group name appears as a whole word in the signal title or summary.
+
+    Company-matched items become ``scope=company`` signals (→ notice + outreach
+    task via rule 4).  Unmatched BTR-relevant items become ``scope=industry``
+    signals (→ notices/tasks for contacts in active stages via rule 5).
+
+    Dedup: signals whose ``source_url`` already exists in ``prospecting_signals``
+    are skipped.
+
+    Relevance filter: items with ``signal_type == 'not_relevant'`` or
+    ``'unclassified'`` are dropped for industry signals (kept only if they
+    matched a tracked group).
     """
     if not results:
         return
     from services.prospecting_rules import ingest_signal
-    from shared.database import fetch_all as _fetch_all
+    from shared.database import fetch_all as _fa, fetch_one as _fo
 
-    groups = _fetch_all("SELECT id, name, type FROM capital_groups") or []
-    group_lookup = [(g['id'], (g.get('name') or '').lower(), g.get('type') or '') for g in groups]
+    # --- Build group lookup ---
+    groups = _fa("SELECT id, name, type FROM capital_groups") or []
+    if not groups:
+        print("[Discovery→Prospecting] No tracked groups; skipping fan-out.")
+        return
 
+    import re as _re
+    group_index = []
+    for g in groups:
+        raw = (g.get('name') or '').strip()
+        if not raw:
+            continue
+        pattern = _re.compile(r'\b' + _re.escape(raw) + r'\b', _re.IGNORECASE)
+        group_index.append((g['id'], raw, raw.lower(), pattern, g.get('type') or ''))
+
+    # --- Collect all signal items from the results dict ---
     items = []
     if isinstance(results, dict):
-        for v in results.values():
-            if isinstance(v, list):
-                items.extend(v)
+        for val in results.values():
+            sigs = val if isinstance(val, list) else (val.get('signals') if isinstance(val, dict) else None)
+            if isinstance(sigs, list):
+                items.extend(sigs)
     elif isinstance(results, list):
         items = results
+
+    if not items:
+        return
+
+    # --- Pre-fetch existing signal URLs for dedup ---
+    existing_urls = set()
+    rows = _fa("SELECT source_url FROM prospecting_signals WHERE source_url IS NOT NULL AND source_url != ''") or []
+    for r in rows:
+        existing_urls.add(r['source_url'])
+
+    stats = {'company': 0, 'industry': 0, 'skipped_dup': 0, 'skipped_irrelevant': 0, 'total': 0}
 
     for item in items:
         if not isinstance(item, dict):
             continue
-        title = item.get('title') or item.get('headline') or ''
-        summary = item.get('summary') or item.get('description') or ''
-        url = item.get('url') or item.get('source_url') or ''
-        importance = item.get('importance') or item.get('score') or 5
+        stats['total'] += 1
+
+        title = (item.get('title') or item.get('headline') or '').strip()
+        summary = (item.get('summary') or item.get('description') or '').strip()
+        url = (item.get('url') or item.get('source_url') or '').strip()
+        signal_type = item.get('signal_type') or ''
+        entity = (item.get('entity_name') or '').strip()
+
         if not title:
             continue
 
-        haystack = f"{title} {summary}".lower()
-        matched_group_id = None
-        for gid, gname, _gtype in group_lookup:
-            if gname and len(gname) >= 4 and gname in haystack:
-                matched_group_id = gid
-                break
+        # Dedup by URL
+        if url and url in existing_urls:
+            stats['skipped_dup'] += 1
+            continue
 
-        if matched_group_id:
+        # Parse importance safely
+        raw_imp = item.get('importance') or item.get('score') or 5
+        try:
+            importance = max(1, min(10, int(float(raw_imp))))
+        except (ValueError, TypeError):
+            importance = 5
+
+        # --- Attempt group match ---
+        matched_gid = None
+
+        # Strategy 1: entity_name from classification
+        if entity:
+            entity_lower = entity.lower()
+            for gid, _gname, gname_lower, _pat, _gtype in group_index:
+                if entity_lower == gname_lower:
+                    matched_gid = gid
+                    break
+                overlap = len(set(entity_lower.split()) & set(gname_lower.split()))
+                total = max(len(gname_lower.split()), 1)
+                if overlap / total >= 0.6:
+                    matched_gid = gid
+                    break
+
+        # Strategy 2: whole-word match in title/summary
+        if not matched_gid:
+            haystack = f"{title} {summary}"
+            for gid, _gname, _gnl, pattern, _gtype in group_index:
+                if pattern.search(haystack):
+                    matched_gid = gid
+                    break
+
+        if matched_gid:
             ingest_signal(
                 scope='company', title=title, summary=summary,
-                source_url=url, signal_type=item.get('type', ''),
-                importance=int(importance) if str(importance).isdigit() else 5,
-                group_id=matched_group_id
+                source_url=url, signal_type=signal_type,
+                importance=importance, group_id=matched_gid
             )
+            if url:
+                existing_urls.add(url)
+            stats['company'] += 1
         else:
+            # Skip irrelevant/unclassified items for industry signals
+            if signal_type in ('not_relevant', 'unclassified', ''):
+                stats['skipped_irrelevant'] += 1
+                continue
             ingest_signal(
                 scope='industry', title=title, summary=summary,
-                source_url=url, signal_type=item.get('type', ''),
-                importance=int(importance) if str(importance).isdigit() else 5,
-                match_types=None, match_stages=None
+                source_url=url, signal_type=signal_type,
+                importance=importance
             )
+            if url:
+                existing_urls.add(url)
+            stats['industry'] += 1
+
+    print(f"[Discovery→Prospecting] {stats['total']} items processed: "
+          f"{stats['company']} company, {stats['industry']} industry, "
+          f"{stats['skipped_dup']} dup, {stats['skipped_irrelevant']} irrelevant")
 
 # ===================================================================
 # BROKER API ROUTES (Deal Board)
