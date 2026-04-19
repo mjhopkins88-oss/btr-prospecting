@@ -3206,6 +3206,39 @@ function ProspectingContactsTab({ user }) {
                           borderRadius: '0.25rem', whiteSpace: 'nowrap'
                         }
                       }, nbaLabel) : null
+                    ),
+                    React.createElement('select', {
+                      value: c.relationship_stage || 'cold',
+                      onChange: function(e) {
+                        var newStage = e.target.value;
+                        fetch(API_BASE + '/api/prospecting/contacts/' + c.id, {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ relationship_stage: newStage })
+                        }).then(function(r) {
+                          if (r.ok) setRefreshKey(function(k) { return k + 1; });
+                        });
+                      },
+                      style: {
+                        marginTop: '0.35rem', width: '100%',
+                        fontSize: '0.62rem', padding: '0.2rem 0.3rem',
+                        background: '#0f172a', color: '#94a3b8',
+                        border: '1px solid rgba(51,65,85,0.5)',
+                        borderRadius: '0.3rem', cursor: 'pointer',
+                        fontFamily: "'Inter', sans-serif"
+                      }
+                    },
+                      [
+                        { v: 'cold', l: 'New' },
+                        { v: 'initial_outreach', l: 'Initial Outreach' },
+                        { v: 'light_conversation', l: 'Follow-Up' },
+                        { v: 'active', l: 'Conversation' },
+                        { v: 'warm', l: 'Relationship' },
+                        { v: 'strategic', l: 'Partner' },
+                        { v: 'dormant', l: 'Dormant' }
+                      ].map(function(o) {
+                        return React.createElement('option', { key: o.v, value: o.v }, o.l);
+                      })
                     )
                   );
                 })
