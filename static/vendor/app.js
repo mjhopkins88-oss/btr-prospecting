@@ -3129,45 +3129,89 @@ function ProspectingContactsTab({ user }) {
             { key: 'warm',               label: 'Relationship',     accent: '#34d399' },
             { key: 'strategic',          label: 'Partner',           accent: '#a78bfa' },
             { key: 'dormant',            label: 'Dormant',           accent: '#475569' }
-          ].map(col => React.createElement('div', {
-            key: col.key,
-            style: {
-              flex: '1 0 180px', maxWidth: '240px', minWidth: '180px',
-              background: '#0f172a',
-              border: '1px solid rgba(51,65,85,0.4)',
-              borderTop: '2px solid ' + col.accent,
-              borderRadius: '0.75rem',
-              display: 'flex', flexDirection: 'column',
-              overflow: 'hidden'
-            }
-          },
-            React.createElement('div', {
+          ].map(col => {
+            var colRows = rows.filter(c => (c.relationship_stage || 'cold') === col.key);
+            return React.createElement('div', {
+              key: col.key,
               style: {
-                padding: '0.65rem 0.75rem',
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                borderBottom: '1px solid rgba(51,65,85,0.3)'
+                flex: '1 0 180px', maxWidth: '240px', minWidth: '180px',
+                background: '#0f172a',
+                border: '1px solid rgba(51,65,85,0.4)',
+                borderTop: '2px solid ' + col.accent,
+                borderRadius: '0.75rem',
+                display: 'flex', flexDirection: 'column',
+                overflow: 'hidden'
               }
             },
-              React.createElement('span', {
+              React.createElement('div', {
                 style: {
-                  fontSize: '0.72rem', fontWeight: 700, color: col.accent,
-                  textTransform: 'uppercase', letterSpacing: '0.06em'
+                  padding: '0.65rem 0.75rem',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  borderBottom: '1px solid rgba(51,65,85,0.3)'
                 }
-              }, col.label),
-              React.createElement('span', {
+              },
+                React.createElement('span', {
+                  style: {
+                    fontSize: '0.72rem', fontWeight: 700, color: col.accent,
+                    textTransform: 'uppercase', letterSpacing: '0.06em'
+                  }
+                }, col.label),
+                React.createElement('span', {
+                  style: {
+                    fontSize: '0.66rem', fontWeight: 600, color: '#475569',
+                    fontFamily: "'JetBrains Mono', monospace"
+                  }
+                }, String(colRows.length))
+              ),
+              React.createElement('div', {
                 style: {
-                  fontSize: '0.66rem', fontWeight: 600, color: '#475569',
-                  fontFamily: "'JetBrains Mono', monospace"
+                  flex: 1, padding: '0.5rem', overflowY: 'auto',
+                  display: 'flex', flexDirection: 'column', gap: '0.4rem'
                 }
-              }, '0')
-            ),
-            React.createElement('div', {
-              style: {
-                flex: 1, padding: '0.5rem', overflowY: 'auto',
-                display: 'flex', flexDirection: 'column', gap: '0.4rem'
-              }
-            })
-          ))
+              },
+                colRows.map(c => {
+                  var nba = c.next_best_action || {};
+                  var nbaLabel = NBA_TYPE_LABELS[nba.next_best_action_type || nba.type] || '';
+                  var name = [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Unnamed';
+                  var lastTouch = c.last_touch_at ? c.last_touch_at.slice(0, 10) : '—';
+                  return React.createElement('div', {
+                    key: c.id,
+                    style: {
+                      background: '#1e293b',
+                      border: '1px solid rgba(51,65,85,0.5)',
+                      borderRadius: '0.5rem',
+                      padding: '0.55rem 0.6rem',
+                      cursor: 'default'
+                    }
+                  },
+                    React.createElement('div', {
+                      style: { fontSize: '0.78rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '0.2rem', lineHeight: 1.3 }
+                    }, name),
+                    c.title ? React.createElement('div', {
+                      style: { fontSize: '0.68rem', color: '#94a3b8', marginBottom: '0.15rem', lineHeight: 1.25 }
+                    }, c.title) : null,
+                    c.group_name ? React.createElement('div', {
+                      style: { fontSize: '0.68rem', color: '#64748b', marginBottom: '0.25rem', lineHeight: 1.25 }
+                    }, c.group_name) : null,
+                    React.createElement('div', {
+                      style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.15rem' }
+                    },
+                      React.createElement('span', {
+                        style: { fontSize: '0.62rem', color: '#475569', fontFamily: "'JetBrains Mono', monospace" }
+                      }, lastTouch),
+                      nbaLabel ? React.createElement('span', {
+                        style: {
+                          fontSize: '0.58rem', fontWeight: 600, color: col.accent,
+                          background: col.accent + '18', padding: '0.1rem 0.35rem',
+                          borderRadius: '0.25rem', whiteSpace: 'nowrap'
+                        }
+                      }, nbaLabel) : null
+                    )
+                  );
+                })
+              )
+            );
+          })
         )
       : React.createElement('div', {
           style: {
