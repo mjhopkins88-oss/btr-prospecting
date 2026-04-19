@@ -2359,6 +2359,8 @@ function ProspectingPage({ user }) {
         ? React.createElement(ProspectingSequencesTab)
       : tab === 'schedule'
         ? React.createElement(ProspectingScheduleTab)
+      : tab === 'feed'
+        ? React.createElement(ProspectingFeedTab)
         : React.createElement('div', {
             style: {
               background: '#1e293b',
@@ -3166,6 +3168,179 @@ function ProspectingScheduleTab() {
       }
     }, `${totalItems} scheduled across ${PROSP_MOCK_SCHEDULE.length} days`),
     PROSP_MOCK_SCHEDULE.map(daySection)
+  );
+}
+
+// -- Prospecting Feed tab: activity stream --
+// Mock-only data for Phase 7. No backend wiring.
+
+const PROSP_FEED_TYPE_META = {
+  touchpoint:    { label: 'Touchpoint',   color: '#34d399' },
+  note:          { label: 'Note',         color: '#60a5fa' },
+  status_change: { label: 'Status',       color: '#fbbf24' },
+  group_added:   { label: 'New Group',    color: '#22d3ee' },
+  sequence:      { label: 'Sequence',     color: '#a78bfa' },
+  signal:        { label: 'Market Signal', color: '#fb923c' }
+};
+
+const PROSP_MOCK_FEED = [
+  { id: 'f1',  type: 'touchpoint',    action: 'Call completed',                  group: 'NexMetro Capital',             detail: 'Discussed Q2 pipeline \u2014 3 new communities in permitting', ts: '14 min ago' },
+  { id: 'f2',  type: 'note',          action: 'Note added',                      group: 'Sunbelt Residential Partners', detail: 'Interested in JV structure for Charlotte expansion',           ts: '1 hr ago' },
+  { id: 'f3',  type: 'status_change', action: 'Status \u2192 Engaged',           group: 'Atlas Capital Ventures',       detail: 'Upgraded after productive intro call',                         ts: '2 hr ago' },
+  { id: 'f4',  type: 'sequence',      action: 'Enrolled in Market Intel Touch',  group: 'Lone Star BTR Capital',        detail: 'Auto-enrolled after prospect tag',                             ts: '3 hr ago' },
+  { id: 'f5',  type: 'touchpoint',    action: 'Email sent',                      group: 'Trident Development Group',    detail: 'Coverage proposal for Orlando portfolio',                      ts: '5 hr ago' },
+  { id: 'f6',  type: 'group_added',   action: 'New group added',                 group: 'Blackstone Residential',       detail: 'Developer \u00b7 Markets: Austin, San Antonio',                ts: '7 hr ago' },
+  { id: 'f7',  type: 'signal',        action: 'Market signal detected',          group: 'NexMetro Capital',             detail: 'Permit filed for 280-unit BTR in Mesa, AZ',                    ts: 'yesterday' },
+  { id: 'f8',  type: 'touchpoint',    action: 'Meeting completed',               group: 'Cornerstone Brokerage',        detail: 'Reviewed 5 new BTR listings in DFW',                           ts: 'yesterday' },
+  { id: 'f9',  type: 'status_change', action: 'Status \u2192 Dormant',           group: 'Pacific Crest Homes',          detail: 'No response in 45 days \u2014 flagged for re-engagement',      ts: '2d ago' },
+  { id: 'f10', type: 'touchpoint',    action: 'LinkedIn message sent',           group: 'Meridian Property Group',      detail: 'Shared article on insurance cost trends in BTR',               ts: '3d ago' },
+  { id: 'f11', type: 'note',          action: 'Note added',                      group: 'NexMetro Capital',             detail: 'CEO mentioned potential Denver expansion at conference',       ts: '3d ago' },
+  { id: 'f12', type: 'sequence',      action: 'Sequence step completed',         group: 'Atlas Capital Ventures',       detail: 'Warm Re-engagement \u2014 Step 2 of 5',                        ts: '4d ago' },
+  { id: 'f13', type: 'signal',        action: 'Market signal detected',          group: 'Sunbelt Residential Partners', detail: 'Zoning variance approved \u2014 Nashville parcel',             ts: '5d ago' },
+  { id: 'f14', type: 'touchpoint',    action: 'Call completed',                  group: 'Meridian Property Group',      detail: 'Quarterly portfolio review \u2014 reviewed 4 renewals',        ts: '6d ago' }
+];
+
+function ProspectingFeedTab() {
+  const [typeFilter, setTypeFilter] = useState('');
+
+  const items = typeFilter
+    ? PROSP_MOCK_FEED.filter(it => it.type === typeFilter)
+    : PROSP_MOCK_FEED;
+
+  const filterChip = (value, label) => {
+    const active = typeFilter === value;
+    const color = value === '' ? '#94a3b8' : (PROSP_FEED_TYPE_META[value]?.color || '#94a3b8');
+    return React.createElement('button', {
+      key: value || 'all',
+      onClick: () => setTypeFilter(value),
+      style: {
+        background: active ? `${color}22` : 'transparent',
+        border: `1px solid ${active ? color : '#334155'}`,
+        color: active ? color : '#94a3b8',
+        padding: '0.3rem 0.7rem',
+        borderRadius: '9999px',
+        fontSize: '0.72rem',
+        fontWeight: 600,
+        cursor: 'pointer',
+        fontFamily: "'Inter', sans-serif",
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em'
+      }
+    }, label);
+  };
+
+  const feedRow = (item, isLast) => {
+    const meta = PROSP_FEED_TYPE_META[item.type] || { label: item.type, color: '#94a3b8' };
+    return React.createElement('div', {
+      key: item.id,
+      style: {
+        display: 'grid',
+        gridTemplateColumns: '14px 1fr auto',
+        gap: '0.85rem',
+        alignItems: 'flex-start',
+        padding: '0.75rem 0',
+        borderBottom: isLast ? 'none' : '1px solid rgba(51,65,85,0.3)'
+      }
+    },
+      React.createElement('div', {
+        style: {
+          width: '8px',
+          height: '8px',
+          borderRadius: '50%',
+          background: meta.color,
+          marginTop: '7px'
+        }
+      }),
+      React.createElement('div', null,
+        React.createElement('div', {
+          style: {
+            display: 'flex',
+            alignItems: 'baseline',
+            gap: '0.5rem',
+            flexWrap: 'wrap'
+          }
+        },
+          React.createElement('span', {
+            style: {
+              fontSize: '0.62rem',
+              fontWeight: 600,
+              color: meta.color,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em'
+            }
+          }, meta.label),
+          React.createElement('span', {
+            style: { fontSize: '0.88rem', color: '#e2e8f0', fontWeight: 500 }
+          }, item.action),
+          React.createElement('span', {
+            style: { fontSize: '0.78rem', color: '#475569' }
+          }, '\u2014'),
+          React.createElement('span', {
+            style: { fontSize: '0.82rem', color: '#34d399', fontWeight: 500 }
+          }, item.group)
+        ),
+        React.createElement('div', {
+          style: {
+            fontSize: '0.78rem',
+            color: '#94a3b8',
+            marginTop: '0.2rem',
+            lineHeight: 1.4
+          }
+        }, item.detail)
+      ),
+      React.createElement('span', {
+        style: {
+          fontSize: '0.72rem',
+          color: '#64748b',
+          fontFamily: "'JetBrains Mono', monospace",
+          whiteSpace: 'nowrap',
+          paddingTop: '2px'
+        }
+      }, item.ts)
+    );
+  };
+
+  return React.createElement('div', {
+    style: { display: 'flex', flexDirection: 'column', gap: '1rem' }
+  },
+    React.createElement('div', {
+      style: { display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }
+    },
+      filterChip('', 'All'),
+      filterChip('touchpoint', 'Touchpoints'),
+      filterChip('note', 'Notes'),
+      filterChip('status_change', 'Status'),
+      filterChip('group_added', 'New Groups'),
+      filterChip('sequence', 'Sequences'),
+      filterChip('signal', 'Signals'),
+      React.createElement('span', {
+        style: {
+          marginLeft: 'auto',
+          fontSize: '0.72rem',
+          color: '#64748b',
+          fontFamily: "'JetBrains Mono', monospace"
+        }
+      }, `${items.length} ${items.length === 1 ? 'event' : 'events'}`)
+    ),
+    React.createElement('div', {
+      style: {
+        background: '#1e293b',
+        border: '1px solid rgba(51,65,85,0.5)',
+        borderRadius: '0.85rem',
+        padding: '0.25rem 1.25rem'
+      }
+    },
+      items.length === 0
+        ? React.createElement('div', {
+            style: {
+              padding: '2rem',
+              textAlign: 'center',
+              color: '#64748b',
+              fontSize: '0.85rem'
+            }
+          }, 'No activity matches this filter.')
+        : items.map((it, i) => feedRow(it, i === items.length - 1))
+    )
   );
 }
 
