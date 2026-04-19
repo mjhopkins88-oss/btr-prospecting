@@ -89,7 +89,12 @@ def rule_initial_followup(contact_id):
     c = fetch_one("SELECT * FROM prospecting_contacts WHERE id = ?", [contact_id])
     if not c or not c.get('first_reached_out_at'):
         return None
-    if c.get('last_touch_at') and c['last_touch_at'] > c['first_reached_out_at']:
+    inbound = fetch_one(
+        "SELECT id FROM prospecting_touchpoints "
+        "WHERE contact_id = ? AND direction = 'inbound' AND occurred_at > ? LIMIT 1",
+        [contact_id, c['first_reached_out_at']]
+    )
+    if inbound:
         return None
     try:
         start = datetime.fromisoformat(c['first_reached_out_at'])
@@ -100,9 +105,9 @@ def rule_initial_followup(contact_id):
     return _create_task(
         contact_id=contact_id, group_id=c.get('group_id'),
         task_type='follow_up', title=f'Follow-up — {name}',
-        description=f'7 business days since initial outreach. Send follow-up note.',
+        description='7 business days since initial outreach with no reply. Send follow-up.',
         channel='email', due_at=due, priority=7,
-        generated_reason='initial outreach sent 7 business days ago, no reply logged',
+        generated_reason='initial outreach sent, no inbound reply logged within 7 business days',
         next_best_action_type=NBA_OVERDUE_FOLLOWUP,
         rule_tag='initial_followup'
     )
@@ -136,12 +141,13 @@ def rule_stale_30d_relationship():
 # ── Rule 3: strategic / warm no touch 45-60 days → high priority ─────
 def rule_stale_45_60d_relationship():
     threshold = (_now() - timedelta(days=45)).isoformat()
+    created = 0
+
     contacts = fetch_all(
         "SELECT * FROM prospecting_contacts WHERE relationship_stage IN (?, ?) "
         "AND last_touch_at IS NOT NULL AND last_touch_at < ?",
         [STAGE_WARM, STAGE_STRATEGIC, threshold]
     )
-    created = 0
     for c in contacts:
         name = f"{c.get('first_name') or ''} {c.get('last_name') or ''}".strip() or 'contact'
         tid = _create_task(
@@ -149,12 +155,35 @@ def rule_stale_45_60d_relationship():
             task_type='re_engage', title=f'Re-engage — {name}',
             description=f'{c.get("relationship_stage", "warm")} relationship has 45+ days of silence.',
             channel='call', due_at=_now(), priority=9,
-            generated_reason=f'{c.get("relationship_stage")} relationship stale 45+ days',
+            generated_reason=f'{c.get("relationship_stage")} contact stale 45+ days',
             next_best_action_type=NBA_STALE_CHECKIN,
             rule_tag='stale_45d_strategic'
         )
         if tid:
             created += 1
+
+    stale_groups = fetch_all(
+        "SELECT id, name, relationship_status FROM capital_groups "
+        "WHERE relationship_status IN ('warm', 'engaged', 'partner') "
+        "AND last_touch_at IS NOT NULL AND last_touch_at < ?",
+        [threshold]
+    )
+    contact_group_ids = {c.get('group_id') for c in contacts if c.get('group_id')}
+    for g in stale_groups:
+        if g['id'] in contact_group_ids:
+            continue
+        tid = _create_task(
+            group_id=g['id'],
+            task_type='re_engage', title=f'Re-engage group — {g["name"]}',
+            description=f'{g.get("relationship_status", "warm")} group has 45+ days of silence.',
+            channel='call', due_at=_now(), priority=9,
+            generated_reason=f'{g.get("relationship_status")} group stale 45+ days',
+            next_best_action_type=NBA_STALE_CHECKIN,
+            rule_tag='stale_45d_group'
+        )
+        if tid:
+            created += 1
+
     return created
 
 
@@ -202,10 +231,14 @@ def rule_company_signal(signal_id):
 
 
 # ── Rule 5: industry signal → match to relevant contacts ─────────────
+INDUSTRY_DEFAULT_STAGES = [STAGE_LIGHT, STAGE_ACTIVE, STAGE_WARM, STAGE_STRATEGIC]
+
 def rule_industry_signal(signal_id, match_types=None, match_stages=None):
     sig = fetch_one("SELECT * FROM prospecting_signals WHERE id = ?", [signal_id])
     if not sig or sig.get('signal_scope') != 'industry':
         return 0
+
+    stages = match_stages or INDUSTRY_DEFAULT_STAGES
 
     where = ["1=1"]
     params = []
@@ -213,10 +246,9 @@ def rule_industry_signal(signal_id, match_types=None, match_stages=None):
         placeholders = ','.join(['?'] * len(match_types))
         where.append(f"g.type IN ({placeholders})")
         params.extend(match_types)
-    if match_stages:
-        placeholders = ','.join(['?'] * len(match_stages))
-        where.append(f"c.relationship_stage IN ({placeholders})")
-        params.extend(match_stages)
+    stage_placeholders = ','.join(['?'] * len(stages))
+    where.append(f"c.relationship_stage IN ({stage_placeholders})")
+    params.extend(stages)
 
     contacts = fetch_all(
         "SELECT c.*, g.name AS group_name FROM prospecting_contacts c "
@@ -281,10 +313,17 @@ def rule_task_complete(task_id, touchpoint_data=None):
 
     now = _iso(_now())
     if task.get('contact_id'):
-        execute(
-            "UPDATE prospecting_contacts SET last_touch_at = ?, updated_at = ? WHERE id = ?",
-            [now, now, task['contact_id']]
+        contact = fetch_one(
+            "SELECT relationship_stage, last_touch_at FROM prospecting_contacts WHERE id = ?",
+            [task['contact_id']]
         )
+        sets = "last_touch_at = ?, updated_at = ?"
+        params = [now, now]
+        if contact and contact.get('relationship_stage') == STAGE_COLD and not contact.get('last_touch_at'):
+            sets = "last_touch_at = ?, updated_at = ?, relationship_stage = ?"
+            params = [now, now, STAGE_INITIAL]
+        params.append(task['contact_id'])
+        execute(f"UPDATE prospecting_contacts SET {sets} WHERE id = ?", params)
     if task.get('capital_group_id'):
         execute(
             "UPDATE capital_groups SET last_touch_at = ?, last_contacted_at = ?, updated_at = ? WHERE id = ?",
