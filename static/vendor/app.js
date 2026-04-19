@@ -51,7 +51,7 @@ function getTriggerStyle(trigger) {
   };
   if (t.includes('portfolio') || t.includes('blanket') || t.includes('scale')) return {
     bg: 'rgba(59,130,246,0.15)',
-    color: '#93c5fd'
+    color: '#3b82f6'
   };
   if (t.includes('lender') || t.includes('covenant')) return {
     bg: 'rgba(249,115,22,0.15)',
@@ -59,7 +59,7 @@ function getTriggerStyle(trigger) {
   };
   return {
     bg: 'rgba(148,163,184,0.15)',
-    color: '#94a3b8'
+    color: '#64748b'
   };
 }
 
@@ -94,8 +94,8 @@ const CRM_STATUS_COLORS = {
     color: '#c4b5fd'
   },
   'Won': {
-    bg: 'rgba(16,185,129,0.15)',
-    color: '#34d399'
+    bg: 'rgba(20,184,166,0.1)',
+    color: '#14b8a6'
   },
   'Lost': {
     bg: 'rgba(239,68,68,0.15)',
@@ -103,7 +103,7 @@ const CRM_STATUS_COLORS = {
   },
   'Nurture': {
     bg: 'rgba(148,163,184,0.15)',
-    color: '#94a3b8'
+    color: '#64748b'
   }
 };
 const CRM_STATUSES = ['New', 'Contacted', 'InDiscussion', 'Quoted', 'Won', 'Lost', 'Nurture'];
@@ -540,7 +540,7 @@ function Sparkline({
       y1: h / 2,
       x2: w - 2,
       y2: h / 2,
-      stroke: "#334155",
+      stroke: "#e2e8f0",
       strokeWidth: "1",
       strokeDasharray: "3 3"
     }));
@@ -684,7 +684,7 @@ function Root() {
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontFamily: "'Orbitron',sans-serif",
-      color: '#34d399',
+      color: '#14b8a6',
       fontSize: '1.2rem',
       animation: 'pulse 1.5s ease-in-out infinite'
     }
@@ -727,8 +727,8 @@ function LoginPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '16px',
       padding: '2.5rem',
       maxWidth: '400px',
@@ -739,7 +739,7 @@ function LoginPage({
       fontFamily: "'Orbitron',sans-serif",
       fontSize: '1.5rem',
       fontWeight: 900,
-      background: 'linear-gradient(135deg,#34d399 0%,#22d3ee 100%)',
+      background: 'linear-gradient(135deg,#34d399 0%,#3b82f6 100%)',
       WebkitBackgroundClip: 'text',
       WebkitTextFillColor: 'transparent',
       marginBottom: '0.5rem',
@@ -839,8 +839,8 @@ function BootstrapPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '16px',
       padding: '2.5rem',
       maxWidth: '440px',
@@ -851,7 +851,7 @@ function BootstrapPage({
       fontFamily: "'Orbitron',sans-serif",
       fontSize: '1.5rem',
       fontWeight: 900,
-      background: 'linear-gradient(135deg,#34d399 0%,#22d3ee 100%)',
+      background: 'linear-gradient(135deg,#34d399 0%,#3b82f6 100%)',
       WebkitBackgroundClip: 'text',
       WebkitTextFillColor: 'transparent',
       marginBottom: '0.5rem',
@@ -1516,19 +1516,19 @@ function LinkedInHub({
   };
   const cellStyle = {
     padding: '0.75rem',
-    borderBottom: '1px solid #1e293b',
+    borderBottom: '1px solid #e2e8f0',
     fontSize: '0.85rem',
-    color: '#e2e8f0',
+    color: '#1e293b',
     verticalAlign: 'top'
   };
   const headStyle = {
     ...cellStyle,
-    color: '#94a3b8',
+    color: '#64748b',
     fontWeight: 600,
     fontSize: '0.75rem',
     textTransform: 'uppercase',
     letterSpacing: '0.05em',
-    borderBottom: '1px solid #334155',
+    borderBottom: '1px solid #e2e8f0',
     textAlign: 'left'
   };
   return /*#__PURE__*/React.createElement("div", {
@@ -1548,12 +1548,12 @@ function LinkedInHub({
     style: {
       fontFamily: "'Orbitron', sans-serif",
       fontSize: '1.5rem',
-      color: '#e2e8f0',
+      color: '#1e293b',
       margin: 0
     }
   }, "LinkedIn Hub"), /*#__PURE__*/React.createElement("p", {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.9rem',
       margin: '0.35rem 0 0'
     }
@@ -1609,7 +1609,7 @@ function LinkedInHub({
     value: "executive"
   }, "Sort: Executive"))), loading && /*#__PURE__*/React.createElement("div", {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       padding: '2rem',
       textAlign: 'center'
     }
@@ -1620,8 +1620,8 @@ function LinkedInHub({
     }
   }, error), !loading && !error && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#0f172a',
-      border: '1px solid #1e293b',
+      background: '#F1F5F9',
+      border: '1px solid #e2e8f0',
       borderRadius: '0.75rem',
       overflow: 'hidden',
       marginBottom: '2rem'
@@ -1629,8 +1629,8 @@ function LinkedInHub({
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '0.75rem 1rem',
-      borderBottom: '1px solid #1e293b',
-      color: '#cbd5e1',
+      borderBottom: '1px solid #e2e8f0',
+      color: '#334155',
       fontFamily: "'Orbitron', sans-serif",
       fontSize: '0.9rem'
     }
@@ -1714,16 +1714,16 @@ function LinkedInHub({
     }, copiedId === p.id ? 'Copied!' : 'Copy'))));
   }))))), /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#0f172a',
-      border: '1px solid #1e293b',
+      background: '#F1F5F9',
+      border: '1px solid #e2e8f0',
       borderRadius: '0.75rem',
       overflow: 'hidden'
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '0.75rem 1rem',
-      borderBottom: '1px solid #1e293b',
-      color: '#cbd5e1',
+      borderBottom: '1px solid #e2e8f0',
+      color: '#334155',
       fontFamily: "'Orbitron', sans-serif",
       fontSize: '0.9rem'
     }
@@ -1937,7 +1937,7 @@ function CapitalGroupsPage({ user }) {
     const pct = (score / 10) * 100;
     const color = score >= 7 ? '#34d399' : score >= 4 ? '#fbbf24' : '#ef4444';
     return React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } },
-      React.createElement('div', { style: { flex: 1, height: '6px', background: '#334155', borderRadius: '3px', overflow: 'hidden', maxWidth: '80px' } },
+      React.createElement('div', { style: { flex: 1, height: '6px', background: '#e2e8f0', borderRadius: '3px', overflow: 'hidden', maxWidth: '80px' } },
         React.createElement('div', { style: { width: `${pct}%`, height: '100%', background: color, borderRadius: '3px', transition: 'width 0.3s' } })
       ),
       React.createElement('span', { style: { fontSize: '0.75rem', color, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" } }, score)
@@ -1958,7 +1958,7 @@ function CapitalGroupsPage({ user }) {
     style: {
       display: 'inline-block', fontSize: '0.7rem', fontWeight: 500,
       padding: '0.15rem 0.5rem', borderRadius: '0.25rem',
-      background: '#334155', color: '#94a3b8'
+      background: '#e2e8f0', color: '#64748b'
     }
   }, typeLabels[type] || type);
 
@@ -1975,13 +1975,13 @@ function CapitalGroupsPage({ user }) {
   };
 
   const renderFormModal = () => showForm && React.createElement('div', {
-    style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
+    style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
     onClick: e => { if (e.target === e.currentTarget) setShowForm(false); }
   },
     React.createElement('div', {
-      style: { background: '#1e293b', border: '1px solid #334155', borderRadius: '1rem', padding: '1.5rem', width: '480px', maxWidth: '95vw', maxHeight: '90vh', overflow: 'auto' }
+      style: { background: '#FFFFFF', border: '1px solid #e2e8f0', borderRadius: '1rem', padding: '1.5rem', width: '480px', maxWidth: '95vw', maxHeight: '90vh', overflow: 'auto' }
     },
-      React.createElement('h3', { style: { color: '#e2e8f0', fontSize: '1.1rem', fontFamily: "'Orbitron', sans-serif", margin: '0 0 1rem' } },
+      React.createElement('h3', { style: { color: '#1e293b', fontSize: '1.1rem', fontFamily: "'Orbitron', sans-serif", margin: '0 0 1rem' } },
         editingGroup ? 'Edit Capital Group' : 'New Capital Group'
       ),
       React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.75rem' } },
@@ -2018,7 +2018,7 @@ function CapitalGroupsPage({ user }) {
           style: { ...styles.input, width: '100%', minWidth: 0, boxSizing: 'border-box' }
         }),
         React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.75rem' } },
-          React.createElement('label', { style: { color: '#94a3b8', fontSize: '0.85rem' } }, 'Warmth'),
+          React.createElement('label', { style: { color: '#64748b', fontSize: '0.85rem' } }, 'Warmth'),
           React.createElement('input', {
             type: 'range', min: 1, max: 10, value: fWarmth,
             onChange: e => setFWarmth(parseInt(e.target.value)),
@@ -2080,40 +2080,40 @@ function CapitalGroupsPage({ user }) {
         : React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' } },
           React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '1.25rem' } },
             React.createElement('div', { style: { ...styles.card, padding: '1.25rem' } },
-              React.createElement('h3', { style: { color: '#e2e8f0', fontSize: '0.9rem', fontWeight: 600, margin: '0 0 0.75rem', fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.04em' } }, 'DETAILS'),
+              React.createElement('h3', { style: { color: '#1e293b', fontSize: '0.9rem', fontWeight: 600, margin: '0 0 0.75rem', fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.04em' } }, 'DETAILS'),
               g.markets && g.markets.length > 0 && React.createElement('div', { style: { marginBottom: '0.5rem' } },
                 React.createElement('span', { style: { color: '#64748b', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 600 } }, 'Markets'),
                 React.createElement('div', { style: { display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.25rem' } },
                   g.markets.map(m => React.createElement('span', {
-                    key: m, style: { fontSize: '0.75rem', padding: '0.1rem 0.45rem', borderRadius: '0.25rem', background: '#0f172a', border: '1px solid #334155', color: '#94a3b8' }
+                    key: m, style: { fontSize: '0.75rem', padding: '0.1rem 0.45rem', borderRadius: '0.25rem', background: '#F1F5F9', border: '1px solid #e2e8f0', color: '#64748b' }
                   }, m))
                 )
               ),
               g.strategy && React.createElement('div', { style: { marginBottom: '0.5rem' } },
                 React.createElement('span', { style: { color: '#64748b', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 600 } }, 'Strategy'),
-                React.createElement('p', { style: { color: '#e2e8f0', fontSize: '0.85rem', margin: '0.25rem 0 0', lineHeight: 1.5 } }, g.strategy)
+                React.createElement('p', { style: { color: '#1e293b', fontSize: '0.85rem', margin: '0.25rem 0 0', lineHeight: 1.5 } }, g.strategy)
               ),
               g.notes && React.createElement('div', { style: { marginBottom: '0.5rem' } },
                 React.createElement('span', { style: { color: '#64748b', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 600 } }, 'Notes'),
-                React.createElement('p', { style: { color: '#e2e8f0', fontSize: '0.85rem', margin: '0.25rem 0 0', lineHeight: 1.5 } }, g.notes)
+                React.createElement('p', { style: { color: '#1e293b', fontSize: '0.85rem', margin: '0.25rem 0 0', lineHeight: 1.5 } }, g.notes)
               ),
               React.createElement('div', { style: { display: 'flex', gap: '1.5rem', marginTop: '0.5rem', fontSize: '0.75rem', color: '#64748b' } },
-                React.createElement('span', null, 'Last contacted: ', React.createElement('strong', { style: { color: '#94a3b8' } }, timeAgo(g.last_contacted_at))),
-                React.createElement('span', null, 'Created: ', React.createElement('strong', { style: { color: '#94a3b8' } }, timeAgo(g.created_at)))
+                React.createElement('span', null, 'Last contacted: ', React.createElement('strong', { style: { color: '#64748b' } }, timeAgo(g.last_contacted_at))),
+                React.createElement('span', null, 'Created: ', React.createElement('strong', { style: { color: '#64748b' } }, timeAgo(g.created_at)))
               )
             ),
 
             React.createElement('div', { style: { ...styles.card, padding: '1.25rem' } },
-              React.createElement('h3', { style: { color: '#e2e8f0', fontSize: '0.9rem', fontWeight: 600, margin: '0 0 0.75rem', fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.04em' } }, 'LINKED PROPERTIES'),
+              React.createElement('h3', { style: { color: '#1e293b', fontSize: '0.9rem', fontWeight: 600, margin: '0 0 0.75rem', fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.04em' } }, 'LINKED PROPERTIES'),
               (!g.properties || g.properties.length === 0)
-                ? React.createElement('p', { style: { color: '#475569', fontSize: '0.85rem' } }, 'No properties linked yet')
+                ? React.createElement('p', { style: { color: '#94a3b8', fontSize: '0.85rem' } }, 'No properties linked yet')
                 : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.5rem' } },
                     g.properties.map(p => React.createElement('div', {
                       key: p.id,
-                      style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0.75rem', background: '#0f172a', borderRadius: '0.5rem', border: '1px solid #1e293b' }
+                      style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0.75rem', background: '#F1F5F9', borderRadius: '0.5rem', border: '1px solid #e2e8f0' }
                     },
                       React.createElement('div', null,
-                        React.createElement('div', { style: { color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 500 } }, p.name || 'Unnamed'),
+                        React.createElement('div', { style: { color: '#1e293b', fontSize: '0.85rem', fontWeight: 500 } }, p.name || 'Unnamed'),
                         React.createElement('div', { style: { color: '#64748b', fontSize: '0.75rem' } },
                           [p.city, p.state].filter(Boolean).join(', '),
                           p.unit_count ? ` \u00b7 ${p.unit_count} units` : '',
@@ -2121,7 +2121,7 @@ function CapitalGroupsPage({ user }) {
                         )
                       ),
                       p.status && React.createElement('span', {
-                        style: { fontSize: '0.7rem', padding: '0.1rem 0.4rem', borderRadius: '0.25rem', background: '#334155', color: '#94a3b8' }
+                        style: { fontSize: '0.7rem', padding: '0.1rem 0.4rem', borderRadius: '0.25rem', background: '#e2e8f0', color: '#64748b' }
                       }, p.status)
                     ))
                   )
@@ -2130,7 +2130,7 @@ function CapitalGroupsPage({ user }) {
 
           React.createElement('div', { style: { ...styles.card, padding: '1.25rem' } },
             React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' } },
-              React.createElement('h3', { style: { color: '#e2e8f0', fontSize: '0.9rem', fontWeight: 600, margin: 0, fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.04em' } }, 'ACTIVITY TIMELINE'),
+              React.createElement('h3', { style: { color: '#1e293b', fontSize: '0.9rem', fontWeight: 600, margin: 0, fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.04em' } }, 'ACTIVITY TIMELINE'),
               React.createElement('button', {
                 onClick: () => { setShowTpForm(true); setTpType('call'); setTpOutcome(''); setTpNotes(''); },
                 style: { ...styles.btnPrimary, padding: '0.35rem 0.75rem', fontSize: '0.75rem' }
@@ -2138,7 +2138,7 @@ function CapitalGroupsPage({ user }) {
             ),
 
             showTpForm && React.createElement('div', {
-              style: { background: '#0f172a', border: '1px solid #334155', borderRadius: '0.5rem', padding: '0.75rem', marginBottom: '0.75rem' }
+              style: { background: '#F1F5F9', border: '1px solid #e2e8f0', borderRadius: '0.5rem', padding: '0.75rem', marginBottom: '0.75rem' }
             },
               React.createElement('div', { style: { display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' } },
                 React.createElement('select', {
@@ -2171,21 +2171,21 @@ function CapitalGroupsPage({ user }) {
             ),
 
             (!g.touchpoints || g.touchpoints.length === 0)
-              ? React.createElement('p', { style: { color: '#475569', fontSize: '0.85rem' } }, 'No touchpoints yet. Log your first interaction above.')
+              ? React.createElement('p', { style: { color: '#94a3b8', fontSize: '0.85rem' } }, 'No touchpoints yet. Log your first interaction above.')
               : React.createElement('div', { style: { display: 'flex', flexDirection: 'column' } },
                   g.touchpoints.map((tp, i) => React.createElement('div', {
                     key: tp.id,
-                    style: { display: 'flex', gap: '0.75rem', paddingBottom: i < g.touchpoints.length - 1 ? '0.75rem' : 0, borderLeft: '2px solid #334155', paddingLeft: '0.75rem', marginLeft: '0.35rem', position: 'relative' }
+                    style: { display: 'flex', gap: '0.75rem', paddingBottom: i < g.touchpoints.length - 1 ? '0.75rem' : 0, borderLeft: '2px solid #e2e8f0', paddingLeft: '0.75rem', marginLeft: '0.35rem', position: 'relative' }
                   },
                     React.createElement('div', {
                       style: { position: 'absolute', left: '-5px', top: '2px', width: '8px', height: '8px', borderRadius: '50%', background: '#34d399' }
                     }),
                     React.createElement('div', { style: { flex: 1 } },
                       React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
-                        React.createElement('span', { style: { fontSize: '0.8rem', fontWeight: 600, color: '#e2e8f0', textTransform: 'capitalize' } }, tp.type),
+                        React.createElement('span', { style: { fontSize: '0.8rem', fontWeight: 600, color: '#1e293b', textTransform: 'capitalize' } }, tp.type),
                         React.createElement('span', { style: { fontSize: '0.7rem', color: '#64748b' } }, timeAgo(tp.occurred_at))
                       ),
-                      tp.outcome && React.createElement('div', { style: { fontSize: '0.78rem', color: '#94a3b8', marginTop: '0.15rem' } }, tp.outcome),
+                      tp.outcome && React.createElement('div', { style: { fontSize: '0.78rem', color: '#64748b', marginTop: '0.15rem' } }, tp.outcome),
                       tp.notes && React.createElement('div', { style: { fontSize: '0.78rem', color: '#64748b', marginTop: '0.15rem', lineHeight: 1.4 } }, tp.notes)
                     )
                   ))
@@ -2257,7 +2257,7 @@ function CapitalGroupsPage({ user }) {
                   g.markets && g.markets.length > 0 && React.createElement('div', { style: { color: '#64748b', fontSize: '0.8rem', marginBottom: '0.25rem' } },
                     g.markets.join(' \u00b7 ')
                   ),
-                  g.strategy && React.createElement('div', { style: { color: '#94a3b8', fontSize: '0.8rem' } }, g.strategy)
+                  g.strategy && React.createElement('div', { style: { color: '#64748b', fontSize: '0.8rem' } }, g.strategy)
                 ),
                 React.createElement('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.35rem', flexShrink: 0 } },
                   warmthBar(g.warmth_score || 1),
@@ -2309,7 +2309,7 @@ function ProspectingPage({ user }) {
           fontFamily: "'Orbitron', sans-serif",
           fontSize: '1.3rem',
           fontWeight: 700,
-          color: '#e2e8f0',
+          color: '#1e293b',
           margin: 0,
           letterSpacing: '0.04em'
         }
@@ -2320,7 +2320,7 @@ function ProspectingPage({ user }) {
       style: {
         display: 'flex',
         gap: 0,
-        borderBottom: '1px solid #334155',
+        borderBottom: '1px solid #e2e8f0',
         marginTop: '1rem',
         marginBottom: '1.5rem'
       }
@@ -2331,8 +2331,8 @@ function ProspectingPage({ user }) {
         style: {
           background: 'none',
           border: 'none',
-          borderBottom: tab === t.id ? '2px solid #34d399' : '2px solid transparent',
-          color: tab === t.id ? '#e2e8f0' : '#64748b',
+          borderBottom: tab === t.id ? '2px solid #14b8a6' : '2px solid transparent',
+          color: tab === t.id ? '#1e293b' : '#94a3b8',
           padding: '0.6rem 1.25rem',
           fontSize: '0.85rem',
           fontWeight: tab === t.id ? 600 : 400,
@@ -2369,7 +2369,7 @@ function ProspectingPage({ user }) {
 const PROSP_TASK_TYPE_META = [
   { key: 'linkedin',      label: 'LinkedIn',   color: '#0a66c2' },
   { key: 'email',         label: 'Email',      color: '#f59e0b' },
-  { key: 'call',          label: 'Calls',      color: '#34d399' },
+  { key: 'call',          label: 'Calls',      color: '#14b8a6' },
   { key: 'meeting',       label: 'Meetings',   color: '#a78bfa' },
   { key: 'research',      label: 'Research',   color: '#60a5fa' },
   { key: 'check_in',      label: 'Check-ins',  color: '#fb923c' },
@@ -2400,19 +2400,19 @@ function ProspectingSummaryTab() {
 
   const statCard = (s) => React.createElement('div', {
     key: s.label,
-    style: { background: '#1e293b', border: '1px solid rgba(51,65,85,0.5)', borderRadius: '0.75rem', padding: '1rem 1.25rem', flex: 1, minWidth: '140px' }
+    style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.75rem', padding: '1rem 1.25rem', flex: 1, minWidth: '140px' }
   },
     React.createElement('div', { style: { fontSize: '0.68rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em', marginBottom: '0.35rem' } }, s.label),
     React.createElement('div', { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '1.6rem', fontWeight: 700, color: s.accent, lineHeight: 1.1 } }, s.value),
-    React.createElement('div', { style: { fontSize: '0.72rem', color: '#475569', marginTop: '0.2rem' } }, s.sub)
+    React.createElement('div', { style: { fontSize: '0.72rem', color: '#94a3b8', marginTop: '0.2rem' } }, s.sub)
   );
 
   const bucketCard = (b) => React.createElement('div', {
     key: b.id,
-    style: { background: '#1e293b', border: '1px solid rgba(51,65,85,0.5)', borderTop: '3px solid ' + b.accent, borderRadius: '0.75rem', padding: '1.25rem', flex: 1, minWidth: '220px' }
+    style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderTop: '3px solid ' + b.accent, borderRadius: '0.75rem', padding: '1.25rem', flex: 1, minWidth: '220px' }
   },
     React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' } },
-      React.createElement('span', { style: { fontSize: '0.9rem', fontWeight: 600, color: '#e2e8f0' } }, b.title),
+      React.createElement('span', { style: { fontSize: '0.9rem', fontWeight: 600, color: '#1e293b' } }, b.title),
       React.createElement('span', { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '1.4rem', fontWeight: 700, color: b.accent, lineHeight: 1 } }, b.total)
     ),
     React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.4rem' } },
@@ -2422,10 +2422,10 @@ function ProspectingSummaryTab() {
       },
         React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.45rem' } },
           React.createElement('div', { style: { width: '8px', height: '8px', borderRadius: '2px', background: t.color } }),
-          React.createElement('span', { style: { fontSize: '0.8rem', color: '#94a3b8' } }, t.label)
+          React.createElement('span', { style: { fontSize: '0.8rem', color: '#64748b' } }, t.label)
         ),
         React.createElement('span', {
-          style: { fontSize: '0.85rem', fontWeight: 600, color: (b.counts[t.key] || 0) === 0 ? '#475569' : '#e2e8f0', fontFamily: "'JetBrains Mono', monospace" }
+          style: { fontSize: '0.85rem', fontWeight: 600, color: (b.counts[t.key] || 0) === 0 ? '#94a3b8' : '#1e293b', fontFamily: "'JetBrains Mono', monospace" }
         }, b.counts[t.key] || 0)
       ))
     )
@@ -2501,9 +2501,9 @@ function ProspectingOverviewPanel() {
         style: { fontSize: '0.78rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.06em', margin: '0 0 0.75rem' }
       }, 'Action Items'),
       React.createElement('div', {
-        style: { background: '#1e293b', border: '1px solid rgba(51,65,85,0.5)', borderRadius: '0.75rem', padding: '1.5rem 1.25rem', textAlign: 'center' }
+        style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.75rem', padding: '1.5rem 1.25rem', textAlign: 'center' }
       },
-        React.createElement('div', { style: { fontSize: '0.92rem', color: '#475569', marginBottom: '0.3rem' } }, 'All clear'),
+        React.createElement('div', { style: { fontSize: '0.92rem', color: '#94a3b8', marginBottom: '0.3rem' } }, 'All clear'),
         React.createElement('div', { style: { fontSize: '0.8rem', color: '#64748b' } }, 'No overdue tasks, pending notices, or stale groups. Add contacts and groups to start prospecting.')
       )
     );
@@ -2514,14 +2514,14 @@ function ProspectingOverviewPanel() {
       style: { fontSize: '0.78rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.06em', margin: '0 0 0.75rem' }
     }, 'Action Items'),
     React.createElement('div', {
-      style: { background: '#1e293b', border: '1px solid rgba(51,65,85,0.5)', borderRadius: '0.75rem', overflow: 'hidden' }
+      style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.75rem', overflow: 'hidden' }
     },
       items.map((item, i) => React.createElement('div', {
         key: i,
         style: {
           display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
           padding: '0.85rem 1.25rem',
-          borderBottom: i < items.length - 1 ? '1px solid rgba(51,65,85,0.3)' : 'none'
+          borderBottom: i < items.length - 1 ? '1px solid rgba(226,232,240,0.3)' : 'none'
         }
       },
         React.createElement('span', { style: { fontSize: '1rem', lineHeight: 1.3, flexShrink: 0 } }, item.icon),
@@ -2544,10 +2544,10 @@ const PROSP_TYPE_LABELS = {
 };
 
 const PROSP_STATUS_META = {
-  prospect: { label: 'Prospect', color: '#94a3b8' },
+  prospect: { label: 'Prospect', color: '#64748b' },
   warm:     { label: 'Warm',     color: '#fbbf24' },
   engaged:  { label: 'Engaged',  color: '#60a5fa' },
-  partner:  { label: 'Partner',  color: '#34d399' },
+  partner:  { label: 'Partner',  color: '#14b8a6' },
   dormant:  { label: 'Dormant',  color: '#a78bfa' },
   cold:     { label: 'Cold',     color: '#ef4444' }
 };
@@ -2573,9 +2573,9 @@ function ProspectingGroupsTab() {
   }, [search, typeFilter, statusFilter, sort]);
 
   const inputStyle = {
-    background: '#0f172a',
-    border: '1px solid #334155',
-    color: '#e2e8f0',
+    background: '#F1F5F9',
+    border: '1px solid #e2e8f0',
+    color: '#1e293b',
     padding: '0.5rem 0.75rem',
     borderRadius: '0.5rem',
     fontSize: '0.82rem',
@@ -2585,8 +2585,8 @@ function ProspectingGroupsTab() {
   const selectStyle = { ...inputStyle, cursor: 'pointer' };
   const btnStyle = {
     background: 'transparent',
-    border: '1px solid #334155',
-    color: '#94a3b8',
+    border: '1px solid #e2e8f0',
+    color: '#64748b',
     padding: '0.5rem 0.9rem',
     borderRadius: '0.5rem',
     fontSize: '0.8rem',
@@ -2595,7 +2595,7 @@ function ProspectingGroupsTab() {
   };
   const btnPrimary = {
     ...btnStyle,
-    background: '#10b981',
+    background: '#14b8a6',
     border: 'none',
     color: '#0f172a',
     fontWeight: 600
@@ -2608,7 +2608,7 @@ function ProspectingGroupsTab() {
       style: { display: 'flex', alignItems: 'center', gap: '0.4rem' }
     },
       React.createElement('div', {
-        style: { width: '50px', height: '5px', background: '#334155', borderRadius: '3px', overflow: 'hidden' }
+        style: { width: '50px', height: '5px', background: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }
       },
         React.createElement('div', {
           style: { width: `${pct}%`, height: '100%', background: color, borderRadius: '3px' }
@@ -2696,8 +2696,8 @@ function ProspectingGroupsTab() {
 
     React.createElement('div', {
       style: {
-        background: '#1e293b',
-        border: '1px solid rgba(51,65,85,0.5)',
+        background: '#FFFFFF',
+        border: '1px solid rgba(226,232,240,0.5)',
         borderRadius: '0.75rem',
         overflow: 'hidden'
       }
@@ -2708,8 +2708,8 @@ function ProspectingGroupsTab() {
           gridTemplateColumns: COLS,
           gap: '0.5rem',
           padding: '0.65rem 1rem',
-          borderBottom: '1px solid #334155',
-          background: '#0f172a'
+          borderBottom: '1px solid #e2e8f0',
+          background: '#F1F5F9'
         }
       },
         headerCell('Group'),
@@ -2726,7 +2726,7 @@ function ProspectingGroupsTab() {
             style: { padding: '2rem', textAlign: 'center', color: '#64748b', fontSize: '0.85rem' }
           }, 'No groups match current filters.')
         : rows.map(g => {
-            const statusMeta = PROSP_STATUS_META[g.status] || { label: g.status, color: '#94a3b8' };
+            const statusMeta = PROSP_STATUS_META[g.status] || { label: g.status, color: '#64748b' };
             return React.createElement('div', {
               key: g.id,
               style: {
@@ -2734,15 +2734,15 @@ function ProspectingGroupsTab() {
                 gridTemplateColumns: COLS,
                 gap: '0.5rem',
                 padding: '0.7rem 1rem',
-                borderBottom: '1px solid rgba(51,65,85,0.3)',
+                borderBottom: '1px solid rgba(226,232,240,0.3)',
                 alignItems: 'center'
               }
             },
               React.createElement('span', {
-                style: { fontSize: '0.86rem', fontWeight: 600, color: '#e2e8f0' }
+                style: { fontSize: '0.86rem', fontWeight: 600, color: '#1e293b' }
               }, g.name),
               React.createElement('span', {
-                style: { fontSize: '0.78rem', color: '#94a3b8' }
+                style: { fontSize: '0.78rem', color: '#64748b' }
               }, PROSP_TYPE_LABELS[g.type] || g.type),
               React.createElement('span', {
                 style: { fontSize: '0.78rem', color: '#64748b' }
@@ -2758,19 +2758,19 @@ function ProspectingGroupsTab() {
               }, statusMeta.label),
               warmthBar(g.warmth),
               React.createElement('span', {
-                style: { fontSize: '0.78rem', color: '#94a3b8' }
+                style: { fontSize: '0.78rem', color: '#64748b' }
               }, g.lastTouch),
               React.createElement('span', {
                 style: {
                   fontSize: '0.86rem',
                   fontWeight: 600,
-                  color: g.communities === 0 ? '#475569' : '#e2e8f0',
+                  color: g.communities === 0 ? '#94a3b8' : '#1e293b',
                   fontFamily: "'JetBrains Mono', monospace",
                   textAlign: 'center'
                 }
               }, g.communities),
               React.createElement('span', {
-                style: { fontSize: '0.78rem', color: '#94a3b8' }
+                style: { fontSize: '0.78rem', color: '#64748b' }
               }, g.nextAction)
             );
           })
@@ -2783,7 +2783,7 @@ const CONTACT_STAGE_META = {
   initial_outreach:  { label: 'Initial Outreach',  color: '#fb923c' },
   light_conversation:{ label: 'Light Conversation', color: '#fbbf24' },
   active:            { label: 'Active',            color: '#60a5fa' },
-  warm:              { label: 'Warm',              color: '#34d399' },
+  warm:              { label: 'Warm',              color: '#14b8a6' },
   strategic:         { label: 'Strategic',         color: '#a78bfa' },
   dormant:           { label: 'Dormant',           color: '#64748b' }
 };
@@ -2896,9 +2896,9 @@ function ProspectingContactsTab({ user }) {
   };
 
   const inputStyle = {
-    background: '#0f172a',
-    border: '1px solid #334155',
-    color: '#e2e8f0',
+    background: '#F1F5F9',
+    border: '1px solid #e2e8f0',
+    color: '#1e293b',
     padding: '0.5rem 0.75rem',
     borderRadius: '0.5rem',
     fontSize: '0.82rem',
@@ -2909,7 +2909,7 @@ function ProspectingContactsTab({ user }) {
   const formInputStyle = { ...inputStyle, width: '100%', boxSizing: 'border-box' };
   const formSelectStyle = { ...formInputStyle, cursor: 'pointer' };
   const formLabel = (text) => React.createElement('label', {
-    style: { fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }
+    style: { fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }
   }, text);
 
   const COLS = '1.6fr 1.1fr 1.3fr 1fr 0.9fr 0.9fr 1.3fr 0.8fr';
@@ -2928,7 +2928,7 @@ function ProspectingContactsTab({ user }) {
   const ssBtn = (contact) => React.createElement('button', {
     onClick: (e) => { e.stopPropagation(); _signalStackFromContact(contact); },
     style: {
-      background: 'transparent', border: '1px solid #334155', color: '#6ee7b7',
+      background: 'transparent', border: '1px solid #e2e8f0', color: '#0d9488',
       padding: '0.25rem 0.5rem', borderRadius: '0.4rem', fontSize: '0.68rem',
       fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter', sans-serif", whiteSpace: 'nowrap'
     }
@@ -2956,7 +2956,7 @@ function ProspectingContactsTab({ user }) {
   const pipeBtn = (contact) => React.createElement('button', {
     onClick: (e) => { e.stopPropagation(); createLeadFromContact(contact); },
     style: {
-      background: 'transparent', border: '1px solid #334155', color: '#60a5fa',
+      background: 'transparent', border: '1px solid #e2e8f0', color: '#60a5fa',
       padding: '0.25rem 0.5rem', borderRadius: '0.4rem', fontSize: '0.68rem',
       fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter', sans-serif", whiteSpace: 'nowrap'
     }
@@ -2972,7 +2972,7 @@ function ProspectingContactsTab({ user }) {
   };
 
   const stageBadge = (stage) => {
-    const meta = CONTACT_STAGE_META[stage] || { label: stage || 'Unknown', color: '#94a3b8' };
+    const meta = CONTACT_STAGE_META[stage] || { label: stage || 'Unknown', color: '#64748b' };
     return React.createElement('span', {
       style: {
         fontSize: '0.7rem',
@@ -2987,11 +2987,11 @@ function ProspectingContactsTab({ user }) {
   const nbaBadge = (nba) => {
     const nbaType = nba && (nba.next_best_action_type || nba.type);
     if (!nbaType || nbaType === 'none') {
-      return React.createElement('span', { style: { fontSize: '0.78rem', color: '#475569' } }, '\u2014');
+      return React.createElement('span', { style: { fontSize: '0.78rem', color: '#94a3b8' } }, '\u2014');
     }
     const label = NBA_TYPE_LABELS[nbaType] || nbaType;
     return React.createElement('span', {
-      style: { fontSize: '0.78rem', color: '#94a3b8' }
+      style: { fontSize: '0.78rem', color: '#64748b' }
     }, label);
   };
 
@@ -2999,8 +2999,8 @@ function ProspectingContactsTab({ user }) {
 
   const formPanel = !showForm ? null : React.createElement('div', {
     style: {
-      background: '#1e293b',
-      border: '1px solid rgba(51,65,85,0.5)',
+      background: '#FFFFFF',
+      border: '1px solid rgba(226,232,240,0.5)',
       borderRadius: '0.75rem',
       padding: '1.25rem',
       display: 'flex',
@@ -3009,7 +3009,7 @@ function ProspectingContactsTab({ user }) {
     }
   },
     React.createElement('div', {
-      style: { fontSize: '0.92rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '0.25rem' }
+      style: { fontSize: '0.92rem', fontWeight: 600, color: '#1e293b', marginBottom: '0.25rem' }
     }, 'New Contact'),
     React.createElement('div', {
       style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }
@@ -3071,7 +3071,7 @@ function ProspectingContactsTab({ user }) {
       React.createElement('button', {
         onClick: () => { setShowForm(false); setForm(emptyForm); setFormError(''); },
         style: {
-          background: 'transparent', border: '1px solid #334155', color: '#94a3b8',
+          background: 'transparent', border: '1px solid #e2e8f0', color: '#64748b',
           padding: '0.5rem 1rem', borderRadius: '0.5rem', fontSize: '0.82rem', cursor: 'pointer',
           fontFamily: "'Inter', sans-serif"
         }
@@ -3080,7 +3080,7 @@ function ProspectingContactsTab({ user }) {
         onClick: handleSubmit,
         disabled: saving,
         style: {
-          background: '#10b981', border: 'none', color: '#0f172a',
+          background: '#14b8a6', border: 'none', color: '#0f172a',
           padding: '0.5rem 1rem', borderRadius: '0.5rem', fontSize: '0.82rem', fontWeight: 600,
           cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.6 : 1,
           fontFamily: "'Inter', sans-serif"
@@ -3112,15 +3112,15 @@ function ProspectingContactsTab({ user }) {
         )
       ),
       React.createElement('div', {
-        style: { display: 'inline-flex', border: '1px solid #334155', borderRadius: '0.5rem', overflow: 'hidden' }
+        style: { display: 'inline-flex', border: '1px solid #e2e8f0', borderRadius: '0.5rem', overflow: 'hidden' }
       },
         ['board', 'table'].map(m => React.createElement('button', {
           key: m,
           onClick: () => setViewMode(m),
           style: {
-            background: viewMode === m ? '#334155' : 'transparent',
+            background: viewMode === m ? '#e2e8f0' : 'transparent',
             border: 'none',
-            color: viewMode === m ? '#e2e8f0' : '#64748b',
+            color: viewMode === m ? '#1e293b' : '#94a3b8',
             padding: '0.4rem 0.75rem',
             fontSize: '0.75rem',
             fontWeight: 600,
@@ -3133,8 +3133,8 @@ function ProspectingContactsTab({ user }) {
       React.createElement('button', {
         onClick: () => setShowForm(f => !f),
         style: {
-          background: showForm ? 'transparent' : '#10b981',
-          border: showForm ? '1px solid #334155' : 'none',
+          background: showForm ? 'transparent' : '#14b8a6',
+          border: showForm ? '1px solid #e2e8f0' : 'none',
           color: showForm ? '#94a3b8' : '#0f172a',
           padding: '0.5rem 0.9rem',
           borderRadius: '0.5rem',
@@ -3162,7 +3162,7 @@ function ProspectingContactsTab({ user }) {
             { key: 'active',             label: 'Conversation',     accent: '#60a5fa' },
             { key: 'warm',               label: 'Relationship',     accent: '#34d399' },
             { key: 'strategic',          label: 'Partner',           accent: '#a78bfa' },
-            { key: 'dormant',            label: 'Dormant',           accent: '#475569' }
+            { key: 'dormant',            label: 'Dormant',           accent: '#94a3b8' }
           ].map(col => {
             var colRows = rows.filter(c => (c.relationship_stage || 'cold') === col.key);
             var isOver = dragOver === col.key && dragId;
@@ -3191,8 +3191,8 @@ function ProspectingContactsTab({ user }) {
               },
               style: {
                 flex: '1 0 180px', maxWidth: '240px', minWidth: '180px',
-                background: isOver ? 'rgba(51,65,85,0.35)' : '#0f172a',
-                border: isOver ? '1px solid ' + col.accent : '1px solid rgba(51,65,85,0.4)',
+                background: isOver ? 'rgba(20,184,166,0.06)' : '#FFFFFF',
+                border: isOver ? '1px solid ' + col.accent : '1px solid rgba(226,232,240,0.4)',
                 borderTop: '2px solid ' + col.accent,
                 borderRadius: '0.75rem',
                 display: 'flex', flexDirection: 'column',
@@ -3204,7 +3204,7 @@ function ProspectingContactsTab({ user }) {
                 style: {
                   padding: '0.65rem 0.75rem',
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  borderBottom: '1px solid rgba(51,65,85,0.3)'
+                  borderBottom: '1px solid rgba(226,232,240,0.3)'
                 }
               },
                 React.createElement('span', {
@@ -3215,7 +3215,7 @@ function ProspectingContactsTab({ user }) {
                 }, col.label),
                 React.createElement('span', {
                   style: {
-                    fontSize: '0.66rem', fontWeight: 600, color: '#475569',
+                    fontSize: '0.66rem', fontWeight: 600, color: '#94a3b8',
                     fontFamily: "'JetBrains Mono', monospace"
                   }
                 }, String(colRows.length))
@@ -3242,22 +3242,22 @@ function ProspectingContactsTab({ user }) {
                     },
                     onDragEnd: function() { setDragId(null); setDragOver(null); },
                     style: {
-                      background: '#1e293b',
-                      border: '1px solid rgba(51,65,85,0.5)',
+                      background: '#FFFFFF',
+                      border: '1px solid rgba(226,232,240,0.5)',
                       borderRadius: '0.5rem',
                       padding: '0.55rem 0.6rem',
                       cursor: 'grab',
                       opacity: isDragging ? 0.5 : 1,
                       transform: isDragging ? 'scale(1.03)' : 'none',
-                      boxShadow: isDragging ? '0 4px 12px rgba(0,0,0,0.4)' : 'none',
+                      boxShadow: isDragging ? '0 4px 12px rgba(0,0,0,0.1)' : 'none',
                       transition: 'opacity 0.15s, transform 0.15s, box-shadow 0.15s'
                     }
                   },
                     React.createElement('div', {
-                      style: { fontSize: '0.78rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '0.2rem', lineHeight: 1.3 }
+                      style: { fontSize: '0.78rem', fontWeight: 600, color: '#1e293b', marginBottom: '0.2rem', lineHeight: 1.3 }
                     }, name),
                     c.title ? React.createElement('div', {
-                      style: { fontSize: '0.68rem', color: '#94a3b8', marginBottom: '0.15rem', lineHeight: 1.25 }
+                      style: { fontSize: '0.68rem', color: '#64748b', marginBottom: '0.15rem', lineHeight: 1.25 }
                     }, c.title) : null,
                     c.group_name ? React.createElement('div', {
                       style: { fontSize: '0.68rem', color: '#64748b', marginBottom: '0.25rem', lineHeight: 1.25 }
@@ -3266,7 +3266,7 @@ function ProspectingContactsTab({ user }) {
                       style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.15rem' }
                     },
                       React.createElement('span', {
-                        style: { fontSize: '0.62rem', color: '#475569', fontFamily: "'JetBrains Mono', monospace" }
+                        style: { fontSize: '0.62rem', color: '#94a3b8', fontFamily: "'JetBrains Mono', monospace" }
                       }, lastTouch),
                       nbaLabel ? React.createElement('span', {
                         style: {
@@ -3277,7 +3277,7 @@ function ProspectingContactsTab({ user }) {
                       }, nbaLabel) : null
                     ),
                     React.createElement('div', {
-                      style: { marginTop: '0.3rem', borderTop: '1px solid rgba(51,65,85,0.3)', paddingTop: '0.3rem' }
+                      style: { marginTop: '0.3rem', borderTop: '1px solid rgba(226,232,240,0.3)', paddingTop: '0.3rem' }
                     },
                       assignId === c.id
                         ? React.createElement('select', {
@@ -3302,8 +3302,8 @@ function ProspectingContactsTab({ user }) {
                             onBlur: function() { setAssignId(null); },
                             style: {
                               width: '100%', fontSize: '0.62rem', padding: '0.2rem 0.3rem',
-                              background: '#0f172a', color: '#94a3b8',
-                              border: '1px solid rgba(51,65,85,0.5)',
+                              background: '#F1F5F9', color: '#64748b',
+                              border: '1px solid rgba(226,232,240,0.5)',
                               borderRadius: '0.3rem', fontFamily: "'Inter', sans-serif"
                             }
                           },
@@ -3318,7 +3318,7 @@ function ProspectingContactsTab({ user }) {
                             React.createElement('button', {
                               onClick: function(e) { e.stopPropagation(); setAssignId(c.id); },
                               style: {
-                                background: 'transparent', border: 'none', color: '#475569',
+                                background: 'transparent', border: 'none', color: '#94a3b8',
                                 fontSize: '0.6rem', cursor: 'pointer', padding: 0,
                                 fontFamily: "'Inter', sans-serif"
                               }
@@ -3341,8 +3341,8 @@ function ProspectingContactsTab({ user }) {
         )
       : React.createElement('div', {
           style: {
-            background: '#1e293b',
-            border: '1px solid rgba(51,65,85,0.5)',
+            background: '#FFFFFF',
+            border: '1px solid rgba(226,232,240,0.5)',
             borderRadius: '0.75rem',
             overflow: 'hidden'
           }
@@ -3353,8 +3353,8 @@ function ProspectingContactsTab({ user }) {
               gridTemplateColumns: COLS,
               gap: '0.5rem',
               padding: '0.65rem 1rem',
-              borderBottom: '1px solid #334155',
-              background: '#0f172a'
+              borderBottom: '1px solid #e2e8f0',
+              background: '#F1F5F9'
             }
           },
             headerCell('Name'),
@@ -3371,7 +3371,7 @@ function ProspectingContactsTab({ user }) {
                 style: { padding: '3rem 2rem', textAlign: 'center', color: '#64748b' }
               },
                 React.createElement('div', {
-                  style: { fontSize: '1.1rem', marginBottom: '0.5rem', color: '#475569' }
+                  style: { fontSize: '1.1rem', marginBottom: '0.5rem', color: '#94a3b8' }
                 }, 'No contacts yet'),
                 React.createElement('div', {
                   style: { fontSize: '0.82rem' }
@@ -3384,25 +3384,25 @@ function ProspectingContactsTab({ user }) {
                   gridTemplateColumns: COLS,
                   gap: '0.5rem',
                   padding: '0.7rem 1rem',
-                  borderBottom: '1px solid rgba(51,65,85,0.3)',
+                  borderBottom: '1px solid rgba(226,232,240,0.3)',
                   alignItems: 'center'
                 }
               },
                 React.createElement('span', {
-                  style: { fontSize: '0.86rem', fontWeight: 600, color: '#e2e8f0' }
+                  style: { fontSize: '0.86rem', fontWeight: 600, color: '#1e293b' }
                 }, [c.first_name, c.last_name].filter(Boolean).join(' ') || '\u2014'),
                 React.createElement('span', {
-                  style: { fontSize: '0.78rem', color: '#94a3b8' }
+                  style: { fontSize: '0.78rem', color: '#64748b' }
                 }, c.title || '\u2014'),
                 React.createElement('span', {
-                  style: { fontSize: '0.78rem', color: '#94a3b8' }
+                  style: { fontSize: '0.78rem', color: '#64748b' }
                 }, c.group_name || '\u2014'),
                 stageBadge(c.relationship_stage),
                 React.createElement('span', {
-                  style: { fontSize: '0.78rem', color: '#94a3b8' }
+                  style: { fontSize: '0.78rem', color: '#64748b' }
                 }, fmtDate(c.first_reached_out_at)),
                 React.createElement('span', {
-                  style: { fontSize: '0.78rem', color: '#94a3b8' }
+                  style: { fontSize: '0.78rem', color: '#64748b' }
                 }, fmtDate(c.last_touch_at)),
                 nbaBadge(c.next_best_action),
                 React.createElement('div', { style: { display: 'flex', gap: '0.3rem' } },
@@ -3440,9 +3440,9 @@ function ProspectingNoticesTab() {
   };
 
   const selectStyle = {
-    background: '#0f172a',
-    border: '1px solid #334155',
-    color: '#e2e8f0',
+    background: '#F1F5F9',
+    border: '1px solid #e2e8f0',
+    color: '#1e293b',
     padding: '0.5rem 0.75rem',
     borderRadius: '0.5rem',
     fontSize: '0.82rem',
@@ -3454,8 +3454,8 @@ function ProspectingNoticesTab() {
   const actionBtn = (label, onClick, accent) => React.createElement('button', {
     onClick: onClick,
     style: {
-      background: accent ? 'rgba(52,211,153,0.12)' : 'transparent',
-      border: '1px solid ' + (accent ? '#34d399' : '#334155'),
+      background: accent ? 'rgba(20,184,166,0.12)' : 'transparent',
+      border: '1px solid ' + (accent ? '#34d399' : '#e2e8f0'),
       color: accent ? '#34d399' : '#94a3b8',
       padding: '0.3rem 0.65rem',
       borderRadius: '0.4rem',
@@ -3529,8 +3529,8 @@ function ProspectingNoticesTab() {
 
     React.createElement('div', {
       style: {
-        background: '#1e293b',
-        border: '1px solid rgba(51,65,85,0.5)',
+        background: '#FFFFFF',
+        border: '1px solid rgba(226,232,240,0.5)',
         borderRadius: '0.75rem',
         overflow: 'hidden'
       }
@@ -3541,8 +3541,8 @@ function ProspectingNoticesTab() {
           gridTemplateColumns: COLS,
           gap: '0.5rem',
           padding: '0.65rem 1rem',
-          borderBottom: '1px solid #334155',
-          background: '#0f172a'
+          borderBottom: '1px solid #e2e8f0',
+          background: '#F1F5F9'
         }
       },
         headerCell('Title'),
@@ -3558,7 +3558,7 @@ function ProspectingNoticesTab() {
             style: { padding: '3rem 2rem', textAlign: 'center', color: '#64748b' }
           },
             React.createElement('div', {
-              style: { fontSize: '1.1rem', marginBottom: '0.5rem', color: '#475569' }
+              style: { fontSize: '1.1rem', marginBottom: '0.5rem', color: '#94a3b8' }
             }, statusFilter === 'new' ? 'No new notices' : 'No ' + statusFilter + ' notices'),
             React.createElement('div', {
               style: { fontSize: '0.82rem' }
@@ -3578,13 +3578,13 @@ function ProspectingNoticesTab() {
                 gridTemplateColumns: COLS,
                 gap: '0.5rem',
                 padding: '0.7rem 1rem',
-                borderBottom: '1px solid rgba(51,65,85,0.3)',
+                borderBottom: '1px solid rgba(226,232,240,0.3)',
                 alignItems: 'center'
               }
             },
               React.createElement('div', { style: { minWidth: 0 } },
                 React.createElement('div', {
-                  style: { fontSize: '0.86rem', fontWeight: 600, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+                  style: { fontSize: '0.86rem', fontWeight: 600, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
                 }, n.title || '\u2014'),
                 n.source_url
                   ? React.createElement('a', {
@@ -3597,7 +3597,7 @@ function ProspectingNoticesTab() {
               ),
               scopeBadge(n.signal_scope),
               React.createElement('span', {
-                style: { fontSize: '0.78rem', color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+                style: { fontSize: '0.78rem', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
               }, relation),
               React.createElement('span', {
                 style: { fontSize: '0.76rem', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
@@ -3612,7 +3612,7 @@ function ProspectingNoticesTab() {
                 }
               }, n.importance != null ? n.importance : '\u2014'),
               React.createElement('span', {
-                style: { fontSize: '0.78rem', color: '#94a3b8' }
+                style: { fontSize: '0.78rem', color: '#64748b' }
               }, fmtDate(n.created_at)),
               statusFilter === 'new'
                 ? React.createElement('div', {
@@ -3638,7 +3638,7 @@ function ProspectingNoticesTab() {
                     }, false)
                   )
                 : React.createElement('span', {
-                    style: { fontSize: '0.72rem', color: '#475569', textTransform: 'uppercase', fontWeight: 600 }
+                    style: { fontSize: '0.72rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600 }
                   }, n.status)
             );
           })
@@ -3660,8 +3660,8 @@ function ProspectingSequencesTab() {
   if (loading) return React.createElement('div', { style: { color: '#64748b', padding: '2rem', textAlign: 'center' } }, 'Loading sequences...');
   const statusBadge = (status) => {
     const meta = status === 'active'
-      ? { label: 'Active', color: '#34d399', bg: 'rgba(52,211,153,0.12)' }
-      : { label: 'Draft',  color: '#94a3b8', bg: 'rgba(148,163,184,0.12)' };
+      ? { label: 'Active', color: '#14b8a6', bg: 'rgba(20,184,166,0.12)' }
+      : { label: 'Draft',  color: '#64748b', bg: 'rgba(148,163,184,0.12)' };
     return React.createElement('span', {
       style: {
         fontSize: '0.66rem',
@@ -3705,7 +3705,7 @@ function ProspectingSequencesTab() {
     return React.createElement('div', {
       style: {
         height: '4px',
-        background: '#334155',
+        background: '#e2e8f0',
         borderRadius: '2px',
         overflow: 'hidden',
         marginTop: '0.5rem'
@@ -3725,8 +3725,8 @@ function ProspectingSequencesTab() {
   const sequenceCard = (seq) => React.createElement('div', {
     key: seq.id,
     style: {
-      background: '#1e293b',
-      border: '1px solid rgba(51,65,85,0.5)',
+      background: '#FFFFFF',
+      border: '1px solid rgba(226,232,240,0.5)',
       borderRadius: '0.85rem',
       padding: '1.1rem 1.25rem',
       display: 'flex',
@@ -3750,7 +3750,7 @@ function ProspectingSequencesTab() {
           style: {
             fontSize: '0.98rem',
             fontWeight: 600,
-            color: '#e2e8f0',
+            color: '#1e293b',
             fontFamily: "'Inter', sans-serif"
           }
         }, seq.name),
@@ -3772,11 +3772,11 @@ function ProspectingSequencesTab() {
         flexWrap: 'wrap',
         gap: '1.25rem',
         paddingTop: '0.4rem',
-        borderTop: '1px solid rgba(51,65,85,0.4)',
+        borderTop: '1px solid rgba(226,232,240,0.4)',
         marginTop: '0.15rem'
       }
     },
-      metricBlock('Enrolled', seq.enrolled, '#22d3ee'),
+      metricBlock('Enrolled', seq.enrolled, '#3b82f6'),
       metricBlock('Step', `${seq.step}/${seq.totalSteps}`, '#e2e8f0'),
       metricBlock('Response', `${Math.round(seq.responseRate * 100)}%`, '#34d399'),
       metricBlock('Meetings', seq.meetings, '#a78bfa'),
@@ -3801,7 +3801,7 @@ function ProspectingSequencesTab() {
   }, text);
 
   if (seqs.length === 0) return React.createElement('div', {
-    style: { background: '#1e293b', border: '1px solid rgba(51,65,85,0.5)', borderRadius: '0.85rem', padding: '2rem', textAlign: 'center', color: '#64748b' }
+    style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.85rem', padding: '2rem', textAlign: 'center', color: '#64748b' }
   }, 'No sequences yet. Create one from the API to get started.');
 
   return React.createElement('div', {
@@ -3827,10 +3827,10 @@ const PROSP_SCHEDULE_TYPE_META = {
   meeting:       { label: 'Meeting',    color: '#a78bfa' },
   sequence_step: { label: 'Sequence',   color: '#60a5fa' },
   check_in:      { label: 'Check-in',   color: '#fb923c' },
-  research:      { label: 'Research',   color: '#22d3ee' },
+  research:      { label: 'Research',   color: '#3b82f6' },
   linkedin:      { label: 'LinkedIn',   color: '#0a66c2' },
   email:         { label: 'Email',      color: '#f59e0b' },
-  call:          { label: 'Call',        color: '#34d399' }
+  call:          { label: 'Call',        color: '#14b8a6' }
 };
 
 function ProspectingScheduleTab() {
@@ -3846,7 +3846,7 @@ function ProspectingScheduleTab() {
 
   if (loading) return React.createElement('div', { style: { color: '#64748b', padding: '2rem', textAlign: 'center' } }, 'Loading schedule...');
   const typeChip = (type) => {
-    const meta = PROSP_SCHEDULE_TYPE_META[type] || { label: type, color: '#94a3b8' };
+    const meta = PROSP_SCHEDULE_TYPE_META[type] || { label: type, color: '#64748b' };
     return React.createElement('span', {
       style: {
         display: 'inline-flex',
@@ -3881,19 +3881,19 @@ function ProspectingScheduleTab() {
       gap: '0.75rem',
       alignItems: 'center',
       padding: '0.65rem 0.25rem',
-      borderBottom: isLast ? 'none' : '1px solid rgba(51,65,85,0.3)'
+      borderBottom: isLast ? 'none' : '1px solid rgba(226,232,240,0.3)'
     }
   },
     React.createElement('span', {
       style: {
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: '0.82rem',
-        color: '#94a3b8'
+        color: '#64748b'
       }
     }, item.time),
     typeChip(item.type),
     React.createElement('span', {
-      style: { fontSize: '0.88rem', color: '#e2e8f0', fontWeight: 500 }
+      style: { fontSize: '0.88rem', color: '#1e293b', fontWeight: 500 }
     }, item.title),
     React.createElement('span', {
       style: { fontSize: '0.8rem', color: '#64748b' }
@@ -3901,7 +3901,7 @@ function ProspectingScheduleTab() {
     React.createElement('span', {
       style: {
         fontSize: '0.75rem',
-        color: '#475569',
+        color: '#94a3b8',
         fontFamily: "'JetBrains Mono', monospace",
         textAlign: 'right'
       }
@@ -3911,8 +3911,8 @@ function ProspectingScheduleTab() {
   const daySection = (day) => React.createElement('div', {
     key: day.id,
     style: {
-      background: '#1e293b',
-      border: '1px solid rgba(51,65,85,0.5)',
+      background: '#FFFFFF',
+      border: '1px solid rgba(226,232,240,0.5)',
       borderRadius: '0.85rem',
       padding: '1.1rem 1.25rem'
     }
@@ -3923,7 +3923,7 @@ function ProspectingScheduleTab() {
         alignItems: 'baseline',
         justifyContent: 'space-between',
         paddingBottom: '0.75rem',
-        borderBottom: '1px solid rgba(51,65,85,0.4)',
+        borderBottom: '1px solid rgba(226,232,240,0.4)',
         marginBottom: '0.25rem'
       }
     },
@@ -3934,7 +3934,7 @@ function ProspectingScheduleTab() {
           style: {
             fontFamily: "'Orbitron', sans-serif",
             fontSize: '0.95rem',
-            color: '#e2e8f0',
+            color: '#1e293b',
             margin: 0,
             letterSpacing: '0.04em',
             textTransform: 'uppercase'
@@ -3960,7 +3960,7 @@ function ProspectingScheduleTab() {
   const totalItems = schedule.reduce((n, d) => n + d.items.length, 0);
 
   if (schedule.length === 0) return React.createElement('div', {
-    style: { background: '#1e293b', border: '1px solid rgba(51,65,85,0.5)', borderRadius: '0.85rem', padding: '2rem', textAlign: 'center', color: '#64748b' }
+    style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.85rem', padding: '2rem', textAlign: 'center', color: '#64748b' }
   }, 'No tasks scheduled. Create capital groups and log touchpoints to generate tasks.');
 
   return React.createElement('div', {
@@ -3978,10 +3978,10 @@ function ProspectingScheduleTab() {
 }
 
 const PROSP_FEED_TYPE_META = {
-  touchpoint:    { label: 'Touchpoint',   color: '#34d399' },
+  touchpoint:    { label: 'Touchpoint',   color: '#14b8a6' },
   note:          { label: 'Note',         color: '#60a5fa' },
   status_change: { label: 'Status',       color: '#fbbf24' },
-  group_added:   { label: 'New Group',    color: '#22d3ee' },
+  group_added:   { label: 'New Group',    color: '#3b82f6' },
   sequence:      { label: 'Sequence',     color: '#a78bfa' },
   signal:        { label: 'Market Signal', color: '#fb923c' }
 };
@@ -4010,7 +4010,7 @@ function ProspectingFeedTab() {
       onClick: () => setTypeFilter(value),
       style: {
         background: active ? `${color}22` : 'transparent',
-        border: `1px solid ${active ? color : '#334155'}`,
+        border: `1px solid ${active ? color : '#e2e8f0'}`,
         color: active ? color : '#94a3b8',
         padding: '0.3rem 0.7rem',
         borderRadius: '9999px',
@@ -4025,7 +4025,7 @@ function ProspectingFeedTab() {
   };
 
   const feedRow = (item, isLast) => {
-    const meta = PROSP_FEED_TYPE_META[item.type] || { label: item.type, color: '#94a3b8' };
+    const meta = PROSP_FEED_TYPE_META[item.type] || { label: item.type, color: '#64748b' };
     return React.createElement('div', {
       key: item.id,
       style: {
@@ -4034,7 +4034,7 @@ function ProspectingFeedTab() {
         gap: '0.85rem',
         alignItems: 'flex-start',
         padding: '0.75rem 0',
-        borderBottom: isLast ? 'none' : '1px solid rgba(51,65,85,0.3)'
+        borderBottom: isLast ? 'none' : '1px solid rgba(226,232,240,0.3)'
       }
     },
       React.createElement('div', {
@@ -4065,19 +4065,19 @@ function ProspectingFeedTab() {
             }
           }, meta.label),
           React.createElement('span', {
-            style: { fontSize: '0.88rem', color: '#e2e8f0', fontWeight: 500 }
+            style: { fontSize: '0.88rem', color: '#1e293b', fontWeight: 500 }
           }, item.action),
           React.createElement('span', {
-            style: { fontSize: '0.78rem', color: '#475569' }
+            style: { fontSize: '0.78rem', color: '#94a3b8' }
           }, '\u2014'),
           React.createElement('span', {
-            style: { fontSize: '0.82rem', color: '#34d399', fontWeight: 500 }
+            style: { fontSize: '0.82rem', color: '#14b8a6', fontWeight: 500 }
           }, item.group)
         ),
         React.createElement('div', {
           style: {
             fontSize: '0.78rem',
-            color: '#94a3b8',
+            color: '#64748b',
             marginTop: '0.2rem',
             lineHeight: 1.4
           }
@@ -4119,8 +4119,8 @@ function ProspectingFeedTab() {
     ),
     React.createElement('div', {
       style: {
-        background: '#1e293b',
-        border: '1px solid rgba(51,65,85,0.5)',
+        background: '#FFFFFF',
+        border: '1px solid rgba(226,232,240,0.5)',
         borderRadius: '0.85rem',
         padding: '0.25rem 1.25rem'
       }
@@ -4227,7 +4227,7 @@ function ProspectingCanvasTab() {
       if (i < filled) {
         ctx.fillStyle = `rgba(${d.r},${d.g},${d.b},${(d.a / 255).toFixed(2)})`;
       } else {
-        ctx.fillStyle = 'rgba(51,65,85,0.25)';
+        ctx.fillStyle = 'rgba(148,163,184,0.2)';
       }
       ctx.fill();
     });
@@ -4255,10 +4255,10 @@ function ProspectingCanvasTab() {
   };
 
   const inputStyle = {
-    background: '#0f172a',
-    border: '1px solid #334155',
+    background: '#F1F5F9',
+    border: '1px solid #e2e8f0',
     borderRadius: '0.5rem',
-    color: '#e2e8f0',
+    color: '#1e293b',
     padding: '0.55rem 0.75rem',
     fontSize: '0.82rem',
     fontFamily: "'Inter', sans-serif",
@@ -4284,8 +4284,8 @@ function ProspectingCanvasTab() {
   },
     React.createElement('div', {
       style: {
-        background: '#1e293b',
-        border: '1px solid rgba(51,65,85,0.5)',
+        background: '#FFFFFF',
+        border: '1px solid rgba(226,232,240,0.5)',
         borderRadius: '0.85rem',
         padding: '1rem 1.25rem'
       }
@@ -4299,12 +4299,12 @@ function ProspectingCanvasTab() {
             fontFamily: "'Orbitron', sans-serif",
             fontSize: '0.95rem',
             fontWeight: 700,
-            color: '#e2e8f0',
+            color: '#1e293b',
             letterSpacing: '0.04em'
           }
         }, 'Relationship Canvas'),
         React.createElement('span', {
-          style: { ...pillStyle, background: 'rgba(52,211,153,0.12)', color: '#34d399' }
+          style: { ...pillStyle, background: 'rgba(20,184,166,0.12)', color: '#14b8a6' }
         }, 'PORTFOLIO')
       ),
 
@@ -4328,7 +4328,7 @@ function ProspectingCanvasTab() {
           onClick: () => loadImage(imageUrl),
           disabled: !imageUrl.trim(),
           style: {
-            background: imageUrl.trim() ? '#34d399' : '#334155',
+            background: imageUrl.trim() ? '#34d399' : '#e2e8f0',
             color: imageUrl.trim() ? '#0f172a' : '#64748b',
             border: 'none',
             borderRadius: '0.5rem',
@@ -4350,7 +4350,7 @@ function ProspectingCanvasTab() {
             type: 'file',
             accept: 'image/*',
             onChange: handleFile,
-            style: { fontSize: '0.72rem', color: '#94a3b8', fontFamily: "'Inter', sans-serif" }
+            style: { fontSize: '0.72rem', color: '#64748b', fontFamily: "'Inter', sans-serif" }
           })
         )
       ),
@@ -4361,8 +4361,8 @@ function ProspectingCanvasTab() {
 
     React.createElement('div', {
       style: {
-        background: '#1e293b',
-        border: '1px solid rgba(51,65,85,0.5)',
+        background: '#FFFFFF',
+        border: '1px solid rgba(226,232,240,0.5)',
         borderRadius: '0.85rem',
         padding: '1.25rem',
         minHeight: '520px',
@@ -4381,20 +4381,20 @@ function ProspectingCanvasTab() {
               style: { display: 'flex', alignItems: 'center', gap: '0.75rem', width: '100%', justifyContent: 'space-between', flexWrap: 'wrap' }
             },
               React.createElement('span', {
-                style: { fontSize: '0.78rem', color: '#94a3b8' }
+                style: { fontSize: '0.78rem', color: '#64748b' }
               }, `${filledDots.toLocaleString()} / ${totalDots.toLocaleString()} dots filled`),
               React.createElement('div', {
                 style: { display: 'flex', alignItems: 'center', gap: '0.5rem' }
               },
                 React.createElement('div', {
-                  style: { width: '120px', height: '6px', background: '#1e293b', borderRadius: '3px', border: '1px solid #334155', overflow: 'hidden' }
+                  style: { width: '120px', height: '6px', background: '#FFFFFF', borderRadius: '3px', border: '1px solid #e2e8f0', overflow: 'hidden' }
                 },
                   React.createElement('div', {
                     style: { width: `${pctFilled}%`, height: '100%', background: pctFilled >= 100 ? '#34d399' : '#60a5fa', borderRadius: '3px', transition: 'width 0.4s' }
                   })
                 ),
                 React.createElement('span', {
-                  style: { ...pillStyle, background: pctFilled >= 100 ? 'rgba(52,211,153,0.15)' : 'rgba(96,165,250,0.12)', color: pctFilled >= 100 ? '#34d399' : '#60a5fa' }
+                  style: { ...pillStyle, background: pctFilled >= 100 ? 'rgba(20,184,166,0.15)' : 'rgba(96,165,250,0.12)', color: pctFilled >= 100 ? '#34d399' : '#60a5fa' }
                 }, `${pctFilled}%`)
               ),
               React.createElement('span', {
@@ -4405,7 +4405,7 @@ function ProspectingCanvasTab() {
               ref: canvasRef,
               style: {
                 borderRadius: '0.5rem',
-                border: '1px solid #334155',
+                border: '1px solid #e2e8f0',
                 maxWidth: '100%',
                 width: '100%',
                 height: 'auto'
@@ -4425,15 +4425,15 @@ function ProspectingCanvasTab() {
               style: { fontSize: '0.92rem', color: '#64748b', marginBottom: '0.4rem' }
             }, 'No image loaded'),
             React.createElement('div', {
-              style: { fontSize: '0.82rem', color: '#475569' }
+              style: { fontSize: '0.82rem', color: '#94a3b8' }
             }, 'Paste a URL or upload a photo above to generate a dot template')
           )
     ),
 
     stats ? React.createElement('div', {
       style: {
-        background: '#1e293b',
-        border: '1px solid rgba(51,65,85,0.5)',
+        background: '#FFFFFF',
+        border: '1px solid rgba(226,232,240,0.5)',
         borderRadius: '0.85rem',
         padding: '0.85rem 1.25rem',
         display: 'grid',
@@ -4555,7 +4555,7 @@ function TopNav({ activeTab, setActiveTab, user }) {
     gap: '0.4rem',
     padding: '0.5rem 0 0.85rem',
     marginBottom: '1.25rem',
-    borderBottom: '1px solid rgba(51,65,85,0.5)',
+    borderBottom: '1px solid rgba(226,232,240,0.5)',
     flexWrap: 'wrap'
   };
   const btnStyle = (isActive) => ({
@@ -4563,8 +4563,8 @@ function TopNav({ activeTab, setActiveTab, user }) {
     alignItems: 'center',
     gap: '0.5rem',
     padding: '0.6rem 1.1rem',
-    background: isActive ? 'rgba(16,185,129,0.12)' : 'transparent',
-    border: '1px solid ' + (isActive ? 'rgba(16,185,129,0.4)' : 'rgba(51,65,85,0.4)'),
+    background: isActive ? 'rgba(20,184,166,0.08)' : 'transparent',
+    border: '1px solid ' + (isActive ? 'rgba(20,184,166,0.3)' : 'rgba(226,232,240,0.4)'),
     color: isActive ? '#34d399' : '#94a3b8',
     borderRadius: '0.75rem',
     cursor: 'pointer',
@@ -4573,7 +4573,7 @@ function TopNav({ activeTab, setActiveTab, user }) {
     fontWeight: 700,
     letterSpacing: '0.03em',
     transition: 'all 0.2s',
-    boxShadow: isActive ? '0 0 18px rgba(16,185,129,0.12)' : 'none'
+    boxShadow: isActive ? '0 2px 8px rgba(20,184,166,0.08)' : 'none'
   });
 
   return /*#__PURE__*/React.createElement('div', { style: rowStyle },
@@ -4585,14 +4585,14 @@ function TopNav({ activeTab, setActiveTab, user }) {
       },
       onMouseEnter: (e) => {
         if (s.id !== activeSectionId) {
-          e.currentTarget.style.color = '#cbd5e1';
-          e.currentTarget.style.borderColor = 'rgba(52,211,153,0.25)';
+          e.currentTarget.style.color = '#1e293b';
+          e.currentTarget.style.borderColor = 'rgba(20,184,166,0.4)';
         }
       },
       onMouseLeave: (e) => {
         if (s.id !== activeSectionId) {
           e.currentTarget.style.color = '#94a3b8';
-          e.currentTarget.style.borderColor = 'rgba(51,65,85,0.4)';
+          e.currentTarget.style.borderColor = '#e2e8f0';
         }
       }
     },
@@ -4608,7 +4608,7 @@ function TopNav({ activeTab, setActiveTab, user }) {
           display: 'inline-flex',
           alignItems: 'center',
           gap: '0.35rem',
-          boxShadow: '0 0 18px rgba(16,185,129,0.25)'
+          boxShadow: '0 2px 8px rgba(20,184,166,0.15)'
         },
         onClick: () => setActiveTab('search')
       }, '+ Run Prospect Search')
@@ -4628,7 +4628,7 @@ function SubNav({ activeTab, setActiveTab, user }) {
     alignItems: 'center',
     gap: '0.25rem',
     marginBottom: '1.5rem',
-    borderBottom: '1px solid rgba(51,65,85,0.35)',
+    borderBottom: '1px solid rgba(226,232,240,0.35)',
     flexWrap: 'wrap'
   };
   const itemStyle = (isActive) => ({
@@ -4639,7 +4639,7 @@ function SubNav({ activeTab, setActiveTab, user }) {
     fontSize: '0.8rem',
     fontWeight: 600,
     cursor: 'pointer',
-    borderBottom: isActive ? '2px solid #34d399' : '2px solid transparent',
+    borderBottom: isActive ? '2px solid #14b8a6' : '2px solid transparent',
     marginBottom: '-1px',
     fontFamily: "'Inter', sans-serif",
     letterSpacing: '0.01em',
@@ -4654,7 +4654,7 @@ function SubNav({ activeTab, setActiveTab, user }) {
     textTransform: 'uppercase',
     letterSpacing: '0.12em',
     padding: '0.25rem 0.7rem 0.25rem 0',
-    borderRight: '1px solid rgba(51,65,85,0.4)',
+    borderRight: '1px solid rgba(226,232,240,0.4)',
     marginRight: '0.5rem'
   };
 
@@ -4665,7 +4665,7 @@ function SubNav({ activeTab, setActiveTab, user }) {
       style: itemStyle(c.id === activeTab),
       onClick: () => setActiveTab(c.id),
       onMouseEnter: (e) => {
-        if (c.id !== activeTab) e.currentTarget.style.color = '#cbd5e1';
+        if (c.id !== activeTab) e.currentTarget.style.color = '#1e293b';
       },
       onMouseLeave: (e) => {
         if (c.id !== activeTab) e.currentTarget.style.color = '#64748b';
@@ -4709,7 +4709,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
     { dot: '#34d399', text: 'Permit surge detected \u2014 Phoenix metro' },
     { dot: '#a855f7', text: 'Capital raise detected \u2014 Tampa' },
     { dot: '#fbbf24', text: 'Zoning change alert \u2014 Charlotte' },
-    { dot: '#22d3ee', text: 'Construction start signal \u2014 Austin' }
+    { dot: '#3b82f6', text: 'Construction start signal \u2014 Austin' }
   ];
 
   // Role-aware quick actions
@@ -4738,7 +4738,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   const panelTitle = {
     fontFamily: "'Orbitron', sans-serif",
     fontSize: '0.95rem',
-    color: '#f1f5f9',
+    color: '#0f172a',
     margin: 0,
     letterSpacing: '0.03em'
   };
@@ -4762,14 +4762,14 @@ function CommandCenter({ user, prospects, setActiveTab }) {
             fontSize: '1.8rem',
             fontWeight: 900,
             margin: 0,
-            background: 'linear-gradient(135deg, #34d399 0%, #22d3ee 100%)',
+            background: 'linear-gradient(135deg, #14b8a6 0%, #3b82f6 100%)',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             letterSpacing: '0.03em'
           }
         }, 'Command Center'),
         /*#__PURE__*/React.createElement('p', {
-          style: { color: '#94a3b8', margin: '0.35rem 0 0', fontSize: '0.9rem' }
+          style: { color: '#64748b', margin: '0.35rem 0 0', fontSize: '0.9rem' }
         }, `${greeting}${firstName ? ', ' + firstName : ''}. Here's where your day starts.`)
       )
     ),
@@ -4809,10 +4809,10 @@ function CommandCenter({ user, prospects, setActiveTab }) {
               gap: '0.7rem',
               padding: '0.6rem 0.8rem',
               background: 'rgba(15,23,42,0.5)',
-              border: '1px solid rgba(51,65,85,0.45)',
+              border: '1px solid rgba(226,232,240,0.45)',
               borderRadius: '0.5rem',
               fontSize: '0.82rem',
-              color: '#cbd5e1'
+              color: '#334155'
             }
           },
             /*#__PURE__*/React.createElement('span', {
@@ -4853,13 +4853,13 @@ function CommandCenter({ user, prospects, setActiveTab }) {
                     gap: '0.6rem',
                     padding: '0.55rem 0.8rem',
                     background: 'rgba(15,23,42,0.5)',
-                    border: '1px solid rgba(51,65,85,0.45)',
+                    border: '1px solid rgba(226,232,240,0.45)',
                     borderRadius: '0.5rem',
                     fontSize: '0.82rem'
                   }
                 },
-                  /*#__PURE__*/React.createElement('span', { style: { color: '#f1f5f9', fontWeight: 600 } }, l.company_name || '—'),
-                  /*#__PURE__*/React.createElement('span', { style: { color: '#94a3b8', fontSize: '0.72rem' } }, l.status || '')
+                  /*#__PURE__*/React.createElement('span', { style: { color: '#0f172a', fontWeight: 600 } }, l.company_name || '—'),
+                  /*#__PURE__*/React.createElement('span', { style: { color: '#64748b', fontSize: '0.72rem' } }, l.status || '')
                 ))
               )
       )
@@ -5142,7 +5142,7 @@ function CommandPalette({
       left: 0,
       right: 0,
       bottom: 0,
-      background: 'rgba(0,0,0,0.6)',
+      background: 'rgba(0,0,0,0.25)',
       backdropFilter: 'blur(4px)',
       WebkitBackdropFilter: 'blur(4px)',
       display: 'flex',
@@ -5163,7 +5163,7 @@ function CommandPalette({
       WebkitBackdropFilter: 'blur(16px)',
       border: '1px solid rgba(255,255,255,0.08)',
       borderRadius: '12px',
-      boxShadow: '0 30px 80px rgba(0,0,0,0.5)',
+      boxShadow: '0 30px 80px rgba(0,0,0,0.12)',
       width: '720px',
       maxWidth: '92vw',
       maxHeight: '70vh',
@@ -5187,7 +5187,7 @@ function CommandPalette({
       background: 'transparent',
       border: 'none',
       borderBottom: '1px solid rgba(255,255,255,0.06)',
-      color: '#f1f5f9',
+      color: '#0f172a',
       padding: '1rem 1.25rem',
       fontSize: '1.05rem',
       fontFamily: "'Inter', sans-serif",
@@ -5252,7 +5252,7 @@ function CommandPalette({
     style: {
       padding: '2rem',
       textAlign: 'center',
-      color: '#475569',
+      color: '#94a3b8',
       fontSize: '0.9rem'
     }
   }, "No results found")), /*#__PURE__*/React.createElement("div", {
@@ -5262,7 +5262,7 @@ function CommandPalette({
       display: 'flex',
       gap: '1rem',
       fontSize: '0.7rem',
-      color: '#475569',
+      color: '#94a3b8',
       fontFamily: "'Inter', sans-serif"
     }
   }, /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
@@ -5279,7 +5279,7 @@ function CommandPalette({
 // ===================================================================
 const FEED_EVENT_COLORS = {
   SIGNAL: {
-    accent: '#22d3ee',
+    accent: '#3b82f6',
     bg: 'rgba(6,182,212,0.08)',
     border: 'rgba(6,182,212,0.2)'
   },
@@ -5295,8 +5295,8 @@ const FEED_EVENT_COLORS = {
   },
   DEVELOPER_EXPANSION: {
     accent: '#34d399',
-    bg: 'rgba(52,211,153,0.08)',
-    border: 'rgba(52,211,153,0.2)'
+    bg: 'rgba(20,184,166,0.08)',
+    border: 'rgba(20,184,166,0.2)'
   },
   CONTRACTOR_ACTIVITY: {
     accent: '#f97316',
@@ -5411,20 +5411,20 @@ function FeedEventCard({
     style: {
       fontSize: '0.95rem',
       fontWeight: 600,
-      color: '#f1f5f9',
+      color: '#0f172a',
       fontFamily: "'Inter', sans-serif"
     }
   }, event.title)), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: '0.7rem',
-      color: '#475569',
+      color: '#94a3b8',
       fontFamily: "'Inter', sans-serif",
       whiteSpace: 'nowrap'
     }
   }, timeAgo(event.created_at))), event.description && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.82rem',
-      color: '#94a3b8',
+      color: '#64748b',
       fontFamily: "'Inter', sans-serif",
       marginTop: '2px'
     }
@@ -5476,7 +5476,7 @@ function SignalIntelligencePanel() {
     style: {
       textAlign: 'center',
       padding: '3rem',
-      color: '#34d399',
+      color: '#14b8a6',
       fontFamily: "'Orbitron', sans-serif"
     }
   }, 'LOADING SIGNAL INTELLIGENCE...');
@@ -5523,7 +5523,7 @@ function SignalIntelligencePanel() {
       fontFamily: "'Orbitron', sans-serif",
       fontSize: '1.3rem',
       fontWeight: 900,
-      background: 'linear-gradient(135deg, #a78bfa 0%, #22d3ee 100%)',
+      background: 'linear-gradient(135deg, #a78bfa 0%, #3b82f6 100%)',
       WebkitBackgroundClip: 'text',
       WebkitTextFillColor: 'transparent',
       margin: 0
@@ -5556,7 +5556,7 @@ function SignalIntelligencePanel() {
   }, {
     label: 'CONFIRMED',
     value: stats.total_confirmed,
-    color: '#34d399'
+    color: '#14b8a6'
   }].map(c => e('div', {
     key: c.label,
     style: {
@@ -5617,7 +5617,7 @@ function SignalIntelligencePanel() {
     style: {
       textAlign: 'center',
       padding: '2rem',
-      color: '#475569'
+      color: '#94a3b8'
     }
   }, 'No signal sources tracked yet.') : top_sources.map((src, i) => e('div', {
     key: src.source_name,
@@ -5641,14 +5641,14 @@ function SignalIntelligencePanel() {
   }, e('span', {
     style: {
       fontSize: '0.7rem',
-      color: '#475569',
+      color: '#94a3b8',
       fontWeight: 700
     }
   }, '#' + (i + 1)), e('span', {
     style: {
       fontSize: '0.95rem',
       fontWeight: 600,
-      color: '#f1f5f9'
+      color: '#0f172a'
     }
   }, src.source_name), e('span', {
     style: {
@@ -5680,7 +5680,7 @@ function SignalIntelligencePanel() {
   }, src.accuracy_pct + '%'), e('div', {
     style: {
       fontSize: '0.6rem',
-      color: '#475569'
+      color: '#94a3b8'
     }
   }, 'ACCURACY'))))),
   // TYPES tab
@@ -5688,7 +5688,7 @@ function SignalIntelligencePanel() {
     style: {
       textAlign: 'center',
       padding: '2rem',
-      color: '#475569'
+      color: '#94a3b8'
     }
   }, 'No signal type data available yet.') : type_rankings.map(t => e('div', {
     key: t.signal_type,
@@ -5706,7 +5706,7 @@ function SignalIntelligencePanel() {
     style: {
       fontSize: '0.95rem',
       fontWeight: 600,
-      color: '#f1f5f9'
+      color: '#0f172a'
     }
   }, t.signal_type), e('div', {
     style: {
@@ -5737,7 +5737,7 @@ function SignalIntelligencePanel() {
     style: {
       textAlign: 'center',
       padding: '2rem',
-      color: '#475569'
+      color: '#94a3b8'
     }
   }, 'No city data available yet.') : city_rankings.map(c => e('div', {
     key: c.city + '-' + c.state,
@@ -5755,7 +5755,7 @@ function SignalIntelligencePanel() {
     style: {
       fontSize: '0.95rem',
       fontWeight: 600,
-      color: '#f1f5f9'
+      color: '#0f172a'
     }
   }, c.city + ', ' + c.state), e('div', {
     style: {
@@ -5777,7 +5777,7 @@ function SignalIntelligencePanel() {
   }, c.avg_accuracy_pct + '%'), e('div', {
     style: {
       fontSize: '0.6rem',
-      color: '#475569'
+      color: '#94a3b8'
     }
   }, 'AVG ACCURACY'))))),
   // PRIORITY tab
@@ -5785,7 +5785,7 @@ function SignalIntelligencePanel() {
     style: {
       textAlign: 'center',
       padding: '2rem',
-      color: '#475569'
+      color: '#94a3b8'
     }
   }, 'No priority data available yet.') : priority_index.map(p => e('div', {
     key: p.source_name,
@@ -5804,7 +5804,7 @@ function SignalIntelligencePanel() {
     style: {
       fontSize: '0.95rem',
       fontWeight: 600,
-      color: '#f1f5f9'
+      color: '#0f172a'
     }
   }, p.source_name), e('div', {
     style: {
@@ -5826,7 +5826,7 @@ function SignalIntelligencePanel() {
   }, p.schedule_interval), e('div', {
     style: {
       fontSize: '0.6rem',
-      color: '#475569'
+      color: '#94a3b8'
     }
   }, 'PRIORITY: ' + (p.priority_score * 100).toFixed(0))))))));
 }
@@ -5872,12 +5872,12 @@ function CapitalFlowPanel() {
     CONSTRUCTION_LOAN: '#eab308',
     LAND_ACQUISITION_LOAN: '#f59e0b',
     DEBT_PLACEMENT: '#3b82f6',
-    EQUITY_INVESTMENT: '#10b981',
+    EQUITY_INVESTMENT: '#14b8a6',
     JOINT_VENTURE: '#a855f7',
     FUND_DEPLOYMENT: '#ef4444'
   };
   const confidenceColor = score => {
-    if (score >= 80) return '#10b981';
+    if (score >= 80) return '#14b8a6';
     if (score >= 60) return '#f59e0b';
     return '#ef4444';
   };
@@ -5901,7 +5901,7 @@ function CapitalFlowPanel() {
     }
   }, React.createElement('div', null, React.createElement('h2', {
     style: {
-      color: '#e2e8f0',
+      color: '#1e293b',
       fontSize: '1.5rem',
       fontWeight: 700,
       fontFamily: "'Orbitron', sans-serif",
@@ -5923,9 +5923,9 @@ function CapitalFlowPanel() {
     value: filterState,
     onChange: e => setFilterState(e.target.value),
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
-      color: '#e2e8f0',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
+      color: '#1e293b',
       borderRadius: '0.5rem',
       padding: '0.5rem 0.75rem',
       fontSize: '0.85rem'
@@ -5951,7 +5951,7 @@ function CapitalFlowPanel() {
     style: {
       textAlign: 'center',
       padding: '3rem',
-      color: '#94a3b8'
+      color: '#64748b'
     }
   }, 'Scanning capital flow signals...') : predictions.length === 0 ? React.createElement('div', {
     style: {
@@ -5999,13 +5999,13 @@ function CapitalFlowPanel() {
     }
   }, 'CAPITAL DEPLOYMENT DETECTED'), React.createElement('div', {
     style: {
-      color: '#e2e8f0',
+      color: '#1e293b',
       fontSize: '1rem',
       fontWeight: 600
     }
   }, p.developer), React.createElement('div', {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.85rem',
       marginTop: '0.15rem'
     }
@@ -6049,7 +6049,7 @@ function CapitalFlowPanel() {
     }
   }, 'confidence'))), p.reasoning && React.createElement('div', {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.8rem',
       marginTop: '0.5rem',
       lineHeight: 1.4
@@ -6073,7 +6073,7 @@ function CapitalFlowPanel() {
     }
   }, React.createElement('h3', {
     style: {
-      color: '#e2e8f0',
+      color: '#1e293b',
       margin: 0,
       fontSize: '1.1rem'
     }
@@ -6098,7 +6098,7 @@ function CapitalFlowPanel() {
     }
   }, selectedPrediction.developer), React.createElement('div', {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.85rem'
     }
   }, (selectedPrediction.city || '') + ', ' + (selectedPrediction.state || '')), selectedPrediction.estimated_amount && React.createElement('div', {
@@ -6119,7 +6119,7 @@ function CapitalFlowPanel() {
     }
   }, 'Confidence: ' + selectedPrediction.confidence + '%')), selectedPrediction.reasoning && React.createElement('div', {
     style: {
-      color: '#cbd5e1',
+      color: '#334155',
       fontSize: '0.85rem',
       marginBottom: '1rem',
       padding: '0.75rem',
@@ -6129,7 +6129,7 @@ function CapitalFlowPanel() {
     }
   }, selectedPrediction.reasoning), React.createElement('h4', {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.8rem',
       fontWeight: 600,
       marginBottom: '0.5rem'
@@ -6159,7 +6159,7 @@ function CapitalFlowPanel() {
     }
   }), React.createElement('div', null, React.createElement('div', {
     style: {
-      color: '#e2e8f0',
+      color: '#1e293b',
       fontSize: '0.85rem',
       fontWeight: 500
     }
@@ -6176,7 +6176,7 @@ function CapitalFlowPanel() {
     }
   }, formatAmount(ev.loan_amount)), React.createElement('div', {
     style: {
-      color: '#475569',
+      color: '#94a3b8',
       fontSize: '0.7rem'
     }
   }, timeAgo(ev.created_at))))))));
@@ -6229,10 +6229,10 @@ function DeveloperIntentPanel() {
     CONTRACTOR_PRECON: '#ef4444',
     ENTITY_FORMATION: '#a855f7',
     MARKET_RESEARCH: '#06b6d4',
-    HIRING_EXPANSION: '#10b981'
+    HIRING_EXPANSION: '#14b8a6'
   };
   const confidenceColor = score => {
-    if (score >= 80) return '#10b981';
+    if (score >= 80) return '#14b8a6';
     if (score >= 60) return '#f59e0b';
     return '#ef4444';
   };
@@ -6250,7 +6250,7 @@ function DeveloperIntentPanel() {
     }
   }, React.createElement('div', null, React.createElement('h2', {
     style: {
-      color: '#e2e8f0',
+      color: '#1e293b',
       fontSize: '1.5rem',
       fontWeight: 700,
       fontFamily: "'Orbitron', sans-serif",
@@ -6272,9 +6272,9 @@ function DeveloperIntentPanel() {
     value: filterState,
     onChange: e => setFilterState(e.target.value),
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
-      color: '#e2e8f0',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
+      color: '#1e293b',
       borderRadius: '0.5rem',
       padding: '0.5rem 0.75rem',
       fontSize: '0.85rem'
@@ -6300,7 +6300,7 @@ function DeveloperIntentPanel() {
     style: {
       textAlign: 'center',
       padding: '3rem',
-      color: '#94a3b8'
+      color: '#64748b'
     }
   }, 'Scanning developer intent signals...') : predictions.length === 0 ? React.createElement('div', {
     style: {
@@ -6348,13 +6348,13 @@ function DeveloperIntentPanel() {
     }
   }, 'DEVELOPER INTENT DETECTED'), React.createElement('div', {
     style: {
-      color: '#e2e8f0',
+      color: '#1e293b',
       fontSize: '1rem',
       fontWeight: 600
     }
   }, p.developer), React.createElement('div', {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.85rem',
       marginTop: '0.15rem'
     }
@@ -6376,7 +6376,7 @@ function DeveloperIntentPanel() {
     }
   }, p.signal_count + ' signals'))), p.reasoning && React.createElement('div', {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.8rem',
       marginTop: '0.5rem',
       lineHeight: 1.4
@@ -6400,7 +6400,7 @@ function DeveloperIntentPanel() {
     }
   }, React.createElement('h3', {
     style: {
-      color: '#e2e8f0',
+      color: '#1e293b',
       margin: 0,
       fontSize: '1.1rem'
     }
@@ -6425,7 +6425,7 @@ function DeveloperIntentPanel() {
     }
   }, selectedPrediction.developer), React.createElement('div', {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.85rem'
     }
   }, (selectedPrediction.city || '') + ', ' + (selectedPrediction.state || '')), React.createElement('div', {
@@ -6438,7 +6438,7 @@ function DeveloperIntentPanel() {
     }
   }, 'Confidence: ' + selectedPrediction.confidence + '%')), selectedPrediction.reasoning && React.createElement('div', {
     style: {
-      color: '#cbd5e1',
+      color: '#334155',
       fontSize: '0.85rem',
       marginBottom: '1rem',
       padding: '0.75rem',
@@ -6448,7 +6448,7 @@ function DeveloperIntentPanel() {
     }
   }, selectedPrediction.reasoning), React.createElement('h4', {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.8rem',
       fontWeight: 600,
       marginBottom: '0.5rem'
@@ -6478,7 +6478,7 @@ function DeveloperIntentPanel() {
     }
   }), React.createElement('div', null, React.createElement('div', {
     style: {
-      color: '#e2e8f0',
+      color: '#1e293b',
       fontSize: '0.85rem',
       fontWeight: 500
     }
@@ -6489,7 +6489,7 @@ function DeveloperIntentPanel() {
     }
   }, sig.related_entity), React.createElement('div', {
     style: {
-      color: '#475569',
+      color: '#94a3b8',
       fontSize: '0.7rem'
     }
   }, timeAgo(sig.created_at))))))));
@@ -6563,7 +6563,7 @@ function LiveIntelligenceFeed() {
       fontFamily: "'Orbitron', sans-serif",
       fontSize: '1.3rem',
       fontWeight: 900,
-      background: 'linear-gradient(135deg, #34d399 0%, #22d3ee 100%)',
+      background: 'linear-gradient(135deg, #14b8a6 0%, #3b82f6 100%)',
       WebkitBackgroundClip: 'text',
       WebkitTextFillColor: 'transparent',
       margin: 0
@@ -6583,8 +6583,8 @@ function LiveIntelligenceFeed() {
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => setPaused(!paused),
     style: {
-      background: paused ? 'rgba(239,68,68,0.1)' : 'rgba(52,211,153,0.1)',
-      border: '1px solid ' + (paused ? 'rgba(239,68,68,0.3)' : 'rgba(52,211,153,0.3)'),
+      background: paused ? 'rgba(239,68,68,0.1)' : 'rgba(20,184,166,0.1)',
+      border: '1px solid ' + (paused ? 'rgba(239,68,68,0.3)' : 'rgba(20,184,166,0.3)'),
       color: paused ? '#f87171' : '#34d399',
       padding: '0.4rem 0.85rem',
       borderRadius: '6px',
@@ -6635,7 +6635,7 @@ function LiveIntelligenceFeed() {
     style: {
       textAlign: 'center',
       padding: '3rem',
-      color: '#34d399',
+      color: '#14b8a6',
       fontFamily: "'Orbitron', sans-serif",
       animation: 'pulse 1.5s ease-in-out infinite'
     }
@@ -6654,7 +6654,7 @@ function LiveIntelligenceFeed() {
   }, "NO EVENTS YET"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.85rem',
-      color: '#475569'
+      color: '#94a3b8'
     }
   }, "Intelligence events will appear here as they are detected by the system.")), events.map(event => /*#__PURE__*/React.createElement(FeedEventCard, {
     key: event.id,
@@ -6665,7 +6665,7 @@ function LiveIntelligenceFeed() {
       textAlign: 'center',
       padding: '0.5rem',
       fontSize: '0.7rem',
-      color: '#475569',
+      color: '#94a3b8',
       marginTop: '0.5rem'
     }
   }, "Showing ", events.length, " events ", '\u00B7', " Polling every 10s ", paused ? ' (paused)' : ''));
@@ -6753,8 +6753,8 @@ function Controls({
     fontSize: '0.8rem',
     padding: '0.4rem 0.85rem',
     borderRadius: '9999px',
-    border: `1px solid ${active ? '#34d399' : '#334155'}`,
-    background: active ? 'rgba(16,185,129,0.15)' : 'transparent',
+    border: `1px solid ${active ? '#34d399' : '#e2e8f0'}`,
+    background: active ? 'rgba(20,184,166,0.1)' : 'transparent',
     color: active ? '#34d399' : '#94a3b8',
     cursor: 'pointer',
     fontFamily: 'Inter, sans-serif',
@@ -6855,7 +6855,7 @@ function Controls({
     onChange: e => setCustomDateStart(e.target.value)
   }), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.8rem'
     }
   }, "to"), /*#__PURE__*/React.createElement("input", {
@@ -6880,7 +6880,7 @@ function Controls({
       flexWrap: 'wrap',
       alignItems: 'center',
       paddingTop: '0.65rem',
-      borderTop: '1px solid #1e293b',
+      borderTop: '1px solid #e2e8f0',
       width: '100%'
     }
   }, /*#__PURE__*/React.createElement("span", {
@@ -7015,7 +7015,7 @@ function ScoreBar({
     style: {
       flex: 1,
       height: '5px',
-      background: '#1e293b',
+      background: '#FFFFFF',
       borderRadius: '3px',
       overflow: 'hidden'
     }
@@ -7073,7 +7073,7 @@ function ProspectCard({
     },
     'Watch': {
       bg: 'rgba(148,163,184,0.15)',
-      color: '#94a3b8',
+      color: '#64748b',
       border: '#64748b'
     }
   };
@@ -7096,16 +7096,16 @@ function ProspectCard({
   const govActivity = prospect.government_activity || [];
 
   // Score badge border + glow
-  let scoreBorderColor = '#475569';
+  let scoreBorderColor = '#94a3b8';
   let scoreGlow = 'none';
   let scoreAnim = 'none';
   if (score >= 90) {
-    scoreBorderColor = '#6ee7b7';
+    scoreBorderColor = '#0d9488';
     scoreGlow = '0 0 14px rgba(16,185,129,0.45)';
     scoreAnim = 'glowPulse 2s ease-in-out infinite';
   } else if (score >= 80) {
-    scoreBorderColor = '#10b981';
-    scoreGlow = '0 0 10px rgba(16,185,129,0.25)';
+    scoreBorderColor = '#14b8a6';
+    scoreGlow = '0 0 10px rgba(20,184,166,0.15)';
   } else if (score >= 70) {
     scoreBorderColor = '#3b82f6';
   }
@@ -7113,7 +7113,7 @@ function ProspectCard({
   // Card left accent
   let cardAccent = {};
   if (score >= 85) cardAccent = {
-    borderLeft: '4px solid #34d399'
+    borderLeft: '4px solid #14b8a6'
   };else if (score >= 70) cardAccent = {
     borderLeft: '4px solid #3b82f6'
   };
@@ -7236,9 +7236,9 @@ function ProspectCard({
   }, "LinkedIn")), hasBreakdown && /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '0.75rem',
-      background: '#0b1220',
+      background: '#F7F9FC',
       borderRadius: '8px',
-      border: '1px solid #1e293b'
+      border: '1px solid #e2e8f0'
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -7268,7 +7268,7 @@ function ProspectCard({
     label: "Freshness",
     value: breakdown.freshness || 0,
     max: 15,
-    color: "#10b981"
+    color: "#14b8a6"
   })), explanation.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '0.5rem 0.75rem',
@@ -7289,7 +7289,7 @@ function ProspectCard({
     key: idx,
     style: {
       fontSize: '0.78rem',
-      color: '#94a3b8',
+      color: '#64748b',
       lineHeight: '1.4',
       marginBottom: '0.15rem'
     }
@@ -7315,28 +7315,28 @@ function ProspectCard({
       gridTemplateColumns: '1fr 1fr',
       gap: '0.3rem',
       fontSize: '0.78rem',
-      color: '#94a3b8',
+      color: '#64748b',
       marginBottom: '0.5rem'
     }
   }, /*#__PURE__*/React.createElement("span", null, "Trigger: ", /*#__PURE__*/React.createElement("strong", {
     style: {
-      color: '#f1f5f9'
+      color: '#0f172a'
     }
   }, timingInfo.trigger_severity), "/100"), /*#__PURE__*/React.createElement("span", null, "Swim Fit: ", /*#__PURE__*/React.createElement("strong", {
     style: {
-      color: '#f1f5f9'
+      color: '#0f172a'
     }
   }, timingInfo.swim_lane_fit), "/100"), /*#__PURE__*/React.createElement("span", null, "Engagement: ", /*#__PURE__*/React.createElement("strong", {
     style: {
-      color: '#f1f5f9'
+      color: '#0f172a'
     }
   }, timingInfo.engagement_score), "/100"), /*#__PURE__*/React.createElement("span", null, "Momentum: ", /*#__PURE__*/React.createElement("strong", {
     style: {
-      color: '#f1f5f9'
+      color: '#0f172a'
     }
   }, Math.round(timingInfo.market_momentum_score)), "/100"), /*#__PURE__*/React.createElement("span", null, "Freshness: ", /*#__PURE__*/React.createElement("strong", {
     style: {
-      color: '#f1f5f9'
+      color: '#0f172a'
     }
   }, timingInfo.freshness_score), "/100"), /*#__PURE__*/React.createElement("span", null, "Total: ", /*#__PURE__*/React.createElement("strong", {
     style: {
@@ -7346,7 +7346,7 @@ function ProspectCard({
     key: i,
     style: {
       fontSize: '0.75rem',
-      color: '#cbd5e1',
+      color: '#334155',
       marginBottom: '0.15rem'
     }
   }, "\u2022 ", r)))), triggers.length > 0 && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(SectionLabel, {
@@ -7390,7 +7390,7 @@ function ProspectCard({
   }), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: '0.75rem',
-      color: '#94a3b8'
+      color: '#64748b'
     }
   }, user?.role === 'broker' ? `${competitiveDifficulty} Complexity` : `${competitiveDifficulty} Competition`))), /*#__PURE__*/React.createElement("div", {
     style: styles.details
@@ -7424,7 +7424,7 @@ function ProspectCard({
   }, "Why Call Now"), /*#__PURE__*/React.createElement("p", {
     className: `why-now-text${whyNowExpanded ? ' expanded' : ''}`,
     style: {
-      color: '#cbd5e1',
+      color: '#334155',
       fontSize: '0.875rem',
       margin: 0,
       lineHeight: '1.5'
@@ -7490,8 +7490,8 @@ function ProspectCard({
       fontSize: '0.65rem',
       padding: '0.1rem 0.4rem',
       borderRadius: '4px',
-      background: sig.signal_type === 'permit' ? 'rgba(6,182,212,0.15)' : sig.signal_type === 'zoning' ? 'rgba(139,92,246,0.15)' : sig.signal_type === 'deed' ? 'rgba(16,185,129,0.15)' : sig.signal_type === 'mortgage' ? 'rgba(239,68,68,0.15)' : 'rgba(148,163,184,0.15)',
-      color: sig.signal_type === 'permit' ? '#67e8f9' : sig.signal_type === 'zoning' ? '#c4b5fd' : sig.signal_type === 'deed' ? '#6ee7b7' : sig.signal_type === 'mortgage' ? '#fca5a5' : '#94a3b8',
+      background: sig.signal_type === 'permit' ? 'rgba(6,182,212,0.15)' : sig.signal_type === 'zoning' ? 'rgba(139,92,246,0.15)' : sig.signal_type === 'deed' ? 'rgba(20,184,166,0.1)' : sig.signal_type === 'mortgage' ? 'rgba(239,68,68,0.15)' : 'rgba(148,163,184,0.15)',
+      color: sig.signal_type === 'permit' ? '#67e8f9' : sig.signal_type === 'zoning' ? '#c4b5fd' : sig.signal_type === 'deed' ? '#0d9488' : sig.signal_type === 'mortgage' ? '#fca5a5' : '#94a3b8',
       fontWeight: 600,
       textTransform: 'uppercase'
     }
@@ -7508,7 +7508,7 @@ function ProspectCard({
   }, "$", typeof sig.amount === 'number' ? sig.amount.toLocaleString() : sig.amount)), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.78rem',
-      color: '#cbd5e1',
+      color: '#334155',
       lineHeight: '1.4'
     }
   }, sig.summary), sig.source_url && /*#__PURE__*/React.createElement("a", {
@@ -7635,8 +7635,8 @@ function ProspectCard({
     className: "action-btn",
     style: {
       ...styles.actionBtn,
-      borderColor: '#10b981',
-      color: '#34d399'
+      borderColor: '#14b8a6',
+      color: '#14b8a6'
     },
     onClick: () => onSaveToPipeline(prospect)
   }, user?.role === 'admin' ? 'Save to Pipeline' : 'Save to My Leads') : /*#__PURE__*/React.createElement("button", {
@@ -7892,7 +7892,7 @@ function DailyDiscovery() {
     },
     news: {
       label: 'News',
-      color: '#22d3ee',
+      color: '#3b82f6',
       icon: 'N'
     },
     press_release: {
@@ -7903,7 +7903,7 @@ function DailyDiscovery() {
   };
   const confidenceConfig = {
     high: {
-      color: '#34d399',
+      color: '#14b8a6',
       label: 'HIGH'
     },
     medium: {
@@ -7911,7 +7911,7 @@ function DailyDiscovery() {
       label: 'MED'
     },
     low: {
-      color: '#94a3b8',
+      color: '#64748b',
       label: 'LOW'
     }
   };
@@ -8018,8 +8018,8 @@ function DailyDiscovery() {
     onClick: () => toggleSourceFilter(key),
     style: {
       ...ds.filterToggle,
-      borderColor: sourceFilters[key] ? cfg.color : '#334155',
-      color: sourceFilters[key] ? cfg.color : '#475569',
+      borderColor: sourceFilters[key] ? cfg.color : '#e2e8f0',
+      color: sourceFilters[key] ? cfg.color : '#94a3b8',
       background: sourceFilters[key] ? `${cfg.color}15` : 'transparent'
     }
   }, "[", cfg.icon, "] ", cfg.label))), selectedRun && adapterStats && Object.keys(adapterStats).length > 0 && !showDigest && /*#__PURE__*/React.createElement("div", {
@@ -8066,7 +8066,7 @@ function DailyDiscovery() {
       const typeLabel = (s.signal_type || 'other').replace(/_/g, ' ');
       const typeColor = {
         'new build': '#34d399',
-        'under construction': '#22d3ee',
+        'under construction': '#3b82f6',
         'permit rezoning': '#fbbf24',
         'acquisition': '#ef4444',
         'sale': '#fb7185',
@@ -8176,8 +8176,8 @@ const EVENT_TYPE_COLORS = {
     color: '#f9a8d4'
   },
   'groundbreaking': {
-    bg: 'rgba(16,185,129,0.15)',
-    color: '#34d399'
+    bg: 'rgba(20,184,166,0.1)',
+    color: '#14b8a6'
   },
   'permit': {
     bg: 'rgba(245,158,11,0.15)',
@@ -8201,7 +8201,7 @@ const EVENT_TYPE_COLORS = {
   },
   'other': {
     bg: 'rgba(148,163,184,0.15)',
-    color: '#94a3b8'
+    color: '#64748b'
   }
 };
 function StatewideDiscovery() {
@@ -8301,18 +8301,18 @@ function StatewideDiscovery() {
     const score = ranking.state_activity_score || 0;
     const intensity = maxScore > 0 ? score / maxScore : 0;
     const isSelected = selectedState === s.abbr;
-    const borderColor = intensity > 0.7 ? '#34d399' : intensity > 0.4 ? '#fbbf24' : intensity > 0 ? '#3b82f6' : '#334155';
+    const borderColor = intensity > 0.7 ? '#34d399' : intensity > 0.4 ? '#fbbf24' : intensity > 0 ? '#3b82f6' : '#e2e8f0';
     const glowColor = intensity > 0.7 ? 'rgba(16,185,129,0.2)' : intensity > 0.4 ? 'rgba(251,191,36,0.15)' : 'transparent';
     return /*#__PURE__*/React.createElement("div", {
       key: s.abbr,
       onClick: () => loadStateSummary(s.abbr),
       style: {
-        background: isSelected ? '#263548' : '#1e293b',
+        background: isSelected ? '#F1F5F9' : '#1e293b',
         border: `2px solid ${isSelected ? '#34d399' : borderColor}`,
         borderRadius: '12px',
         padding: '1.25rem',
         cursor: 'pointer',
-        boxShadow: isSelected ? '0 0 20px rgba(16,185,129,0.15)' : `0 0 12px ${glowColor}`,
+        boxShadow: isSelected ? '0 0 20px rgba(20,184,166,0.1)' : `0 0 12px ${glowColor}`,
         transition: 'all 0.2s'
       }
     }, /*#__PURE__*/React.createElement("div", {
@@ -8327,7 +8327,7 @@ function StatewideDiscovery() {
         fontFamily: "'Orbitron',sans-serif",
         fontSize: '1.6rem',
         fontWeight: 900,
-        color: '#f1f5f9'
+        color: '#0f172a'
       }
     }, s.abbr), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -8354,7 +8354,7 @@ function StatewideDiscovery() {
         display: 'flex',
         gap: '1rem',
         fontSize: '0.8rem',
-        color: '#94a3b8'
+        color: '#64748b'
       }
     }, /*#__PURE__*/React.createElement("span", null, ranking.total_signals || 0, " signals"), /*#__PURE__*/React.createElement("span", null, ranking.capital_events_count || 0, " capital"), /*#__PURE__*/React.createElement("span", null, ranking.construction_signals_count || 0, " construction")), ranking.top_cities && ranking.top_cities.length > 0 && /*#__PURE__*/React.createElement("div", {
       style: {
@@ -8370,7 +8370,7 @@ function StatewideDiscovery() {
         padding: '0.15rem 0.45rem',
         borderRadius: '4px',
         background: 'rgba(16,185,129,0.1)',
-        color: '#6ee7b7'
+        color: '#0d9488'
       }
     }, tc.city))), /*#__PURE__*/React.createElement("button", {
       className: "action-btn",
@@ -8397,7 +8397,7 @@ function StatewideDiscovery() {
       fontFamily: "'Orbitron',sans-serif",
       fontSize: '1.2rem',
       fontWeight: 700,
-      color: '#22d3ee',
+      color: '#3b82f6',
       marginBottom: '1rem'
     }
   }, STATEWIDE_STATES.find(s => s.abbr === selectedState)?.name, " \u2014 Detail"), stateData.top_cities_7d && stateData.top_cities_7d.length > 0 && /*#__PURE__*/React.createElement("div", {
@@ -8422,8 +8422,8 @@ function StatewideDiscovery() {
   }, stateData.top_cities_7d.map((tc, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '10px',
       padding: '0.85rem 1.25rem',
       minWidth: '160px'
@@ -8433,7 +8433,7 @@ function StatewideDiscovery() {
       fontFamily: "'Orbitron',sans-serif",
       fontSize: '1rem',
       fontWeight: 700,
-      color: '#f1f5f9'
+      color: '#0f172a'
     }
   }, tc.city), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -8441,11 +8441,11 @@ function StatewideDiscovery() {
       gap: '0.75rem',
       marginTop: '0.3rem',
       fontSize: '0.8rem',
-      color: '#94a3b8'
+      color: '#64748b'
     }
   }, /*#__PURE__*/React.createElement("span", null, "Score: ", /*#__PURE__*/React.createElement("b", {
     style: {
-      color: '#34d399'
+      color: '#14b8a6'
     }
   }, tc.activity_score)), /*#__PURE__*/React.createElement("span", null, tc.signals_count, " signals")), tc.dominant_event_types && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -8491,8 +8491,8 @@ function StatewideDiscovery() {
     return /*#__PURE__*/React.createElement("div", {
       key: i,
       style: {
-        background: '#1e293b',
-        border: '1px solid #334155',
+        background: '#FFFFFF',
+        border: '1px solid #e2e8f0',
         borderRadius: '10px',
         padding: '1rem'
       }
@@ -8523,19 +8523,19 @@ function StatewideDiscovery() {
     }, (item.confidence || '').toUpperCase()), item.city && item.city !== 'Unknown' && /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: '0.75rem',
-        color: '#22d3ee'
+        color: '#3b82f6'
       }
     }, item.city, ", ", item.state)), item.company && /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: '0.9rem',
         fontWeight: 600,
-        color: '#f1f5f9',
+        color: '#0f172a',
         marginBottom: '0.25rem'
       }
     }, item.company), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: '0.85rem',
-        color: '#cbd5e1',
+        color: '#334155',
         marginBottom: '0.4rem',
         lineHeight: '1.4'
       }
@@ -8552,7 +8552,7 @@ function StatewideDiscovery() {
       target: "_blank",
       rel: "noopener noreferrer",
       style: {
-        color: '#22d3ee',
+        color: '#3b82f6',
         textDecoration: 'none',
         fontSize: '0.8rem',
         display: 'inline-block',
@@ -8814,7 +8814,7 @@ function SunbeltIntelligence({
     if (!sn) return null;
     return /*#__PURE__*/React.createElement("div", {
       style: {
-        background: 'linear-gradient(135deg, rgba(16,185,129,0.08), rgba(167,139,250,0.08))',
+        background: 'linear-gradient(135deg, rgba(20,184,166,0.06), rgba(167,139,250,0.08))',
         border: '1px solid rgba(16,185,129,0.3)',
         borderRadius: '12px',
         padding: '1.5rem',
@@ -8832,7 +8832,7 @@ function SunbeltIntelligence({
         fontFamily: "'Orbitron', sans-serif",
         fontSize: '0.85rem',
         fontWeight: 700,
-        color: '#34d399',
+        color: '#14b8a6',
         textTransform: 'uppercase',
         margin: 0
       }
@@ -8865,7 +8865,7 @@ function SunbeltIntelligence({
     }, "Copy Sparknotes"))), sn.executive_summary && /*#__PURE__*/React.createElement("div", {
       style: {
         background: 'rgba(15,23,42,0.5)',
-        border: '1px solid #334155',
+        border: '1px solid #e2e8f0',
         borderRadius: '8px',
         padding: '1rem',
         marginBottom: '1rem'
@@ -8875,7 +8875,7 @@ function SunbeltIntelligence({
         fontFamily: "'Orbitron', sans-serif",
         fontSize: '0.7rem',
         fontWeight: 700,
-        color: '#22d3ee',
+        color: '#3b82f6',
         textTransform: 'uppercase',
         marginTop: 0,
         marginBottom: '0.5rem'
@@ -8887,7 +8887,7 @@ function SunbeltIntelligence({
         key: i,
         style: {
           fontSize: '0.85rem',
-          color: '#cbd5e1',
+          color: '#334155',
           lineHeight: '1.6',
           marginBottom: '0.25rem',
           paddingLeft: '0.75rem',
@@ -8927,7 +8927,7 @@ function SunbeltIntelligence({
         key: item.id || i,
         style: {
           background: 'rgba(15,23,42,0.4)',
-          border: '1px solid #334155',
+          border: '1px solid #e2e8f0',
           borderRadius: '8px',
           padding: '0.75rem 1rem',
           marginBottom: '0.5rem',
@@ -8944,7 +8944,7 @@ function SunbeltIntelligence({
       }, /*#__PURE__*/React.createElement("span", {
         style: {
           fontSize: '0.85rem',
-          color: '#f1f5f9',
+          color: '#0f172a',
           fontWeight: 500
         }
       }, item.one_liner), /*#__PURE__*/React.createElement("span", {
@@ -8958,13 +8958,13 @@ function SunbeltIntelligence({
         style: {
           marginTop: '0.75rem',
           paddingTop: '0.75rem',
-          borderTop: '1px solid #334155'
+          borderTop: '1px solid #e2e8f0'
         }
       }, item.bullets && item.bullets.map((b, j) => /*#__PURE__*/React.createElement("div", {
         key: j,
         style: {
           fontSize: '0.8rem',
-          color: '#94a3b8',
+          color: '#64748b',
           marginBottom: '0.3rem',
           paddingLeft: '0.75rem',
           borderLeft: '2px solid rgba(148,163,184,0.3)'
@@ -8978,7 +8978,7 @@ function SunbeltIntelligence({
       }, /*#__PURE__*/React.createElement("strong", null, "Why it matters:"), " ", item.why_it_matters), item.suggested_next_step && /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: '0.8rem',
-          color: '#34d399',
+          color: '#14b8a6',
           marginTop: '0.3rem'
         }
       }, /*#__PURE__*/React.createElement("strong", null, "Next step:"), " ", item.suggested_next_step)));
@@ -9003,12 +9003,12 @@ function SunbeltIntelligence({
     };
     if (c === 'cooling') return {
       bg: 'rgba(59,130,246,0.15)',
-      color: '#93c5fd',
+      color: '#3b82f6',
       border: '#3b82f6'
     };
     return {
       bg: 'rgba(148,163,184,0.15)',
-      color: '#94a3b8',
+      color: '#64748b',
       border: '#64748b'
     };
   };
@@ -9064,15 +9064,15 @@ function SunbeltIntelligence({
       display: 'flex',
       gap: '0.5rem',
       marginBottom: '1.5rem',
-      borderBottom: '1px solid #334155',
+      borderBottom: '1px solid #e2e8f0',
       paddingBottom: '0.75rem'
     }
   }, subTabs.map(t => /*#__PURE__*/React.createElement("button", {
     key: t.id,
     onClick: () => setSubTab(t.id),
     style: {
-      background: subTab === t.id ? 'rgba(16,185,129,0.15)' : 'transparent',
-      border: subTab === t.id ? '1px solid #34d399' : '1px solid #334155',
+      background: subTab === t.id ? 'rgba(20,184,166,0.1)' : 'transparent',
+      border: subTab === t.id ? '1px solid #14b8a6' : '1px solid #e2e8f0',
       color: subTab === t.id ? '#34d399' : '#94a3b8',
       padding: '0.5rem 1.2rem',
       borderRadius: '8px',
@@ -9129,8 +9129,8 @@ function SunbeltIntelligence({
     msg: errors.brief
   }), !loading.brief && !errors.brief && weeklyData && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '12px',
       padding: '1.25rem',
       marginBottom: '1.5rem'
@@ -9138,7 +9138,7 @@ function SunbeltIntelligence({
   }, /*#__PURE__*/React.createElement("p", {
     style: {
       fontSize: '0.95rem',
-      color: '#cbd5e1',
+      color: '#334155',
       lineHeight: '1.7'
     }
   }, weeklyData.brief_text)), /*#__PURE__*/React.createElement("div", {
@@ -9150,8 +9150,8 @@ function SunbeltIntelligence({
     }
   }, weeklyData.top_markets && weeklyData.top_markets.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '12px',
       padding: '1.25rem'
     }
@@ -9160,7 +9160,7 @@ function SunbeltIntelligence({
       fontFamily: "'Orbitron', sans-serif",
       fontSize: '0.8rem',
       fontWeight: 700,
-      color: '#22d3ee',
+      color: '#3b82f6',
       textTransform: 'uppercase',
       marginBottom: '0.75rem',
       marginTop: 0
@@ -9175,19 +9175,19 @@ function SunbeltIntelligence({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#f1f5f9',
+      color: '#0f172a',
       fontSize: '0.85rem'
     }
   }, m.market), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#34d399',
+      color: '#14b8a6',
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: '0.85rem'
     }
   }, m.weighted_signals)))), weeklyData.top_topics && weeklyData.top_topics.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '12px',
       padding: '1.25rem'
     }
@@ -9211,19 +9211,19 @@ function SunbeltIntelligence({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#f1f5f9',
+      color: '#0f172a',
       fontSize: '0.85rem'
     }
   }, t.topic), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: '0.85rem'
     }
   }, t.count))))), weeklyData.highlights && weeklyData.highlights.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '12px',
       padding: '1.25rem'
     }
@@ -9252,7 +9252,7 @@ function SunbeltIntelligence({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#f1f5f9',
+      color: '#0f172a',
       fontSize: '0.85rem',
       fontWeight: 600
     }
@@ -9261,7 +9261,7 @@ function SunbeltIntelligence({
     target: "_blank",
     rel: "noopener noreferrer",
     style: {
-      color: '#f1f5f9',
+      color: '#0f172a',
       textDecoration: 'underline'
     }
   }, h.title) : h.title), /*#__PURE__*/React.createElement("span", {
@@ -9279,12 +9279,12 @@ function SunbeltIntelligence({
   }, /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: '0.7rem',
-      color: '#94a3b8'
+      color: '#64748b'
     }
   }, h.topic), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: '0.7rem',
-      color: '#475569'
+      color: '#94a3b8'
     }
   }, h.date ? new Date(h.date).toLocaleDateString() : ''))))), latestBrief && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -9295,7 +9295,7 @@ function SunbeltIntelligence({
       fontFamily: "'Orbitron', sans-serif",
       fontSize: '0.85rem',
       fontWeight: 700,
-      color: '#34d399',
+      color: '#14b8a6',
       marginBottom: '0.75rem'
     }
   }, "AI-GENERATED BRIEF"), /*#__PURE__*/React.createElement(BriefDisplay, {
@@ -9355,8 +9355,8 @@ function SunbeltIntelligence({
     return /*#__PURE__*/React.createElement("div", {
       key: i,
       style: {
-        background: '#1e293b',
-        border: '1px solid #334155',
+        background: '#FFFFFF',
+        border: '1px solid #e2e8f0',
         borderRadius: '12px',
         padding: '1.25rem',
         display: 'grid',
@@ -9385,7 +9385,7 @@ function SunbeltIntelligence({
         fontFamily: "'Orbitron', sans-serif",
         fontSize: '1rem',
         fontWeight: 700,
-        color: '#f1f5f9'
+        color: '#0f172a'
       }
     }, m.city || 'Unknown', ", ", m.state || '??'), /*#__PURE__*/React.createElement("span", {
       style: {
@@ -9404,15 +9404,15 @@ function SunbeltIntelligence({
         display: 'flex',
         gap: '1.5rem',
         fontSize: '0.8rem',
-        color: '#94a3b8'
+        color: '#64748b'
       }
     }, /*#__PURE__*/React.createElement("span", null, "7d signals: ", /*#__PURE__*/React.createElement("strong", {
       style: {
-        color: '#34d399'
+        color: '#14b8a6'
       }
     }, m.signals_window)), /*#__PURE__*/React.createElement("span", null, "30d signals: ", /*#__PURE__*/React.createElement("strong", {
       style: {
-        color: '#94a3b8'
+        color: '#64748b'
       }
     }, m.signals_baseline)), /*#__PURE__*/React.createElement("span", null, "ratio: ", /*#__PURE__*/React.createElement("strong", {
       style: {
@@ -9486,8 +9486,8 @@ function SunbeltIntelligence({
     return /*#__PURE__*/React.createElement("div", {
       key: i,
       style: {
-        background: '#1e293b',
-        border: '1px solid #334155',
+        background: '#FFFFFF',
+        border: '1px solid #e2e8f0',
         borderRadius: '12px',
         padding: '1.25rem',
         borderLeft: `3px solid ${cc.border}`
@@ -9504,7 +9504,7 @@ function SunbeltIntelligence({
         fontFamily: "'Orbitron', sans-serif",
         fontSize: '0.95rem',
         fontWeight: 700,
-        color: '#f1f5f9'
+        color: '#0f172a'
       }
     }, t.city || 'Unknown', ", ", t.state || '??'), /*#__PURE__*/React.createElement("span", {
       style: {
@@ -9521,7 +9521,7 @@ function SunbeltIntelligence({
     }, t.classification)), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: '0.9rem',
-        color: '#f1f5f9',
+        color: '#0f172a',
         marginBottom: '0.5rem',
         fontWeight: 500
       }
@@ -9530,16 +9530,16 @@ function SunbeltIntelligence({
         display: 'flex',
         gap: '1.5rem',
         fontSize: '0.8rem',
-        color: '#94a3b8',
+        color: '#64748b',
         marginBottom: '0.75rem'
       }
     }, /*#__PURE__*/React.createElement("span", null, "7d: ", /*#__PURE__*/React.createElement("strong", {
       style: {
-        color: '#34d399'
+        color: '#14b8a6'
       }
     }, t.count_window)), /*#__PURE__*/React.createElement("span", null, "30d: ", /*#__PURE__*/React.createElement("strong", {
       style: {
-        color: '#94a3b8'
+        color: '#64748b'
       }
     }, t.count_baseline)), /*#__PURE__*/React.createElement("span", null, "Ratio: ", /*#__PURE__*/React.createElement("strong", {
       style: {
@@ -9547,14 +9547,14 @@ function SunbeltIntelligence({
       }
     }, (t.trend_ratio || 0).toFixed(1), "x"))), t.examples && t.examples.length > 0 && /*#__PURE__*/React.createElement("div", {
       style: {
-        borderTop: '1px solid #334155',
+        borderTop: '1px solid #e2e8f0',
         paddingTop: '0.5rem'
       }
     }, t.examples.map((ex, j) => /*#__PURE__*/React.createElement("div", {
       key: j,
       style: {
         fontSize: '0.75rem',
-        color: '#94a3b8',
+        color: '#64748b',
         marginBottom: '0.3rem',
         display: 'flex',
         justifyContent: 'space-between',
@@ -9571,11 +9571,11 @@ function SunbeltIntelligence({
       target: "_blank",
       rel: "noopener noreferrer",
       style: {
-        color: '#94a3b8'
+        color: '#64748b'
       }
     }, ex.title) : ex.title), /*#__PURE__*/React.createElement("span", {
       style: {
-        color: '#475569',
+        color: '#94a3b8',
         whiteSpace: 'nowrap',
         flexShrink: 0
       }
@@ -9620,8 +9620,8 @@ function SunbeltIntelligence({
   }, rankingsData.rankings.map((r, i) => /*#__PURE__*/React.createElement("div", {
     key: r.state,
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '12px',
       padding: '1.5rem',
       display: 'grid',
@@ -9643,7 +9643,7 @@ function SunbeltIntelligence({
       fontFamily: "'Orbitron', sans-serif",
       fontSize: '1.2rem',
       fontWeight: 700,
-      color: '#f1f5f9',
+      color: '#0f172a',
       marginBottom: '0.5rem'
     }
   }, r.state_name || r.state), /*#__PURE__*/React.createElement("div", {
@@ -9652,11 +9652,11 @@ function SunbeltIntelligence({
       gap: '2rem',
       flexWrap: 'wrap',
       fontSize: '0.85rem',
-      color: '#94a3b8'
+      color: '#64748b'
     }
   }, /*#__PURE__*/React.createElement("span", null, "Signals: ", /*#__PURE__*/React.createElement("strong", {
     style: {
-      color: '#34d399'
+      color: '#14b8a6'
     }
   }, r.total_signals || 0)), /*#__PURE__*/React.createElement("span", null, "Capital: ", /*#__PURE__*/React.createElement("strong", {
     style: {
@@ -9681,7 +9681,7 @@ function SunbeltIntelligence({
       borderRadius: '20px',
       padding: '0.2rem 0.6rem',
       fontSize: '0.75rem',
-      color: '#34d399'
+      color: '#14b8a6'
     }
   }, c.city, " (", c.weighted_score, ")"))), r.top_topics && r.top_topics.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -9701,7 +9701,7 @@ function SunbeltIntelligence({
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: '1.6rem',
       fontWeight: 700,
-      color: '#34d399',
+      color: '#14b8a6',
       textAlign: 'right'
     }
   }, r.weighted_signals || 0)))) : !loading.rankings && !errors.rankings ? /*#__PURE__*/React.createElement(EmptyPanel, {
@@ -9736,29 +9736,29 @@ function BriefDisplay({
     }, /*#__PURE__*/React.createElement("p", {
       style: {
         fontSize: '0.9rem',
-        color: '#cbd5e1',
+        color: '#334155',
         lineHeight: '1.7'
       }
     }, content.executive_summary)), content.top_emerging_markets && content.top_emerging_markets.length > 0 && /*#__PURE__*/React.createElement(BriefSection, {
       title: "Top Emerging Markets",
-      color: "#22d3ee"
+      color: "#3b82f6"
     }, content.top_emerging_markets.map((m, i) => /*#__PURE__*/React.createElement("div", {
       key: i,
       style: {
         marginBottom: '0.75rem',
         paddingBottom: '0.75rem',
-        borderBottom: i < content.top_emerging_markets.length - 1 ? '1px solid #334155' : 'none'
+        borderBottom: i < content.top_emerging_markets.length - 1 ? '1px solid #e2e8f0' : 'none'
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         fontWeight: 600,
-        color: '#f1f5f9',
+        color: '#0f172a',
         marginBottom: '0.25rem'
       }
     }, m.market || m.city), /*#__PURE__*/React.createElement("p", {
       style: {
         fontSize: '0.85rem',
-        color: '#94a3b8',
+        color: '#64748b',
         lineHeight: '1.5'
       }
     }, m.summary || m.reason || m.description)))), content.capital_flow_highlights && content.capital_flow_highlights.length > 0 && /*#__PURE__*/React.createElement(BriefSection, {
@@ -9769,7 +9769,7 @@ function BriefDisplay({
       style: {
         marginBottom: '0.5rem',
         fontSize: '0.85rem',
-        color: '#cbd5e1'
+        color: '#334155'
       }
     }, "\u2022 ", typeof h === 'string' ? h : h.description || h.summary || JSON.stringify(h)))), content.construction_pipeline && content.construction_pipeline.length > 0 && /*#__PURE__*/React.createElement(BriefSection, {
       title: "Construction Pipeline",
@@ -9779,7 +9779,7 @@ function BriefDisplay({
       style: {
         marginBottom: '0.5rem',
         fontSize: '0.85rem',
-        color: '#cbd5e1'
+        color: '#334155'
       }
     }, "\u2022 ", typeof p === 'string' ? p : p.description || p.summary || JSON.stringify(p)))), content.operator_movements && content.operator_movements.length > 0 && /*#__PURE__*/React.createElement(BriefSection, {
       title: "Operator Movements",
@@ -9789,7 +9789,7 @@ function BriefDisplay({
       style: {
         marginBottom: '0.5rem',
         fontSize: '0.85rem',
-        color: '#cbd5e1'
+        color: '#334155'
       }
     }, "\u2022 ", typeof o === 'string' ? o : o.description || o.summary || JSON.stringify(o)))), content.risk_watchlist && content.risk_watchlist.length > 0 && /*#__PURE__*/React.createElement(BriefSection, {
       title: "Risk Watchlist",
@@ -9799,17 +9799,17 @@ function BriefDisplay({
       style: {
         marginBottom: '0.5rem',
         fontSize: '0.85rem',
-        color: '#cbd5e1'
+        color: '#334155'
       }
     }, "\u2022 ", typeof r === 'string' ? r : r.description || r.summary || JSON.stringify(r)))), content.recommended_actions && content.recommended_actions.length > 0 && /*#__PURE__*/React.createElement(BriefSection, {
       title: "Recommended Actions",
-      color: "#10b981"
+      color: "#14b8a6"
     }, content.recommended_actions.map((a, i) => /*#__PURE__*/React.createElement("div", {
       key: i,
       style: {
         marginBottom: '0.5rem',
         fontSize: '0.85rem',
-        color: '#cbd5e1'
+        color: '#334155'
       }
     }, i + 1, ". ", typeof a === 'string' ? a : a.action || a.description || JSON.stringify(a)))));
   }
@@ -9817,8 +9817,8 @@ function BriefDisplay({
   // Fallback: plain text
   return /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#0f172a',
-      border: '1px solid #334155',
+      background: '#F1F5F9',
+      border: '1px solid #e2e8f0',
       borderRadius: '12px',
       padding: '1.5rem'
     }
@@ -9826,7 +9826,7 @@ function BriefDisplay({
     style: {
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: '0.85rem',
-      color: '#f1f5f9',
+      color: '#0f172a',
       whiteSpace: 'pre-wrap',
       lineHeight: '1.6'
     }
@@ -9839,8 +9839,8 @@ function BriefSection({
 }) {
   return /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '12px',
       padding: '1.25rem'
     }
@@ -10019,7 +10019,7 @@ function QuotingPage({
       fontFamily: "'Orbitron', sans-serif",
       fontSize: '1.5rem',
       fontWeight: 700,
-      color: '#34d399',
+      color: '#14b8a6',
       marginBottom: '1.5rem'
     }
   }, "Property Quote Calculator"), /*#__PURE__*/React.createElement("div", {
@@ -10030,8 +10030,8 @@ function QuotingPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '12px',
       padding: '1.5rem'
     }
@@ -10174,7 +10174,7 @@ function QuotingPage({
   }, /*#__PURE__*/React.createElement("label", {
     style: {
       fontSize: '0.85rem',
-      color: '#f1f5f9',
+      color: '#0f172a',
       cursor: 'pointer',
       display: 'flex',
       alignItems: 'center',
@@ -10194,7 +10194,7 @@ function QuotingPage({
     }
   }), "AOP Buydown (+0.0345 to rate)")), /*#__PURE__*/React.createElement("div", {
     style: {
-      borderTop: '1px solid #334155',
+      borderTop: '1px solid #e2e8f0',
       paddingTop: '1rem',
       marginTop: '0.25rem'
     }
@@ -10202,7 +10202,7 @@ function QuotingPage({
     style: {
       display: 'block',
       fontSize: '0.7rem',
-      color: '#475569',
+      color: '#94a3b8',
       textTransform: 'uppercase',
       fontWeight: 600,
       marginBottom: '0.75rem'
@@ -10275,7 +10275,7 @@ function QuotingPage({
       fontSize: '0.85rem',
       ...(countyOverride === c ? {
         borderColor: '#34d399',
-        color: '#34d399'
+        color: '#14b8a6'
       } : {})
     },
     onClick: () => setCountyOverride(c)
@@ -10301,8 +10301,8 @@ function QuotingPage({
     }
   }, error)), /*#__PURE__*/React.createElement("div", null, result ? /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '12px',
       padding: '1.5rem'
     }
@@ -10310,7 +10310,7 @@ function QuotingPage({
     style: {
       fontFamily: "'Orbitron', sans-serif",
       fontSize: '1.1rem',
-      color: '#34d399',
+      color: '#14b8a6',
       marginTop: 0,
       marginBottom: '1.25rem'
     }
@@ -10342,12 +10342,12 @@ function QuotingPage({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.9rem'
     }
   }, "County"), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#f1f5f9',
+      color: '#0f172a',
       fontSize: '0.9rem',
       fontWeight: 600
     }
@@ -10360,12 +10360,12 @@ function QuotingPage({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.9rem'
     }
   }, "Grouping"), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#22d3ee',
+      color: '#3b82f6',
       fontSize: '0.9rem',
       fontWeight: 600
     }
@@ -10378,12 +10378,12 @@ function QuotingPage({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.9rem'
     }
   }, "Rate x100"), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#f1f5f9',
+      color: '#0f172a',
       fontSize: '0.9rem',
       fontFamily: "'JetBrains Mono', monospace"
     }
@@ -10396,12 +10396,12 @@ function QuotingPage({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.9rem'
     }
   }, "Replacement Cost"), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#f1f5f9',
+      color: '#0f172a',
       fontSize: '0.9rem',
       fontFamily: "'JetBrains Mono', monospace"
     }
@@ -10414,12 +10414,12 @@ function QuotingPage({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.9rem'
     }
   }, "Total TIV"), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#f1f5f9',
+      color: '#0f172a',
       fontSize: '0.9rem',
       fontFamily: "'JetBrains Mono', monospace"
     }
@@ -10428,16 +10428,16 @@ function QuotingPage({
       display: 'flex',
       justifyContent: 'space-between',
       padding: '0.5rem 0',
-      borderBottom: '1px solid #334155'
+      borderBottom: '1px solid #e2e8f0'
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.9rem'
     }
   }, "Base Premium"), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#f1f5f9',
+      color: '#0f172a',
       fontSize: '0.9rem',
       fontWeight: 600,
       fontFamily: "'JetBrains Mono', monospace"
@@ -10447,16 +10447,16 @@ function QuotingPage({
       display: 'flex',
       justifyContent: 'space-between',
       padding: '0.5rem 0',
-      borderBottom: '1px solid #334155'
+      borderBottom: '1px solid #e2e8f0'
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.9rem'
     }
   }, "Taxes (6%)"), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#f1f5f9',
+      color: '#0f172a',
       fontSize: '0.9rem',
       fontFamily: "'JetBrains Mono', monospace"
     }
@@ -10465,7 +10465,7 @@ function QuotingPage({
       display: 'flex',
       justifyContent: 'space-between',
       padding: '0.75rem 0',
-      background: 'rgba(16,185,129,0.08)',
+      background: 'rgba(20,184,166,0.06)',
       borderRadius: '8px',
       paddingLeft: '0.75rem',
       paddingRight: '0.75rem',
@@ -10473,28 +10473,28 @@ function QuotingPage({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#34d399',
+      color: '#14b8a6',
       fontSize: '1.05rem',
       fontWeight: 700
     }
   }, "Total Premium"), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#34d399',
+      color: '#14b8a6',
       fontSize: '1.2rem',
       fontWeight: 700,
       fontFamily: "'JetBrains Mono', monospace"
     }
   }, fmt(result.total_premium))))) : /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '12px',
       padding: '3rem',
       textAlign: 'center'
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      color: '#475569',
+      color: '#94a3b8',
       fontSize: '0.95rem'
     }
   }, "Fill in the form and click \"Get Quote\" to see the premium breakdown.")), /*#__PURE__*/React.createElement("div", {
@@ -10520,8 +10520,8 @@ function QuotingPage({
   }, history.map(q => /*#__PURE__*/React.createElement("div", {
     key: q.id,
     style: {
-      background: '#0f172a',
-      border: '1px solid #1e293b',
+      background: '#F1F5F9',
+      border: '1px solid #e2e8f0',
       borderRadius: '8px',
       padding: '0.75rem',
       display: 'flex',
@@ -10532,7 +10532,7 @@ function QuotingPage({
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#f1f5f9',
+      color: '#0f172a',
       fontSize: '0.85rem',
       fontWeight: 600
     }
@@ -10550,7 +10550,7 @@ function QuotingPage({
     }
   }, q.grouping)), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#34d399',
+      color: '#14b8a6',
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: '0.9rem',
       fontWeight: 600
@@ -10558,7 +10558,7 @@ function QuotingPage({
   }, fmt(q.total_premium)))))))), isSuperAdmin && /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: '2rem',
-      borderTop: '2px solid #334155',
+      borderTop: '2px solid #e2e8f0',
       paddingTop: '1.5rem'
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -10572,7 +10572,7 @@ function QuotingPage({
       ...styles.btn,
       ...(adminTab === 'rates' ? {
         borderColor: '#34d399',
-        color: '#34d399'
+        color: '#14b8a6'
       } : {})
     },
     onClick: () => {
@@ -10584,7 +10584,7 @@ function QuotingPage({
       ...styles.btn,
       ...(adminTab === 'counties' ? {
         borderColor: '#34d399',
-        color: '#34d399'
+        color: '#14b8a6'
       } : {})
     },
     onClick: () => {
@@ -10593,8 +10593,8 @@ function QuotingPage({
     }
   }, "County Mappings")), adminTab === 'rates' && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '12px',
       overflow: 'hidden'
     }
@@ -10608,7 +10608,7 @@ function QuotingPage({
     style: {
       textAlign: 'left',
       padding: '0.6rem 1rem',
-      borderBottom: '2px solid #334155',
+      borderBottom: '2px solid #e2e8f0',
       color: '#64748b',
       fontWeight: 600,
       fontSize: '0.75rem',
@@ -10618,7 +10618,7 @@ function QuotingPage({
     style: {
       textAlign: 'right',
       padding: '0.6rem 1rem',
-      borderBottom: '2px solid #334155',
+      borderBottom: '2px solid #e2e8f0',
       color: '#64748b',
       fontWeight: 600,
       fontSize: '0.75rem',
@@ -10628,7 +10628,7 @@ function QuotingPage({
     style: {
       textAlign: 'right',
       padding: '0.6rem 1rem',
-      borderBottom: '2px solid #334155',
+      borderBottom: '2px solid #e2e8f0',
       color: '#64748b',
       fontWeight: 600,
       fontSize: '0.75rem',
@@ -10640,13 +10640,13 @@ function QuotingPage({
     style: {
       padding: '0.6rem 1rem',
       borderBottom: '1px solid #0f172a',
-      color: '#f1f5f9'
+      color: '#0f172a'
     }
   }, g.name), /*#__PURE__*/React.createElement("td", {
     style: {
       padding: '0.6rem 1rem',
       borderBottom: '1px solid #0f172a',
-      color: '#94a3b8',
+      color: '#64748b',
       textAlign: 'right',
       fontFamily: "'JetBrains Mono', monospace"
     }
@@ -10654,15 +10654,15 @@ function QuotingPage({
     style: {
       padding: '0.6rem 1rem',
       borderBottom: '1px solid #0f172a',
-      color: '#34d399',
+      color: '#14b8a6',
       textAlign: 'right',
       fontFamily: "'JetBrains Mono', monospace",
       fontWeight: 600
     }
   }, g.rate_x100)))))), adminTab === 'counties' && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '12px',
       padding: '1.25rem'
     }
@@ -10753,7 +10753,7 @@ function QuotingPage({
     style: {
       textAlign: 'left',
       padding: '0.5rem 0.75rem',
-      borderBottom: '1px solid #334155',
+      borderBottom: '1px solid #e2e8f0',
       color: '#64748b',
       fontSize: '0.7rem',
       textTransform: 'uppercase'
@@ -10762,7 +10762,7 @@ function QuotingPage({
     style: {
       textAlign: 'left',
       padding: '0.5rem 0.75rem',
-      borderBottom: '1px solid #334155',
+      borderBottom: '1px solid #e2e8f0',
       color: '#64748b',
       fontSize: '0.7rem',
       textTransform: 'uppercase'
@@ -10770,7 +10770,7 @@ function QuotingPage({
   }, "Group"), /*#__PURE__*/React.createElement("th", {
     style: {
       padding: '0.5rem 0.75rem',
-      borderBottom: '1px solid #334155',
+      borderBottom: '1px solid #e2e8f0',
       width: '60px'
     }
   }))), /*#__PURE__*/React.createElement("tbody", null, countyMappings.map(m => /*#__PURE__*/React.createElement("tr", {
@@ -10779,13 +10779,13 @@ function QuotingPage({
     style: {
       padding: '0.5rem 0.75rem',
       borderBottom: '1px solid #0f172a',
-      color: '#f1f5f9'
+      color: '#0f172a'
     }
   }, m.county_name), /*#__PURE__*/React.createElement("td", {
     style: {
       padding: '0.5rem 0.75rem',
       borderBottom: '1px solid #0f172a',
-      color: '#22d3ee'
+      color: '#3b82f6'
     }
   }, m.group_name), /*#__PURE__*/React.createElement("td", {
     style: {
@@ -10803,7 +10803,7 @@ function QuotingPage({
     onClick: () => deleteMapping(m.id)
   }, "X")))))) : /*#__PURE__*/React.createElement("div", {
     style: {
-      color: '#475569',
+      color: '#94a3b8',
       fontSize: '0.85rem',
       fontStyle: 'italic'
     }
@@ -10908,7 +10908,7 @@ function UnderwritingSheet({
   const sectionOrder = ['location', 'values', 'construction', 'building', 'structure', 'premium'];
   const sectionColors = {
     location: '#6366f1',
-    values: '#10b981',
+    values: '#14b8a6',
     construction: '#f59e0b',
     building: '#3b82f6',
     structure: '#8b5cf6',
@@ -10965,8 +10965,8 @@ function UnderwritingSheet({
   };
 
   // ── Color scheme ──
-  const rowBgEven = '#0b1220';
-  const rowBgOdd = '#0f172a';
+  const rowBgEven = '#FFFFFF';
+  const rowBgOdd = '#F7F9FC';
   const rowBgHover = '#162032';
   const headerBg = '#080e1a';
   const groupHeaderBg = '#0a1020';
@@ -11002,8 +11002,8 @@ function UnderwritingSheet({
     className: "action-btn",
     style: {
       ...styles.actionBtn,
-      borderColor: '#10b981',
-      color: '#34d399'
+      borderColor: '#14b8a6',
+      color: '#14b8a6'
     },
     onClick: () => setShowNewForm(true)
   }, "+ New Community"), /*#__PURE__*/React.createElement("button", {
@@ -11084,7 +11084,7 @@ function UnderwritingSheet({
   }) : rows.length === 0 ? null : /*#__PURE__*/React.createElement("div", {
     style: {
       overflowX: 'auto',
-      border: '1px solid #1e293b',
+      border: '1px solid #e2e8f0',
       borderRadius: '0.5rem',
       maxHeight: '74vh',
       overflowY: 'auto'
@@ -11109,7 +11109,7 @@ function UnderwritingSheet({
       left: 0,
       zIndex: 50,
       background: groupHeaderBg,
-      borderBottom: '1px solid #1e293b',
+      borderBottom: '1px solid #e2e8f0',
       padding: 0,
       minWidth: actionsWidth + 'px'
     },
@@ -11120,7 +11120,7 @@ function UnderwritingSheet({
       top: 0,
       zIndex: 40,
       background: groupHeaderBg,
-      borderBottom: '1px solid #1e293b',
+      borderBottom: '1px solid #e2e8f0',
       padding: 0,
       minWidth: versionWidth + 'px'
     }
@@ -11131,7 +11131,7 @@ function UnderwritingSheet({
       left: stickyLeftOffsets[si] + 'px',
       zIndex: 45,
       background: groupHeaderBg,
-      borderBottom: '1px solid #1e293b',
+      borderBottom: '1px solid #e2e8f0',
       padding: 0,
       minWidth: stickyWidths[si] + 'px'
     }
@@ -11175,8 +11175,8 @@ function UnderwritingSheet({
       zIndex: 48,
       background: headerBg,
       padding: '0.4rem 0.5rem',
-      borderBottom: '2px solid #334155',
-      color: '#94a3b8',
+      borderBottom: '2px solid #e2e8f0',
+      color: '#64748b',
       fontWeight: 700,
       textAlign: 'left',
       whiteSpace: 'nowrap',
@@ -11192,8 +11192,8 @@ function UnderwritingSheet({
       zIndex: 38,
       background: headerBg,
       padding: '0.4rem 0.5rem',
-      borderBottom: '2px solid #334155',
-      color: '#94a3b8',
+      borderBottom: '2px solid #e2e8f0',
+      color: '#64748b',
       fontWeight: 700,
       textAlign: 'left',
       whiteSpace: 'nowrap',
@@ -11214,8 +11214,8 @@ function UnderwritingSheet({
         zIndex: isSticky ? 42 : 38,
         background: headerBg,
         padding: '0.4rem 0.5rem',
-        borderBottom: '2px solid #334155',
-        color: '#94a3b8',
+        borderBottom: '2px solid #e2e8f0',
+        color: '#64748b',
         fontWeight: 700,
         textAlign: isNumeric ? 'right' : 'left',
         whiteSpace: 'nowrap',
@@ -11235,7 +11235,7 @@ function UnderwritingSheet({
       onMouseEnter: () => setHoveredRow(ri),
       onMouseLeave: () => setHoveredRow(null),
       style: {
-        borderBottom: '1px solid #1e293b',
+        borderBottom: '1px solid #e2e8f0',
         background: bg,
         transition: 'background 0.1s'
       }
@@ -11291,7 +11291,7 @@ function UnderwritingSheet({
     }, "Del"))), showHistory && /*#__PURE__*/React.createElement("td", {
       style: {
         padding: '0.35rem 0.4rem',
-        color: '#475569',
+        color: '#94a3b8',
         fontSize: '0.72rem',
         background: bg,
         transition: 'background 0.1s'
@@ -11308,7 +11308,7 @@ function UnderwritingSheet({
           zIndex: isSticky ? 10 : 1,
           background: isSticky ? stickyBg : bg,
           padding: '0.35rem 0.5rem',
-          color: isNumeric ? '#93c5fd' : '#e2e8f0',
+          color: isNumeric ? '#3b82f6' : '#1e293b',
           maxWidth: '200px',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -11361,12 +11361,12 @@ function UnderwritingSheet({
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: 'rgba(0,0,0,0.7)'
+      background: 'rgba(0,0,0,0.3)'
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#0f172a',
-      border: '1px solid #334155',
+      background: '#F1F5F9',
+      border: '1px solid #e2e8f0',
       borderRadius: '1rem',
       width: '95vw',
       maxWidth: '440px',
@@ -11375,12 +11375,12 @@ function UnderwritingSheet({
   }, /*#__PURE__*/React.createElement("h3", {
     style: {
       margin: '0 0 0.75rem',
-      color: '#f1f5f9',
+      color: '#0f172a',
       fontSize: '1.05rem'
     }
   }, "Delete Community"), /*#__PURE__*/React.createElement("p", {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.88rem',
       margin: '0 0 0.5rem',
       lineHeight: 1.5
@@ -11509,11 +11509,11 @@ function UWImportModal({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: 'rgba(0,0,0,0.7)'
+    background: 'rgba(0,0,0,0.3)'
   };
   const modalBox = {
-    background: '#0f172a',
-    border: '1px solid #334155',
+    background: '#F1F5F9',
+    border: '1px solid #e2e8f0',
     borderRadius: '1rem',
     width: '95vw',
     maxWidth: '640px',
@@ -11524,15 +11524,15 @@ function UWImportModal({
   const labelStyle = {
     display: 'block',
     fontSize: '0.72rem',
-    color: '#94a3b8',
+    color: '#64748b',
     fontWeight: 600,
     marginBottom: '0.35rem',
     textTransform: 'uppercase',
     letterSpacing: '0.03em'
   };
   const summaryCard = {
-    background: '#0b1220',
-    border: '1px solid #1e293b',
+    background: '#F7F9FC',
+    border: '1px solid #e2e8f0',
     borderRadius: '0.5rem',
     padding: '0.75rem 1rem',
     marginBottom: '0.75rem'
@@ -11547,7 +11547,7 @@ function UWImportModal({
     color: '#64748b'
   };
   const summaryValue = {
-    color: '#f1f5f9',
+    color: '#0f172a',
     fontWeight: 600,
     fontFamily: "'Orbitron', monospace"
   };
@@ -11558,7 +11558,7 @@ function UWImportModal({
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '1.25rem 1.5rem',
-      borderBottom: '1px solid #1e293b',
+      borderBottom: '1px solid #e2e8f0',
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center'
@@ -11566,7 +11566,7 @@ function UWImportModal({
   }, /*#__PURE__*/React.createElement("h3", {
     style: {
       margin: 0,
-      color: '#f1f5f9',
+      color: '#0f172a',
       fontSize: '1.1rem'
     }
   }, "Import Spreadsheet"), /*#__PURE__*/React.createElement("button", {
@@ -11602,12 +11602,12 @@ function UWImportModal({
     style: labelStyle
   }, "Upload File (.xlsx or .csv)"), /*#__PURE__*/React.createElement("div", {
     style: {
-      border: '2px dashed #334155',
+      border: '2px dashed #e2e8f0',
       borderRadius: '0.5rem',
       padding: '1.5rem',
       textAlign: 'center',
       cursor: 'pointer',
-      background: '#0b1220',
+      background: '#F7F9FC',
       transition: 'border-color 0.2s'
     },
     onDragOver: e => {
@@ -11615,11 +11615,11 @@ function UWImportModal({
       e.currentTarget.style.borderColor = '#6366f1';
     },
     onDragLeave: e => {
-      e.currentTarget.style.borderColor = '#334155';
+      e.currentTarget.style.borderColor = '#e2e8f0';
     },
     onDrop: e => {
       e.preventDefault();
-      e.currentTarget.style.borderColor = '#334155';
+      e.currentTarget.style.borderColor = '#e2e8f0';
       const f = e.dataTransfer.files[0];
       if (f) {
         const inp = {
@@ -11677,7 +11677,7 @@ function UWImportModal({
     }
   }, "Click or drag & drop"), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: '#475569',
+      color: '#94a3b8',
       fontSize: '0.75rem',
       marginTop: '0.25rem'
     }
@@ -11699,8 +11699,8 @@ function UWImportModal({
       padding: '0.6rem 0.75rem',
       borderRadius: '0.5rem',
       fontSize: '0.82rem',
-      border: mode === 'merge' ? '1px solid #6366f1' : '1px solid #334155',
-      background: mode === 'merge' ? 'rgba(99,102,241,0.1)' : '#0b1220',
+      border: mode === 'merge' ? '1px solid #6366f1' : '1px solid #e2e8f0',
+      background: mode === 'merge' ? 'rgba(99,102,241,0.1)' : '#F7F9FC',
       color: mode === 'merge' ? '#818cf8' : '#64748b',
       cursor: 'pointer',
       textAlign: 'left'
@@ -11722,8 +11722,8 @@ function UWImportModal({
       padding: '0.6rem 0.75rem',
       borderRadius: '0.5rem',
       fontSize: '0.82rem',
-      border: mode === 'strict' ? '1px solid #f59e0b' : '1px solid #334155',
-      background: mode === 'strict' ? 'rgba(245,158,11,0.1)' : '#0b1220',
+      border: mode === 'strict' ? '1px solid #f59e0b' : '1px solid #e2e8f0',
+      background: mode === 'strict' ? 'rgba(245,158,11,0.1)' : '#F7F9FC',
       color: mode === 'strict' ? '#fcd34d' : '#64748b',
       cursor: 'pointer',
       textAlign: 'left'
@@ -11749,7 +11749,7 @@ function UWImportModal({
       gap: '0.5rem',
       cursor: 'pointer',
       fontSize: '0.85rem',
-      color: '#94a3b8'
+      color: '#64748b'
     }
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
@@ -11767,7 +11767,7 @@ function UWImportModal({
       border: '1px solid rgba(99,102,241,0.2)',
       borderRadius: '6px',
       fontSize: '0.8rem',
-      color: '#94a3b8'
+      color: '#64748b'
     }
   }, "Need the correct format? ", /*#__PURE__*/React.createElement("button", {
     onClick: downloadTemplate,
@@ -11786,12 +11786,12 @@ function UWImportModal({
     style: {
       ...summaryRow,
       paddingBottom: '0.5rem',
-      borderBottom: '1px solid #1e293b',
+      borderBottom: '1px solid #e2e8f0',
       marginBottom: '0.35rem'
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#f1f5f9',
+      color: '#0f172a',
       fontWeight: 700,
       fontSize: '0.9rem'
     }
@@ -11808,7 +11808,7 @@ function UWImportModal({
   }, "Rows Imported"), /*#__PURE__*/React.createElement("span", {
     style: {
       ...summaryValue,
-      color: '#34d399'
+      color: '#14b8a6'
     }
   }, result.imported_rows)), /*#__PURE__*/React.createElement("div", {
     style: summaryRow
@@ -11865,8 +11865,8 @@ function UWImportModal({
     style: {
       maxHeight: '150px',
       overflowY: 'auto',
-      background: '#0b1220',
-      border: '1px solid #1e293b',
+      background: '#F7F9FC',
+      border: '1px solid #e2e8f0',
       borderRadius: '0.5rem',
       fontSize: '0.78rem'
     }
@@ -11907,8 +11907,8 @@ function UWImportModal({
     style: {
       maxHeight: '120px',
       overflowY: 'auto',
-      background: '#0b1220',
-      border: '1px solid #1e293b',
+      background: '#F7F9FC',
+      border: '1px solid #e2e8f0',
       borderRadius: '0.5rem',
       fontSize: '0.78rem'
     }
@@ -11933,7 +11933,7 @@ function UWImportModal({
   }, "...and ", result.warnings.length - 30, " more"))))), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '1rem 1.5rem',
-      borderTop: '1px solid #1e293b',
+      borderTop: '1px solid #e2e8f0',
       display: 'flex',
       justifyContent: 'flex-end',
       gap: '0.5rem'
@@ -11950,8 +11950,8 @@ function UWImportModal({
     className: "action-btn",
     style: {
       ...styles.actionBtn,
-      borderColor: '#10b981',
-      color: '#34d399'
+      borderColor: '#14b8a6',
+      color: '#14b8a6'
     },
     onClick: onImported
   }, "Done - View Data") : dryRun && !error ? /*#__PURE__*/React.createElement("button", {
@@ -12065,12 +12065,12 @@ function UWFormModal({
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: 'rgba(0,0,0,0.7)'
+      background: 'rgba(0,0,0,0.3)'
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#0f172a',
-      border: '1px solid #334155',
+      background: '#F1F5F9',
+      border: '1px solid #e2e8f0',
       borderRadius: '1rem',
       width: '95vw',
       maxWidth: '900px',
@@ -12081,7 +12081,7 @@ function UWFormModal({
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '1.25rem 1.5rem',
-      borderBottom: '1px solid #1e293b',
+      borderBottom: '1px solid #e2e8f0',
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center'
@@ -12089,7 +12089,7 @@ function UWFormModal({
   }, /*#__PURE__*/React.createElement("h3", {
     style: {
       margin: 0,
-      color: '#f1f5f9',
+      color: '#0f172a',
       fontSize: '1.1rem'
     }
   }, title), /*#__PURE__*/React.createElement("button", {
@@ -12105,7 +12105,7 @@ function UWFormModal({
     style: {
       display: 'flex',
       gap: '0',
-      borderBottom: '1px solid #1e293b',
+      borderBottom: '1px solid #e2e8f0',
       overflowX: 'auto',
       flexShrink: 0
     }
@@ -12119,7 +12119,7 @@ function UWFormModal({
       color: activeSection === key ? '#34d399' : '#64748b',
       background: 'transparent',
       border: 'none',
-      borderBottom: activeSection === key ? '2px solid #34d399' : '2px solid transparent',
+      borderBottom: activeSection === key ? '2px solid #14b8a6' : '2px solid transparent',
       cursor: 'pointer',
       whiteSpace: 'nowrap'
     }
@@ -12189,7 +12189,7 @@ function UWFormModal({
   }))))), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '1rem 1.5rem',
-      borderTop: '1px solid #1e293b',
+      borderTop: '1px solid #e2e8f0',
       display: 'flex',
       justifyContent: 'flex-end',
       gap: '0.5rem'
@@ -12202,8 +12202,8 @@ function UWFormModal({
     className: "action-btn",
     style: {
       ...styles.actionBtn,
-      borderColor: '#10b981',
-      color: '#34d399'
+      borderColor: '#14b8a6',
+      color: '#14b8a6'
     },
     onClick: save,
     disabled: saving
@@ -12252,7 +12252,7 @@ function PredictedDevelopments() {
     loadStats();
   }, [filter]);
   const confidenceColor = c => {
-    if (c >= 80) return '#10b981';
+    if (c >= 80) return '#14b8a6';
     if (c >= 60) return '#f59e0b';
     if (c >= 40) return '#f97316';
     return '#ef4444';
@@ -12284,11 +12284,11 @@ function PredictedDevelopments() {
     alignItems: 'center',
     gap: '0.3rem',
     fontSize: '0.7rem',
-    color: '#94a3b8',
+    color: '#64748b',
     fontFamily: 'monospace'
   };
   const arrowStyle = {
-    color: '#22d3ee',
+    color: '#3b82f6',
     fontWeight: 700
   };
   const formatPattern = p => {
@@ -12300,7 +12300,7 @@ function PredictedDevelopments() {
       const elements = [React.createElement('span', {
         key: `p${i}`,
         style: {
-          color: '#e2e8f0'
+          color: '#1e293b'
         }
       }, part)];
       if (i < parts.length - 1) elements.push(React.createElement('span', {
@@ -12312,8 +12312,8 @@ function PredictedDevelopments() {
   };
   const statCard = (val, label, color) => React.createElement('div', {
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '0.75rem',
       padding: '0.85rem',
       textAlign: 'center'
@@ -12327,7 +12327,7 @@ function PredictedDevelopments() {
   }, val), React.createElement('div', {
     style: {
       fontSize: '0.7rem',
-      color: '#94a3b8',
+      color: '#64748b',
       marginTop: '0.2rem'
     }
   }, label));
@@ -12348,7 +12348,7 @@ function PredictedDevelopments() {
     style: {
       fontSize: '1.4rem',
       fontWeight: 700,
-      color: '#f1f5f9',
+      color: '#0f172a',
       margin: 0
     }
   }, 'Predicted Developments'), React.createElement('div', {
@@ -12363,9 +12363,9 @@ function PredictedDevelopments() {
       padding: '0.4rem 0.8rem',
       borderRadius: '6px',
       cursor: 'pointer',
-      border: filter === f ? '1px solid #22d3ee' : '1px solid #475569',
+      border: filter === f ? '1px solid #3b82f6' : '1px solid #cbd5e1',
       background: filter === f ? 'rgba(34,211,238,0.1)' : 'transparent',
-      color: filter === f ? '#22d3ee' : '#94a3b8',
+      color: filter === f ? '#3b82f6' : '#94a3b8',
       fontSize: '0.8rem',
       fontWeight: 500,
       textTransform: 'capitalize'
@@ -12379,13 +12379,13 @@ function PredictedDevelopments() {
       gap: '0.75rem',
       marginBottom: '1.5rem'
     }
-  }, statCard(stats.total?.count || 0, 'Predictions', '#22d3ee'), statCard(stats.confirmed?.count || 0, 'Confirmed', '#10b981'), statCard(stats.unconfirmed?.count || 0, 'Unconfirmed', '#f59e0b'), statCard(stats.events_total?.count || 0, 'Dev Events', '#a78bfa'), statCard(stats.clusters_detected?.count || 0, 'Clusters', '#f472b6'), statCard(stats.high_convergence?.count || 0, 'High Convergence', '#10b981')),
+  }, statCard(stats.total?.count || 0, 'Predictions', '#3b82f6'), statCard(stats.confirmed?.count || 0, 'Confirmed', '#14b8a6'), statCard(stats.unconfirmed?.count || 0, 'Unconfirmed', '#f59e0b'), statCard(stats.events_total?.count || 0, 'Dev Events', '#a78bfa'), statCard(stats.clusters_detected?.count || 0, 'Clusters', '#f472b6'), statCard(stats.high_convergence?.count || 0, 'High Convergence', '#14b8a6')),
   // Prediction cards
   loading ? React.createElement('div', {
     style: {
       textAlign: 'center',
       padding: '3rem',
-      color: '#94a3b8'
+      color: '#64748b'
     }
   }, 'Loading predictions...') : predictions.length === 0 ? React.createElement('div', {
     style: {
@@ -12402,8 +12402,8 @@ function PredictedDevelopments() {
   }, predictions.map(pred => React.createElement('div', {
     key: pred.id,
     style: {
-      background: '#1e293b',
-      border: pred.confirmed ? '1px solid #10b981' : '1px solid #334155',
+      background: '#FFFFFF',
+      border: pred.confirmed ? '1px solid #14b8a6' : '1px solid #e2e8f0',
       borderRadius: '0.75rem',
       padding: '1.25rem'
     }
@@ -12420,12 +12420,12 @@ function PredictedDevelopments() {
     style: {
       fontSize: '1.05rem',
       fontWeight: 600,
-      color: '#f1f5f9'
+      color: '#0f172a'
     }
   }, `${pred.city || '?'}, ${pred.state || '?'}`), React.createElement('div', {
     style: {
       fontSize: '0.85rem',
-      color: '#94a3b8',
+      color: '#64748b',
       marginTop: '0.15rem'
     }
   }, `Developer: ${pred.developer || 'Unknown'}`)), React.createElement('div', {
@@ -12442,7 +12442,7 @@ function PredictedDevelopments() {
     style: {
       fontSize: '1.3rem',
       fontWeight: 700,
-      color: pred.convergence_score >= 80 ? '#10b981' : pred.convergence_score >= 60 ? '#22d3ee' : pred.convergence_score >= 40 ? '#f59e0b' : '#94a3b8',
+      color: pred.convergence_score >= 80 ? '#14b8a6' : pred.convergence_score >= 60 ? '#3b82f6' : pred.convergence_score >= 40 ? '#f59e0b' : '#94a3b8',
       fontFamily: "'Orbitron', sans-serif"
     }
   }, pred.convergence_score), React.createElement('div', {
@@ -12473,7 +12473,7 @@ function PredictedDevelopments() {
       gridTemplateColumns: 'repeat(6, 1fr)',
       gap: '0.75rem',
       marginBottom: '0.75rem',
-      background: '#0f172a',
+      background: '#F1F5F9',
       borderRadius: '8px',
       padding: '0.75rem'
     }
@@ -12489,7 +12489,7 @@ function PredictedDevelopments() {
     style: {
       fontSize: '1.1rem',
       fontWeight: 700,
-      color: pred.convergence_score >= 70 ? '#10b981' : pred.convergence_score >= 40 ? '#f59e0b' : '#475569'
+      color: pred.convergence_score >= 70 ? '#14b8a6' : pred.convergence_score >= 40 ? '#f59e0b' : '#94a3b8'
     }
   }, pred.convergence_score || 0)), React.createElement('div', null, React.createElement('div', {
     style: {
@@ -12503,7 +12503,7 @@ function PredictedDevelopments() {
     style: {
       fontSize: '1.1rem',
       fontWeight: 700,
-      color: '#e2e8f0'
+      color: '#1e293b'
     }
   }, pred.convergence_signal_count || pred.signal_count || 0)), React.createElement('div', null, React.createElement('div', {
     style: {
@@ -12517,7 +12517,7 @@ function PredictedDevelopments() {
     style: {
       fontSize: '1.1rem',
       fontWeight: 700,
-      color: pred.relationship_count > 0 ? '#a78bfa' : '#475569'
+      color: pred.relationship_count > 0 ? '#a78bfa' : '#94a3b8'
     }
   }, pred.relationship_count || 0)), React.createElement('div', null, React.createElement('div', {
     style: {
@@ -12531,7 +12531,7 @@ function PredictedDevelopments() {
     style: {
       fontSize: '1.1rem',
       fontWeight: 700,
-      color: pred.cluster_detected ? '#10b981' : '#475569'
+      color: pred.cluster_detected ? '#14b8a6' : '#94a3b8'
     }
   }, pred.cluster_detected ? 'Yes' : 'No')), React.createElement('div', {
     style: {
@@ -12549,7 +12549,7 @@ function PredictedDevelopments() {
     style: {
       fontSize: '0.85rem',
       fontWeight: 600,
-      color: '#22d3ee'
+      color: '#3b82f6'
     }
   }, pred.expected_construction_window || 'Estimating...'))),
   // Convergence signal types
@@ -12573,7 +12573,7 @@ function PredictedDevelopments() {
     key: si,
     style: {
       fontSize: '0.65rem',
-      color: '#22d3ee',
+      color: '#3b82f6',
       background: 'rgba(34,211,238,0.1)',
       padding: '0.12rem 0.45rem',
       borderRadius: '0.25rem',
@@ -12596,7 +12596,7 @@ function PredictedDevelopments() {
   }, formatPattern(pred.pattern_detected), pred.pattern_name && React.createElement('span', {
     style: {
       fontSize: '0.65rem',
-      color: '#22d3ee',
+      color: '#3b82f6',
       background: 'rgba(34,211,238,0.1)',
       padding: '0.1rem 0.4rem',
       borderRadius: '0.25rem',
@@ -12615,7 +12615,7 @@ function PredictedDevelopments() {
       flexWrap: 'wrap',
       gap: '0.25rem'
     }
-  }, pred.confirmed && smallBadge('CONFIRMED', '#10b981', '16,185,129,0.15'), pred.cluster_detected && smallBadge('CLUSTER', '#f472b6', '244,114,182,0.15'), pred.freshness_boost > 0 && smallBadge('FRESH', '#22d3ee', '34,211,238,0.15'), pred.developer_linked && smallBadge('DEV LINKED', '#a78bfa', '167,139,250,0.15'), pred.contractor_linked && smallBadge('CONTRACTOR', '#fb923c', '251,146,60,0.15'), pred.consultant_linked && smallBadge('CONSULTANT', '#2dd4bf', '45,212,191,0.15'), pred.developer_expansion_signal && smallBadge('DNA MATCH', '#f59e0b', '245,158,11,0.15'), pred.contractor_activity_detected && smallBadge('CONTRACTOR INTEL', '#ef4444', '239,68,68,0.15'), pred.temporal_boost > 0 && smallBadge('TEMPORAL +' + pred.temporal_boost, '#8b5cf6', '139,92,246,0.15'), React.createElement('span', {
+  }, pred.confirmed && smallBadge('CONFIRMED', '#14b8a6', '16,185,129,0.15'), pred.cluster_detected && smallBadge('CLUSTER', '#f472b6', '244,114,182,0.15'), pred.freshness_boost > 0 && smallBadge('FRESH', '#3b82f6', '34,211,238,0.15'), pred.developer_linked && smallBadge('DEV LINKED', '#a78bfa', '167,139,250,0.15'), pred.contractor_linked && smallBadge('CONTRACTOR', '#fb923c', '251,146,60,0.15'), pred.consultant_linked && smallBadge('CONSULTANT', '#2dd4bf', '45,212,191,0.15'), pred.developer_expansion_signal && smallBadge('DNA MATCH', '#f59e0b', '245,158,11,0.15'), pred.contractor_activity_detected && smallBadge('CONTRACTOR INTEL', '#ef4444', '239,68,68,0.15'), pred.temporal_boost > 0 && smallBadge('TEMPORAL +' + pred.temporal_boost, '#8b5cf6', '139,92,246,0.15'), React.createElement('span', {
     style: {
       fontSize: '0.7rem',
       color: '#64748b'
@@ -12648,7 +12648,7 @@ function PredictedDevelopments() {
   }, React.createElement('div', {
     style: {
       fontSize: '0.75rem',
-      color: '#e2e8f0'
+      color: '#1e293b'
     }
   }, pred.developer_expansion_reasoning || 'Expansion signal detected'), pred.developer_dna_confidence > 0 && React.createElement('div', {
     style: {
@@ -12701,7 +12701,7 @@ function PredictedDevelopments() {
   }, pred.contractor_developer_inference && React.createElement('div', {
     style: {
       fontSize: '0.75rem',
-      color: '#e2e8f0'
+      color: '#1e293b'
     }
   }, 'Developer Likely: ', React.createElement('span', {
     style: {
@@ -12720,14 +12720,14 @@ function PredictedDevelopments() {
     style: {
       marginTop: '0.6rem',
       padding: '0.6rem',
-      background: 'rgba(16,185,129,0.08)',
+      background: 'rgba(20,184,166,0.06)',
       border: '1px solid rgba(16,185,129,0.2)',
       borderRadius: '0.5rem'
     }
   }, React.createElement('div', {
     style: {
       fontSize: '0.6rem',
-      color: '#10b981',
+      color: '#14b8a6',
       textTransform: 'uppercase',
       letterSpacing: '0.08em',
       fontWeight: 700,
@@ -12755,7 +12755,7 @@ function PredictedDevelopments() {
     style: {
       fontSize: '1rem',
       fontWeight: 700,
-      color: '#10b981'
+      color: '#14b8a6'
     }
   }, pred.parcel_probability_score + '%')), React.createElement('div', null, React.createElement('div', {
     style: {
@@ -12767,13 +12767,13 @@ function PredictedDevelopments() {
     style: {
       fontSize: '0.8rem',
       fontWeight: 600,
-      color: pred.parcel_development_likelihood === 'Very High' ? '#10b981' : pred.parcel_development_likelihood === 'High' ? '#22d3ee' : '#f59e0b'
+      color: pred.parcel_development_likelihood === 'Very High' ? '#14b8a6' : pred.parcel_development_likelihood === 'High' ? '#3b82f6' : '#f59e0b'
     }
   }, pred.parcel_development_likelihood || 'Pending'))), pred.parcel_probability_score >= 70 && React.createElement('span', {
     style: {
       fontSize: '0.6rem',
-      color: '#10b981',
-      background: 'rgba(16,185,129,0.12)',
+      color: '#14b8a6',
+      background: 'rgba(20,184,166,0.08)',
       padding: '0.15rem 0.5rem',
       borderRadius: '0.25rem',
       fontWeight: 600
@@ -12857,7 +12857,7 @@ function PredictedDevelopments() {
     const els = [React.createElement('span', {
       key: 's' + si,
       style: {
-        color: '#e2e8f0'
+        color: '#1e293b'
       }
     }, step)];
     if (si < arr.length - 1) els.push(React.createElement('span', {
@@ -12911,7 +12911,7 @@ function MarketExpansion() {
     loadStats();
   }, [filterState]);
   const scoreColor = s => {
-    if (s >= 85) return '#10b981';
+    if (s >= 85) return '#14b8a6';
     if (s >= 70) return '#f59e0b';
     if (s >= 50) return '#f97316';
     return '#ef4444';
@@ -12931,8 +12931,8 @@ function MarketExpansion() {
   };
   const statCard = (val, label, color) => React.createElement('div', {
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '0.75rem',
       padding: '0.85rem',
       textAlign: 'center'
@@ -12946,7 +12946,7 @@ function MarketExpansion() {
   }, val), React.createElement('div', {
     style: {
       fontSize: '0.7rem',
-      color: '#94a3b8',
+      color: '#64748b',
       marginTop: '0.2rem'
     }
   }, label));
@@ -12967,7 +12967,7 @@ function MarketExpansion() {
     style: {
       fontSize: '1.4rem',
       fontWeight: 700,
-      color: '#f1f5f9',
+      color: '#0f172a',
       margin: 0
     }
   }, 'Market Expansion'), React.createElement('div', {
@@ -12979,7 +12979,7 @@ function MarketExpansion() {
   }, React.createElement('span', {
     style: {
       fontSize: '0.75rem',
-      color: '#94a3b8'
+      color: '#64748b'
     }
   }, 'Filter State:'), React.createElement('input', {
     type: 'text',
@@ -12990,9 +12990,9 @@ function MarketExpansion() {
       padding: '0.35rem 0.6rem',
       borderRadius: '6px',
       width: '60px',
-      border: '1px solid #475569',
-      background: '#0f172a',
-      color: '#e2e8f0',
+      border: '1px solid #cbd5e1',
+      background: '#F1F5F9',
+      color: '#1e293b',
       fontSize: '0.8rem',
       textAlign: 'center'
     }
@@ -13005,13 +13005,13 @@ function MarketExpansion() {
       gap: '0.75rem',
       marginBottom: '1.5rem'
     }
-  }, statCard(stats.total_markets?.count || 0, 'Total Markets', '#22d3ee'), statCard(stats.active_markets?.count || 0, 'Active', '#10b981'), statCard(stats.pending_markets?.count || 0, 'Pending', '#f59e0b'), statCard(stats.avg_score?.avg || 0, 'Avg Score', '#a78bfa')),
+  }, statCard(stats.total_markets?.count || 0, 'Total Markets', '#3b82f6'), statCard(stats.active_markets?.count || 0, 'Active', '#14b8a6'), statCard(stats.pending_markets?.count || 0, 'Pending', '#f59e0b'), statCard(stats.avg_score?.avg || 0, 'Avg Score', '#a78bfa')),
   // Market cards
   loading ? React.createElement('div', {
     style: {
       textAlign: 'center',
       padding: '3rem',
-      color: '#94a3b8'
+      color: '#64748b'
     }
   }, 'Loading markets...') : markets.length === 0 ? React.createElement('div', {
     style: {
@@ -13028,8 +13028,8 @@ function MarketExpansion() {
   }, markets.map(m => React.createElement('div', {
     key: m.id,
     style: {
-      background: '#1e293b',
-      border: m.collectors_active ? '1px solid #10b981' : '1px solid #334155',
+      background: '#FFFFFF',
+      border: m.collectors_active ? '1px solid #14b8a6' : '1px solid #e2e8f0',
       borderRadius: '0.75rem',
       padding: '1.25rem'
     }
@@ -13046,12 +13046,12 @@ function MarketExpansion() {
     style: {
       fontSize: '1.05rem',
       fontWeight: 600,
-      color: '#f1f5f9'
+      color: '#0f172a'
     }
   }, `${m.city || '?'}, ${m.state || '?'}`), React.createElement('div', {
     style: {
       fontSize: '0.8rem',
-      color: '#94a3b8',
+      color: '#64748b',
       marginTop: '0.15rem'
     }
   }, m.population ? `Pop: ${Number(m.population).toLocaleString()}` : '')), React.createElement('div', {
@@ -13074,7 +13074,7 @@ function MarketExpansion() {
       gridTemplateColumns: 'repeat(4, 1fr)',
       gap: '0.75rem',
       marginBottom: '0.75rem',
-      background: '#0f172a',
+      background: '#F1F5F9',
       borderRadius: '8px',
       padding: '0.75rem'
     }
@@ -13090,7 +13090,7 @@ function MarketExpansion() {
     style: {
       fontSize: '1.1rem',
       fontWeight: 700,
-      color: m.population_growth > 2 ? '#10b981' : '#e2e8f0'
+      color: m.population_growth > 2 ? '#14b8a6' : '#1e293b'
     }
   }, pctDisplay(m.population_growth))), React.createElement('div', null, React.createElement('div', {
     style: {
@@ -13104,7 +13104,7 @@ function MarketExpansion() {
     style: {
       fontSize: '1.1rem',
       fontWeight: 700,
-      color: m.permit_growth > 15 ? '#10b981' : '#e2e8f0'
+      color: m.permit_growth > 15 ? '#14b8a6' : '#1e293b'
     }
   }, pctDisplay(m.permit_growth))), React.createElement('div', null, React.createElement('div', {
     style: {
@@ -13118,7 +13118,7 @@ function MarketExpansion() {
     style: {
       fontSize: '1.1rem',
       fontWeight: 700,
-      color: m.rent_growth > 5 ? '#10b981' : '#e2e8f0'
+      color: m.rent_growth > 5 ? '#14b8a6' : '#1e293b'
     }
   }, pctDisplay(m.rent_growth))), React.createElement('div', null, React.createElement('div', {
     style: {
@@ -13132,7 +13132,7 @@ function MarketExpansion() {
     style: {
       fontSize: '1.1rem',
       fontWeight: 700,
-      color: m.collectors_active ? '#10b981' : '#f59e0b'
+      color: m.collectors_active ? '#14b8a6' : '#f59e0b'
     }
   }, m.collectors_active ? 'Active' : 'Pending')))))));
 }
@@ -13231,8 +13231,8 @@ function DealBoardPage({
     className: "action-btn",
     style: {
       ...styles.actionBtn,
-      borderColor: '#10b981',
-      color: '#34d399'
+      borderColor: '#14b8a6',
+      color: '#14b8a6'
     },
     onClick: exportCsv
   }, "Export CSV")), items.length === 0 ? /*#__PURE__*/React.createElement(EmptyState, {
@@ -13334,7 +13334,7 @@ function DealBoardPage({
     onClick: () => deleteItem(item.id)
   }, "Remove"))), item.notes && /*#__PURE__*/React.createElement("p", {
     style: {
-      color: '#cbd5e1',
+      color: '#334155',
       fontSize: '0.85rem',
       margin: '0.5rem 0 0',
       lineHeight: '1.5'
@@ -13343,9 +13343,9 @@ function DealBoardPage({
     style: {
       marginTop: '0.75rem',
       padding: '0.75rem',
-      background: '#0b1220',
+      background: '#F7F9FC',
       borderRadius: '8px',
-      border: '1px solid #1e293b'
+      border: '1px solid #e2e8f0'
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -13397,8 +13397,8 @@ function DealBoardPage({
     className: "action-btn",
     style: {
       ...styles.actionBtn,
-      borderColor: '#10b981',
-      color: '#34d399'
+      borderColor: '#14b8a6',
+      color: '#14b8a6'
     },
     onClick: () => saveEdit(item.id)
   }, "Save"), /*#__PURE__*/React.createElement("button", {
@@ -13540,7 +13540,7 @@ function AdminPage({
     th: {
       textAlign: 'left',
       padding: '0.75rem 1rem',
-      borderBottom: '2px solid #334155',
+      borderBottom: '2px solid #e2e8f0',
       color: '#64748b',
       fontWeight: 600,
       fontSize: '0.75rem',
@@ -13549,8 +13549,8 @@ function AdminPage({
     },
     td: {
       padding: '0.75rem 1rem',
-      borderBottom: '1px solid #1e293b',
-      color: '#f1f5f9'
+      borderBottom: '1px solid #e2e8f0',
+      color: '#0f172a'
     },
     badge: (color, bg) => ({
       display: 'inline-block',
@@ -13574,7 +13574,7 @@ function AdminPage({
       fontFamily: "'Orbitron', sans-serif",
       fontSize: '1.5rem',
       fontWeight: 700,
-      color: '#34d399',
+      color: '#14b8a6',
       margin: 0
     }
   }, "User Management"), /*#__PURE__*/React.createElement("button", {
@@ -13587,15 +13587,15 @@ function AdminPage({
       borderRadius: '8px',
       padding: '0.75rem 1rem',
       marginBottom: '1rem',
-      color: '#34d399',
+      color: '#14b8a6',
       fontSize: '0.9rem'
     }
   }, actionMsg), loading ? /*#__PURE__*/React.createElement("div", {
     style: ds.loadingMsg
   }, "Loading users...") : /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '12px',
       overflow: 'hidden'
     }
@@ -13640,13 +13640,13 @@ function AdminPage({
   }, u.role)), /*#__PURE__*/React.createElement("td", {
     style: {
       ...tbl.td,
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.85rem'
     }
   }, u.created_at ? new Date(u.created_at).toLocaleDateString() : '-'), /*#__PURE__*/React.createElement("td", {
     style: {
       ...tbl.td,
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.85rem'
     }
   }, u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : 'Never'), /*#__PURE__*/React.createElement("td", {
@@ -13708,7 +13708,7 @@ function AdminPage({
       left: 0,
       right: 0,
       bottom: 0,
-      background: 'rgba(0,0,0,0.7)',
+      background: 'rgba(0,0,0,0.3)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -13719,8 +13719,8 @@ function AdminPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '12px',
       padding: '2rem',
       width: '100%',
@@ -13730,7 +13730,7 @@ function AdminPage({
     style: {
       fontFamily: "'Orbitron', sans-serif",
       fontSize: '1.2rem',
-      color: '#34d399',
+      color: '#14b8a6',
       marginTop: 0,
       marginBottom: '1.5rem'
     }
@@ -13810,7 +13810,7 @@ function AdminPage({
       left: 0,
       right: 0,
       bottom: 0,
-      background: 'rgba(0,0,0,0.7)',
+      background: 'rgba(0,0,0,0.3)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -13821,7 +13821,7 @@ function AdminPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#1e293b',
+      background: '#FFFFFF',
       border: '1px solid #ef4444',
       borderRadius: '12px',
       padding: '2rem',
@@ -13838,17 +13838,17 @@ function AdminPage({
     }
   }, "Delete User"), /*#__PURE__*/React.createElement("p", {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.9rem',
       marginBottom: '1rem'
     }
   }, "This will permanently delete ", /*#__PURE__*/React.createElement("strong", {
     style: {
-      color: '#f1f5f9'
+      color: '#0f172a'
     }
   }, confirmDelete.name), " (", confirmDelete.email, ") and revoke all their sessions immediately."), /*#__PURE__*/React.createElement("p", {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.85rem',
       marginBottom: '1rem'
     }
@@ -13890,7 +13890,7 @@ function AdminPage({
       left: 0,
       right: 0,
       bottom: 0,
-      background: 'rgba(0,0,0,0.7)',
+      background: 'rgba(0,0,0,0.3)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -13901,8 +13901,8 @@ function AdminPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '12px',
       padding: '2rem',
       width: '100%',
@@ -13912,19 +13912,19 @@ function AdminPage({
     style: {
       fontFamily: "'Orbitron', sans-serif",
       fontSize: '1.2rem',
-      color: '#34d399',
+      color: '#14b8a6',
       marginTop: 0,
       marginBottom: '0.75rem'
     }
   }, "Reset Password"), /*#__PURE__*/React.createElement("p", {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.9rem',
       marginBottom: '1rem'
     }
   }, "Set a new password for ", /*#__PURE__*/React.createElement("strong", {
     style: {
-      color: '#f1f5f9'
+      color: '#0f172a'
     }
   }, resetTarget.name), " (", resetTarget.email, "). This will log them out of all sessions."), /*#__PURE__*/React.createElement("input", {
     style: {
@@ -14185,7 +14185,7 @@ function ActivityModal({
   };
   const ACTION_COLORS = {
     'SAVED': '#34d399',
-    'STATUS_CHANGED': '#22d3ee',
+    'STATUS_CHANGED': '#3b82f6',
     'NOTE_ADDED': '#a5b4fc',
     'FOLLOWUP_SET': '#fbbf24',
     'FOLLOWUP_CLEARED': '#94a3b8',
@@ -14226,7 +14226,7 @@ function ActivityModal({
     }
   }, "Loading..."), !loading && activities.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
-      color: '#475569',
+      color: '#94a3b8',
       textAlign: 'center',
       padding: '2rem',
       fontStyle: 'italic'
@@ -14243,7 +14243,7 @@ function ActivityModal({
       top: '8px',
       bottom: '8px',
       width: '2px',
-      background: '#334155'
+      background: '#e2e8f0'
     }
   }), activities.map((a, i) => /*#__PURE__*/React.createElement("div", {
     key: a.id,
@@ -14273,18 +14273,18 @@ function ActivityModal({
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#f1f5f9',
+      color: '#0f172a',
       fontSize: '0.85rem',
       fontWeight: 600
     }
   }, a.actor.id === user?.id ? 'You' : a.actor.name), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#94a3b8',
+      color: '#64748b',
       fontSize: '0.85rem'
     }
   }, " ", describeAction(a))), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#475569',
+      color: '#94a3b8',
       fontSize: '0.7rem',
       whiteSpace: 'nowrap',
       flexShrink: 0
@@ -14304,7 +14304,8 @@ if (typeof document !== 'undefined' && !document.getElementById('pipeline-panel-
   _s.textContent = '@keyframes slideInRight{from{transform:translateX(100%)}to{transform:translateX(0)}}' +
     '.pl-row .pl-hover-actions{opacity:0;pointer-events:none;transition:opacity 0.15s}' +
     '.pl-row:hover .pl-hover-actions{opacity:1;pointer-events:auto}' +
-    '.pl-row:hover{border-color:#475569!important}';
+    '.pl-row{transition:box-shadow 0.15s,transform 0.15s}' +
+    '.pl-row:hover{box-shadow:0 4px 12px rgba(0,0,0,0.08)!important;transform:translateY(-1px)}';
   document.head.appendChild(_s);
 }
 function PipelinePage({
@@ -14358,15 +14359,15 @@ function PipelinePage({
   const _panelRow = (label, val) => /*#__PURE__*/React.createElement("div", {
     style: { display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem' }
   },
-    /*#__PURE__*/React.createElement("span", { style: { color: '#475569' } }, label),
-    /*#__PURE__*/React.createElement("span", { style: { color: '#94a3b8' } }, val || '\u2014')
+    /*#__PURE__*/React.createElement("span", { style: { color: '#94a3b8' } }, label),
+    /*#__PURE__*/React.createElement("span", { style: { color: '#64748b' } }, val || '\u2014')
   );
   const statusPill = (active, label) => ({
     fontSize: '0.8rem',
     padding: '0.35rem 0.75rem',
     borderRadius: '9999px',
-    border: `1px solid ${active ? '#34d399' : '#334155'}`,
-    background: active ? 'rgba(16,185,129,0.15)' : 'transparent',
+    border: `1px solid ${active ? '#34d399' : '#e2e8f0'}`,
+    background: active ? 'rgba(20,184,166,0.1)' : 'transparent',
     color: active ? '#34d399' : '#94a3b8',
     cursor: 'pointer',
     fontFamily: 'Inter,sans-serif',
@@ -14462,15 +14463,15 @@ function PipelinePage({
     }
   }, leads.map(lead => {
     const contactName = [lead.contact_first_name, lead.contact_last_name].filter(Boolean).join(' ');
-    const heatColor = lead.warmth_score >= 70 ? '#34d399' : lead.warmth_score >= 40 ? '#fbbf24' : lead.warmth_score >= 1 ? '#fb923c' : '#475569';
+    const heatColor = lead.warmth_score >= 70 ? '#34d399' : lead.warmth_score >= 40 ? '#fbbf24' : lead.warmth_score >= 1 ? '#fb923c' : '#94a3b8';
     const stageMeta = { cold: 'Cold', initial_outreach: 'Outreach', light_conversation: 'Follow-Up', active: 'Active', warm: 'Warm', strategic: 'Strategic', dormant: 'Dormant' };
     return /*#__PURE__*/React.createElement("div", {
     key: lead.id,
     className: 'pl-row',
     onClick: () => setPanelLead(lead),
     style: {
-      background: '#1e293b',
-      border: '1px solid #334155',
+      background: '#FFFFFF',
+      border: '1px solid #e2e8f0',
       borderRadius: '12px',
       padding: '1rem',
       display: 'flex',
@@ -14478,6 +14479,7 @@ function PipelinePage({
       gap: '1rem',
       flexWrap: 'wrap',
       cursor: 'pointer',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
       position: 'relative',
       transition: 'border-color 0.15s'
     }
@@ -14491,7 +14493,7 @@ function PipelinePage({
       fontFamily: "'Orbitron',sans-serif",
       fontSize: '1rem',
       fontWeight: 700,
-      color: '#f1f5f9',
+      color: '#0f172a',
       marginBottom: '0.2rem'
     }
   }, lead.company_name), /*#__PURE__*/React.createElement("div", {
@@ -14501,7 +14503,7 @@ function PipelinePage({
       style: { fontSize: '0.75rem', color: '#64748b' }
     }, lead.owner_user_id === user?.id ? 'Me' : lead.owner_name || 'Unassigned'),
     contactName && /*#__PURE__*/React.createElement("span", {
-      style: { fontSize: '0.72rem', color: '#94a3b8' }
+      style: { fontSize: '0.72rem', color: '#64748b' }
     }, '\u00B7 ' + contactName + (lead.contact_title ? ' (' + lead.contact_title + ')' : '')),
     lead.relationship_stage && /*#__PURE__*/React.createElement("span", {
       style: { fontSize: '0.6rem', padding: '0.1rem 0.4rem', borderRadius: '9999px', background: 'rgba(96,165,250,0.15)', color: '#60a5fa', fontWeight: 600 }
@@ -14518,8 +14520,8 @@ function PipelinePage({
         display: 'inline-flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.15rem',
         fontSize: '0.64rem', fontWeight: 600, fontFamily: "'Inter',sans-serif",
         padding: '0.15rem 0.45rem', borderRadius: '0.3rem',
-        background: lead.last_signal_title ? 'rgba(251,191,36,0.12)' : 'rgba(51,65,85,0.3)',
-        color: lead.last_signal_title ? '#fbbf24' : '#475569'
+        background: lead.last_signal_title ? 'rgba(251,191,36,0.12)' : 'rgba(226,232,240,0.3)',
+        color: lead.last_signal_title ? '#fbbf24' : '#94a3b8'
       }
     },
       /*#__PURE__*/React.createElement("span", {
@@ -14625,7 +14627,7 @@ function PipelinePage({
   })()), lead.last_activity_at && /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: '0.7rem',
-      color: '#475569'
+      color: '#94a3b8'
     }
   }, (() => {
     const diff = Date.now() - new Date(lead.last_activity_at).getTime();
@@ -14641,21 +14643,21 @@ function PipelinePage({
   },
     /*#__PURE__*/React.createElement("button", {
       onClick: e => { e.stopPropagation(); const cn = [lead.contact_first_name, lead.contact_last_name].filter(Boolean).join(' '); _launchSignalStack({ contact: { first_name: lead.contact_first_name, last_name: lead.contact_last_name, title: lead.contact_title }, group: lead.group_name ? { name: lead.group_name } : { name: lead.company_name }, relationship_stage: lead.relationship_stage, channel: 'email', title: 'Outreach \u2014 ' + (cn || lead.company_name) }); },
-      style: { background: 'rgba(16,185,129,0.15)', border: '1px solid #334155', color: '#6ee7b7', padding: '0.25rem 0.55rem', borderRadius: '0.35rem', fontSize: '0.68rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif", whiteSpace: 'nowrap' }
+      style: { background: 'rgba(20,184,166,0.1)', border: '1px solid #e2e8f0', color: '#0d9488', padding: '0.25rem 0.55rem', borderRadius: '0.35rem', fontSize: '0.68rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif", whiteSpace: 'nowrap' }
     }, "Draft"),
     /*#__PURE__*/React.createElement("button", {
       onClick: e => { e.stopPropagation(); setTouchpointTarget({ lead_id: lead.id, company_name: lead.company_name }); },
-      style: { background: 'transparent', border: '1px solid #334155', color: '#94a3b8', padding: '0.25rem 0.55rem', borderRadius: '0.35rem', fontSize: '0.68rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif", whiteSpace: 'nowrap' }
+      style: { background: 'transparent', border: '1px solid #e2e8f0', color: '#64748b', padding: '0.25rem 0.55rem', borderRadius: '0.35rem', fontSize: '0.68rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif", whiteSpace: 'nowrap' }
     }, "Log Touch"),
     /*#__PURE__*/React.createElement("button", {
       onClick: e => { e.stopPropagation(); const d = prompt('Follow-up date (YYYY-MM-DD):'); if (d) updateLead(lead.id, 'next_followup_at', new Date(d).toISOString()); },
-      style: { background: 'transparent', border: '1px solid #334155', color: '#94a3b8', padding: '0.25rem 0.55rem', borderRadius: '0.35rem', fontSize: '0.68rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif", whiteSpace: 'nowrap' }
+      style: { background: 'transparent', border: '1px solid #e2e8f0', color: '#64748b', padding: '0.25rem 0.55rem', borderRadius: '0.35rem', fontSize: '0.68rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif", whiteSpace: 'nowrap' }
     }, "Follow-Up"),
     /*#__PURE__*/React.createElement("select", {
       value: lead.status,
       onClick: e => e.stopPropagation(),
       onChange: e => { e.stopPropagation(); updateLead(lead.id, 'status', e.target.value); },
-      style: { background: '#0f172a', border: '1px solid #334155', color: '#94a3b8', padding: '0.25rem 0.4rem', borderRadius: '0.35rem', fontSize: '0.68rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif" }
+      style: { background: '#F1F5F9', border: '1px solid #e2e8f0', color: '#64748b', padding: '0.25rem 0.4rem', borderRadius: '0.35rem', fontSize: '0.68rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif" }
     }, CRM_STATUSES.map(s => /*#__PURE__*/React.createElement("option", { key: s, value: s }, s)))
   )
   )})), touchpointTarget && /*#__PURE__*/React.createElement(TouchpointModal, {
@@ -14673,7 +14675,7 @@ function PipelinePage({
     onClick: () => setPanelLead(null),
     style: {
       position: 'fixed', inset: 0, zIndex: 999,
-      background: 'rgba(0,0,0,0.4)',
+      background: 'rgba(0,0,0,0.1)',
       transition: 'opacity 0.2s'
     }
   },
@@ -14682,9 +14684,9 @@ function PipelinePage({
       style: {
         position: 'absolute', top: 0, right: 0, bottom: 0,
         width: '420px', maxWidth: '90vw',
-        background: '#0f172a',
-        borderLeft: '1px solid #334155',
-        boxShadow: '-8px 0 30px rgba(0,0,0,0.5)',
+        background: '#F1F5F9',
+        borderLeft: '1px solid #e2e8f0',
+        boxShadow: '-8px 0 30px rgba(0,0,0,0.12)',
         display: 'flex', flexDirection: 'column',
         overflow: 'hidden',
         animation: 'slideInRight 0.2s ease-out'
@@ -14694,12 +14696,12 @@ function PipelinePage({
       /*#__PURE__*/React.createElement("div", {
         style: {
           padding: '1rem 1.25rem',
-          borderBottom: '1px solid #1e293b',
+          borderBottom: '1px solid #e2e8f0',
           display: 'flex', justifyContent: 'space-between', alignItems: 'center'
         }
       },
         /*#__PURE__*/React.createElement("div", {
-          style: { fontFamily: "'Orbitron',sans-serif", fontSize: '1rem', fontWeight: 700, color: '#f1f5f9' }
+          style: { fontFamily: "'Orbitron',sans-serif", fontSize: '1rem', fontWeight: 700, color: '#0f172a' }
         }, panelLead.company_name),
         /*#__PURE__*/React.createElement("button", {
           onClick: () => setPanelLead(null),
@@ -14713,7 +14715,7 @@ function PipelinePage({
       /*#__PURE__*/React.createElement("div", {
         style: {
           padding: '0.75rem 1.25rem',
-          borderBottom: '1px solid #1e293b',
+          borderBottom: '1px solid #e2e8f0',
           display: 'flex', gap: '0.5rem', flexWrap: 'wrap'
         }
       },
@@ -14728,23 +14730,23 @@ function PipelinePage({
               title: 'Outreach \u2014 ' + (cn || panelLead.company_name)
             });
           },
-          style: { background: 'rgba(16,185,129,0.15)', border: '1px solid #334155', color: '#6ee7b7', padding: '0.35rem 0.7rem', borderRadius: '0.4rem', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif" }
+          style: { background: 'rgba(20,184,166,0.1)', border: '1px solid #e2e8f0', color: '#0d9488', padding: '0.35rem 0.7rem', borderRadius: '0.4rem', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif" }
         }, "Draft in SignalStack"),
         /*#__PURE__*/React.createElement("button", {
           onClick: () => { setPanelLead(null); setTouchpointTarget({ lead_id: panelLead.id, company_name: panelLead.company_name }); },
-          style: { background: 'transparent', border: '1px solid #334155', color: '#94a3b8', padding: '0.35rem 0.7rem', borderRadius: '0.4rem', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif" }
+          style: { background: 'transparent', border: '1px solid #e2e8f0', color: '#64748b', padding: '0.35rem 0.7rem', borderRadius: '0.4rem', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif" }
         }, "Log Touch"),
         /*#__PURE__*/React.createElement("button", {
           onClick: () => {
             const d = prompt('Follow-up date (YYYY-MM-DD):');
             if (d) updateLead(panelLead.id, 'next_followup_at', new Date(d).toISOString());
           },
-          style: { background: 'transparent', border: '1px solid #334155', color: '#94a3b8', padding: '0.35rem 0.7rem', borderRadius: '0.4rem', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif" }
+          style: { background: 'transparent', border: '1px solid #e2e8f0', color: '#64748b', padding: '0.35rem 0.7rem', borderRadius: '0.4rem', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif" }
         }, "Set Follow-Up"),
         /*#__PURE__*/React.createElement("select", {
           value: panelLead.status,
           onChange: e => { updateLead(panelLead.id, 'status', e.target.value); setPanelLead(Object.assign({}, panelLead, { status: e.target.value })); },
-          style: { background: '#1e293b', border: '1px solid #334155', color: '#94a3b8', padding: '0.35rem 0.5rem', borderRadius: '0.4rem', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif" }
+          style: { background: '#FFFFFF', border: '1px solid #e2e8f0', color: '#64748b', padding: '0.35rem 0.5rem', borderRadius: '0.4rem', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif" }
         }, CRM_STATUSES.map(s => /*#__PURE__*/React.createElement("option", { key: s, value: s }, s)))
       ),
 
@@ -14754,7 +14756,7 @@ function PipelinePage({
 
         /*#__PURE__*/React.createElement("div", { style: { marginBottom: '1.25rem' } },
           /*#__PURE__*/React.createElement("div", {
-            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#475569', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
+            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
           }, "Details"),
           /*#__PURE__*/React.createElement("div", { style: { display: 'flex', flexDirection: 'column', gap: '0.35rem' } },
             _panelRow('Status', panelLead.status),
@@ -14766,9 +14768,9 @@ function PipelinePage({
 
         panelLead.group_name && /*#__PURE__*/React.createElement("div", { style: { marginBottom: '1.25rem' } },
           /*#__PURE__*/React.createElement("div", {
-            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#475569', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
+            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
           }, "Group / Account"),
-          /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.85rem', color: '#e2e8f0', marginBottom: '0.15rem' } }, panelLead.group_name),
+          /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.85rem', color: '#1e293b', marginBottom: '0.15rem' } }, panelLead.group_name),
           panelLead.warmth_score > 0 && /*#__PURE__*/React.createElement("span", {
             style: { fontSize: '0.68rem', color: panelLead.warmth_score >= 70 ? '#34d399' : panelLead.warmth_score >= 40 ? '#fbbf24' : '#fb923c' }
           }, 'Warmth: ' + panelLead.warmth_score)
@@ -14776,27 +14778,27 @@ function PipelinePage({
 
         /*#__PURE__*/React.createElement("div", { style: { marginBottom: '1.25rem' } },
           /*#__PURE__*/React.createElement("div", {
-            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#475569', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
+            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
           }, "Contact"),
           (() => {
             const cn = [panelLead.contact_first_name, panelLead.contact_last_name].filter(Boolean).join(' ');
             return cn
               ? /*#__PURE__*/React.createElement("div", null,
-                  /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.85rem', color: '#e2e8f0' } }, cn),
-                  panelLead.contact_title && /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.75rem', color: '#94a3b8' } }, panelLead.contact_title),
+                  /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.85rem', color: '#1e293b' } }, cn),
+                  panelLead.contact_title && /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.75rem', color: '#64748b' } }, panelLead.contact_title),
                   panelLead.relationship_stage && /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.68rem', color: '#60a5fa', marginTop: '0.2rem' } }, 'Stage: ' + (({ cold:'Cold', initial_outreach:'Outreach', light_conversation:'Follow-Up', active:'Active', warm:'Warm', strategic:'Strategic', dormant:'Dormant' })[panelLead.relationship_stage] || panelLead.relationship_stage))
                 )
-              : /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.78rem', color: '#475569', fontStyle: 'italic' } }, 'No contact linked');
+              : /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.78rem', color: '#94a3b8', fontStyle: 'italic' } }, 'No contact linked');
           })()
         ),
 
         /*#__PURE__*/React.createElement("div", { style: { marginBottom: '1.25rem' } },
           /*#__PURE__*/React.createElement("div", {
-            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#475569', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
+            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
           }, "Last Touch"),
           panelLead.last_activity_at
             ? /*#__PURE__*/React.createElement("div", null,
-                /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.82rem', color: '#94a3b8' } },
+                /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.82rem', color: '#64748b' } },
                   (() => {
                     const diff = Date.now() - new Date(panelLead.last_activity_at).getTime();
                     const d = Math.floor(diff / 86400000);
@@ -14804,15 +14806,15 @@ function PipelinePage({
                   })()
                 ),
                 panelLead.last_action_type && /*#__PURE__*/React.createElement("div", {
-                  style: { fontSize: '0.72rem', color: '#475569' }
+                  style: { fontSize: '0.72rem', color: '#94a3b8' }
                 }, (panelLead.last_action_type || '').replace(/_/g, ' ').toLowerCase())
               )
-            : /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.78rem', color: '#475569', fontStyle: 'italic' } }, 'No activity recorded')
+            : /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.78rem', color: '#94a3b8', fontStyle: 'italic' } }, 'No activity recorded')
         ),
 
         panelLead.next_followup_at && /*#__PURE__*/React.createElement("div", { style: { marginBottom: '1.25rem' } },
           /*#__PURE__*/React.createElement("div", {
-            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#475569', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
+            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
           }, "Follow-Up"),
           /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.82rem', color: '#fbbf24' } },
             new Date(panelLead.next_followup_at).toLocaleDateString()
@@ -14821,18 +14823,18 @@ function PipelinePage({
 
         /*#__PURE__*/React.createElement("div", { style: { marginBottom: '1.25rem' } },
           /*#__PURE__*/React.createElement("div", {
-            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#475569', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
+            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
           }, "Signals"),
           panelLead.last_signal_title
-            ? /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.78rem', color: '#94a3b8' } }, panelLead.last_signal_title)
-            : /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.78rem', color: '#475569', fontStyle: 'italic' } }, 'No signals detected')
+            ? /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.78rem', color: '#64748b' } }, panelLead.last_signal_title)
+            : /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.78rem', color: '#94a3b8', fontStyle: 'italic' } }, 'No signals detected')
         ),
 
         /*#__PURE__*/React.createElement("div", null,
           /*#__PURE__*/React.createElement("div", {
-            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#475569', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
+            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
           }, "Notes"),
-          /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.78rem', color: '#475569', fontStyle: 'italic' } }, 'No notes yet')
+          /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.78rem', color: '#94a3b8', fontStyle: 'italic' } }, 'No notes yet')
         )
       )
     )
@@ -14917,8 +14919,8 @@ function FollowUpsPage({
     return /*#__PURE__*/React.createElement("div", {
       key: lead.id,
       style: {
-        background: '#1e293b',
-        border: `1px solid ${isOverdue ? 'rgba(239,68,68,0.4)' : '#334155'}`,
+        background: '#FFFFFF',
+        border: `1px solid ${isOverdue ? 'rgba(239,68,68,0.4)' : '#e2e8f0'}`,
         borderLeft: isOverdue ? '4px solid #ef4444' : '4px solid #fbbf24',
         borderRadius: '12px',
         padding: '1rem',
@@ -14937,7 +14939,7 @@ function FollowUpsPage({
         fontFamily: "'Orbitron',sans-serif",
         fontSize: '1rem',
         fontWeight: 700,
-        color: '#f1f5f9',
+        color: '#0f172a',
         marginBottom: '0.2rem'
       }
     }, lead.company_name), /*#__PURE__*/React.createElement("div", {
@@ -15012,7 +15014,7 @@ const ds = {
     display: 'flex',
     gap: '0.25rem',
     marginBottom: '2rem',
-    borderBottom: '2px solid #334155',
+    borderBottom: '2px solid #e2e8f0',
     paddingBottom: '0'
   },
   tab: {
@@ -15029,17 +15031,17 @@ const ds = {
     transition: 'color 0.2s, border-color 0.2s'
   },
   tabActive: {
-    color: '#34d399',
+    color: '#14b8a6',
     borderBottomColor: '#34d399'
   },
   loadingMsg: {
     textAlign: 'center',
     padding: '3rem',
-    color: '#94a3b8'
+    color: '#64748b'
   },
   configPanel: {
-    background: '#1e293b',
-    border: '1px solid rgba(51,65,85,0.5)',
+    background: '#FFFFFF',
+    border: '1px solid rgba(226,232,240,0.5)',
     borderRadius: '1rem',
     padding: '1.5rem',
     marginBottom: '2rem'
@@ -15056,10 +15058,10 @@ const ds = {
     fontFamily: "'Orbitron', sans-serif",
     fontSize: '1.3rem',
     fontWeight: 700,
-    color: '#34d399'
+    color: '#14b8a6'
   },
   schedule: {
-    color: '#94a3b8',
+    color: '#64748b',
     fontSize: '0.9rem'
   },
   configGrid: {
@@ -15085,7 +15087,7 @@ const ds = {
     borderRadius: '20px',
     padding: '0.3rem 0.8rem',
     fontSize: '0.85rem',
-    color: '#34d399'
+    color: '#14b8a6'
   },
   keywordChip: {
     background: 'rgba(6,182,212,0.1)',
@@ -15093,7 +15095,7 @@ const ds = {
     borderRadius: '20px',
     padding: '0.3rem 0.8rem',
     fontSize: '0.8rem',
-    color: '#22d3ee'
+    color: '#3b82f6'
   },
   sourceChip: {
     background: 'rgba(251,191,36,0.1)',
@@ -15117,7 +15119,7 @@ const ds = {
     flexWrap: 'wrap'
   },
   filterItem: {
-    color: '#f1f5f9',
+    color: '#0f172a',
     fontSize: '0.9rem'
   },
   actionBar: {
@@ -15128,12 +15130,12 @@ const ds = {
     flexWrap: 'wrap'
   },
   lastRun: {
-    color: '#94a3b8',
+    color: '#64748b',
     fontSize: '0.85rem'
   },
   digestBox: {
-    background: '#0f172a',
-    border: '1px solid #334155',
+    background: '#F1F5F9',
+    border: '1px solid #e2e8f0',
     borderRadius: '1rem',
     padding: '1.5rem',
     marginBottom: '2rem',
@@ -15143,7 +15145,7 @@ const ds = {
   digestText: {
     fontFamily: "'JetBrains Mono', monospace",
     fontSize: '0.85rem',
-    color: '#f1f5f9',
+    color: '#0f172a',
     whiteSpace: 'pre-wrap',
     lineHeight: '1.5',
     margin: 0
@@ -15157,21 +15159,21 @@ const ds = {
     gap: '0.75rem',
     marginBottom: '1rem',
     paddingBottom: '0.5rem',
-    borderBottom: '1px solid #334155'
+    borderBottom: '1px solid #e2e8f0'
   },
   cityTitle: {
     fontFamily: "'Orbitron', sans-serif",
     fontSize: '1.1rem',
     fontWeight: 700,
-    color: '#22d3ee'
+    color: '#3b82f6'
   },
   newBadge: {
-    background: 'rgba(16,185,129,0.15)',
-    border: '1px solid #34d399',
+    background: 'rgba(20,184,166,0.1)',
+    border: '1px solid #14b8a6',
     borderRadius: '12px',
     padding: '0.15rem 0.6rem',
     fontSize: '0.75rem',
-    color: '#34d399',
+    color: '#14b8a6',
     fontWeight: 600
   },
   errorText: {
@@ -15179,7 +15181,7 @@ const ds = {
     fontSize: '0.9rem'
   },
   noResults: {
-    color: '#94a3b8',
+    color: '#64748b',
     fontSize: '0.9rem',
     fontStyle: 'italic'
   },
@@ -15189,8 +15191,8 @@ const ds = {
     gap: '1rem'
   },
   signalCard: {
-    background: '#1e293b',
-    border: '1px solid rgba(51,65,85,0.5)',
+    background: '#FFFFFF',
+    border: '1px solid rgba(226,232,240,0.5)',
     borderRadius: '1rem',
     padding: '1.25rem',
     transition: 'all 0.2s'
@@ -15215,17 +15217,17 @@ const ds = {
     fontFamily: "'Orbitron', sans-serif",
     fontSize: '0.95rem',
     fontWeight: 600,
-    color: '#f1f5f9'
+    color: '#0f172a'
   },
   signalTitle: {
     fontSize: '0.9rem',
-    color: '#f1f5f9',
+    color: '#0f172a',
     marginBottom: '0.5rem',
     lineHeight: '1.4'
   },
   signalSummary: {
     fontSize: '0.85rem',
-    color: '#94a3b8',
+    color: '#64748b',
     marginBottom: '0.75rem',
     lineHeight: '1.5'
   },
@@ -15241,10 +15243,10 @@ const ds = {
   },
   signalDate: {
     fontSize: '0.8rem',
-    color: '#94a3b8'
+    color: '#64748b'
   },
   signalLink: {
-    color: '#22d3ee',
+    color: '#3b82f6',
     textDecoration: 'none',
     fontSize: '0.85rem',
     display: 'inline-block',
@@ -15252,8 +15254,8 @@ const ds = {
   },
   historySection: {
     marginTop: '2rem',
-    background: '#1e293b',
-    border: '1px solid #334155',
+    background: '#FFFFFF',
+    border: '1px solid #e2e8f0',
     borderRadius: '1rem',
     padding: '1.5rem'
   },
@@ -15270,21 +15272,21 @@ const ds = {
     padding: '0.75rem 1rem',
     borderRadius: '8px',
     cursor: 'pointer',
-    background: '#0f172a',
+    background: '#F1F5F9',
     border: '1px solid transparent',
     transition: 'all 0.2s'
   },
   historyItemActive: {
-    border: '1px solid #34d399',
-    background: 'rgba(16,185,129,0.05)'
+    border: '1px solid #14b8a6',
+    background: 'rgba(20,184,166,0.04)'
   },
   historyDate: {
     fontSize: '0.85rem',
-    color: '#f1f5f9'
+    color: '#0f172a'
   },
   historyStats: {
     fontSize: '0.85rem',
-    color: '#94a3b8'
+    color: '#64748b'
   },
   historyStatus: {
     fontSize: '0.8rem',
@@ -15292,8 +15294,8 @@ const ds = {
     textTransform: 'uppercase'
   },
   sourceRefreshBar: {
-    background: '#1e293b',
-    border: '1px solid #334155',
+    background: '#FFFFFF',
+    border: '1px solid #e2e8f0',
     borderRadius: '1rem',
     padding: '1rem 1.25rem',
     marginBottom: '1.5rem'
@@ -15307,7 +15309,7 @@ const ds = {
   },
   filterToggle: {
     background: 'transparent',
-    border: '1px solid #334155',
+    border: '1px solid #e2e8f0',
     borderRadius: '20px',
     padding: '0.3rem 0.8rem',
     fontSize: '0.8rem',
@@ -15354,7 +15356,7 @@ const styles = {
     fontFamily: "'Orbitron', sans-serif",
     fontSize: '2.5rem',
     fontWeight: 900,
-    background: 'linear-gradient(135deg, #34d399 0%, #22d3ee 100%)',
+    background: 'linear-gradient(135deg, #14b8a6 0%, #3b82f6 100%)',
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
     marginBottom: '0.5rem',
@@ -15372,8 +15374,8 @@ const styles = {
     marginBottom: '2rem'
   },
   statCard: {
-    background: '#1e293b',
-    border: '1px solid rgba(51,65,85,0.5)',
+    background: '#FFFFFF',
+    border: '1px solid rgba(226,232,240,0.5)',
     borderRadius: '1rem',
     padding: '1.25rem'
   },
@@ -15389,7 +15391,7 @@ const styles = {
     fontFamily: "'JetBrains Mono', monospace",
     fontSize: '1.8rem',
     fontWeight: 700,
-    color: '#34d399',
+    color: '#14b8a6',
     lineHeight: '1.2',
     display: 'block',
     minHeight: '2.2rem'
@@ -15401,10 +15403,10 @@ const styles = {
     position: 'sticky',
     top: 0,
     zIndex: 20,
-    background: 'rgba(2,6,23,0.80)',
+    background: 'rgba(255,255,255,0.85)',
     backdropFilter: 'blur(12px)',
     WebkitBackdropFilter: 'blur(12px)',
-    borderBottom: '1px solid #1e293b',
+    borderBottom: '1px solid #e2e8f0',
     padding: '0.75rem 1rem',
     marginBottom: '2rem',
     display: 'flex',
@@ -15413,8 +15415,8 @@ const styles = {
   },
   btn: {
     background: 'transparent',
-    border: '1px solid #334155',
-    color: '#94a3b8',
+    border: '1px solid #e2e8f0',
+    color: '#64748b',
     padding: '0.6rem 1.2rem',
     borderRadius: '0.5rem',
     fontSize: '0.85rem',
@@ -15423,7 +15425,7 @@ const styles = {
     transition: 'all 0.2s'
   },
   btnPrimary: {
-    background: '#10b981',
+    background: '#14b8a6',
     border: 'none',
     color: '#0f172a',
     padding: '0.6rem 1.5rem',
@@ -15435,9 +15437,9 @@ const styles = {
     transition: 'all 0.2s'
   },
   input: {
-    background: '#1e293b',
-    border: '1px solid #334155',
-    color: '#f1f5f9',
+    background: '#FFFFFF',
+    border: '1px solid #e2e8f0',
+    color: '#0f172a',
     padding: '0.6rem 1rem',
     borderRadius: '0.5rem',
     fontSize: '0.85rem',
@@ -15446,9 +15448,9 @@ const styles = {
     outline: 'none'
   },
   select: {
-    background: '#1e293b',
-    border: '1px solid #334155',
-    color: '#f1f5f9',
+    background: '#FFFFFF',
+    border: '1px solid #e2e8f0',
+    color: '#0f172a',
     padding: '0.6rem 0.75rem',
     borderRadius: '0.5rem',
     fontSize: '0.85rem',
@@ -15457,14 +15459,14 @@ const styles = {
     outline: 'none'
   },
   searchStatus: {
-    background: 'rgba(16,185,129,0.08)',
+    background: 'rgba(20,184,166,0.06)',
     border: '1px solid rgba(16,185,129,0.3)',
     borderRadius: '0.5rem',
     padding: '0.85rem',
     marginBottom: '1.5rem',
     textAlign: 'center',
     fontWeight: 500,
-    color: '#34d399',
+    color: '#14b8a6',
     fontSize: '0.9rem'
   },
   loading: {
@@ -15474,7 +15476,7 @@ const styles = {
   loadingText: {
     fontFamily: "'Orbitron', sans-serif",
     fontSize: '1rem',
-    color: '#34d399',
+    color: '#14b8a6',
     animation: 'pulse 1.5s ease-in-out infinite'
   },
   empty: {
@@ -15489,23 +15491,23 @@ const styles = {
   },
   emptyText: {
     fontSize: '1rem',
-    color: '#94a3b8',
+    color: '#64748b',
     marginBottom: '0.5rem'
   },
   emptySubtext: {
     fontSize: '0.85rem',
-    color: '#475569'
+    color: '#94a3b8'
   },
   grid: {
     display: 'grid',
     gap: '1.25rem'
   },
   card: {
-    background: '#1e293b',
-    border: '1px solid rgba(51,65,85,0.5)',
+    background: '#FFFFFF',
+    border: '1px solid rgba(226,232,240,0.5)',
     borderRadius: '1rem',
     padding: '1rem',
-    boxShadow: '0 10px 15px -3px rgba(0,0,0,0.2), 0 4px 6px -4px rgba(0,0,0,0.2)',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)',
     display: 'grid',
     gap: '0.75rem'
   },
@@ -15519,7 +15521,7 @@ const styles = {
     fontFamily: "'Orbitron', sans-serif",
     fontSize: '1.15rem',
     fontWeight: 700,
-    color: '#f1f5f9',
+    color: '#0f172a',
     marginBottom: '0.2rem'
   },
   location: {
@@ -15528,9 +15530,9 @@ const styles = {
   },
   executive: {
     paddingBottom: '0.5rem',
-    borderBottom: '1px solid #1e293b',
+    borderBottom: '1px solid #e2e8f0',
     fontSize: '0.9rem',
-    color: '#94a3b8'
+    color: '#64748b'
   },
   linkedinLink: {
     marginLeft: '0.75rem',
@@ -15544,7 +15546,7 @@ const styles = {
     gridTemplateColumns: 'repeat(2, 1fr)',
     gap: '0.4rem',
     fontSize: '0.85rem',
-    color: '#cbd5e1'
+    color: '#334155'
   },
   whyNow: {
     background: 'rgba(239,68,68,0.06)',
@@ -15565,29 +15567,29 @@ const styles = {
   signalItem: {
     marginBottom: '0.35rem',
     fontSize: '0.85rem',
-    color: '#94a3b8'
+    color: '#64748b'
   },
   cardActions: {
     display: 'flex',
     gap: '0.5rem',
     flexWrap: 'wrap',
     paddingTop: '0.5rem',
-    borderTop: '1px solid #1e293b'
+    borderTop: '1px solid #e2e8f0'
   },
   actionBtn: {
     fontSize: '0.75rem',
     padding: '0.35rem 0.75rem',
     borderRadius: '6px',
-    border: '1px solid #475569',
+    border: '1px solid #cbd5e1',
     background: 'transparent',
-    color: '#cbd5e1',
+    color: '#334155',
     cursor: 'pointer',
     fontFamily: "'Inter', sans-serif",
     fontWeight: 500
   },
   emailOptions: {
-    background: 'rgba(16,185,129,0.04)',
-    border: '1px solid rgba(16,185,129,0.15)',
+    background: 'rgba(20,184,166,0.04)',
+    border: '1px solid rgba(20,184,166,0.1)',
     borderRadius: '8px',
     padding: '1rem',
     display: 'flex',
@@ -15613,7 +15615,7 @@ const styles = {
     left: 0,
     right: 0,
     bottom: 0,
-    background: 'rgba(0,0,0,0.75)',
+    background: 'rgba(0,0,0,0.3)',
     backdropFilter: 'blur(4px)',
     display: 'flex',
     alignItems: 'center',
@@ -15621,8 +15623,8 @@ const styles = {
     zIndex: 1000
   },
   modal: {
-    background: '#1e293b',
-    border: '1px solid #334155',
+    background: '#FFFFFF',
+    border: '1px solid #e2e8f0',
     borderRadius: '1rem',
     padding: '2rem',
     maxWidth: '600px',
@@ -15639,7 +15641,7 @@ const styles = {
   closeBtn: {
     background: 'none',
     border: 'none',
-    color: '#94a3b8',
+    color: '#64748b',
     fontSize: '1.3rem',
     cursor: 'pointer'
   },
@@ -15656,7 +15658,7 @@ const styles = {
   subjectLabel: {
     fontWeight: 700,
     fontSize: '0.75rem',
-    color: '#22d3ee',
+    color: '#3b82f6',
     textTransform: 'uppercase',
     flexShrink: 0
   },
@@ -15664,7 +15666,7 @@ const styles = {
     fontSize: '0.95rem',
     fontWeight: 600,
     flex: 1,
-    color: '#f1f5f9'
+    color: '#0f172a'
   },
   copySmall: {
     background: 'none',
@@ -15673,17 +15675,17 @@ const styles = {
     fontSize: '1rem',
     padding: '0.25rem',
     flexShrink: 0,
-    color: '#94a3b8'
+    color: '#64748b'
   },
   emailBody: {
-    background: '#0f172a',
+    background: '#F1F5F9',
     padding: '1.5rem',
     borderRadius: '8px',
     fontSize: '0.9rem',
     lineHeight: '1.7',
     marginBottom: '1rem',
     fontFamily: "'Inter', -apple-system, sans-serif",
-    color: '#cbd5e1'
+    color: '#334155'
   },
   modalActions: {
     display: 'flex',
@@ -15853,7 +15855,7 @@ function DeveloperNetworkPanel() {
       border: '1px solid rgba(100,116,139,0.3)',
       borderRadius: '6px',
       padding: '8px 12px',
-      color: '#e2e8f0',
+      color: '#1e293b',
       fontSize: '0.85rem'
     }
   }), e('button', {
@@ -15895,7 +15897,7 @@ function DeveloperNetworkPanel() {
     }
   }, e('div', null, e('div', {
     style: {
-      color: '#e2e8f0',
+      color: '#1e293b',
       fontSize: '0.85rem',
       fontWeight: 600
     }
@@ -15945,7 +15947,7 @@ function DeveloperNetworkPanel() {
     }
   }, e('span', {
     style: {
-      color: '#e2e8f0',
+      color: '#1e293b',
       fontSize: '0.85rem',
       fontWeight: 600
     }
@@ -15956,7 +15958,7 @@ function DeveloperNetworkPanel() {
     }
   }, '\u2194'), e('span', {
     style: {
-      color: '#e2e8f0',
+      color: '#1e293b',
       fontSize: '0.85rem',
       fontWeight: 600
     }
@@ -16136,7 +16138,7 @@ function DevelopmentCorridorsPanel() {
     }
   }, e('div', null, e('div', {
     style: {
-      color: '#e2e8f0',
+      color: '#1e293b',
       fontSize: '0.95rem',
       fontWeight: 700
     }
@@ -16320,7 +16322,7 @@ function MomentumEnginePanel() {
     }
   }, e('div', null, e('div', {
     style: {
-      color: '#e2e8f0',
+      color: '#1e293b',
       fontSize: '0.85rem',
       fontWeight: 600
     }
@@ -16512,7 +16514,7 @@ function SignalDiscoveryPanel() {
     }
   }, e('div', {
     style: {
-      color: '#e2e8f0',
+      color: '#1e293b',
       fontSize: '0.85rem',
       fontWeight: 600,
       overflow: 'hidden',
@@ -16552,7 +16554,7 @@ function SignalDiscoveryPanel() {
   }, 'P' + s.priority))), s.url && e('div', {
     style: {
       fontSize: '0.7rem',
-      color: '#475569',
+      color: '#94a3b8',
       overflow: 'hidden',
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap'
