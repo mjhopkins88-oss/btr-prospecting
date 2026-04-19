@@ -176,6 +176,13 @@ def create_capital_group():
         return jsonify({'error': f'insert failed: {e}'}), 400
 
     created = fetch_one('SELECT * FROM capital_groups WHERE id = ?', [gid])
+
+    try:
+        from services.task_engine import rule_new_group
+        rule_new_group(gid, name)
+    except Exception:
+        pass
+
     return jsonify(_row_to_group(created)), 201
 
 
@@ -357,6 +364,21 @@ def create_touchpoint(group_id):
     touchpoint = fetch_one(
         'SELECT * FROM capital_group_touchpoints WHERE id = ?', [tid]
     )
+
+    try:
+        from services.task_engine import rule_meeting_followup, rule_proposal_followup, _log_feed
+        group = fetch_one('SELECT name FROM capital_groups WHERE id = ?', [group_id])
+        gname = group['name'] if group else ''
+        notes = data.get('notes') or ''
+        if ttype == 'meeting':
+            rule_meeting_followup(group_id, gname, notes)
+        elif ttype in ('proposal', 'coverage'):
+            rule_proposal_followup(group_id, gname, notes)
+        else:
+            _log_feed(group_id, 'touchpoint', f'{ttype.capitalize()} logged', notes or f'{ttype} with {gname}')
+    except Exception:
+        pass
+
     return jsonify(touchpoint), 201
 
 

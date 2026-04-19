@@ -1099,6 +1099,90 @@ def init_db():
         pass
 
     # ===================================================================
+    # PROSPECTING TASK ENGINE — Tables
+    # ===================================================================
+
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'contact_name', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'contact_email', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'contact_phone', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'contact_linkedin', 'TEXT')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_sequences (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT,
+            status TEXT DEFAULT 'draft',
+            total_steps INTEGER DEFAULT 0,
+            step_definitions TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_enrollments (
+            id TEXT PRIMARY KEY,
+            sequence_id TEXT NOT NULL,
+            capital_group_id TEXT NOT NULL,
+            current_step INTEGER DEFAULT 1,
+            status TEXT DEFAULT 'active',
+            enrolled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_step_at TIMESTAMP,
+            completed_at TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_tasks (
+            id TEXT PRIMARY KEY,
+            capital_group_id TEXT,
+            type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            status TEXT DEFAULT 'pending',
+            priority INTEGER DEFAULT 5,
+            due_at TIMESTAMP,
+            completed_at TIMESTAMP,
+            trigger_rule TEXT,
+            enrollment_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_feed (
+            id TEXT PRIMARY KEY,
+            capital_group_id TEXT,
+            type TEXT NOT NULL,
+            action TEXT NOT NULL,
+            detail TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_tasks_status ON prospecting_tasks(status, due_at)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_tasks_group ON prospecting_tasks(capital_group_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_enroll_seq ON prospecting_enrollments(sequence_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_enroll_group ON prospecting_enrollments(capital_group_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_feed_type ON prospecting_feed(type, created_at DESC)')
+    except Exception:
+        pass
+
+    # ===================================================================
     # DEVELOPMENT EVENT PATTERN DETECTION — Tables
     # ===================================================================
 
@@ -2032,6 +2116,7 @@ from api.routes.momentum import momentum_bp
 from api.routes.corridors import corridors_bp
 from api.routes.signal_discovery import signal_discovery_bp
 from api.routes.capital_groups import capital_groups_bp
+from api.routes.prospecting import prospecting_bp
 
 app.register_blueprint(leads_bp)
 app.register_blueprint(projects_bp)
@@ -2050,6 +2135,7 @@ app.register_blueprint(momentum_bp)
 app.register_blueprint(corridors_bp)
 app.register_blueprint(signal_discovery_bp)
 app.register_blueprint(capital_groups_bp)
+app.register_blueprint(prospecting_bp)
 
 
 # ===================================================================
