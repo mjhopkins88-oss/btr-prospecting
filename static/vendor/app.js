@@ -5069,6 +5069,8 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   const [dueLoading, setDueLoading] = useState(true);
   const [clockTime, setClockTime] = useState(new Date());
   const [weather, setWeather] = useState(null);
+  const [focusItems, setFocusItems] = useState([]);
+  const [focusLoading, setFocusLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -5085,6 +5087,12 @@ function CommandCenter({ user, prospects, setActiveTab }) {
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(d) { if (!cancelled && d && !d.error) setWeather(d); })
       .catch(function() {});
+
+    fetch(API_BASE + '/api/prospecting/todays-focus?limit=8')
+      .then(function(r) { return r.ok ? r.json() : []; })
+      .then(function(d) { if (!cancelled) setFocusItems(Array.isArray(d) ? d : []); })
+      .catch(function() {})
+      .finally(function() { if (!cancelled) setFocusLoading(false); });
 
     return () => { cancelled = true; };
   }, []);
@@ -5107,12 +5115,25 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   })();
   const firstName = user?.name ? String(user.name).split(' ')[0] : '';
 
-  var alerts = [
-    { color: '#10b981', bg: 'rgba(16,185,129,0.06)', border: 'rgba(16,185,129,0.18)', icon: '\u{1F4CB}', label: 'PERMITS', text: 'Permit surge detected \u2014 Phoenix metro' },
-    { color: '#8b5cf6', bg: 'rgba(139,92,246,0.06)', border: 'rgba(139,92,246,0.18)', icon: '\u{1F4B0}', label: 'CAPITAL', text: 'Capital raise detected \u2014 Tampa' },
-    { color: '#f59e0b', bg: 'rgba(245,158,11,0.06)', border: 'rgba(245,158,11,0.18)', icon: '\u26A0\uFE0F', label: 'ZONING', text: 'Zoning change alert \u2014 Charlotte' },
-    { color: '#3b82f6', bg: 'rgba(59,130,246,0.06)', border: 'rgba(59,130,246,0.18)', icon: '\u{1F3D7}\uFE0F', label: 'BUILD', text: 'Construction start signal \u2014 Austin' }
-  ];
+  var _focusMeta = function(item) {
+    var nba = item.nba_type || '';
+    if (nba === 'signal_company') return { color: '#8b5cf6', bg: 'rgba(139,92,246,0.06)', border: 'rgba(139,92,246,0.18)', icon: '\u26A1', label: 'SIGNAL' };
+    if (nba === 'signal_industry') return { color: '#3b82f6', bg: 'rgba(59,130,246,0.06)', border: 'rgba(59,130,246,0.18)', icon: '\u{1F4E1}', label: 'INDUSTRY' };
+    if (nba === 'overdue_followup') return { color: '#f59e0b', bg: 'rgba(245,158,11,0.06)', border: 'rgba(245,158,11,0.18)', icon: '\u23F0', label: 'FOLLOW-UP' };
+    if (nba === 'stale_checkin') return { color: '#ef4444', bg: 'rgba(239,68,68,0.06)', border: 'rgba(239,68,68,0.18)', icon: '\u{1F525}', label: 'RE-ENGAGE' };
+    if (nba === 'initial_outreach') return { color: '#10b981', bg: 'rgba(16,185,129,0.06)', border: 'rgba(16,185,129,0.18)', icon: '\u{1F44B}', label: 'OUTREACH' };
+    var t = item.type || '';
+    if (t === 'research') return { color: '#14b8a6', bg: 'rgba(20,184,166,0.06)', border: 'rgba(20,184,166,0.18)', icon: '\u{1F50D}', label: 'RESEARCH' };
+    if (t === 'call') return { color: '#6366f1', bg: 'rgba(99,102,241,0.06)', border: 'rgba(99,102,241,0.18)', icon: '\u{1F4DE}', label: 'CALL' };
+    return { color: '#64748b', bg: 'rgba(100,116,139,0.06)', border: 'rgba(100,116,139,0.18)', icon: '\u{1F4CB}', label: 'TASK' };
+  };
+
+  var _draftFromTask = function(taskId) {
+    fetch(API_BASE + '/api/prospecting/tasks/' + taskId + '/signalstack-payload')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(payload) { if (payload) _launchSignalStack(payload); })
+      .catch(function() {});
+  };
 
   var role = user?.role || 'producer';
   var quickActions = [
@@ -5294,39 +5315,75 @@ function CommandCenter({ user, prospects, setActiveTab }) {
     },
       React.createElement('div', { style: sectionCard },
         React.createElement('div', { style: panelHeader },
-          React.createElement('h3', { style: panelTitle }, 'Key Signals & Alerts'),
+          React.createElement('h3', { style: panelTitle }, "Today\u2019s Focus" + (focusItems.length > 0 ? ' (' + focusItems.length + ')' : '')),
           React.createElement('button', {
             style: { ...styles.actionBtn, fontSize: '0.7rem' },
-            onClick: function() { setActiveTab('intelligence'); }
-          }, 'View all \u2192')
+            onClick: function() { setActiveTab('prospecting'); }
+          }, 'All tasks \u2192')
         ),
-        React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.5rem' } },
-          alerts.map(function(a, i) {
-            return React.createElement('div', {
-              key: i,
-              style: {
-                display: 'flex', alignItems: 'center', gap: '0.65rem',
-                padding: '0.65rem 0.85rem', background: a.bg,
-                border: '1px solid ' + a.border, borderRadius: '0.5rem',
-                transition: 'box-shadow 0.15s',
-                cursor: 'pointer'
-              }
+        focusLoading
+          ? React.createElement('div', {
+              style: { color: '#94a3b8', fontSize: '0.85rem', padding: '1.5rem 0', textAlign: 'center' }
             },
-              React.createElement('span', { style: { fontSize: '0.9rem', flexShrink: 0 } }, a.icon),
-              React.createElement('div', { style: { flex: 1, minWidth: 0 } },
-                React.createElement('div', {
-                  style: { fontSize: '0.65rem', fontWeight: 700, color: a.color, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.1rem' }
-                }, a.label),
-                React.createElement('div', {
-                  style: { fontSize: '0.82rem', color: '#334155', fontWeight: 500, lineHeight: 1.35 }
-                }, a.text)
-              ),
-              React.createElement('div', {
-                style: { width: '6px', height: '6px', borderRadius: '50%', background: a.color, flexShrink: 0, boxShadow: '0 0 6px ' + a.color }
-              })
-            );
-          })
-        )
+              React.createElement('div', { style: { fontSize: '1.2rem', marginBottom: '0.35rem', opacity: 0.4 } }, '\u23F3'),
+              'Loading\u2026'
+            )
+          : focusItems.length === 0
+            ? React.createElement('div', {
+                style: { textAlign: 'center', padding: '1.5rem 0' }
+              },
+                React.createElement('div', { style: { fontSize: '1.5rem', marginBottom: '0.4rem', opacity: 0.3 } }, '\u2705'),
+                React.createElement('div', { style: { fontSize: '0.85rem', fontWeight: 600, color: '#10b981', marginBottom: '0.15rem' } }, 'No pending actions'),
+                React.createElement('div', { style: { fontSize: '0.75rem', color: '#94a3b8' } }, 'Signal-driven tasks will appear here')
+              )
+            : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.5rem' } },
+                focusItems.slice(0, 6).map(function(item) {
+                  var m = _focusMeta(item);
+                  return React.createElement('div', {
+                    key: item.id,
+                    style: {
+                      display: 'flex', alignItems: 'center', gap: '0.65rem',
+                      padding: '0.65rem 0.85rem', background: m.bg,
+                      border: '1px solid ' + m.border, borderRadius: '0.5rem',
+                      transition: 'box-shadow 0.15s'
+                    }
+                  },
+                    React.createElement('span', { style: { fontSize: '0.9rem', flexShrink: 0 } }, m.icon),
+                    React.createElement('div', { style: { flex: 1, minWidth: 0 } },
+                      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.1rem' } },
+                        React.createElement('span', {
+                          style: { fontSize: '0.6rem', fontWeight: 700, color: m.color, textTransform: 'uppercase', letterSpacing: '0.06em' }
+                        }, m.label),
+                        item.group_name ? React.createElement('span', {
+                          style: { fontSize: '0.6rem', color: '#94a3b8' }
+                        }, '\u00B7 ' + item.group_name) : null
+                      ),
+                      React.createElement('div', {
+                        style: { fontSize: '0.82rem', color: '#334155', fontWeight: 500, lineHeight: 1.35 }
+                      }, item.title),
+                      (item.reason || item.signal_title) ? React.createElement('div', {
+                        style: { fontSize: '0.68rem', color: '#94a3b8', marginTop: '0.15rem', lineHeight: 1.3 }
+                      }, item.signal_title || item.reason) : null
+                    ),
+                    React.createElement('button', {
+                      onClick: function() { _draftFromTask(item.id); },
+                      style: {
+                        background: 'rgba(20,184,166,0.1)', border: '1px solid rgba(20,184,166,0.25)',
+                        color: '#0d9488', padding: '0.2rem 0.5rem', borderRadius: '0.3rem',
+                        fontSize: '0.65rem', fontWeight: 600, cursor: 'pointer',
+                        fontFamily: "'Inter',sans-serif", whiteSpace: 'nowrap', flexShrink: 0
+                      }
+                    }, 'Draft'),
+                    React.createElement('div', {
+                      style: { width: '6px', height: '6px', borderRadius: '50%', background: m.color, flexShrink: 0, boxShadow: '0 0 6px ' + m.color }
+                    })
+                  );
+                }),
+                focusItems.length > 6 ? React.createElement('div', {
+                  style: { textAlign: 'center', fontSize: '0.72rem', color: '#94a3b8', padding: '0.25rem 0', cursor: 'pointer' },
+                  onClick: function() { setActiveTab('prospecting'); }
+                }, '+' + (focusItems.length - 6) + ' more') : null
+              )
       ),
 
       React.createElement('div', { style: sectionCard },
@@ -15145,6 +15202,7 @@ function PipelinePage({
       fontFamily: "'Inter',sans-serif"
     }
   }, (() => {
+    if (lead.last_signal_title) return '\u26A1 Signal: reach out';
     const s = lead.status;
     if (s === 'New') return 'Initial outreach';
     if (s === 'Contacted') return 'Follow up';
