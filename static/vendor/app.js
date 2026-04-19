@@ -2595,10 +2595,7 @@ function ProspectingGroupsTab() {
         React.createElement('option', { value: 'name' }, 'Sort: Name'),
         React.createElement('option', { value: 'communities' }, 'Sort: Communities')
       ),
-      React.createElement('div', { style: { flexGrow: 1 } }),
-      React.createElement('button', { onClick: () => alert('Add Group (mock)'), style: btnPrimary }, '+ Add Group'),
-      React.createElement('button', { onClick: () => alert('Log Touchpoint (mock)'), style: btnStyle }, 'Log Touchpoint'),
-      React.createElement('button', { onClick: () => alert('Open in SignalStack (mock)'), style: btnStyle }, 'Open in SignalStack')
+      React.createElement('div', { style: { flexGrow: 1 } })
     ),
 
     React.createElement('div', {
