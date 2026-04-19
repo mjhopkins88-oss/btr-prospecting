@@ -1170,6 +1170,14 @@ def init_db():
     except Exception:
         pass
     try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_tasks_contact ON prospecting_tasks(contact_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_tasks_signal ON prospecting_tasks(signal_id)')
+    except Exception:
+        pass
+    try:
         c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_enroll_seq ON prospecting_enrollments(sequence_id)')
     except Exception:
         pass
@@ -1179,6 +1187,141 @@ def init_db():
         pass
     try:
         c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_feed_type ON prospecting_feed(type, created_at DESC)')
+    except Exception:
+        pass
+
+    # ===================================================================
+    # RELATIONSHIP-FIRST PROSPECTING — contacts, properties, signals, notices
+    # ===================================================================
+
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'website', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'linkedin_url', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'last_touch_at', 'TIMESTAMP')
+
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'contact_id', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'signal_id', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'channel', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'generated_reason', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'next_best_action_type', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'updated_at', 'TIMESTAMP')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_contacts (
+            id TEXT PRIMARY KEY,
+            group_id TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            title TEXT,
+            linkedin_url TEXT,
+            email TEXT,
+            phone TEXT,
+            first_reached_out_at TIMESTAMP,
+            last_touch_at TIMESTAMP,
+            relationship_stage TEXT DEFAULT 'cold',
+            owner_user_id TEXT,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_properties (
+            id TEXT PRIMARY KEY,
+            group_id TEXT,
+            name TEXT NOT NULL,
+            market TEXT,
+            state TEXT,
+            stage TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_touchpoints (
+            id TEXT PRIMARY KEY,
+            contact_id TEXT,
+            group_id TEXT,
+            property_id TEXT,
+            channel TEXT,
+            direction TEXT,
+            subject TEXT,
+            summary TEXT,
+            occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            outcome TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_signals (
+            id TEXT PRIMARY KEY,
+            group_id TEXT,
+            contact_id TEXT,
+            property_id TEXT,
+            signal_scope TEXT NOT NULL,
+            signal_type TEXT,
+            title TEXT NOT NULL,
+            summary TEXT,
+            source_url TEXT,
+            importance INTEGER DEFAULT 5,
+            detected_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_notices (
+            id TEXT PRIMARY KEY,
+            group_id TEXT,
+            contact_id TEXT,
+            signal_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            summary TEXT,
+            status TEXT DEFAULT 'new',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_contacts_group ON prospecting_contacts(group_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_contacts_stage ON prospecting_contacts(relationship_stage)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_properties_group ON prospecting_properties(group_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_tp_contact ON prospecting_touchpoints(contact_id, occurred_at DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_tp_group ON prospecting_touchpoints(group_id, occurred_at DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_signals_scope ON prospecting_signals(signal_scope, detected_at DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_signals_group ON prospecting_signals(group_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_notices_status ON prospecting_notices(status, created_at DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_notices_signal ON prospecting_notices(signal_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_notices_group ON prospecting_notices(group_id)')
     except Exception:
         pass
 
@@ -4142,6 +4285,12 @@ def run_daily_discovery(is_scheduled=False):
                 print(f"[Discovery] Webhook delivery failed: {e}")
 
         print(f"[Discovery] Run complete. {total_new} new signals across {len(config['cities'])} cities.")
+
+        try:
+            _fanout_discovery_to_prospecting(results)
+        except Exception as e:
+            print(f"[Discovery] Prospecting fan-out failed: {e}")
+
         return results, digest
 
     except Exception as e:
@@ -4150,6 +4299,62 @@ def run_daily_discovery(is_scheduled=False):
         return {}, ""
     finally:
         _discovery_running = False
+
+
+def _fanout_discovery_to_prospecting(results):
+    """Convert Daily Discovery output into prospecting_signals + notices + tasks.
+
+    Matches signals to tracked capital_groups by name appearing in the signal
+    title/summary, creates a company-scoped signal + notice + task for matches,
+    and otherwise files the signal as industry-scoped.
+    """
+    if not results:
+        return
+    from services.prospecting_rules import ingest_signal
+    from shared.database import fetch_all as _fetch_all
+
+    groups = _fetch_all("SELECT id, name, type FROM capital_groups") or []
+    group_lookup = [(g['id'], (g.get('name') or '').lower(), g.get('type') or '') for g in groups]
+
+    items = []
+    if isinstance(results, dict):
+        for v in results.values():
+            if isinstance(v, list):
+                items.extend(v)
+    elif isinstance(results, list):
+        items = results
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        title = item.get('title') or item.get('headline') or ''
+        summary = item.get('summary') or item.get('description') or ''
+        url = item.get('url') or item.get('source_url') or ''
+        importance = item.get('importance') or item.get('score') or 5
+        if not title:
+            continue
+
+        haystack = f"{title} {summary}".lower()
+        matched_group_id = None
+        for gid, gname, _gtype in group_lookup:
+            if gname and len(gname) >= 4 and gname in haystack:
+                matched_group_id = gid
+                break
+
+        if matched_group_id:
+            ingest_signal(
+                scope='company', title=title, summary=summary,
+                source_url=url, signal_type=item.get('type', ''),
+                importance=int(importance) if str(importance).isdigit() else 5,
+                group_id=matched_group_id
+            )
+        else:
+            ingest_signal(
+                scope='industry', title=title, summary=summary,
+                source_url=url, signal_type=item.get('type', ''),
+                importance=int(importance) if str(importance).isdigit() else 5,
+                match_types=None, match_stages=None
+            )
 
 # ===================================================================
 # BROKER API ROUTES (Deal Board)

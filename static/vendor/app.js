@@ -2296,6 +2296,8 @@ function ProspectingPage({ user }) {
     { id: 'schedule', label: 'Schedule' },
     { id: 'feed', label: 'Feed' },
     { id: 'groups', label: 'Groups' },
+    { id: 'contacts', label: 'Contacts' },
+    { id: 'notices', label: 'Notices' },
     { id: 'sequences', label: 'Sequences' }
   ];
 
@@ -2345,6 +2347,10 @@ function ProspectingPage({ user }) {
       ? React.createElement(ProspectingSummaryTab)
       : tab === 'groups'
         ? React.createElement(ProspectingGroupsTab)
+      : tab === 'contacts'
+        ? React.createElement(ProspectingContactsTab, { user: user })
+      : tab === 'notices'
+        ? React.createElement(ProspectingNoticesTab)
       : tab === 'sequences'
         ? React.createElement(ProspectingSequencesTab)
       : tab === 'schedule'
