@@ -2709,16 +2709,62 @@ function ProspectingContactsTab({ user }) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [stageFilter, setStageFilter] = useState('');
+  const [showForm, setShowForm] = useState(false);
+  const [groups, setGroups] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const emptyForm = {
+    first_name: '', last_name: '', title: '', group_id: '',
+    linkedin_url: '', email: '', phone: '',
+    first_reached_out_at: '', relationship_stage: 'cold', notes: ''
+  };
+  const [form, setForm] = useState(emptyForm);
+  const setField = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
 
   useEffect(() => {
     const params = new URLSearchParams();
     if (search) params.set('search', search);
     if (stageFilter) params.set('stage', stageFilter);
+    setLoading(true);
     fetch(API_BASE + '/api/prospecting/contacts?' + params.toString())
       .then(r => r.json())
       .then(d => { setRows(Array.isArray(d) ? d : []); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [search, stageFilter]);
+  }, [search, stageFilter, refreshKey]);
+
+  useEffect(() => {
+    fetch(API_BASE + '/api/capital-groups?limit=500')
+      .then(r => r.json())
+      .then(d => { setGroups((d && d.capital_groups) || []); })
+      .catch(() => {});
+  }, []);
+
+  const handleSubmit = () => {
+    if (!form.first_name.trim() && !form.last_name.trim()) {
+      setFormError('First or last name is required.');
+      return;
+    }
+    setSaving(true);
+    setFormError('');
+    const body = { ...form };
+    if (!body.first_reached_out_at) delete body.first_reached_out_at;
+    if (!body.group_id) delete body.group_id;
+    fetch(API_BASE + '/api/prospecting/contacts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+      .then(r => { if (!r.ok) throw new Error('save failed'); return r.json(); })
+      .then(() => {
+        setForm(emptyForm);
+        setShowForm(false);
+        setSaving(false);
+        setRefreshKey(k => k + 1);
+      })
+      .catch(() => { setFormError('Failed to save contact.'); setSaving(false); });
+  };
 
   const inputStyle = {
     background: '#0f172a',
@@ -2731,6 +2777,11 @@ function ProspectingContactsTab({ user }) {
     outline: 'none'
   };
   const selectStyle = { ...inputStyle, cursor: 'pointer' };
+  const formInputStyle = { ...inputStyle, width: '100%', boxSizing: 'border-box' };
+  const formSelectStyle = { ...formInputStyle, cursor: 'pointer' };
+  const formLabel = (text) => React.createElement('label', {
+    style: { fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }
+  }, text);
 
   const COLS = '1.8fr 1.2fr 1.5fr 1.1fr 1fr 1fr 1.5fr';
 
@@ -2779,6 +2830,98 @@ function ProspectingContactsTab({ user }) {
 
   if (loading) return React.createElement('div', { style: { color: '#64748b', padding: '2rem', textAlign: 'center' } }, 'Loading contacts...');
 
+  const formPanel = !showForm ? null : React.createElement('div', {
+    style: {
+      background: '#1e293b',
+      border: '1px solid rgba(51,65,85,0.5)',
+      borderRadius: '0.75rem',
+      padding: '1.25rem',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '0.85rem'
+    }
+  },
+    React.createElement('div', {
+      style: { fontSize: '0.92rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '0.25rem' }
+    }, 'New Contact'),
+    React.createElement('div', {
+      style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }
+    },
+      React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
+        formLabel('First Name'),
+        React.createElement('input', { value: form.first_name, onChange: e => setField('first_name', e.target.value), style: formInputStyle, placeholder: 'Jane' })
+      ),
+      React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
+        formLabel('Last Name'),
+        React.createElement('input', { value: form.last_name, onChange: e => setField('last_name', e.target.value), style: formInputStyle, placeholder: 'Smith' })
+      ),
+      React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
+        formLabel('Title'),
+        React.createElement('input', { value: form.title, onChange: e => setField('title', e.target.value), style: formInputStyle, placeholder: 'VP of Acquisitions' })
+      ),
+      React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
+        formLabel('Group'),
+        React.createElement('select', { value: form.group_id, onChange: e => setField('group_id', e.target.value), style: formSelectStyle },
+          React.createElement('option', { value: '' }, 'No group'),
+          ...groups.map(g => React.createElement('option', { key: g.id, value: g.id }, g.name))
+        )
+      ),
+      React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
+        formLabel('Email'),
+        React.createElement('input', { value: form.email, onChange: e => setField('email', e.target.value), style: formInputStyle, placeholder: 'jane@example.com', type: 'email' })
+      ),
+      React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
+        formLabel('Phone'),
+        React.createElement('input', { value: form.phone, onChange: e => setField('phone', e.target.value), style: formInputStyle, placeholder: '(555) 123-4567' })
+      ),
+      React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
+        formLabel('LinkedIn URL'),
+        React.createElement('input', { value: form.linkedin_url, onChange: e => setField('linkedin_url', e.target.value), style: formInputStyle, placeholder: 'https://linkedin.com/in/...' })
+      ),
+      React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
+        formLabel('First Reached Out'),
+        React.createElement('input', { value: form.first_reached_out_at, onChange: e => setField('first_reached_out_at', e.target.value), style: formInputStyle, type: 'date' })
+      ),
+      React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
+        formLabel('Relationship Stage'),
+        React.createElement('select', { value: form.relationship_stage, onChange: e => setField('relationship_stage', e.target.value), style: formSelectStyle },
+          ...Object.entries(CONTACT_STAGE_META).map(([k, v]) =>
+            React.createElement('option', { key: k, value: k }, v.label)
+          )
+        )
+      )
+    ),
+    React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
+      formLabel('Notes'),
+      React.createElement('textarea', {
+        value: form.notes, onChange: e => setField('notes', e.target.value),
+        style: { ...formInputStyle, minHeight: '60px', resize: 'vertical' },
+        placeholder: 'Optional notes...'
+      })
+    ),
+    formError ? React.createElement('div', { style: { color: '#ef4444', fontSize: '0.8rem' } }, formError) : null,
+    React.createElement('div', { style: { display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' } },
+      React.createElement('button', {
+        onClick: () => { setShowForm(false); setForm(emptyForm); setFormError(''); },
+        style: {
+          background: 'transparent', border: '1px solid #334155', color: '#94a3b8',
+          padding: '0.5rem 1rem', borderRadius: '0.5rem', fontSize: '0.82rem', cursor: 'pointer',
+          fontFamily: "'Inter', sans-serif"
+        }
+      }, 'Cancel'),
+      React.createElement('button', {
+        onClick: handleSubmit,
+        disabled: saving,
+        style: {
+          background: '#10b981', border: 'none', color: '#0f172a',
+          padding: '0.5rem 1rem', borderRadius: '0.5rem', fontSize: '0.82rem', fontWeight: 600,
+          cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.6 : 1,
+          fontFamily: "'Inter', sans-serif"
+        }
+      }, saving ? 'Saving...' : 'Save Contact')
+    )
+  );
+
   return React.createElement('div', {
     style: { display: 'flex', flexDirection: 'column', gap: '1rem' }
   },
@@ -2800,8 +2943,24 @@ function ProspectingContactsTab({ user }) {
         ...Object.entries(CONTACT_STAGE_META).map(([k, v]) =>
           React.createElement('option', { key: k, value: k }, v.label)
         )
-      )
+      ),
+      React.createElement('button', {
+        onClick: () => setShowForm(f => !f),
+        style: {
+          background: showForm ? 'transparent' : '#10b981',
+          border: showForm ? '1px solid #334155' : 'none',
+          color: showForm ? '#94a3b8' : '#0f172a',
+          padding: '0.5rem 0.9rem',
+          borderRadius: '0.5rem',
+          fontSize: '0.8rem',
+          fontWeight: 600,
+          cursor: 'pointer',
+          fontFamily: "'Inter', sans-serif"
+        }
+      }, showForm ? 'Cancel' : '+ Add Contact')
     ),
+
+    formPanel,
 
     React.createElement('div', {
       style: {
