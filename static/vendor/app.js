@@ -2704,6 +2704,38 @@ const NBA_TYPE_LABELS = {
   none:              'No Action'
 };
 
+function _launchSignalStack(payload) {
+  try { sessionStorage.setItem('signalstack_handoff', JSON.stringify(payload)); } catch(e) {}
+  window.open('/signalstack#/generator', '_blank');
+}
+
+function _signalStackFromContact(contact) {
+  fetch(API_BASE + '/api/prospecting/signalstack/contact/' + contact.id)
+    .then(r => r.ok ? r.json() : null)
+    .then(payload => {
+      if (payload) return _launchSignalStack(payload);
+      _launchSignalStack({
+        contact: { first_name: contact.first_name, last_name: contact.last_name,
+          title: contact.title, email: contact.email, linkedin_url: contact.linkedin_url },
+        group: contact.group_name ? { name: contact.group_name } : null,
+        relationship_stage: contact.relationship_stage,
+        suggested_angle: (contact.next_best_action || {}).generated_reason || '',
+        channel: 'email',
+        title: 'Outreach — ' + [contact.first_name, contact.last_name].filter(Boolean).join(' ')
+      });
+    })
+    .catch(() => {
+      _launchSignalStack({
+        contact: { first_name: contact.first_name, last_name: contact.last_name,
+          title: contact.title, email: contact.email, linkedin_url: contact.linkedin_url },
+        group: contact.group_name ? { name: contact.group_name } : null,
+        relationship_stage: contact.relationship_stage,
+        channel: 'email',
+        title: 'Outreach — ' + [contact.first_name, contact.last_name].filter(Boolean).join(' ')
+      });
+    });
+}
+
 function ProspectingContactsTab({ user }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2783,7 +2815,7 @@ function ProspectingContactsTab({ user }) {
     style: { fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }
   }, text);
 
-  const COLS = '1.8fr 1.2fr 1.5fr 1.1fr 1fr 1fr 1.5fr';
+  const COLS = '1.6fr 1.1fr 1.3fr 1fr 0.9fr 0.9fr 1.3fr 0.8fr';
 
   const headerCell = (label) => React.createElement('span', {
     key: label,
@@ -2795,6 +2827,15 @@ function ProspectingContactsTab({ user }) {
       letterSpacing: '0.05em'
     }
   }, label);
+
+  const ssBtn = (contact) => React.createElement('button', {
+    onClick: (e) => { e.stopPropagation(); _signalStackFromContact(contact); },
+    style: {
+      background: 'transparent', border: '1px solid #334155', color: '#6ee7b7',
+      padding: '0.25rem 0.5rem', borderRadius: '0.4rem', fontSize: '0.68rem',
+      fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter', sans-serif", whiteSpace: 'nowrap'
+    }
+  }, 'SignalStack');
 
   const fmtDate = (d) => {
     if (!d) return '\u2014';
@@ -2986,7 +3027,8 @@ function ProspectingContactsTab({ user }) {
         headerCell('Stage'),
         headerCell('First Reached'),
         headerCell('Last Touch'),
-        headerCell('Next Best Action')
+        headerCell('Next Best Action'),
+        headerCell('')
       ),
       rows.length === 0
         ? React.createElement('div', {
@@ -3026,7 +3068,8 @@ function ProspectingContactsTab({ user }) {
             React.createElement('span', {
               style: { fontSize: '0.78rem', color: '#94a3b8' }
             }, fmtDate(c.last_touch_at)),
-            nbaBadge(c.next_best_action)
+            nbaBadge(c.next_best_action),
+            ssBtn(c)
           ))
     )
   );
@@ -3237,7 +3280,23 @@ function ProspectingNoticesTab() {
                     style: { display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }
                   },
                     actionBtn('Convert', () => patchNotice(n.id, 'converted'), true),
-                    actionBtn('Dismiss', () => patchNotice(n.id, 'dismissed'), false)
+                    actionBtn('Dismiss', () => patchNotice(n.id, 'dismissed'), false),
+                    actionBtn('SignalStack', () => {
+                      _launchSignalStack({
+                        contact: n.first_name || n.last_name
+                          ? { first_name: n.first_name, last_name: n.last_name }
+                          : null,
+                        group: n.group_name ? { name: n.group_name } : null,
+                        relationship_stage: null,
+                        trigger: { title: n.title, summary: n.summary, source_url: n.source_url },
+                        signal_scope: n.signal_scope,
+                        suggested_angle: n.signal_scope === 'company'
+                          ? 'Reference the company signal as a reason for reaching out.'
+                          : 'Share the industry development and tie it to their portfolio.',
+                        channel: 'email',
+                        title: n.title
+                      });
+                    }, false)
                   )
                 : React.createElement('span', {
                     style: { fontSize: '0.72rem', color: '#475569', textTransform: 'uppercase', fontWeight: 600 }

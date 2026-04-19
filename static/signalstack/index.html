@@ -858,6 +858,37 @@ async function viewGenerator() {
   card.append(h("label",{},"Strategy override"));
   card.append(h("div",{class:"row"}, mtype, trigger, style, goal));
 
+  // Prospecting handoff: prefill from sessionStorage if available.
+  let handoff = null;
+  try {
+    const raw = sessionStorage.getItem('signalstack_handoff');
+    if (raw) { handoff = JSON.parse(raw); sessionStorage.removeItem('signalstack_handoff'); }
+  } catch(e) {}
+  if (handoff) {
+    if (handoff.contact && handoff.contact.linkedin_url) linkedinUrl.value = handoff.contact.linkedin_url;
+    if (handoff.contact && handoff.contact.title) headline.value = handoff.contact.title;
+    const ctxParts = [];
+    if (handoff.relationship_stage) ctxParts.push('Relationship stage: ' + handoff.relationship_stage);
+    if (handoff.group && handoff.group.name) ctxParts.push('Group: ' + handoff.group.name);
+    if (handoff.last_touch && handoff.last_touch.summary) ctxParts.push('Last touch: ' + handoff.last_touch.summary);
+    if (handoff.trigger && handoff.trigger.title) ctxParts.push('Signal: ' + handoff.trigger.title);
+    if (handoff.trigger && handoff.trigger.summary) ctxParts.push(handoff.trigger.summary);
+    if (ctxParts.length) aboutText.value = ctxParts.join('\n');
+    if (handoff.suggested_angle) instruction.value = handoff.suggested_angle;
+    const banner = h("div",{class:"card",style:"border-color:var(--accent);margin-bottom:0"});
+    const contactLabel = handoff.contact
+      ? [handoff.contact.first_name, handoff.contact.last_name].filter(Boolean).join(' ') || 'Contact'
+      : 'Contact';
+    banner.append(h("div",{style:"color:var(--accent);font-weight:600;font-size:13px;margin-bottom:4px"},
+      "Prospecting handoff: " + (handoff.title || contactLabel)));
+    const details = [];
+    if (handoff.contact && handoff.contact.email) details.push('Email: ' + handoff.contact.email);
+    if (handoff.channel) details.push('Channel: ' + handoff.channel);
+    if (handoff.task_type) details.push('Task: ' + handoff.task_type);
+    if (details.length) banner.append(h("div",{style:"color:var(--muted);font-size:12px"}, details.join(' · ')));
+    card.prepend(banner);
+  }
+
   const btn = h("button",{},"Generate");
   card.append(btn);
   v.append(card);
