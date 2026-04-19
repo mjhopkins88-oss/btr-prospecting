@@ -2283,6 +2283,104 @@ function CapitalGroupsPage({ user }) {
 }
 
 // ===================================================================
+// PROSPECTING PAGE — shell with tabs (Phase 1: placeholders only)
+// ===================================================================
+
+function ProspectingPage({ user }) {
+  const [tab, setTab] = useState('summary');
+
+  const tabs = [
+    { id: 'summary', label: 'Summary' },
+    { id: 'schedule', label: 'Schedule' },
+    { id: 'feed', label: 'Feed' },
+    { id: 'groups', label: 'Groups' },
+    { id: 'sequences', label: 'Sequences' }
+  ];
+
+  const placeholderCopy = {
+    summary: 'Relationship snapshot, task buckets, capital groups tracking, and sequence overview will live here.',
+    schedule: 'Follow-ups, meetings, and sequence steps due today and this week will appear here.',
+    feed: 'Recent touchpoints, notes, status changes, and market signals tied to groups will stream here.',
+    groups: 'Dedicated list of capital groups with search, filters, and sort will render here.',
+    sequences: 'Active and draft sequences with performance metrics and enrolled groups will appear here.'
+  };
+
+  const activeTabMeta = tabs.find(t => t.id === tab);
+
+  return React.createElement('div', null,
+    React.createElement('div', { style: { marginBottom: '0.5rem' } },
+      React.createElement('h2', {
+        style: {
+          fontFamily: "'Orbitron', sans-serif",
+          fontSize: '1.3rem',
+          fontWeight: 700,
+          color: '#e2e8f0',
+          margin: 0,
+          letterSpacing: '0.04em'
+        }
+      }, 'Prospecting')
+    ),
+
+    React.createElement('div', {
+      style: {
+        display: 'flex',
+        gap: 0,
+        borderBottom: '1px solid #334155',
+        marginTop: '1rem',
+        marginBottom: '1.5rem'
+      }
+    },
+      tabs.map(t => React.createElement('button', {
+        key: t.id,
+        onClick: () => setTab(t.id),
+        style: {
+          background: 'none',
+          border: 'none',
+          borderBottom: tab === t.id ? '2px solid #34d399' : '2px solid transparent',
+          color: tab === t.id ? '#e2e8f0' : '#64748b',
+          padding: '0.6rem 1.25rem',
+          fontSize: '0.85rem',
+          fontWeight: tab === t.id ? 600 : 400,
+          cursor: 'pointer',
+          fontFamily: "'Inter', sans-serif",
+          transition: 'all 0.15s',
+          marginBottom: '-1px'
+        }
+      }, t.label))
+    ),
+
+    React.createElement('div', {
+      style: {
+        background: '#1e293b',
+        border: '1px solid rgba(51,65,85,0.5)',
+        borderRadius: '1rem',
+        padding: '2rem',
+        minHeight: '280px'
+      }
+    },
+      React.createElement('h3', {
+        style: {
+          fontFamily: "'Orbitron', sans-serif",
+          fontSize: '1rem',
+          color: '#34d399',
+          margin: '0 0 0.75rem',
+          letterSpacing: '0.05em',
+          textTransform: 'uppercase'
+        }
+      }, activeTabMeta ? activeTabMeta.label : tab),
+      React.createElement('p', {
+        style: {
+          color: '#94a3b8',
+          fontSize: '0.9rem',
+          lineHeight: 1.5,
+          margin: 0
+        }
+      }, placeholderCopy[tab] || 'Coming soon.')
+    )
+  );
+}
+
+// ===================================================================
 // COMMAND CENTER NAVIGATION — workflow-based 5-section top nav
 // ===================================================================
 
