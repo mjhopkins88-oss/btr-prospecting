@@ -157,8 +157,9 @@ def create_capital_group():
             INSERT INTO capital_groups
                 (id, name, type, markets, strategy, notes,
                  relationship_status, warmth_score, last_contacted_at,
+                 website, linkedin_url,
                  created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             ''',
             [
                 gid,
@@ -170,6 +171,8 @@ def create_capital_group():
                 status,
                 _clamp_warmth(data.get('warmth_score') or 1),
                 data.get('last_contacted_at'),
+                data.get('website'),
+                data.get('linkedin_url'),
             ],
         )
     except Exception as e:
@@ -275,6 +278,12 @@ def update_capital_group(group_id):
     if 'last_contacted_at' in data:
         sets.append('last_contacted_at = ?')
         params.append(data['last_contacted_at'])
+    if 'website' in data:
+        sets.append('website = ?')
+        params.append(data['website'])
+    if 'linkedin_url' in data:
+        sets.append('linkedin_url = ?')
+        params.append(data['linkedin_url'])
 
     if not sets:
         return jsonify({'error': 'no updatable fields provided'}), 400
