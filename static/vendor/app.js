@@ -2837,6 +2837,8 @@ function ProspectingContactsTab({ user }) {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
+  const [dragId, setDragId] = useState(null);
+  const [dragOver, setDragOver] = useState(null);
 
   const emptyForm = {
     first_name: '', last_name: '', title: '', group_id: '',
@@ -3131,16 +3133,39 @@ function ProspectingContactsTab({ user }) {
             { key: 'dormant',            label: 'Dormant',           accent: '#475569' }
           ].map(col => {
             var colRows = rows.filter(c => (c.relationship_stage || 'cold') === col.key);
+            var isOver = dragOver === col.key && dragId;
             return React.createElement('div', {
               key: col.key,
+              onDragOver: function(e) { e.preventDefault(); setDragOver(col.key); },
+              onDragLeave: function() { setDragOver(null); },
+              onDrop: function(e) {
+                e.preventDefault();
+                setDragOver(null);
+                var cid = e.dataTransfer.getData('text/plain');
+                if (!cid) return;
+                var card = rows.find(function(r) { return String(r.id) === cid; });
+                if (!card || (card.relationship_stage || 'cold') === col.key) { setDragId(null); return; }
+                setRows(function(prev) { return prev.map(function(r) {
+                  return String(r.id) === cid ? Object.assign({}, r, { relationship_stage: col.key }) : r;
+                }); });
+                setDragId(null);
+                fetch(API_BASE + '/api/prospecting/contacts/' + cid, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ relationship_stage: col.key })
+                }).then(function(r) {
+                  if (!r.ok) setRefreshKey(function(k) { return k + 1; });
+                });
+              },
               style: {
                 flex: '1 0 180px', maxWidth: '240px', minWidth: '180px',
-                background: '#0f172a',
-                border: '1px solid rgba(51,65,85,0.4)',
+                background: isOver ? 'rgba(51,65,85,0.35)' : '#0f172a',
+                border: isOver ? '1px solid ' + col.accent : '1px solid rgba(51,65,85,0.4)',
                 borderTop: '2px solid ' + col.accent,
                 borderRadius: '0.75rem',
                 display: 'flex', flexDirection: 'column',
-                overflow: 'hidden'
+                overflow: 'hidden',
+                transition: 'background 0.15s, border-color 0.15s'
               }
             },
               React.createElement('div', {
@@ -3174,14 +3199,26 @@ function ProspectingContactsTab({ user }) {
                   var nbaLabel = NBA_TYPE_LABELS[nba.next_best_action_type || nba.type] || '';
                   var name = [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Unnamed';
                   var lastTouch = c.last_touch_at ? c.last_touch_at.slice(0, 10) : '—';
+                  var isDragging = dragId === String(c.id);
                   return React.createElement('div', {
                     key: c.id,
+                    draggable: true,
+                    onDragStart: function(e) {
+                      e.dataTransfer.setData('text/plain', String(c.id));
+                      e.dataTransfer.effectAllowed = 'move';
+                      setDragId(String(c.id));
+                    },
+                    onDragEnd: function() { setDragId(null); setDragOver(null); },
                     style: {
                       background: '#1e293b',
                       border: '1px solid rgba(51,65,85,0.5)',
                       borderRadius: '0.5rem',
                       padding: '0.55rem 0.6rem',
-                      cursor: 'default'
+                      cursor: 'grab',
+                      opacity: isDragging ? 0.5 : 1,
+                      transform: isDragging ? 'scale(1.03)' : 'none',
+                      boxShadow: isDragging ? '0 4px 12px rgba(0,0,0,0.4)' : 'none',
+                      transition: 'opacity 0.15s, transform 0.15s, box-shadow 0.15s'
                     }
                   },
                     React.createElement('div', {
@@ -3206,39 +3243,6 @@ function ProspectingContactsTab({ user }) {
                           borderRadius: '0.25rem', whiteSpace: 'nowrap'
                         }
                       }, nbaLabel) : null
-                    ),
-                    React.createElement('select', {
-                      value: c.relationship_stage || 'cold',
-                      onChange: function(e) {
-                        var newStage = e.target.value;
-                        fetch(API_BASE + '/api/prospecting/contacts/' + c.id, {
-                          method: 'PATCH',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ relationship_stage: newStage })
-                        }).then(function(r) {
-                          if (r.ok) setRefreshKey(function(k) { return k + 1; });
-                        });
-                      },
-                      style: {
-                        marginTop: '0.35rem', width: '100%',
-                        fontSize: '0.62rem', padding: '0.2rem 0.3rem',
-                        background: '#0f172a', color: '#94a3b8',
-                        border: '1px solid rgba(51,65,85,0.5)',
-                        borderRadius: '0.3rem', cursor: 'pointer',
-                        fontFamily: "'Inter', sans-serif"
-                      }
-                    },
-                      [
-                        { v: 'cold', l: 'New' },
-                        { v: 'initial_outreach', l: 'Initial Outreach' },
-                        { v: 'light_conversation', l: 'Follow-Up' },
-                        { v: 'active', l: 'Conversation' },
-                        { v: 'warm', l: 'Relationship' },
-                        { v: 'strategic', l: 'Partner' },
-                        { v: 'dormant', l: 'Dormant' }
-                      ].map(function(o) {
-                        return React.createElement('option', { key: o.v, value: o.v }, o.l);
-                      })
                     )
                   );
                 })
