@@ -14196,9 +14196,22 @@ function PipelinePage({
       style: { fontSize: '0.58rem', padding: '0.1rem 0.35rem', borderRadius: '0.2rem', background: 'rgba(167,139,250,0.15)', color: '#a78bfa', fontWeight: 500 }
     }, lead.source)
   ),
-    lead.last_signal_title && /*#__PURE__*/React.createElement("div", {
-      style: { fontSize: '0.68rem', color: '#475569', fontStyle: 'italic' }
-    }, '\u26A1 ' + lead.last_signal_title)
+    /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'inline-flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.15rem',
+        fontSize: '0.64rem', fontWeight: 600, fontFamily: "'Inter',sans-serif",
+        padding: '0.15rem 0.45rem', borderRadius: '0.3rem',
+        background: lead.last_signal_title ? 'rgba(251,191,36,0.12)' : 'rgba(51,65,85,0.3)',
+        color: lead.last_signal_title ? '#fbbf24' : '#475569'
+      }
+    },
+      /*#__PURE__*/React.createElement("span", {
+        style: { fontSize: '0.72rem', lineHeight: 1 }
+      }, lead.last_signal_title ? '\u26A1' : '\u25CB'),
+      lead.last_signal_title
+        ? (lead.last_signal_title.length > 38 ? lead.last_signal_title.slice(0, 38) + '\u2026' : lead.last_signal_title)
+        : 'No recent signals'
+    )
   ), /*#__PURE__*/React.createElement("select", {
     style: {
       ...styles.select,
