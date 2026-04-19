@@ -2351,33 +2351,207 @@ function ProspectingPage({ user }) {
       }, t.label))
     ),
 
+    tab === 'summary'
+      ? renderProspectingSummary()
+      : React.createElement('div', {
+          style: {
+            background: '#1e293b',
+            border: '1px solid rgba(51,65,85,0.5)',
+            borderRadius: '1rem',
+            padding: '2rem',
+            minHeight: '280px'
+          }
+        },
+          React.createElement('h3', {
+            style: {
+              fontFamily: "'Orbitron', sans-serif",
+              fontSize: '1rem',
+              color: '#34d399',
+              margin: '0 0 0.75rem',
+              letterSpacing: '0.05em',
+              textTransform: 'uppercase'
+            }
+          }, activeTabMeta ? activeTabMeta.label : tab),
+          React.createElement('p', {
+            style: {
+              color: '#94a3b8',
+              fontSize: '0.9rem',
+              lineHeight: 1.5,
+              margin: 0
+            }
+          }, placeholderCopy[tab] || 'Coming soon.')
+        )
+  );
+}
+
+// -- Prospecting Summary tab: dashboard with stat cards + task buckets --
+// Mock-only data for Phase 3. No backend wiring.
+
+const PROSP_SNAPSHOT = [
+  { label: 'Active Groups',     value: 24, accent: '#34d399', sub: 'total tracked' },
+  { label: 'Warm Relationships', value: 11, accent: '#22d3ee', sub: 'warmth \u2265 5' },
+  { label: 'Due Today',          value: 8,  accent: '#fbbf24', sub: 'tasks pending' },
+  { label: 'Overdue',            value: 5,  accent: '#ef4444', sub: 'needs attention' },
+  { label: 'Inactive 30d+',      value: 3,  accent: '#a78bfa', sub: 'no recent touch' },
+  { label: 'Active Campaigns',   value: 4,  accent: '#60a5fa', sub: 'live sequences' }
+];
+
+const PROSP_TASK_TYPE_META = [
+  { key: 'linkedin', label: 'LinkedIn',   color: '#0a66c2' },
+  { key: 'email',    label: 'Email',      color: '#f59e0b' },
+  { key: 'call',     label: 'Calls',      color: '#34d399' },
+  { key: 'meeting',  label: 'Meetings',   color: '#a78bfa' },
+  { key: 'research', label: 'Research',   color: '#60a5fa' },
+  { key: 'checkin',  label: 'Check-ins',  color: '#fb923c' }
+];
+
+const PROSP_TASK_BUCKETS = [
+  {
+    id: 'today', title: 'Due Today', accent: '#fbbf24', total: 8,
+    counts: { linkedin: 2, email: 2, call: 2, meeting: 1, research: 1, checkin: 0 }
+  },
+  {
+    id: 'overdue', title: 'Overdue', accent: '#ef4444', total: 5,
+    counts: { linkedin: 1, email: 1, call: 1, meeting: 0, research: 1, checkin: 1 }
+  },
+  {
+    id: 'week', title: 'This Week', accent: '#60a5fa', total: 12,
+    counts: { linkedin: 2, email: 3, call: 2, meeting: 2, research: 1, checkin: 2 }
+  }
+];
+
+function renderProspectingSummary() {
+  const sectionLabel = (text) => React.createElement('h3', {
+    style: {
+      fontSize: '0.78rem',
+      color: '#64748b',
+      textTransform: 'uppercase',
+      fontWeight: 600,
+      letterSpacing: '0.06em',
+      margin: '0 0 0.75rem'
+    }
+  }, text);
+
+  const statCard = (s) => React.createElement('div', {
+    key: s.label,
+    style: {
+      background: '#1e293b',
+      border: '1px solid rgba(51,65,85,0.5)',
+      borderRadius: '0.75rem',
+      padding: '1rem 1.25rem',
+      flex: 1,
+      minWidth: '140px'
+    }
+  },
     React.createElement('div', {
       style: {
-        background: '#1e293b',
-        border: '1px solid rgba(51,65,85,0.5)',
-        borderRadius: '1rem',
-        padding: '2rem',
-        minHeight: '280px'
+        fontSize: '0.68rem',
+        color: '#64748b',
+        textTransform: 'uppercase',
+        fontWeight: 600,
+        letterSpacing: '0.05em',
+        marginBottom: '0.35rem'
+      }
+    }, s.label),
+    React.createElement('div', {
+      style: {
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: '1.6rem',
+        fontWeight: 700,
+        color: s.accent,
+        lineHeight: 1.1
+      }
+    }, s.value),
+    React.createElement('div', {
+      style: { fontSize: '0.72rem', color: '#475569', marginTop: '0.2rem' }
+    }, s.sub)
+  );
+
+  const bucketCard = (b) => React.createElement('div', {
+    key: b.id,
+    style: {
+      background: '#1e293b',
+      border: '1px solid rgba(51,65,85,0.5)',
+      borderTop: `3px solid ${b.accent}`,
+      borderRadius: '0.75rem',
+      padding: '1.25rem',
+      flex: 1,
+      minWidth: '220px'
+    }
+  },
+    React.createElement('div', {
+      style: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '0.85rem'
       }
     },
-      React.createElement('h3', {
+      React.createElement('span', {
+        style: { fontSize: '0.9rem', fontWeight: 600, color: '#e2e8f0' }
+      }, b.title),
+      React.createElement('span', {
         style: {
-          fontFamily: "'Orbitron', sans-serif",
-          fontSize: '1rem',
-          color: '#34d399',
-          margin: '0 0 0.75rem',
-          letterSpacing: '0.05em',
-          textTransform: 'uppercase'
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: '1.4rem',
+          fontWeight: 700,
+          color: b.accent,
+          lineHeight: 1
         }
-      }, activeTabMeta ? activeTabMeta.label : tab),
-      React.createElement('p', {
+      }, b.total)
+    ),
+    React.createElement('div', {
+      style: { display: 'flex', flexDirection: 'column', gap: '0.4rem' }
+    },
+      PROSP_TASK_TYPE_META.map(t => React.createElement('div', {
+        key: t.key,
         style: {
-          color: '#94a3b8',
-          fontSize: '0.9rem',
-          lineHeight: 1.5,
-          margin: 0
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between'
         }
-      }, placeholderCopy[tab] || 'Coming soon.')
+      },
+        React.createElement('div', {
+          style: { display: 'flex', alignItems: 'center', gap: '0.45rem' }
+        },
+          React.createElement('div', {
+            style: {
+              width: '8px',
+              height: '8px',
+              borderRadius: '2px',
+              background: t.color
+            }
+          }),
+          React.createElement('span', {
+            style: { fontSize: '0.8rem', color: '#94a3b8' }
+          }, t.label)
+        ),
+        React.createElement('span', {
+          style: {
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            color: (b.counts[t.key] || 0) === 0 ? '#475569' : '#e2e8f0',
+            fontFamily: "'JetBrains Mono', monospace"
+          }
+        }, b.counts[t.key] || 0)
+      ))
+    )
+  );
+
+  return React.createElement('div', {
+    style: { display: 'flex', flexDirection: 'column', gap: '1.75rem' }
+  },
+    React.createElement('div', null,
+      sectionLabel('Relationship Snapshot'),
+      React.createElement('div', {
+        style: { display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }
+      }, PROSP_SNAPSHOT.map(statCard))
+    ),
+    React.createElement('div', null,
+      sectionLabel('Task Pipeline'),
+      React.createElement('div', {
+        style: { display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }
+      }, PROSP_TASK_BUCKETS.map(bucketCard))
     )
   );
 }
