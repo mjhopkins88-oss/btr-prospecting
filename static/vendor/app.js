@@ -2353,34 +2353,36 @@ function ProspectingPage({ user }) {
 
     tab === 'summary'
       ? renderProspectingSummary()
-      : React.createElement('div', {
-          style: {
-            background: '#1e293b',
-            border: '1px solid rgba(51,65,85,0.5)',
-            borderRadius: '1rem',
-            padding: '2rem',
-            minHeight: '280px'
-          }
-        },
-          React.createElement('h3', {
+      : tab === 'groups'
+        ? React.createElement(ProspectingGroupsTab)
+        : React.createElement('div', {
             style: {
-              fontFamily: "'Orbitron', sans-serif",
-              fontSize: '1rem',
-              color: '#34d399',
-              margin: '0 0 0.75rem',
-              letterSpacing: '0.05em',
-              textTransform: 'uppercase'
+              background: '#1e293b',
+              border: '1px solid rgba(51,65,85,0.5)',
+              borderRadius: '1rem',
+              padding: '2rem',
+              minHeight: '280px'
             }
-          }, activeTabMeta ? activeTabMeta.label : tab),
-          React.createElement('p', {
-            style: {
-              color: '#94a3b8',
-              fontSize: '0.9rem',
-              lineHeight: 1.5,
-              margin: 0
-            }
-          }, placeholderCopy[tab] || 'Coming soon.')
-        )
+          },
+            React.createElement('h3', {
+              style: {
+                fontFamily: "'Orbitron', sans-serif",
+                fontSize: '1rem',
+                color: '#34d399',
+                margin: '0 0 0.75rem',
+                letterSpacing: '0.05em',
+                textTransform: 'uppercase'
+              }
+            }, activeTabMeta ? activeTabMeta.label : tab),
+            React.createElement('p', {
+              style: {
+                color: '#94a3b8',
+                fontSize: '0.9rem',
+                lineHeight: 1.5,
+                margin: 0
+              }
+            }, placeholderCopy[tab] || 'Coming soon.')
+          )
   );
 }
 
@@ -2552,6 +2554,263 @@ function renderProspectingSummary() {
       React.createElement('div', {
         style: { display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }
       }, PROSP_TASK_BUCKETS.map(bucketCard))
+    )
+  );
+}
+
+// -- Prospecting Groups tab: capital group relationship tracker --
+// Mock-only data for Phase 4. No backend wiring.
+
+const PROSP_TYPE_LABELS = {
+  developer: 'Developer',
+  capital_partner: 'Capital Partner',
+  operator: 'Operator',
+  broker: 'Broker'
+};
+
+const PROSP_STATUS_META = {
+  prospect: { label: 'Prospect', color: '#94a3b8' },
+  warm:     { label: 'Warm',     color: '#fbbf24' },
+  engaged:  { label: 'Engaged',  color: '#60a5fa' },
+  partner:  { label: 'Partner',  color: '#34d399' },
+  dormant:  { label: 'Dormant',  color: '#a78bfa' },
+  cold:     { label: 'Cold',     color: '#ef4444' }
+};
+
+const PROSP_MOCK_GROUPS = [
+  { id: 'g1', name: 'NexMetro Capital',              type: 'developer',       markets: ['Phoenix', 'Dallas', 'Tampa'],        status: 'partner',  warmth: 9, lastTouch: '2d ago',  communities: 12, nextAction: 'Q2 pipeline review call' },
+  { id: 'g2', name: 'Sunbelt Residential Partners',  type: 'capital_partner', markets: ['Atlanta', 'Charlotte', 'Nashville'], status: 'engaged',  warmth: 7, lastTouch: '4d ago',  communities: 8,  nextAction: 'Send market intel deck' },
+  { id: 'g3', name: 'Trident Development Group',     type: 'developer',       markets: ['Tampa', 'Orlando', 'Jacksonville'],  status: 'warm',     warmth: 5, lastTouch: '8d ago',  communities: 4,  nextAction: 'Follow up coverage proposal' },
+  { id: 'g4', name: 'Lone Star BTR Capital',         type: 'capital_partner', markets: ['Dallas', 'Austin', 'San Antonio'],   status: 'prospect', warmth: 3, lastTouch: 'never',   communities: 0,  nextAction: 'Initial outreach' },
+  { id: 'g5', name: 'Meridian Property Group',       type: 'operator',        markets: ['Phoenix', 'Tucson'],                 status: 'partner',  warmth: 8, lastTouch: '6d ago',  communities: 15, nextAction: 'Monthly check-in call' },
+  { id: 'g6', name: 'Cornerstone Brokerage',         type: 'broker',          markets: ['Dallas', 'Houston'],                 status: 'engaged',  warmth: 6, lastTouch: '3d ago',  communities: 0,  nextAction: 'Review new DFW listings' },
+  { id: 'g7', name: 'Pacific Crest Homes',           type: 'developer',       markets: ['Denver', 'Salt Lake City'],          status: 'dormant',  warmth: 2, lastTouch: '45d ago', communities: 6,  nextAction: 'Re-engagement outreach' },
+  { id: 'g8', name: 'Atlas Capital Ventures',        type: 'capital_partner', markets: ['Charlotte', 'Raleigh'],              status: 'warm',     warmth: 4, lastTouch: '5d ago',  communities: 3,  nextAction: 'Intro call scheduled' }
+];
+
+function ProspectingGroupsTab() {
+  const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [sort, setSort] = useState('warmth');
+
+  const filtered = PROSP_MOCK_GROUPS.filter(g => {
+    if (search && !g.name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (typeFilter && g.type !== typeFilter) return false;
+    if (statusFilter && g.status !== statusFilter) return false;
+    return true;
+  });
+
+  const rows = [...filtered].sort((a, b) => {
+    if (sort === 'warmth') return b.warmth - a.warmth;
+    if (sort === 'name') return a.name.localeCompare(b.name);
+    if (sort === 'communities') return b.communities - a.communities;
+    return 0;
+  });
+
+  const inputStyle = {
+    background: '#0f172a',
+    border: '1px solid #334155',
+    color: '#e2e8f0',
+    padding: '0.5rem 0.75rem',
+    borderRadius: '0.5rem',
+    fontSize: '0.82rem',
+    fontFamily: "'Inter', sans-serif",
+    outline: 'none'
+  };
+  const selectStyle = { ...inputStyle, cursor: 'pointer' };
+  const btnStyle = {
+    background: 'transparent',
+    border: '1px solid #334155',
+    color: '#94a3b8',
+    padding: '0.5rem 0.9rem',
+    borderRadius: '0.5rem',
+    fontSize: '0.8rem',
+    cursor: 'pointer',
+    fontFamily: "'Inter', sans-serif"
+  };
+  const btnPrimary = {
+    ...btnStyle,
+    background: '#10b981',
+    border: 'none',
+    color: '#0f172a',
+    fontWeight: 600
+  };
+
+  const warmthBar = (score) => {
+    const pct = (score / 10) * 100;
+    const color = score >= 7 ? '#34d399' : score >= 4 ? '#fbbf24' : '#ef4444';
+    return React.createElement('div', {
+      style: { display: 'flex', alignItems: 'center', gap: '0.4rem' }
+    },
+      React.createElement('div', {
+        style: { width: '50px', height: '5px', background: '#334155', borderRadius: '3px', overflow: 'hidden' }
+      },
+        React.createElement('div', {
+          style: { width: `${pct}%`, height: '100%', background: color, borderRadius: '3px' }
+        })
+      ),
+      React.createElement('span', {
+        style: {
+          fontSize: '0.72rem',
+          color,
+          fontWeight: 600,
+          fontFamily: "'JetBrains Mono', monospace"
+        }
+      }, score)
+    );
+  };
+
+  const COLS = '2fr 1.1fr 1.6fr 0.9fr 0.9fr 0.8fr 0.7fr 1.6fr';
+
+  const headerCell = (label, extra) => React.createElement('span', {
+    key: label,
+    style: {
+      fontSize: '0.68rem',
+      color: '#64748b',
+      textTransform: 'uppercase',
+      fontWeight: 600,
+      letterSpacing: '0.05em',
+      ...(extra || {})
+    }
+  }, label);
+
+  return React.createElement('div', {
+    style: { display: 'flex', flexDirection: 'column', gap: '1rem' }
+  },
+    React.createElement('div', {
+      style: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: '0.5rem',
+        alignItems: 'center'
+      }
+    },
+      React.createElement('input', {
+        value: search,
+        onChange: e => setSearch(e.target.value),
+        placeholder: 'Search groups...',
+        style: { ...inputStyle, flex: 1, minWidth: '200px' }
+      }),
+      React.createElement('select', {
+        value: typeFilter,
+        onChange: e => setTypeFilter(e.target.value),
+        style: selectStyle
+      },
+        React.createElement('option', { value: '' }, 'All Types'),
+        React.createElement('option', { value: 'developer' }, 'Developer'),
+        React.createElement('option', { value: 'capital_partner' }, 'Capital Partner'),
+        React.createElement('option', { value: 'operator' }, 'Operator'),
+        React.createElement('option', { value: 'broker' }, 'Broker')
+      ),
+      React.createElement('select', {
+        value: statusFilter,
+        onChange: e => setStatusFilter(e.target.value),
+        style: selectStyle
+      },
+        React.createElement('option', { value: '' }, 'All Statuses'),
+        React.createElement('option', { value: 'prospect' }, 'Prospect'),
+        React.createElement('option', { value: 'warm' }, 'Warm'),
+        React.createElement('option', { value: 'engaged' }, 'Engaged'),
+        React.createElement('option', { value: 'partner' }, 'Partner'),
+        React.createElement('option', { value: 'dormant' }, 'Dormant'),
+        React.createElement('option', { value: 'cold' }, 'Cold')
+      ),
+      React.createElement('select', {
+        value: sort,
+        onChange: e => setSort(e.target.value),
+        style: selectStyle
+      },
+        React.createElement('option', { value: 'warmth' }, 'Sort: Warmth'),
+        React.createElement('option', { value: 'name' }, 'Sort: Name'),
+        React.createElement('option', { value: 'communities' }, 'Sort: Communities')
+      ),
+      React.createElement('div', { style: { flexGrow: 1 } }),
+      React.createElement('button', { onClick: () => alert('Add Group (mock)'), style: btnPrimary }, '+ Add Group'),
+      React.createElement('button', { onClick: () => alert('Log Touchpoint (mock)'), style: btnStyle }, 'Log Touchpoint'),
+      React.createElement('button', { onClick: () => alert('Open in SignalStack (mock)'), style: btnStyle }, 'Open in SignalStack')
+    ),
+
+    React.createElement('div', {
+      style: {
+        background: '#1e293b',
+        border: '1px solid rgba(51,65,85,0.5)',
+        borderRadius: '0.75rem',
+        overflow: 'hidden'
+      }
+    },
+      React.createElement('div', {
+        style: {
+          display: 'grid',
+          gridTemplateColumns: COLS,
+          gap: '0.5rem',
+          padding: '0.65rem 1rem',
+          borderBottom: '1px solid #334155',
+          background: '#0f172a'
+        }
+      },
+        headerCell('Group'),
+        headerCell('Type'),
+        headerCell('Markets'),
+        headerCell('Status'),
+        headerCell('Warmth'),
+        headerCell('Last Touch'),
+        headerCell('Communities', { textAlign: 'center' }),
+        headerCell('Next Action')
+      ),
+      rows.length === 0
+        ? React.createElement('div', {
+            style: { padding: '2rem', textAlign: 'center', color: '#64748b', fontSize: '0.85rem' }
+          }, 'No groups match current filters.')
+        : rows.map(g => {
+            const statusMeta = PROSP_STATUS_META[g.status] || { label: g.status, color: '#94a3b8' };
+            return React.createElement('div', {
+              key: g.id,
+              style: {
+                display: 'grid',
+                gridTemplateColumns: COLS,
+                gap: '0.5rem',
+                padding: '0.7rem 1rem',
+                borderBottom: '1px solid rgba(51,65,85,0.3)',
+                alignItems: 'center'
+              }
+            },
+              React.createElement('span', {
+                style: { fontSize: '0.86rem', fontWeight: 600, color: '#e2e8f0' }
+              }, g.name),
+              React.createElement('span', {
+                style: { fontSize: '0.78rem', color: '#94a3b8' }
+              }, PROSP_TYPE_LABELS[g.type] || g.type),
+              React.createElement('span', {
+                style: { fontSize: '0.78rem', color: '#64748b' }
+              }, g.markets.join(', ')),
+              React.createElement('span', {
+                style: {
+                  fontSize: '0.7rem',
+                  fontWeight: 600,
+                  color: statusMeta.color,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em'
+                }
+              }, statusMeta.label),
+              warmthBar(g.warmth),
+              React.createElement('span', {
+                style: { fontSize: '0.78rem', color: '#94a3b8' }
+              }, g.lastTouch),
+              React.createElement('span', {
+                style: {
+                  fontSize: '0.86rem',
+                  fontWeight: 600,
+                  color: g.communities === 0 ? '#475569' : '#e2e8f0',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  textAlign: 'center'
+                }
+              }, g.communities),
+              React.createElement('span', {
+                style: { fontSize: '0.78rem', color: '#94a3b8' }
+              }, g.nextAction)
+            );
+          })
     )
   );
 }
