@@ -4149,6 +4149,8 @@ function ProspectingCanvasTab() {
   const [contactId, setContactId] = useState('');
   const [touchCount, setTouchCount] = useState(0);
   const [restoringRef] = useState({ current: false });
+  const [touchpoints, setTouchpoints] = useState([]);
+  const [contactDetail, setContactDetail] = useState(null);
   const canvasRef = useRef(null);
 
   const DOT_SPACING = 5;
@@ -4220,11 +4222,19 @@ function ProspectingCanvasTab() {
   }, []);
 
   useEffect(() => {
-    if (!contactId) { setTouchCount(0); return; }
+    if (!contactId) { setTouchCount(0); setTouchpoints([]); setContactDetail(null); return; }
     fetch(API_BASE + '/api/prospecting/contacts/' + contactId + '/touchpoints')
       .then(r => r.json())
-      .then(d => setTouchCount(d.count || (d.touchpoints ? d.touchpoints.length : 0)))
-      .catch(() => setTouchCount(0));
+      .then(d => {
+        const tps = d.touchpoints || [];
+        setTouchpoints(tps);
+        setTouchCount(d.count || tps.length);
+      })
+      .catch(() => { setTouchCount(0); setTouchpoints([]); });
+    fetch(API_BASE + '/api/prospecting/contacts/' + contactId)
+      .then(r => r.json())
+      .then(d => { if (!d.error) setContactDetail(d); })
+      .catch(() => {});
   }, [contactId]);
 
   useEffect(() => {
@@ -4289,6 +4299,22 @@ function ProspectingCanvasTab() {
   };
 
   const pctFilled = dotGrid && contactId ? Math.min(100, Math.round((touchCount / dotGrid.total) * 100)) : 0;
+  const replies = touchpoints.filter(t => t.direction === 'inbound').length;
+  const meetings = touchpoints.filter(t => t.channel === 'meeting' || t.channel === 'call').length;
+  const lastTouch = contactDetail ? contactDetail.last_touch_at : null;
+  const firstTouch = contactDetail ? contactDetail.first_reached_out_at : null;
+  const nba = contactDetail ? contactDetail.next_best_action : null;
+  const fmtDate = (d) => { if (!d) return '\u2014'; try { return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); } catch(_) { return '\u2014'; } };
+  const filledDots = dotGrid ? Math.min(touchCount, dotGrid.total) : 0;
+  const totalDots = dotGrid ? dotGrid.total : 0;
+  const statCell = (label, value, color) => React.createElement('div', { key: label },
+    React.createElement('div', {
+      style: { fontSize: '0.6rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, marginBottom: '0.2rem' }
+    }, label),
+    React.createElement('div', {
+      style: { fontSize: '0.92rem', fontWeight: 600, color: color || '#e2e8f0', fontFamily: "'JetBrains Mono', monospace" }
+    }, value != null ? value : '\u2014')
+  );
 
   return React.createElement('div', {
     style: { display: 'flex', flexDirection: 'column', gap: '1rem' }
@@ -4464,7 +4490,39 @@ function ProspectingCanvasTab() {
               style: { fontSize: '0.82rem', color: '#475569' }
             }, 'Paste a URL or upload a photo above to generate a dot template')
           )
-    )
+    ),
+
+    contactId ? React.createElement('div', {
+      style: {
+        background: '#1e293b',
+        border: '1px solid rgba(51,65,85,0.5)',
+        borderRadius: '0.85rem',
+        padding: '0.85rem 1.25rem',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+        gap: '0.5rem 1rem'
+      }
+    },
+      statCell('Total Touches', touchCount, '#e2e8f0'),
+      statCell('Replies', replies, replies > 0 ? '#34d399' : '#64748b'),
+      statCell('Meetings', meetings, meetings > 0 ? '#60a5fa' : '#64748b'),
+      statCell('Last Touch', fmtDate(lastTouch), '#e2e8f0'),
+      statCell('First Touch', fmtDate(firstTouch), '#94a3b8'),
+      statCell('Canvas', dotGrid ? `${filledDots} / ${totalDots.toLocaleString()}` : '\u2014', '#60a5fa'),
+      statCell('Completion', dotGrid ? `${pctFilled}%` : '\u2014', pctFilled >= 100 ? '#34d399' : '#f59e0b'),
+      React.createElement('div', { key: 'nba', style: { gridColumn: 'span 2', minWidth: 0 } },
+        React.createElement('div', {
+          style: { fontSize: '0.6rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, marginBottom: '0.2rem' }
+        }, 'Next Best Action'),
+        React.createElement('div', {
+          style: {
+            fontSize: '0.82rem', fontWeight: 500, color: nba ? '#f59e0b' : '#475569',
+            fontFamily: "'Inter', sans-serif",
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+          }
+        }, nba ? nba.title : 'No pending actions')
+      )
+    ) : null
   );
 }
 
