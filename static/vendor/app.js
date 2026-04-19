@@ -2685,6 +2685,207 @@ function ProspectingGroupsTab() {
   );
 }
 
+const CONTACT_STAGE_META = {
+  cold:              { label: 'Cold',              color: '#ef4444' },
+  initial_outreach:  { label: 'Initial Outreach',  color: '#fb923c' },
+  light_conversation:{ label: 'Light Conversation', color: '#fbbf24' },
+  active:            { label: 'Active',            color: '#60a5fa' },
+  warm:              { label: 'Warm',              color: '#34d399' },
+  strategic:         { label: 'Strategic',         color: '#a78bfa' },
+  dormant:           { label: 'Dormant',           color: '#64748b' }
+};
+
+const NBA_TYPE_LABELS = {
+  signal_company:    'Signal: Company',
+  signal_industry:   'Signal: Industry',
+  overdue_followup:  'Overdue Follow-up',
+  stale_checkin:     'Check In',
+  initial_outreach:  'Initial Outreach',
+  none:              'No Action'
+};
+
+function ProspectingContactsTab({ user }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [stageFilter, setStageFilter] = useState('');
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (stageFilter) params.set('stage', stageFilter);
+    fetch(API_BASE + '/api/prospecting/contacts?' + params.toString())
+      .then(r => r.json())
+      .then(d => { setRows(Array.isArray(d) ? d : []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [search, stageFilter]);
+
+  const inputStyle = {
+    background: '#0f172a',
+    border: '1px solid #334155',
+    color: '#e2e8f0',
+    padding: '0.5rem 0.75rem',
+    borderRadius: '0.5rem',
+    fontSize: '0.82rem',
+    fontFamily: "'Inter', sans-serif",
+    outline: 'none'
+  };
+  const selectStyle = { ...inputStyle, cursor: 'pointer' };
+
+  const COLS = '1.8fr 1.2fr 1.5fr 1.1fr 1fr 1fr 1.5fr';
+
+  const headerCell = (label) => React.createElement('span', {
+    key: label,
+    style: {
+      fontSize: '0.68rem',
+      color: '#64748b',
+      textTransform: 'uppercase',
+      fontWeight: 600,
+      letterSpacing: '0.05em'
+    }
+  }, label);
+
+  const fmtDate = (d) => {
+    if (!d) return '\u2014';
+    try {
+      const dt = new Date(d);
+      if (isNaN(dt.getTime())) return '\u2014';
+      return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
+    } catch(e) { return '\u2014'; }
+  };
+
+  const stageBadge = (stage) => {
+    const meta = CONTACT_STAGE_META[stage] || { label: stage || 'Unknown', color: '#94a3b8' };
+    return React.createElement('span', {
+      style: {
+        fontSize: '0.7rem',
+        fontWeight: 600,
+        color: meta.color,
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em'
+      }
+    }, meta.label);
+  };
+
+  const nbaBadge = (nba) => {
+    if (!nba || !nba.type || nba.type === 'none') {
+      return React.createElement('span', { style: { fontSize: '0.78rem', color: '#475569' } }, '\u2014');
+    }
+    const label = NBA_TYPE_LABELS[nba.type] || nba.type;
+    return React.createElement('span', {
+      style: { fontSize: '0.78rem', color: '#94a3b8' }
+    }, label);
+  };
+
+  if (loading) return React.createElement('div', { style: { color: '#64748b', padding: '2rem', textAlign: 'center' } }, 'Loading contacts...');
+
+  return React.createElement('div', {
+    style: { display: 'flex', flexDirection: 'column', gap: '1rem' }
+  },
+    React.createElement('div', {
+      style: { display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }
+    },
+      React.createElement('input', {
+        value: search,
+        onChange: e => setSearch(e.target.value),
+        placeholder: 'Search contacts...',
+        style: { ...inputStyle, flex: 1, minWidth: '200px' }
+      }),
+      React.createElement('select', {
+        value: stageFilter,
+        onChange: e => setStageFilter(e.target.value),
+        style: selectStyle
+      },
+        React.createElement('option', { value: '' }, 'All Stages'),
+        ...Object.entries(CONTACT_STAGE_META).map(([k, v]) =>
+          React.createElement('option', { key: k, value: k }, v.label)
+        )
+      )
+    ),
+
+    React.createElement('div', {
+      style: {
+        background: '#1e293b',
+        border: '1px solid rgba(51,65,85,0.5)',
+        borderRadius: '0.75rem',
+        overflow: 'hidden'
+      }
+    },
+      React.createElement('div', {
+        style: {
+          display: 'grid',
+          gridTemplateColumns: COLS,
+          gap: '0.5rem',
+          padding: '0.65rem 1rem',
+          borderBottom: '1px solid #334155',
+          background: '#0f172a'
+        }
+      },
+        headerCell('Name'),
+        headerCell('Title'),
+        headerCell('Group'),
+        headerCell('Stage'),
+        headerCell('First Reached'),
+        headerCell('Last Touch'),
+        headerCell('Next Best Action')
+      ),
+      rows.length === 0
+        ? React.createElement('div', {
+            style: { padding: '3rem 2rem', textAlign: 'center', color: '#64748b' }
+          },
+            React.createElement('div', {
+              style: { fontSize: '1.1rem', marginBottom: '0.5rem', color: '#475569' }
+            }, 'No contacts yet'),
+            React.createElement('div', {
+              style: { fontSize: '0.82rem' }
+            }, 'Contacts will appear here as you add them through the system.')
+          )
+        : rows.map(c => React.createElement('div', {
+            key: c.id,
+            style: {
+              display: 'grid',
+              gridTemplateColumns: COLS,
+              gap: '0.5rem',
+              padding: '0.7rem 1rem',
+              borderBottom: '1px solid rgba(51,65,85,0.3)',
+              alignItems: 'center'
+            }
+          },
+            React.createElement('span', {
+              style: { fontSize: '0.86rem', fontWeight: 600, color: '#e2e8f0' }
+            }, [c.first_name, c.last_name].filter(Boolean).join(' ') || '\u2014'),
+            React.createElement('span', {
+              style: { fontSize: '0.78rem', color: '#94a3b8' }
+            }, c.title || '\u2014'),
+            React.createElement('span', {
+              style: { fontSize: '0.78rem', color: '#94a3b8' }
+            }, c.group_name || '\u2014'),
+            stageBadge(c.relationship_stage),
+            React.createElement('span', {
+              style: { fontSize: '0.78rem', color: '#94a3b8' }
+            }, fmtDate(c.first_reached_out_at)),
+            React.createElement('span', {
+              style: { fontSize: '0.78rem', color: '#94a3b8' }
+            }, fmtDate(c.last_touch_at)),
+            nbaBadge(c.next_best_action)
+          ))
+    )
+  );
+}
+
+function ProspectingNoticesTab() {
+  return React.createElement('div', {
+    style: { padding: '3rem 2rem', textAlign: 'center', color: '#64748b' }
+  },
+    React.createElement('div', {
+      style: { fontSize: '1.1rem', marginBottom: '0.5rem', color: '#475569' }
+    }, 'Notices'),
+    React.createElement('div', {
+      style: { fontSize: '0.82rem' }
+    }, 'Signal notices will be built in a future step.')
+  );
+}
+
 function ProspectingSequencesTab() {
   const [seqs, setSeqs] = useState([]);
   const [loading, setLoading] = useState(true);
