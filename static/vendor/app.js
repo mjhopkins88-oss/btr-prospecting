@@ -2436,6 +2436,99 @@ function ProspectingSummaryTab() {
     React.createElement('div', null,
       sectionLabel('Task Pipeline'),
       React.createElement('div', { style: { display: 'flex', gap: '0.75rem', flexWrap: 'wrap' } }, buckets.map(bucketCard))
+    ),
+    React.createElement(ProspectingOverviewPanel)
+  );
+}
+
+function ProspectingOverviewPanel() {
+  const [tasks, setTasks] = useState([]);
+  const [notices, setNotices] = useState([]);
+  const [staleGroups, setStaleGroups] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    Promise.all([
+      fetch(API_BASE + '/api/prospecting/tasks?status=pending').then(r => r.json()).catch(() => []),
+      fetch(API_BASE + '/api/prospecting/notices?status=new').then(r => r.json()).catch(() => []),
+      fetch(API_BASE + '/api/capital-groups?status=dormant&limit=100').then(r => r.json()).catch(() => ({ capital_groups: [] })),
+      fetch(API_BASE + '/api/capital-groups?status=cold&limit=100').then(r => r.json()).catch(() => ({ capital_groups: [] }))
+    ]).then(([t, n, dg, cg]) => {
+      setTasks(Array.isArray(t) ? t : []);
+      setNotices(Array.isArray(n) ? n : []);
+      const dormant = (dg && dg.capital_groups) || [];
+      const cold = (cg && cg.capital_groups) || [];
+      setStaleGroups([...dormant, ...cold]);
+      setLoaded(true);
+    });
+  }, []);
+
+  if (!loaded) return null;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const dueToday = tasks.filter(t => t.due_at && t.due_at.slice(0, 10) <= today);
+  const overdue = tasks.filter(t => t.due_at && t.due_at.slice(0, 10) < today);
+  const items = [];
+
+  if (overdue.length > 0) {
+    items.push({ icon: '\u26A0', color: '#f87171',
+      text: overdue.length + ' overdue task' + (overdue.length !== 1 ? 's' : '') + ' need attention',
+      sub: overdue.slice(0, 3).map(t => t.title).join(', ') + (overdue.length > 3 ? '...' : '') });
+  }
+  if (dueToday.length > overdue.length) {
+    const todayOnly = dueToday.length - overdue.length;
+    items.push({ icon: '\u23F0', color: '#fbbf24',
+      text: todayOnly + ' task' + (todayOnly !== 1 ? 's' : '') + ' due today',
+      sub: dueToday.filter(t => t.due_at && t.due_at.slice(0, 10) === today).slice(0, 3).map(t => t.title).join(', ') });
+  }
+  if (notices.length > 0) {
+    items.push({ icon: '\u2709', color: '#60a5fa',
+      text: notices.length + ' signal notice' + (notices.length !== 1 ? 's' : '') + ' awaiting review',
+      sub: notices.slice(0, 3).map(n => n.title).join(', ') + (notices.length > 3 ? '...' : '') });
+  }
+  if (staleGroups.length > 0) {
+    items.push({ icon: '\u2744', color: '#a78bfa',
+      text: staleGroups.length + ' group' + (staleGroups.length !== 1 ? 's' : '') + ' dormant or cold',
+      sub: staleGroups.slice(0, 4).map(g => g.name).join(', ') + (staleGroups.length > 4 ? '...' : '') });
+  }
+
+  if (items.length === 0 && tasks.length === 0) {
+    return React.createElement('div', null,
+      React.createElement('h3', {
+        style: { fontSize: '0.78rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.06em', margin: '0 0 0.75rem' }
+      }, 'Action Items'),
+      React.createElement('div', {
+        style: { background: '#1e293b', border: '1px solid rgba(51,65,85,0.5)', borderRadius: '0.75rem', padding: '1.5rem 1.25rem', textAlign: 'center' }
+      },
+        React.createElement('div', { style: { fontSize: '0.92rem', color: '#475569', marginBottom: '0.3rem' } }, 'All clear'),
+        React.createElement('div', { style: { fontSize: '0.8rem', color: '#64748b' } }, 'No overdue tasks, pending notices, or stale groups. Add contacts and groups to start prospecting.')
+      )
+    );
+  }
+
+  return React.createElement('div', null,
+    React.createElement('h3', {
+      style: { fontSize: '0.78rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.06em', margin: '0 0 0.75rem' }
+    }, 'Action Items'),
+    React.createElement('div', {
+      style: { background: '#1e293b', border: '1px solid rgba(51,65,85,0.5)', borderRadius: '0.75rem', overflow: 'hidden' }
+    },
+      items.map((item, i) => React.createElement('div', {
+        key: i,
+        style: {
+          display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
+          padding: '0.85rem 1.25rem',
+          borderBottom: i < items.length - 1 ? '1px solid rgba(51,65,85,0.3)' : 'none'
+        }
+      },
+        React.createElement('span', { style: { fontSize: '1rem', lineHeight: 1.3, flexShrink: 0 } }, item.icon),
+        React.createElement('div', { style: { flex: 1, minWidth: 0 } },
+          React.createElement('div', { style: { fontSize: '0.86rem', fontWeight: 600, color: item.color } }, item.text),
+          item.sub ? React.createElement('div', {
+            style: { fontSize: '0.76rem', color: '#64748b', marginTop: '0.2rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+          }, item.sub) : null
+        )
+      ))
     )
   );
 }
