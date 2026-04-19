@@ -1371,6 +1371,8 @@ function App({
     user: user
   }), activeTab === 'feed' && /*#__PURE__*/React.createElement(LiveIntelligenceFeed, null), activeTab === 'intent' && /*#__PURE__*/React.createElement(DeveloperIntentPanel, null), activeTab === 'capital' && /*#__PURE__*/React.createElement(CapitalFlowPanel, null), activeTab === 'signal_quality' && /*#__PURE__*/React.createElement(SignalIntelligencePanel, null), activeTab === 'predictions' && user?.role !== 'broker' && /*#__PURE__*/React.createElement(PredictedDevelopments, null), activeTab === 'markets' && user?.role !== 'broker' && /*#__PURE__*/React.createElement(MarketExpansion, null), activeTab === 'dealboard' && /*#__PURE__*/React.createElement(DealBoardPage, {
     user: user
+  }), activeTab === 'prospecting' && /*#__PURE__*/React.createElement(ProspectingPage, {
+    user: user
   }), activeTab === 'capital_groups' && /*#__PURE__*/React.createElement(CapitalGroupsPage, {
     user: user
   }), activeTab === 'linkedinhub' && /*#__PURE__*/React.createElement(LinkedInHub, {
@@ -2402,6 +2404,7 @@ const NAV_SECTIONS = [
     label: 'Prospecting',
     icon: '\u25B2', // ▲
     children: [
+      { id: 'prospecting', label: 'Dashboard' },
       { id: 'search', label: 'Properties' },
       { id: 'capital_groups', label: 'Capital Groups' },
       { id: 'linkedinhub', label: 'LinkedIn Hub' },
