@@ -1810,6 +1810,18 @@ function CapitalGroupsPage({ user }) {
   const [tpType, setTpType] = useState('call');
   const [tpOutcome, setTpOutcome] = useState('');
   const [tpNotes, setTpNotes] = useState('');
+  const [tpContactId, setTpContactId] = useState('');
+  const [tpDate, setTpDate] = useState(new Date().toISOString().slice(0, 10));
+
+  const [showContactForm, setShowContactForm] = useState(false);
+  const [cfFirst, setCfFirst] = useState('');
+  const [cfLast, setCfLast] = useState('');
+  const [cfTitle, setCfTitle] = useState('');
+  const [cfEmail, setCfEmail] = useState('');
+  const [cfPhone, setCfPhone] = useState('');
+  const [cfNotes, setCfNotes] = useState('');
+  const [editingContactId, setEditingContactId] = useState(null);
+  const [editingContactNotes, setEditingContactNotes] = useState('');
 
   const typeLabels = { developer: 'Developer', capital_partner: 'Capital Partner', operator: 'Operator', broker: 'Broker' };
   const statusLabels = { prospect: 'Prospect', warm: 'Warm', engaged: 'Engaged', partner: 'Partner', dormant: 'Dormant', cold: 'Cold' };
@@ -1917,19 +1929,56 @@ function CapitalGroupsPage({ user }) {
   const saveTouchpoint = async () => {
     if (!selectedGroup) return;
     try {
+      var payload = { type: tpType, outcome: tpOutcome, notes: tpNotes };
+      if (tpContactId) payload.contact_id = tpContactId;
+      if (tpDate) payload.occurred_at = tpDate + 'T12:00:00';
       const res = await fetch(`${API_BASE}/api/capital-groups/${selectedGroup.id}/touchpoints`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: tpType, outcome: tpOutcome, notes: tpNotes })
+        body: JSON.stringify(payload)
       });
       const d = await res.json();
       if (d.error) { alert(d.error); return; }
       setShowTpForm(false);
-      setTpType('call'); setTpOutcome(''); setTpNotes('');
+      setTpType('call'); setTpOutcome(''); setTpNotes(''); setTpContactId(''); setTpDate(new Date().toISOString().slice(0, 10));
       loadDetail(selectedGroup.id);
       loadGroups();
     } catch (e) {
       alert('Error logging touchpoint');
+    }
+  };
+
+  const saveContact = async () => {
+    if (!selectedGroup) return;
+    if (!cfFirst.trim() && !cfLast.trim()) { alert('First or last name required'); return; }
+    try {
+      const res = await fetch(`${API_BASE}/api/capital-groups/${selectedGroup.id}/contacts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ first_name: cfFirst, last_name: cfLast, title: cfTitle, email: cfEmail, phone: cfPhone, notes: cfNotes })
+      });
+      const d = await res.json();
+      if (d.error) { alert(d.error); return; }
+      setShowContactForm(false);
+      setCfFirst(''); setCfLast(''); setCfTitle(''); setCfEmail(''); setCfPhone(''); setCfNotes('');
+      loadDetail(selectedGroup.id);
+    } catch (e) {
+      alert('Error adding contact');
+    }
+  };
+
+  const saveContactNotes = async (contactId, notes) => {
+    if (!selectedGroup) return;
+    try {
+      await fetch(`${API_BASE}/api/capital-groups/${selectedGroup.id}/contacts/${contactId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes: notes })
+      });
+      setEditingContactId(null);
+      loadDetail(selectedGroup.id);
+    } catch (e) {
+      alert('Error saving notes');
     }
   };
 
@@ -2125,6 +2174,113 @@ function CapitalGroupsPage({ user }) {
                       }, p.status)
                     ))
                   )
+            ),
+
+            React.createElement('div', { style: { ...styles.card, padding: '1.25rem' } },
+              React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' } },
+                React.createElement('h3', { style: { color: '#1e293b', fontSize: '0.9rem', fontWeight: 600, margin: 0, fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.04em' } }, 'CONTACTS'),
+                React.createElement('button', {
+                  onClick: () => { setShowContactForm(true); setCfFirst(''); setCfLast(''); setCfTitle(''); setCfEmail(''); setCfPhone(''); setCfNotes(''); },
+                  style: { ...styles.btnPrimary, padding: '0.35rem 0.75rem', fontSize: '0.75rem' }
+                }, '+ Add Contact')
+              ),
+
+              showContactForm && React.createElement('div', {
+                style: { background: '#F1F5F9', border: '1px solid #e2e8f0', borderRadius: '0.5rem', padding: '0.75rem', marginBottom: '0.75rem' }
+              },
+                React.createElement('div', { style: { display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' } },
+                  React.createElement('input', {
+                    value: cfFirst, onChange: e => setCfFirst(e.target.value),
+                    placeholder: 'First name',
+                    style: { ...styles.input, flex: 1, minWidth: 0 }
+                  }),
+                  React.createElement('input', {
+                    value: cfLast, onChange: e => setCfLast(e.target.value),
+                    placeholder: 'Last name',
+                    style: { ...styles.input, flex: 1, minWidth: 0 }
+                  })
+                ),
+                React.createElement('div', { style: { display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' } },
+                  React.createElement('input', {
+                    value: cfTitle, onChange: e => setCfTitle(e.target.value),
+                    placeholder: 'Title (e.g. VP Acquisitions)',
+                    style: { ...styles.input, flex: 1, minWidth: 0 }
+                  })
+                ),
+                React.createElement('div', { style: { display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' } },
+                  React.createElement('input', {
+                    value: cfEmail, onChange: e => setCfEmail(e.target.value),
+                    placeholder: 'Email',
+                    style: { ...styles.input, flex: 1, minWidth: 0 }
+                  }),
+                  React.createElement('input', {
+                    value: cfPhone, onChange: e => setCfPhone(e.target.value),
+                    placeholder: 'Phone',
+                    style: { ...styles.input, flex: 1, minWidth: 0 }
+                  })
+                ),
+                React.createElement('textarea', {
+                  value: cfNotes, onChange: e => setCfNotes(e.target.value),
+                  placeholder: 'Notes about this contact...',
+                  rows: 2,
+                  style: { ...styles.input, width: '100%', minWidth: 0, resize: 'vertical', marginBottom: '0.5rem', boxSizing: 'border-box' }
+                }),
+                React.createElement('div', { style: { display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' } },
+                  React.createElement('button', { onClick: () => setShowContactForm(false), style: { ...styles.btn, padding: '0.3rem 0.7rem', fontSize: '0.75rem' } }, 'Cancel'),
+                  React.createElement('button', { onClick: saveContact, style: { ...styles.btnPrimary, padding: '0.3rem 0.7rem', fontSize: '0.75rem' } }, 'Save Contact')
+                )
+              ),
+
+              (!g.contacts || g.contacts.length === 0)
+                ? React.createElement('p', { style: { color: '#94a3b8', fontSize: '0.85rem' } }, 'No contacts added yet')
+                : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.5rem' } },
+                    g.contacts.map(function(ct) {
+                      var ctName = [ct.first_name, ct.last_name].filter(Boolean).join(' ');
+                      var isEditing = editingContactId === ct.id;
+                      return React.createElement('div', {
+                        key: ct.id,
+                        style: { padding: '0.6rem 0.75rem', background: '#F7F9FC', borderRadius: '0.5rem', border: '1px solid #e2e8f0' }
+                      },
+                        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
+                          React.createElement('div', { style: { minWidth: 0, flex: 1 } },
+                            React.createElement('div', { style: { fontSize: '0.85rem', fontWeight: 600, color: '#1e293b' } }, ctName || 'Unnamed'),
+                            ct.title && React.createElement('div', { style: { fontSize: '0.75rem', color: '#64748b', marginTop: '0.1rem' } }, ct.title),
+                            React.createElement('div', { style: { display: 'flex', gap: '0.75rem', marginTop: '0.25rem', flexWrap: 'wrap' } },
+                              ct.email && React.createElement('span', { style: { fontSize: '0.72rem', color: '#3b82f6' } }, ct.email),
+                              ct.phone && React.createElement('span', { style: { fontSize: '0.72rem', color: '#64748b' } }, ct.phone)
+                            ),
+                            ct.last_touch_at && React.createElement('div', { style: { fontSize: '0.68rem', color: '#94a3b8', marginTop: '0.2rem' } },
+                              'Last touch: ' + timeAgo(ct.last_touch_at))
+                          ),
+                          React.createElement('button', {
+                            onClick: function() {
+                              if (isEditing) { setEditingContactId(null); }
+                              else { setEditingContactId(ct.id); setEditingContactNotes(ct.notes || ''); }
+                            },
+                            style: { ...styles.btn, padding: '0.2rem 0.5rem', fontSize: '0.68rem', flexShrink: 0 }
+                          }, isEditing ? 'Cancel' : 'Notes')
+                        ),
+                        ct.notes && !isEditing && React.createElement('div', {
+                          style: { fontSize: '0.75rem', color: '#64748b', marginTop: '0.35rem', padding: '0.35rem 0.5rem', background: '#FFFFFF', borderRadius: '0.35rem', border: '1px solid #f1f5f9', lineHeight: 1.4 }
+                        }, ct.notes),
+                        isEditing && React.createElement('div', { style: { marginTop: '0.4rem' } },
+                          React.createElement('textarea', {
+                            value: editingContactNotes,
+                            onChange: function(e) { setEditingContactNotes(e.target.value); },
+                            rows: 3,
+                            placeholder: 'Add notes about this contact...',
+                            style: { ...styles.input, width: '100%', minWidth: 0, resize: 'vertical', marginBottom: '0.4rem', boxSizing: 'border-box', fontSize: '0.78rem' }
+                          }),
+                          React.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end' } },
+                            React.createElement('button', {
+                              onClick: function() { saveContactNotes(ct.id, editingContactNotes); },
+                              style: { ...styles.btnPrimary, padding: '0.25rem 0.6rem', fontSize: '0.72rem' }
+                            }, 'Save Notes')
+                          )
+                        )
+                      );
+                    })
+                  )
             )
           ),
 
@@ -2132,7 +2288,7 @@ function CapitalGroupsPage({ user }) {
             React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' } },
               React.createElement('h3', { style: { color: '#1e293b', fontSize: '0.9rem', fontWeight: 600, margin: 0, fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.04em' } }, 'ACTIVITY TIMELINE'),
               React.createElement('button', {
-                onClick: () => { setShowTpForm(true); setTpType('call'); setTpOutcome(''); setTpNotes(''); },
+                onClick: () => { setShowTpForm(true); setTpType('call'); setTpOutcome(''); setTpNotes(''); setTpContactId(''); setTpDate(new Date().toISOString().slice(0, 10)); },
                 style: { ...styles.btnPrimary, padding: '0.35rem 0.75rem', fontSize: '0.75rem' }
               }, '+ Log Touchpoint')
             ),
@@ -2153,9 +2309,26 @@ function CapitalGroupsPage({ user }) {
                   React.createElement('option', { value: 'referral' }, 'Referral')
                 ),
                 React.createElement('input', {
+                  type: 'date', value: tpDate, onChange: e => setTpDate(e.target.value),
+                  style: { ...styles.input, flex: 1, minWidth: 0 }
+                })
+              ),
+              React.createElement('div', { style: { display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' } },
+                React.createElement('select', {
+                  value: tpContactId, onChange: e => setTpContactId(e.target.value),
+                  style: { ...styles.select, flex: 1, minWidth: 0 }
+                },
+                  React.createElement('option', { value: '' },
+                    g.contacts && g.contacts.length > 0 ? 'Contact (optional)' : 'No contacts yet'),
+                  (g.contacts || []).map(function(c) {
+                    return React.createElement('option', { key: c.id, value: c.id },
+                      [c.first_name, c.last_name].filter(Boolean).join(' ') + (c.title ? ' \u2014 ' + c.title : ''));
+                  })
+                ),
+                React.createElement('input', {
                   value: tpOutcome, onChange: e => setTpOutcome(e.target.value),
                   placeholder: 'Outcome (optional)',
-                  style: { ...styles.input, flex: 2, minWidth: 0 }
+                  style: { ...styles.input, flex: 1, minWidth: 0 }
                 })
               ),
               React.createElement('textarea', {
@@ -2173,22 +2346,36 @@ function CapitalGroupsPage({ user }) {
             (!g.touchpoints || g.touchpoints.length === 0)
               ? React.createElement('p', { style: { color: '#94a3b8', fontSize: '0.85rem' } }, 'No touchpoints yet. Log your first interaction above.')
               : React.createElement('div', { style: { display: 'flex', flexDirection: 'column' } },
-                  g.touchpoints.map((tp, i) => React.createElement('div', {
-                    key: tp.id,
-                    style: { display: 'flex', gap: '0.75rem', paddingBottom: i < g.touchpoints.length - 1 ? '0.75rem' : 0, borderLeft: '2px solid #e2e8f0', paddingLeft: '0.75rem', marginLeft: '0.35rem', position: 'relative' }
-                  },
-                    React.createElement('div', {
-                      style: { position: 'absolute', left: '-5px', top: '2px', width: '8px', height: '8px', borderRadius: '50%', background: '#34d399' }
-                    }),
-                    React.createElement('div', { style: { flex: 1 } },
-                      React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
-                        React.createElement('span', { style: { fontSize: '0.8rem', fontWeight: 600, color: '#1e293b', textTransform: 'capitalize' } }, tp.type),
-                        React.createElement('span', { style: { fontSize: '0.7rem', color: '#64748b' } }, timeAgo(tp.occurred_at))
-                      ),
-                      tp.outcome && React.createElement('div', { style: { fontSize: '0.78rem', color: '#64748b', marginTop: '0.15rem' } }, tp.outcome),
-                      tp.notes && React.createElement('div', { style: { fontSize: '0.78rem', color: '#64748b', marginTop: '0.15rem', lineHeight: 1.4 } }, tp.notes)
-                    )
-                  ))
+                  g.touchpoints.map((tp, i) => {
+                    var contactName = [tp.contact_first, tp.contact_last].filter(Boolean).join(' ');
+                    var tpDateStr = '';
+                    try { tpDateStr = tp.occurred_at ? new Date(tp.occurred_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''; } catch(_) {}
+                    return React.createElement('div', {
+                      key: tp.id,
+                      style: { display: 'flex', gap: '0.75rem', paddingBottom: i < g.touchpoints.length - 1 ? '0.75rem' : 0, borderLeft: '2px solid #e2e8f0', paddingLeft: '0.75rem', marginLeft: '0.35rem', position: 'relative' }
+                    },
+                      React.createElement('div', {
+                        style: { position: 'absolute', left: '-5px', top: '2px', width: '8px', height: '8px', borderRadius: '50%', background: contactName ? '#14b8a6' : '#34d399' }
+                      }),
+                      React.createElement('div', { style: { flex: 1 } },
+                        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' } },
+                          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', minWidth: 0 } },
+                            React.createElement('span', { style: { fontSize: '0.8rem', fontWeight: 600, color: '#1e293b', textTransform: 'capitalize' } }, tp.type),
+                            contactName && React.createElement('span', {
+                              style: { fontSize: '0.72rem', fontWeight: 500, color: '#14b8a6', background: 'rgba(20,184,166,0.08)', padding: '0.05rem 0.4rem', borderRadius: '9999px' }
+                            }, contactName)
+                          ),
+                          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 } },
+                            tpDateStr && React.createElement('span', { style: { fontSize: '0.7rem', color: '#94a3b8', fontFamily: "'JetBrains Mono', monospace" } }, tpDateStr),
+                            React.createElement('span', { style: { fontSize: '0.65rem', color: '#cbd5e1' } }, '\u00b7'),
+                            React.createElement('span', { style: { fontSize: '0.7rem', color: '#64748b' } }, timeAgo(tp.occurred_at))
+                          )
+                        ),
+                        tp.outcome && React.createElement('div', { style: { fontSize: '0.78rem', color: '#475569', marginTop: '0.15rem' } }, tp.outcome),
+                        tp.notes && React.createElement('div', { style: { fontSize: '0.78rem', color: '#64748b', marginTop: '0.15rem', lineHeight: 1.4 } }, tp.notes)
+                      )
+                    );
+                  })
                 )
           )
         ),

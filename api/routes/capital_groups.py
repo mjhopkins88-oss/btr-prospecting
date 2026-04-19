@@ -214,14 +214,28 @@ def get_capital_group(group_id):
         [group_id],
     )
 
-    # Touchpoint timeline — most recent first.
+    # Touchpoint timeline — most recent first, with contact name.
     out['touchpoints'] = fetch_all(
         '''
-        SELECT id, type, outcome, notes, occurred_at, created_at
-        FROM capital_group_touchpoints
-        WHERE capital_group_id = ?
-        ORDER BY occurred_at DESC
+        SELECT t.id, t.type, t.outcome, t.notes, t.occurred_at, t.created_at,
+               t.contact_id, c.first_name AS contact_first, c.last_name AS contact_last
+        FROM capital_group_touchpoints t
+        LEFT JOIN prospecting_contacts c ON t.contact_id = c.id
+        WHERE t.capital_group_id = ?
+        ORDER BY t.occurred_at DESC
         LIMIT 200
+        ''',
+        [group_id],
+    )
+
+    # Contacts linked to this group.
+    out['contacts'] = fetch_all(
+        '''
+        SELECT id, first_name, last_name, title, email, phone, notes,
+               last_touch_at, relationship_stage, created_at
+        FROM prospecting_contacts
+        WHERE group_id = ?
+        ORDER BY first_name, last_name
         ''',
         [group_id],
     )
@@ -338,24 +352,31 @@ def create_touchpoint(group_id):
 
     tid = new_id()
     occurred_at = data.get('occurred_at')
+    contact_id = data.get('contact_id') or None
 
     if occurred_at:
         execute(
             '''
             INSERT INTO capital_group_touchpoints
-                (id, capital_group_id, type, outcome, notes, occurred_at, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                (id, capital_group_id, contact_id, type, outcome, notes, occurred_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''',
-            [tid, group_id, ttype, data.get('outcome'), data.get('notes'), occurred_at],
+            [tid, group_id, contact_id, ttype, data.get('outcome'), data.get('notes'), occurred_at],
         )
     else:
         execute(
             '''
             INSERT INTO capital_group_touchpoints
-                (id, capital_group_id, type, outcome, notes, occurred_at, created_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                (id, capital_group_id, contact_id, type, outcome, notes, occurred_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             ''',
-            [tid, group_id, ttype, data.get('outcome'), data.get('notes')],
+            [tid, group_id, contact_id, ttype, data.get('outcome'), data.get('notes')],
+        )
+
+    if contact_id:
+        execute(
+            'UPDATE prospecting_contacts SET last_touch_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [contact_id],
         )
 
     # Always roll the parent's "last contacted" forward so the list view's
@@ -472,3 +493,82 @@ def meta():
         'types': list(VALID_TYPES),
         'relationship_statuses': list(VALID_STATUSES),
     })
+
+
+# ---------------------------------------------------------------------------
+# GROUP CONTACTS — CRUD for contacts scoped to a capital group
+# ---------------------------------------------------------------------------
+
+@capital_groups_bp.route('/<group_id>/contacts', methods=['GET'])
+def list_group_contacts(group_id):
+    """List contacts that belong to a capital group."""
+    rows = fetch_all(
+        '''
+        SELECT id, first_name, last_name, title, email, phone, notes,
+               last_touch_at, relationship_stage, created_at
+        FROM prospecting_contacts
+        WHERE group_id = ?
+        ORDER BY first_name, last_name
+        ''',
+        [group_id],
+    )
+    return jsonify({'contacts': rows, 'count': len(rows)})
+
+
+@capital_groups_bp.route('/<group_id>/contacts', methods=['POST'])
+def create_group_contact(group_id):
+    """Create a contact linked to this capital group."""
+    existing = fetch_one('SELECT id FROM capital_groups WHERE id = ?', [group_id])
+    if not existing:
+        return jsonify({'error': 'group not found'}), 404
+
+    data = request.get_json(silent=True) or {}
+    first = (data.get('first_name') or '').strip()
+    last = (data.get('last_name') or '').strip()
+    if not first and not last:
+        return jsonify({'error': 'first_name or last_name required'}), 400
+
+    cid = new_id()
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+    execute(
+        '''
+        INSERT INTO prospecting_contacts
+            (id, group_id, first_name, last_name, title, email, phone, notes,
+             relationship_stage, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'cold', ?, ?)
+        ''',
+        [cid, group_id, first, last, data.get('title'), data.get('email'),
+         data.get('phone'), data.get('notes'), now, now],
+    )
+    contact = fetch_one('SELECT * FROM prospecting_contacts WHERE id = ?', [cid])
+    return jsonify(contact), 201
+
+
+@capital_groups_bp.route('/<group_id>/contacts/<contact_id>', methods=['PATCH'])
+def update_group_contact(group_id, contact_id):
+    """Update a contact's fields (especially notes)."""
+    existing = fetch_one(
+        'SELECT id FROM prospecting_contacts WHERE id = ? AND group_id = ?',
+        [contact_id, group_id],
+    )
+    if not existing:
+        return jsonify({'error': 'contact not found'}), 404
+
+    data = request.get_json(silent=True) or {}
+    sets = []
+    params = []
+    for field in ('first_name', 'last_name', 'title', 'email', 'phone', 'notes'):
+        if field in data:
+            sets.append(f'{field} = ?')
+            params.append(data[field])
+
+    if not sets:
+        return jsonify({'error': 'no updatable fields provided'}), 400
+
+    sets.append('updated_at = CURRENT_TIMESTAMP')
+    params.append(contact_id)
+    execute(f'UPDATE prospecting_contacts SET {", ".join(sets)} WHERE id = ?', params)
+
+    updated = fetch_one('SELECT * FROM prospecting_contacts WHERE id = ?', [contact_id])
+    return jsonify(updated)

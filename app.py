@@ -1112,6 +1112,7 @@ def init_db():
     _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'contact_email', 'TEXT')
     _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'contact_phone', 'TEXT')
     _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'contact_linkedin', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_group_touchpoints', 'contact_id', 'TEXT')
 
     c.execute('''
         CREATE TABLE IF NOT EXISTS prospecting_sequences (
