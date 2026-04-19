@@ -5067,6 +5067,7 @@ function SubNav({ activeTab, setActiveTab, user }) {
 function CommandCenter({ user, prospects, setActiveTab }) {
   const [dueLeads, setDueLeads] = useState([]);
   const [dueLoading, setDueLoading] = useState(true);
+  const [clockTime, setClockTime] = useState(new Date());
 
   useEffect(() => {
     let cancelled = false;
@@ -5079,6 +5080,11 @@ function CommandCenter({ user, prospects, setActiveTab }) {
       .catch(() => {})
       .finally(() => { if (!cancelled) setDueLoading(false); });
     return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    var tick = setInterval(function() { setClockTime(new Date()); }, 60000);
+    return function() { clearInterval(tick); };
   }, []);
 
   const total = (prospects || []).length;
@@ -5094,176 +5100,292 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   })();
   const firstName = user?.name ? String(user.name).split(' ')[0] : '';
 
-  const alerts = [
-    { dot: '#34d399', text: 'Permit surge detected \u2014 Phoenix metro' },
-    { dot: '#a855f7', text: 'Capital raise detected \u2014 Tampa' },
-    { dot: '#fbbf24', text: 'Zoning change alert \u2014 Charlotte' },
-    { dot: '#3b82f6', text: 'Construction start signal \u2014 Austin' }
+  var alerts = [
+    { color: '#10b981', bg: 'rgba(16,185,129,0.06)', border: 'rgba(16,185,129,0.18)', icon: '\u{1F4CB}', label: 'PERMITS', text: 'Permit surge detected \u2014 Phoenix metro' },
+    { color: '#8b5cf6', bg: 'rgba(139,92,246,0.06)', border: 'rgba(139,92,246,0.18)', icon: '\u{1F4B0}', label: 'CAPITAL', text: 'Capital raise detected \u2014 Tampa' },
+    { color: '#f59e0b', bg: 'rgba(245,158,11,0.06)', border: 'rgba(245,158,11,0.18)', icon: '\u26A0\uFE0F', label: 'ZONING', text: 'Zoning change alert \u2014 Charlotte' },
+    { color: '#3b82f6', bg: 'rgba(59,130,246,0.06)', border: 'rgba(59,130,246,0.18)', icon: '\u{1F3D7}\uFE0F', label: 'BUILD', text: 'Construction start signal \u2014 Austin' }
   ];
 
-  // Role-aware quick actions
-  const role = user?.role || 'producer';
-  const quickActions = [
-    { id: 'search', label: 'Run Prospect Search', roles: ['broker', 'producer', 'admin'] },
-    { id: 'discovery', label: 'Daily Discovery', roles: ['producer', 'admin'] },
-    { id: 'intelligence', label: 'Sunbelt Intelligence', roles: ['broker', 'producer', 'admin'] },
-    { id: 'pipeline', label: 'Open Pipeline', roles: ['producer', 'admin'] },
-    { id: 'followups', label: 'Follow-ups Due', roles: ['producer', 'admin'] },
-    { id: 'linkedinhub', label: 'LinkedIn Hub', roles: ['broker', 'producer', 'admin'] },
-    { id: 'dealboard', label: 'Saved Prospects', roles: ['broker', 'producer', 'admin'] }
-  ].filter(a => a.roles.includes(role));
+  var role = user?.role || 'producer';
+  var quickActions = [
+    { id: 'search', label: 'Run Prospect Search', icon: '\u{1F50D}', roles: ['broker', 'producer', 'admin'] },
+    { id: 'discovery', label: 'Daily Discovery', icon: '\u{1F4E1}', roles: ['producer', 'admin'] },
+    { id: 'intelligence', label: 'Sunbelt Intelligence', icon: '\u{1F4CA}', roles: ['broker', 'producer', 'admin'] },
+    { id: 'pipeline', label: 'Open Pipeline', icon: '\u{1F4C8}', roles: ['producer', 'admin'] },
+    { id: 'followups', label: 'Follow-ups Due', icon: '\u23F0', roles: ['producer', 'admin'] },
+    { id: 'linkedinhub', label: 'LinkedIn Hub', icon: '\u{1F517}', roles: ['broker', 'producer', 'admin'] },
+    { id: 'dealboard', label: 'Saved Prospects', icon: '\u2B50', roles: ['broker', 'producer', 'admin'] }
+  ].filter(function(a) { return a.roles.includes(role); });
 
-  const sectionCard = {
-    ...styles.card,
+  var sectionCard = {
+    background: '#FFFFFF',
+    border: '1px solid #e2e8f0',
+    borderRadius: '0.85rem',
     padding: '1.25rem',
-    boxShadow: '0 8px 24px rgba(0,0,0,0.25)'
+    boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03)'
   };
-  const panelHeader = {
+  var panelHeader = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: '0.85rem'
   };
-  const panelTitle = {
+  var panelTitle = {
     fontFamily: "'Orbitron', sans-serif",
-    fontSize: '0.95rem',
-    color: '#0f172a',
+    fontSize: '0.85rem',
+    color: '#1e293b',
     margin: 0,
-    letterSpacing: '0.03em'
+    letterSpacing: '0.03em',
+    fontWeight: 700
   };
 
-  return /*#__PURE__*/React.createElement('div', null,
-    // Greeting header w/ primary + secondary actions
-    /*#__PURE__*/React.createElement('div', {
+  var hotPct = total > 0 ? Math.round((hot / total) * 100) : 0;
+  var liPct = total > 0 ? Math.round((withLinkedIn / total) * 100) : 0;
+
+  var kpiCard = function(icon, label, value, accent, sub) {
+    return React.createElement('div', {
       style: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        gap: '1rem',
-        marginBottom: '1.75rem',
-        flexWrap: 'wrap'
+        background: '#FFFFFF', border: '1px solid #e2e8f0', borderRadius: '0.85rem',
+        padding: '1.15rem 1.25rem', boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+        display: 'flex', flexDirection: 'column', gap: '0.15rem', position: 'relative', overflow: 'hidden'
       }
     },
-      /*#__PURE__*/React.createElement('div', null,
-        /*#__PURE__*/React.createElement('h2', {
+      React.createElement('div', { style: { position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: accent, opacity: 0.5, borderRadius: '0.85rem 0.85rem 0 0' } }),
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.15rem' } },
+        React.createElement('span', { style: { fontSize: '0.85rem', opacity: 0.7 } }, icon),
+        React.createElement('span', {
+          style: { fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }
+        }, label)
+      ),
+      React.createElement('div', {
+        style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '1.75rem', fontWeight: 700, color: '#1e293b', lineHeight: 1.2 }
+      }, String(value)),
+      sub ? React.createElement('div', { style: { fontSize: '0.72rem', color: '#94a3b8', marginTop: '0.1rem' } }, sub) : null
+    );
+  };
+
+  var fmtTime = clockTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  var fmtDay = clockTime.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+
+  var miniBar = function(pct, color) {
+    return React.createElement('div', { style: { width: '100%', height: '4px', background: '#f1f5f9', borderRadius: '2px', marginTop: '0.35rem', overflow: 'hidden' } },
+      React.createElement('div', { style: { width: Math.min(100, pct) + '%', height: '100%', background: color, borderRadius: '2px', transition: 'width 0.4s' } })
+    );
+  };
+
+  return React.createElement('div', null,
+    React.createElement('div', {
+      style: {
+        display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+        gap: '1rem', marginBottom: '1.75rem', flexWrap: 'wrap'
+      }
+    },
+      React.createElement('div', null,
+        React.createElement('h2', {
           style: {
-            fontFamily: "'Orbitron', sans-serif",
-            fontSize: '1.8rem',
-            fontWeight: 900,
-            margin: 0,
+            fontFamily: "'Orbitron', sans-serif", fontSize: '1.8rem', fontWeight: 900, margin: 0,
             background: 'linear-gradient(135deg, #14b8a6 0%, #3b82f6 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            letterSpacing: '0.03em'
+            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', letterSpacing: '0.03em'
           }
         }, 'Command Center'),
-        /*#__PURE__*/React.createElement('p', {
+        React.createElement('p', {
           style: { color: '#64748b', margin: '0.35rem 0 0', fontSize: '0.9rem' }
-        }, `${greeting}${firstName ? ', ' + firstName : ''}. Here's where your day starts.`)
+        }, greeting + (firstName ? ', ' + firstName : '') + '. Here\u2019s where your day starts.')
+      ),
+
+      React.createElement('div', {
+        style: {
+          display: 'flex', alignItems: 'center', gap: '1rem',
+          background: '#FFFFFF', border: '1px solid #e2e8f0', borderRadius: '0.75rem',
+          padding: '0.6rem 1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+        }
+      },
+        React.createElement('div', { style: { textAlign: 'right' } },
+          React.createElement('div', {
+            style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '1.05rem', fontWeight: 600, color: '#1e293b', lineHeight: 1.2 }
+          }, fmtTime),
+          React.createElement('div', {
+            style: { fontSize: '0.72rem', color: '#94a3b8', marginTop: '0.1rem' }
+          }, fmtDay)
+        ),
+        React.createElement('div', {
+          style: { width: '1px', height: '28px', background: '#e2e8f0' }
+        }),
+        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.4rem' } },
+          React.createElement('span', { style: { fontSize: '1.1rem' } }, '\u2600\uFE0F'),
+          React.createElement('div', null,
+            React.createElement('div', {
+              style: { fontSize: '0.82rem', fontWeight: 600, color: '#1e293b', lineHeight: 1.2 }
+            }, 'Sunbelt'),
+            React.createElement('div', {
+              style: { fontSize: '0.68rem', color: '#94a3b8' }
+            }, 'Clear skies')
+          )
+        )
       )
     ),
 
-    // Summary stat cards
-    /*#__PURE__*/React.createElement('div', { style: styles.statsBar },
-      /*#__PURE__*/React.createElement(StatCard, { label: 'Total Prospects', value: total }),
-      /*#__PURE__*/React.createElement(StatCard, { label: 'Hot Leads (80+)', value: hot }),
-      /*#__PURE__*/React.createElement(StatCard, { label: 'Follow-ups Due', value: dueCount, pulse: dueCount > 0 }),
-      /*#__PURE__*/React.createElement(StatCard, { label: 'LinkedIn Coverage', value: withLinkedIn })
-    ),
-
-    // Two-column panel grid: alerts + follow-ups snapshot
-    /*#__PURE__*/React.createElement('div', {
+    React.createElement('div', {
       style: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
-        gap: '1.25rem',
-        marginBottom: '1.5rem'
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+        gap: '0.85rem', marginBottom: '1.5rem'
       }
     },
-      // Alerts / key signals
-      /*#__PURE__*/React.createElement('div', { style: sectionCard },
-        /*#__PURE__*/React.createElement('div', { style: panelHeader },
-          /*#__PURE__*/React.createElement('h3', { style: panelTitle }, 'Key Signals & Alerts'),
-          /*#__PURE__*/React.createElement('button', {
+      kpiCard('\u{1F3AF}', 'Total Prospects', total, '#14b8a6', total > 0 ? 'in your database' : null),
+      kpiCard('\u{1F525}', 'Hot Leads', hot, '#ef4444', hot > 0 ? hotPct + '% of total' : null),
+      kpiCard('\u{1F4CB}', 'Follow-ups Due', dueCount, dueCount > 0 ? '#f59e0b' : '#94a3b8', dueCount > 0 ? 'action needed' : 'all clear'),
+      kpiCard('\u{1F517}', 'LinkedIn', withLinkedIn, '#3b82f6', withLinkedIn > 0 ? liPct + '% coverage' : null)
+    ),
+
+    total > 0 ? React.createElement('div', {
+      style: {
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+        gap: '0.85rem', marginBottom: '1.5rem'
+      }
+    },
+      React.createElement('div', { style: { ...sectionCard, padding: '0.85rem 1rem' } },
+        React.createElement('div', { style: { fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '0.4rem' } }, 'Hot Lead Rate'),
+        miniBar(hotPct, '#ef4444'),
+        React.createElement('div', { style: { fontSize: '0.72rem', color: '#64748b', marginTop: '0.25rem', fontFamily: "'JetBrains Mono', monospace" } }, hotPct + '%')
+      ),
+      React.createElement('div', { style: { ...sectionCard, padding: '0.85rem 1rem' } },
+        React.createElement('div', { style: { fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '0.4rem' } }, 'LinkedIn Coverage'),
+        miniBar(liPct, '#3b82f6'),
+        React.createElement('div', { style: { fontSize: '0.72rem', color: '#64748b', marginTop: '0.25rem', fontFamily: "'JetBrains Mono', monospace" } }, liPct + '%')
+      ),
+      React.createElement('div', { style: { ...sectionCard, padding: '0.85rem 1rem' } },
+        React.createElement('div', { style: { fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '0.4rem' } }, 'Follow-up Rate'),
+        miniBar(total > 0 ? Math.round((dueCount / total) * 100) : 0, '#f59e0b'),
+        React.createElement('div', { style: { fontSize: '0.72rem', color: '#64748b', marginTop: '0.25rem', fontFamily: "'JetBrains Mono', monospace" } },
+          (total > 0 ? Math.round((dueCount / total) * 100) : 0) + '%')
+      ),
+      React.createElement('div', { style: { ...sectionCard, padding: '0.85rem 1rem' } },
+        React.createElement('div', { style: { fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '0.4rem' } }, 'Database Health'),
+        miniBar(Math.min(100, Math.round(((hot + withLinkedIn) / Math.max(1, total * 2)) * 100)), '#14b8a6'),
+        React.createElement('div', { style: { fontSize: '0.72rem', color: '#64748b', marginTop: '0.25rem', fontFamily: "'JetBrains Mono', monospace" } },
+          Math.min(100, Math.round(((hot + withLinkedIn) / Math.max(1, total * 2)) * 100)) + '%')
+      )
+    ) : null,
+
+    React.createElement('div', {
+      style: {
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+        gap: '1rem', marginBottom: '1.25rem'
+      }
+    },
+      React.createElement('div', { style: sectionCard },
+        React.createElement('div', { style: panelHeader },
+          React.createElement('h3', { style: panelTitle }, 'Key Signals & Alerts'),
+          React.createElement('button', {
             style: { ...styles.actionBtn, fontSize: '0.7rem' },
-            onClick: () => setActiveTab('intelligence')
+            onClick: function() { setActiveTab('intelligence'); }
           }, 'View all \u2192')
         ),
-        /*#__PURE__*/React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.5rem' } },
-          alerts.map((a, i) => /*#__PURE__*/React.createElement('div', {
-            key: i,
-            style: {
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.7rem',
-              padding: '0.6rem 0.8rem',
-              background: 'rgba(15,23,42,0.5)',
-              border: '1px solid rgba(226,232,240,0.45)',
-              borderRadius: '0.5rem',
-              fontSize: '0.82rem',
-              color: '#334155'
-            }
-          },
-            /*#__PURE__*/React.createElement('span', {
+        React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.5rem' } },
+          alerts.map(function(a, i) {
+            return React.createElement('div', {
+              key: i,
               style: {
-                width: '8px',
-                height: '8px',
-                borderRadius: '50%',
-                background: a.dot,
-                flexShrink: 0,
-                boxShadow: `0 0 8px ${a.dot}`
+                display: 'flex', alignItems: 'center', gap: '0.65rem',
+                padding: '0.65rem 0.85rem', background: a.bg,
+                border: '1px solid ' + a.border, borderRadius: '0.5rem',
+                transition: 'box-shadow 0.15s',
+                cursor: 'pointer'
               }
-            }),
-            a.text
-          ))
+            },
+              React.createElement('span', { style: { fontSize: '0.9rem', flexShrink: 0 } }, a.icon),
+              React.createElement('div', { style: { flex: 1, minWidth: 0 } },
+                React.createElement('div', {
+                  style: { fontSize: '0.65rem', fontWeight: 700, color: a.color, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.1rem' }
+                }, a.label),
+                React.createElement('div', {
+                  style: { fontSize: '0.82rem', color: '#334155', fontWeight: 500, lineHeight: 1.35 }
+                }, a.text)
+              ),
+              React.createElement('div', {
+                style: { width: '6px', height: '6px', borderRadius: '50%', background: a.color, flexShrink: 0, boxShadow: '0 0 6px ' + a.color }
+              })
+            );
+          })
         )
       ),
 
-      // Follow-ups snapshot
-      /*#__PURE__*/React.createElement('div', { style: sectionCard },
-        /*#__PURE__*/React.createElement('div', { style: panelHeader },
-          /*#__PURE__*/React.createElement('h3', { style: panelTitle }, `Follow-ups Due (${dueCount})`),
-          /*#__PURE__*/React.createElement('button', {
+      React.createElement('div', { style: sectionCard },
+        React.createElement('div', { style: panelHeader },
+          React.createElement('h3', { style: panelTitle }, 'Follow-ups Due (' + dueCount + ')'),
+          React.createElement('button', {
             style: { ...styles.actionBtn, fontSize: '0.7rem' },
-            onClick: () => setActiveTab('followups')
+            onClick: function() { setActiveTab('followups'); }
           }, 'Open \u2192')
         ),
         dueLoading
-          ? /*#__PURE__*/React.createElement('div', { style: { color: '#64748b', fontSize: '0.85rem', padding: '0.6rem 0' } }, 'Loading\u2026')
+          ? React.createElement('div', {
+              style: { color: '#94a3b8', fontSize: '0.85rem', padding: '1.5rem 0', textAlign: 'center' }
+            },
+              React.createElement('div', { style: { fontSize: '1.2rem', marginBottom: '0.35rem', opacity: 0.4 } }, '\u23F3'),
+              'Loading\u2026'
+            )
           : dueLeads.length === 0
-            ? /*#__PURE__*/React.createElement('div', { style: { color: '#64748b', fontSize: '0.85rem', padding: '0.6rem 0' } }, 'All caught up \u2014 nothing overdue.')
-            : /*#__PURE__*/React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.4rem' } },
-                dueLeads.slice(0, 5).map(l => /*#__PURE__*/React.createElement('div', {
-                  key: l.id,
-                  style: {
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: '0.6rem',
-                    padding: '0.55rem 0.8rem',
-                    background: 'rgba(15,23,42,0.5)',
-                    border: '1px solid rgba(226,232,240,0.45)',
-                    borderRadius: '0.5rem',
-                    fontSize: '0.82rem'
-                  }
-                },
-                  /*#__PURE__*/React.createElement('span', { style: { color: '#0f172a', fontWeight: 600 } }, l.company_name || '—'),
-                  /*#__PURE__*/React.createElement('span', { style: { color: '#64748b', fontSize: '0.72rem' } }, l.status || '')
-                ))
+            ? React.createElement('div', {
+                style: { textAlign: 'center', padding: '1.5rem 0' }
+              },
+                React.createElement('div', { style: { fontSize: '1.5rem', marginBottom: '0.4rem', opacity: 0.3 } }, '\u2705'),
+                React.createElement('div', { style: { fontSize: '0.85rem', fontWeight: 600, color: '#10b981', marginBottom: '0.15rem' } }, 'All caught up'),
+                React.createElement('div', { style: { fontSize: '0.75rem', color: '#94a3b8' } }, 'No follow-ups overdue right now')
+              )
+            : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.4rem' } },
+                dueLeads.slice(0, 5).map(function(l) {
+                  return React.createElement('div', {
+                    key: l.id,
+                    style: {
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      gap: '0.6rem', padding: '0.55rem 0.8rem',
+                      background: '#F7F9FC', border: '1px solid #e2e8f0',
+                      borderRadius: '0.5rem', fontSize: '0.82rem',
+                      cursor: 'pointer', transition: 'background 0.15s'
+                    },
+                    onClick: function() { setActiveTab('followups'); }
+                  },
+                    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 } },
+                      React.createElement('div', {
+                        style: { width: '6px', height: '6px', borderRadius: '50%', background: '#f59e0b', flexShrink: 0 }
+                      }),
+                      React.createElement('span', { style: { color: '#1e293b', fontWeight: 600 } }, l.company_name || '\u2014')
+                    ),
+                    React.createElement('span', {
+                      style: { fontSize: '0.7rem', color: '#94a3b8', padding: '0.1rem 0.45rem', background: '#f1f5f9', borderRadius: '0.25rem', flexShrink: 0 }
+                    }, l.status || 'due')
+                  );
+                }),
+                dueCount > 5 ? React.createElement('div', {
+                  style: { textAlign: 'center', fontSize: '0.72rem', color: '#94a3b8', padding: '0.25rem 0', cursor: 'pointer' },
+                  onClick: function() { setActiveTab('followups'); }
+                }, '+' + (dueCount - 5) + ' more') : null
               )
       )
     ),
 
-    // Quick actions strip
-    /*#__PURE__*/React.createElement('div', { style: sectionCard },
-      /*#__PURE__*/React.createElement('h3', { style: { ...panelTitle, marginBottom: '0.85rem' } }, 'Quick Actions'),
-      /*#__PURE__*/React.createElement('div', { style: { display: 'flex', gap: '0.6rem', flexWrap: 'wrap' } },
-        quickActions.map(a => /*#__PURE__*/React.createElement('button', {
-          key: a.id,
-          className: 'action-btn',
-          style: { ...styles.actionBtn, padding: '0.55rem 1rem' },
-          onClick: () => setActiveTab(a.id)
-        }, a.label))
+    React.createElement('div', { style: sectionCard },
+      React.createElement('h3', { style: { ...panelTitle, marginBottom: '0.85rem' } }, 'Quick Actions'),
+      React.createElement('div', { style: { display: 'flex', gap: '0.5rem', flexWrap: 'wrap' } },
+        quickActions.map(function(a) {
+          return React.createElement('button', {
+            key: a.id,
+            className: 'action-btn',
+            style: {
+              display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+              padding: '0.5rem 0.9rem', fontSize: '0.78rem', fontWeight: 500,
+              color: '#475569', background: '#FFFFFF', border: '1px solid #e2e8f0',
+              borderRadius: '0.5rem', cursor: 'pointer', transition: 'all 0.15s',
+              fontFamily: "'Inter', sans-serif"
+            },
+            onClick: function() { setActiveTab(a.id); }
+          },
+            React.createElement('span', { style: { fontSize: '0.85rem' } }, a.icon),
+            a.label
+          );
+        })
       )
     )
   );
