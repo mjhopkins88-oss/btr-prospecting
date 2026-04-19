@@ -2831,6 +2831,7 @@ function ProspectingContactsTab({ user }) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [stageFilter, setStageFilter] = useState('');
+  const [viewMode, setViewMode] = useState('board');
   const [showForm, setShowForm] = useState(false);
   const [groups, setGroups] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -3076,6 +3077,25 @@ function ProspectingContactsTab({ user }) {
           React.createElement('option', { key: k, value: k }, v.label)
         )
       ),
+      React.createElement('div', {
+        style: { display: 'inline-flex', border: '1px solid #334155', borderRadius: '0.5rem', overflow: 'hidden' }
+      },
+        ['board', 'table'].map(m => React.createElement('button', {
+          key: m,
+          onClick: () => setViewMode(m),
+          style: {
+            background: viewMode === m ? '#334155' : 'transparent',
+            border: 'none',
+            color: viewMode === m ? '#e2e8f0' : '#64748b',
+            padding: '0.4rem 0.75rem',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            fontFamily: "'Inter', sans-serif",
+            textTransform: 'capitalize'
+          }
+        }, m))
+      ),
       React.createElement('button', {
         onClick: () => setShowForm(f => !f),
         style: {
@@ -3094,75 +3114,85 @@ function ProspectingContactsTab({ user }) {
 
     formPanel,
 
-    React.createElement('div', {
-      style: {
-        background: '#1e293b',
-        border: '1px solid rgba(51,65,85,0.5)',
-        borderRadius: '0.75rem',
-        overflow: 'hidden'
-      }
-    },
-      React.createElement('div', {
-        style: {
-          display: 'grid',
-          gridTemplateColumns: COLS,
-          gap: '0.5rem',
-          padding: '0.65rem 1rem',
-          borderBottom: '1px solid #334155',
-          background: '#0f172a'
-        }
-      },
-        headerCell('Name'),
-        headerCell('Title'),
-        headerCell('Group'),
-        headerCell('Stage'),
-        headerCell('First Reached'),
-        headerCell('Last Touch'),
-        headerCell('Next Best Action'),
-        headerCell('')
-      ),
-      rows.length === 0
-        ? React.createElement('div', {
-            style: { padding: '3rem 2rem', textAlign: 'center', color: '#64748b' }
-          },
-            React.createElement('div', {
-              style: { fontSize: '1.1rem', marginBottom: '0.5rem', color: '#475569' }
-            }, 'No contacts yet'),
-            React.createElement('div', {
-              style: { fontSize: '0.82rem' }
-            }, 'Contacts will appear here as you add them through the system.')
-          )
-        : rows.map(c => React.createElement('div', {
-            key: c.id,
+    viewMode === 'board'
+      ? React.createElement('div', {
+          style: {
+            background: '#1e293b', border: '1px solid rgba(51,65,85,0.5)',
+            borderRadius: '0.75rem', padding: '3rem 2rem', textAlign: 'center'
+          }
+        },
+          React.createElement('div', { style: { fontSize: '1.1rem', color: '#475569', marginBottom: '0.3rem' } }, 'Board view coming next'),
+          React.createElement('div', { style: { fontSize: '0.8rem', color: '#64748b' } }, rows.length + ' contact' + (rows.length !== 1 ? 's' : '') + ' loaded')
+        )
+      : React.createElement('div', {
+          style: {
+            background: '#1e293b',
+            border: '1px solid rgba(51,65,85,0.5)',
+            borderRadius: '0.75rem',
+            overflow: 'hidden'
+          }
+        },
+          React.createElement('div', {
             style: {
               display: 'grid',
               gridTemplateColumns: COLS,
               gap: '0.5rem',
-              padding: '0.7rem 1rem',
-              borderBottom: '1px solid rgba(51,65,85,0.3)',
-              alignItems: 'center'
+              padding: '0.65rem 1rem',
+              borderBottom: '1px solid #334155',
+              background: '#0f172a'
             }
           },
-            React.createElement('span', {
-              style: { fontSize: '0.86rem', fontWeight: 600, color: '#e2e8f0' }
-            }, [c.first_name, c.last_name].filter(Boolean).join(' ') || '\u2014'),
-            React.createElement('span', {
-              style: { fontSize: '0.78rem', color: '#94a3b8' }
-            }, c.title || '\u2014'),
-            React.createElement('span', {
-              style: { fontSize: '0.78rem', color: '#94a3b8' }
-            }, c.group_name || '\u2014'),
-            stageBadge(c.relationship_stage),
-            React.createElement('span', {
-              style: { fontSize: '0.78rem', color: '#94a3b8' }
-            }, fmtDate(c.first_reached_out_at)),
-            React.createElement('span', {
-              style: { fontSize: '0.78rem', color: '#94a3b8' }
-            }, fmtDate(c.last_touch_at)),
-            nbaBadge(c.next_best_action),
-            ssBtn(c)
-          ))
-    )
+            headerCell('Name'),
+            headerCell('Title'),
+            headerCell('Group'),
+            headerCell('Stage'),
+            headerCell('First Reached'),
+            headerCell('Last Touch'),
+            headerCell('Next Best Action'),
+            headerCell('')
+          ),
+          rows.length === 0
+            ? React.createElement('div', {
+                style: { padding: '3rem 2rem', textAlign: 'center', color: '#64748b' }
+              },
+                React.createElement('div', {
+                  style: { fontSize: '1.1rem', marginBottom: '0.5rem', color: '#475569' }
+                }, 'No contacts yet'),
+                React.createElement('div', {
+                  style: { fontSize: '0.82rem' }
+                }, 'Contacts will appear here as you add them through the system.')
+              )
+            : rows.map(c => React.createElement('div', {
+                key: c.id,
+                style: {
+                  display: 'grid',
+                  gridTemplateColumns: COLS,
+                  gap: '0.5rem',
+                  padding: '0.7rem 1rem',
+                  borderBottom: '1px solid rgba(51,65,85,0.3)',
+                  alignItems: 'center'
+                }
+              },
+                React.createElement('span', {
+                  style: { fontSize: '0.86rem', fontWeight: 600, color: '#e2e8f0' }
+                }, [c.first_name, c.last_name].filter(Boolean).join(' ') || '\u2014'),
+                React.createElement('span', {
+                  style: { fontSize: '0.78rem', color: '#94a3b8' }
+                }, c.title || '\u2014'),
+                React.createElement('span', {
+                  style: { fontSize: '0.78rem', color: '#94a3b8' }
+                }, c.group_name || '\u2014'),
+                stageBadge(c.relationship_stage),
+                React.createElement('span', {
+                  style: { fontSize: '0.78rem', color: '#94a3b8' }
+                }, fmtDate(c.first_reached_out_at)),
+                React.createElement('span', {
+                  style: { fontSize: '0.78rem', color: '#94a3b8' }
+                }, fmtDate(c.last_touch_at)),
+                nbaBadge(c.next_best_action),
+                ssBtn(c)
+              ))
+        )
   );
 }
 
