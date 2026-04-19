@@ -13984,7 +13984,10 @@ function ActivityModal({
 // ======= PIPELINE PAGE =======
 if (typeof document !== 'undefined' && !document.getElementById('pipeline-panel-anim')) {
   var _s = document.createElement('style'); _s.id = 'pipeline-panel-anim';
-  _s.textContent = '@keyframes slideInRight{from{transform:translateX(100%)}to{transform:translateX(0)}}';
+  _s.textContent = '@keyframes slideInRight{from{transform:translateX(100%)}to{transform:translateX(0)}}' +
+    '.pl-row .pl-hover-actions{opacity:0;pointer-events:none;transition:opacity 0.15s}' +
+    '.pl-row:hover .pl-hover-actions{opacity:1;pointer-events:auto}' +
+    '.pl-row:hover{border-color:#475569!important}';
   document.head.appendChild(_s);
 }
 function PipelinePage({
@@ -14146,6 +14149,7 @@ function PipelinePage({
     const stageMeta = { cold: 'Cold', initial_outreach: 'Outreach', light_conversation: 'Follow-Up', active: 'Active', warm: 'Warm', strategic: 'Strategic', dormant: 'Dormant' };
     return /*#__PURE__*/React.createElement("div", {
     key: lead.id,
+    className: 'pl-row',
     onClick: () => setPanelLead(lead),
     style: {
       background: '#1e293b',
@@ -14157,6 +14161,7 @@ function PipelinePage({
       gap: '1rem',
       flexWrap: 'wrap',
       cursor: 'pointer',
+      position: 'relative',
       transition: 'border-color 0.15s'
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -14297,40 +14302,32 @@ function PipelinePage({
     const d = Math.floor(diff / 86400000);
     const label = (lead.last_action_type || '').replace(/_/g, ' ').toLowerCase();
     return `${d === 0 ? 'Today' : d + 'd ago'} · ${label}`;
-  })()), /*#__PURE__*/React.createElement("button", {
-    className: "action-btn",
-    style: styles.actionBtn,
-    onClick: () => setTouchpointTarget({
-      lead_id: lead.id,
-      company_name: lead.company_name
-    })
-  }, "Log Touchpoint"), /*#__PURE__*/React.createElement("button", {
-    className: "action-btn",
+  })()), /*#__PURE__*/React.createElement("div", {
+    className: 'pl-hover-actions',
     style: {
-      ...styles.actionBtn,
-      fontSize: '0.75rem'
-    },
-    onClick: () => setActivityTarget({
-      lead_id: lead.id,
-      company_name: lead.company_name
-    })
-  }, "View Activity"),
-    lead.group_id && /*#__PURE__*/React.createElement("span", {
-      style: { fontSize: '0.68rem', color: '#60a5fa', padding: '0.25rem 0.5rem', border: '1px solid #334155', borderRadius: '0.4rem' }
-    }, (lead.group_name || 'Linked Group')),
-    lead.contact_id && /*#__PURE__*/React.createElement("button", {
-      className: "action-btn",
-      style: { ...styles.actionBtn, fontSize: '0.75rem', color: '#6ee7b7', borderColor: '#334155' },
-      onClick: () => {
-        _launchSignalStack({
-          contact: { first_name: lead.contact_first_name, last_name: lead.contact_last_name, title: lead.contact_title },
-          group: lead.group_name ? { name: lead.group_name } : lead.company_name ? { name: lead.company_name } : null,
-          relationship_stage: lead.relationship_stage,
-          channel: 'email',
-          title: 'Outreach \u2014 ' + (contactName || lead.company_name)
-        });
-      }
-    }, "SignalStack")
+      display: 'flex', gap: '0.35rem', alignItems: 'center',
+      marginLeft: 'auto', flexShrink: 0
+    }
+  },
+    /*#__PURE__*/React.createElement("button", {
+      onClick: e => { e.stopPropagation(); const cn = [lead.contact_first_name, lead.contact_last_name].filter(Boolean).join(' '); _launchSignalStack({ contact: { first_name: lead.contact_first_name, last_name: lead.contact_last_name, title: lead.contact_title }, group: lead.group_name ? { name: lead.group_name } : { name: lead.company_name }, relationship_stage: lead.relationship_stage, channel: 'email', title: 'Outreach \u2014 ' + (cn || lead.company_name) }); },
+      style: { background: 'rgba(16,185,129,0.15)', border: '1px solid #334155', color: '#6ee7b7', padding: '0.25rem 0.55rem', borderRadius: '0.35rem', fontSize: '0.68rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif", whiteSpace: 'nowrap' }
+    }, "Draft"),
+    /*#__PURE__*/React.createElement("button", {
+      onClick: e => { e.stopPropagation(); setTouchpointTarget({ lead_id: lead.id, company_name: lead.company_name }); },
+      style: { background: 'transparent', border: '1px solid #334155', color: '#94a3b8', padding: '0.25rem 0.55rem', borderRadius: '0.35rem', fontSize: '0.68rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif", whiteSpace: 'nowrap' }
+    }, "Log Touch"),
+    /*#__PURE__*/React.createElement("button", {
+      onClick: e => { e.stopPropagation(); const d = prompt('Follow-up date (YYYY-MM-DD):'); if (d) updateLead(lead.id, 'next_followup_at', new Date(d).toISOString()); },
+      style: { background: 'transparent', border: '1px solid #334155', color: '#94a3b8', padding: '0.25rem 0.55rem', borderRadius: '0.35rem', fontSize: '0.68rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif", whiteSpace: 'nowrap' }
+    }, "Follow-Up"),
+    /*#__PURE__*/React.createElement("select", {
+      value: lead.status,
+      onClick: e => e.stopPropagation(),
+      onChange: e => { e.stopPropagation(); updateLead(lead.id, 'status', e.target.value); },
+      style: { background: '#0f172a', border: '1px solid #334155', color: '#94a3b8', padding: '0.25rem 0.4rem', borderRadius: '0.35rem', fontSize: '0.68rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif" }
+    }, CRM_STATUSES.map(s => /*#__PURE__*/React.createElement("option", { key: s, value: s }, s)))
+  )
   )})), touchpointTarget && /*#__PURE__*/React.createElement(TouchpointModal, {
     target: touchpointTarget,
     onClose: () => setTouchpointTarget(null),
