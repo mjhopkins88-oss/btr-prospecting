@@ -13982,6 +13982,11 @@ function ActivityModal({
 }
 
 // ======= PIPELINE PAGE =======
+if (typeof document !== 'undefined' && !document.getElementById('pipeline-panel-anim')) {
+  var _s = document.createElement('style'); _s.id = 'pipeline-panel-anim';
+  _s.textContent = '@keyframes slideInRight{from{transform:translateX(100%)}to{transform:translateX(0)}}';
+  document.head.appendChild(_s);
+}
 function PipelinePage({
   user
 }) {
@@ -13992,6 +13997,7 @@ function PipelinePage({
   const [touchpointTarget, setTouchpointTarget] = useState(null);
   const [activityTarget, setActivityTarget] = useState(null);
   const [workspaceUsers, setWorkspaceUsers] = useState([]);
+  const [panelLead, setPanelLead] = useState(null);
   useEffect(() => {
     loadLeads();
     if (user?.role === 'admin') {
@@ -14029,6 +14035,12 @@ function PipelinePage({
       console.error('Lead update error:', e);
     }
   };
+  const _panelRow = (label, val) => /*#__PURE__*/React.createElement("div", {
+    style: { display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem' }
+  },
+    /*#__PURE__*/React.createElement("span", { style: { color: '#475569' } }, label),
+    /*#__PURE__*/React.createElement("span", { style: { color: '#94a3b8' } }, val || '\u2014')
+  );
   const statusPill = (active, label) => ({
     fontSize: '0.8rem',
     padding: '0.35rem 0.75rem',
@@ -14134,6 +14146,7 @@ function PipelinePage({
     const stageMeta = { cold: 'Cold', initial_outreach: 'Outreach', light_conversation: 'Follow-Up', active: 'Active', warm: 'Warm', strategic: 'Strategic', dormant: 'Dormant' };
     return /*#__PURE__*/React.createElement("div", {
     key: lead.id,
+    onClick: () => setPanelLead(lead),
     style: {
       background: '#1e293b',
       border: '1px solid #334155',
@@ -14142,7 +14155,9 @@ function PipelinePage({
       display: 'flex',
       alignItems: 'center',
       gap: '1rem',
-      flexWrap: 'wrap'
+      flexWrap: 'wrap',
+      cursor: 'pointer',
+      transition: 'border-color 0.15s'
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -14305,7 +14320,178 @@ function PipelinePage({
     companyName: activityTarget.company_name,
     onClose: () => setActivityTarget(null),
     user: user
-  }));
+  }),
+
+  panelLead && /*#__PURE__*/React.createElement("div", {
+    onClick: () => setPanelLead(null),
+    style: {
+      position: 'fixed', inset: 0, zIndex: 999,
+      background: 'rgba(0,0,0,0.4)',
+      transition: 'opacity 0.2s'
+    }
+  },
+    /*#__PURE__*/React.createElement("div", {
+      onClick: e => e.stopPropagation(),
+      style: {
+        position: 'absolute', top: 0, right: 0, bottom: 0,
+        width: '420px', maxWidth: '90vw',
+        background: '#0f172a',
+        borderLeft: '1px solid #334155',
+        boxShadow: '-8px 0 30px rgba(0,0,0,0.5)',
+        display: 'flex', flexDirection: 'column',
+        overflow: 'hidden',
+        animation: 'slideInRight 0.2s ease-out'
+      }
+    },
+
+      /*#__PURE__*/React.createElement("div", {
+        style: {
+          padding: '1rem 1.25rem',
+          borderBottom: '1px solid #1e293b',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+        }
+      },
+        /*#__PURE__*/React.createElement("div", {
+          style: { fontFamily: "'Orbitron',sans-serif", fontSize: '1rem', fontWeight: 700, color: '#f1f5f9' }
+        }, panelLead.company_name),
+        /*#__PURE__*/React.createElement("button", {
+          onClick: () => setPanelLead(null),
+          style: {
+            background: 'transparent', border: 'none', color: '#64748b',
+            fontSize: '1.2rem', cursor: 'pointer', padding: '0.25rem', lineHeight: 1
+          }
+        }, '\u2715')
+      ),
+
+      /*#__PURE__*/React.createElement("div", {
+        style: {
+          padding: '0.75rem 1.25rem',
+          borderBottom: '1px solid #1e293b',
+          display: 'flex', gap: '0.5rem', flexWrap: 'wrap'
+        }
+      },
+        /*#__PURE__*/React.createElement("button", {
+          onClick: () => {
+            const cn = [panelLead.contact_first_name, panelLead.contact_last_name].filter(Boolean).join(' ');
+            _launchSignalStack({
+              contact: { first_name: panelLead.contact_first_name, last_name: panelLead.contact_last_name, title: panelLead.contact_title },
+              group: panelLead.group_name ? { name: panelLead.group_name } : { name: panelLead.company_name },
+              relationship_stage: panelLead.relationship_stage,
+              channel: 'email',
+              title: 'Outreach \u2014 ' + (cn || panelLead.company_name)
+            });
+          },
+          style: { background: 'rgba(16,185,129,0.15)', border: '1px solid #334155', color: '#6ee7b7', padding: '0.35rem 0.7rem', borderRadius: '0.4rem', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif" }
+        }, "Draft in SignalStack"),
+        /*#__PURE__*/React.createElement("button", {
+          onClick: () => { setPanelLead(null); setTouchpointTarget({ lead_id: panelLead.id, company_name: panelLead.company_name }); },
+          style: { background: 'transparent', border: '1px solid #334155', color: '#94a3b8', padding: '0.35rem 0.7rem', borderRadius: '0.4rem', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif" }
+        }, "Log Touch"),
+        /*#__PURE__*/React.createElement("button", {
+          onClick: () => {
+            const d = prompt('Follow-up date (YYYY-MM-DD):');
+            if (d) updateLead(panelLead.id, 'next_followup_at', new Date(d).toISOString());
+          },
+          style: { background: 'transparent', border: '1px solid #334155', color: '#94a3b8', padding: '0.35rem 0.7rem', borderRadius: '0.4rem', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif" }
+        }, "Set Follow-Up"),
+        /*#__PURE__*/React.createElement("select", {
+          value: panelLead.status,
+          onChange: e => { updateLead(panelLead.id, 'status', e.target.value); setPanelLead(Object.assign({}, panelLead, { status: e.target.value })); },
+          style: { background: '#1e293b', border: '1px solid #334155', color: '#94a3b8', padding: '0.35rem 0.5rem', borderRadius: '0.4rem', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter',sans-serif" }
+        }, CRM_STATUSES.map(s => /*#__PURE__*/React.createElement("option", { key: s, value: s }, s)))
+      ),
+
+      /*#__PURE__*/React.createElement("div", {
+        style: { flex: 1, overflowY: 'auto', padding: '1rem 1.25rem' }
+      },
+
+        /*#__PURE__*/React.createElement("div", { style: { marginBottom: '1.25rem' } },
+          /*#__PURE__*/React.createElement("div", {
+            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#475569', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
+          }, "Details"),
+          /*#__PURE__*/React.createElement("div", { style: { display: 'flex', flexDirection: 'column', gap: '0.35rem' } },
+            _panelRow('Status', panelLead.status),
+            _panelRow('Owner', panelLead.owner_user_id === user?.id ? 'Me' : panelLead.owner_name || 'Unassigned'),
+            _panelRow('Source', panelLead.source || 'manual'),
+            _panelRow('Created', panelLead.created_at ? new Date(panelLead.created_at).toLocaleDateString() : '\u2014')
+          )
+        ),
+
+        panelLead.group_name && /*#__PURE__*/React.createElement("div", { style: { marginBottom: '1.25rem' } },
+          /*#__PURE__*/React.createElement("div", {
+            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#475569', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
+          }, "Group / Account"),
+          /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.85rem', color: '#e2e8f0', marginBottom: '0.15rem' } }, panelLead.group_name),
+          panelLead.warmth_score > 0 && /*#__PURE__*/React.createElement("span", {
+            style: { fontSize: '0.68rem', color: panelLead.warmth_score >= 70 ? '#34d399' : panelLead.warmth_score >= 40 ? '#fbbf24' : '#fb923c' }
+          }, 'Warmth: ' + panelLead.warmth_score)
+        ),
+
+        /*#__PURE__*/React.createElement("div", { style: { marginBottom: '1.25rem' } },
+          /*#__PURE__*/React.createElement("div", {
+            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#475569', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
+          }, "Contact"),
+          (() => {
+            const cn = [panelLead.contact_first_name, panelLead.contact_last_name].filter(Boolean).join(' ');
+            return cn
+              ? /*#__PURE__*/React.createElement("div", null,
+                  /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.85rem', color: '#e2e8f0' } }, cn),
+                  panelLead.contact_title && /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.75rem', color: '#94a3b8' } }, panelLead.contact_title),
+                  panelLead.relationship_stage && /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.68rem', color: '#60a5fa', marginTop: '0.2rem' } }, 'Stage: ' + (({ cold:'Cold', initial_outreach:'Outreach', light_conversation:'Follow-Up', active:'Active', warm:'Warm', strategic:'Strategic', dormant:'Dormant' })[panelLead.relationship_stage] || panelLead.relationship_stage))
+                )
+              : /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.78rem', color: '#475569', fontStyle: 'italic' } }, 'No contact linked');
+          })()
+        ),
+
+        /*#__PURE__*/React.createElement("div", { style: { marginBottom: '1.25rem' } },
+          /*#__PURE__*/React.createElement("div", {
+            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#475569', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
+          }, "Last Touch"),
+          panelLead.last_activity_at
+            ? /*#__PURE__*/React.createElement("div", null,
+                /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.82rem', color: '#94a3b8' } },
+                  (() => {
+                    const diff = Date.now() - new Date(panelLead.last_activity_at).getTime();
+                    const d = Math.floor(diff / 86400000);
+                    return (d === 0 ? 'Today' : d + 'd ago');
+                  })()
+                ),
+                panelLead.last_action_type && /*#__PURE__*/React.createElement("div", {
+                  style: { fontSize: '0.72rem', color: '#475569' }
+                }, (panelLead.last_action_type || '').replace(/_/g, ' ').toLowerCase())
+              )
+            : /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.78rem', color: '#475569', fontStyle: 'italic' } }, 'No activity recorded')
+        ),
+
+        panelLead.next_followup_at && /*#__PURE__*/React.createElement("div", { style: { marginBottom: '1.25rem' } },
+          /*#__PURE__*/React.createElement("div", {
+            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#475569', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
+          }, "Follow-Up"),
+          /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.82rem', color: '#fbbf24' } },
+            new Date(panelLead.next_followup_at).toLocaleDateString()
+          )
+        ),
+
+        /*#__PURE__*/React.createElement("div", { style: { marginBottom: '1.25rem' } },
+          /*#__PURE__*/React.createElement("div", {
+            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#475569', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
+          }, "Signals"),
+          panelLead.last_signal_title
+            ? /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.78rem', color: '#94a3b8' } }, panelLead.last_signal_title)
+            : /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.78rem', color: '#475569', fontStyle: 'italic' } }, 'No signals detected')
+        ),
+
+        /*#__PURE__*/React.createElement("div", null,
+          /*#__PURE__*/React.createElement("div", {
+            style: { fontSize: '0.65rem', textTransform: 'uppercase', color: '#475569', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '0.4rem' }
+          }, "Notes"),
+          /*#__PURE__*/React.createElement("div", { style: { fontSize: '0.78rem', color: '#475569', fontStyle: 'italic' } }, 'No notes yet')
+        )
+      )
+    )
+  )
+
+  );
 }
 
 // ======= FOLLOW-UPS DUE PAGE =======
