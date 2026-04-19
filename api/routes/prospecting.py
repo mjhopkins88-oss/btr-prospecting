@@ -109,11 +109,15 @@ def mark_complete(task_id):
 def list_tasks():
     status = request.args.get('status', 'pending')
     group_id = request.args.get('group_id', '')
+    contact_id = request.args.get('contact_id', '')
     where = ["status = ?"]
     params = [status]
     if group_id:
         where.append("capital_group_id = ?")
         params.append(group_id)
+    if contact_id:
+        where.append("contact_id = ?")
+        params.append(contact_id)
     tasks = fetch_all(
         f"SELECT * FROM prospecting_tasks WHERE {' AND '.join(where)} ORDER BY priority DESC, due_at ASC",
         params
@@ -301,6 +305,15 @@ def log_contact_touchpoint(cid):
     return jsonify({'id': tp_id}), 201
 
 
+@prospecting_bp.route('/contacts/<cid>/touchpoints', methods=['GET'])
+def list_contact_touchpoints(cid):
+    rows = fetch_all(
+        "SELECT * FROM prospecting_touchpoints WHERE contact_id = ? ORDER BY occurred_at DESC LIMIT 200",
+        [cid]
+    )
+    return jsonify({'touchpoints': rows, 'count': len(rows)})
+
+
 # ---------------------------------------------------------------------------
 # NOTICES — Daily Discovery matches awaiting user action
 # ---------------------------------------------------------------------------
@@ -335,6 +348,31 @@ def update_notice(nid):
 # RELATIONSHIP-AWARE TASK LIFECYCLE
 # ---------------------------------------------------------------------------
 
+@prospecting_bp.route('/tasks/<task_id>', methods=['PATCH'])
+def update_task(task_id):
+    task = fetch_one("SELECT id, status FROM prospecting_tasks WHERE id = ?", [task_id])
+    if not task:
+        return jsonify({'error': 'task not found'}), 404
+    data = request.get_json(force=True)
+    allowed = ['status', 'due_at', 'priority', 'notes', 'channel']
+    valid_statuses = ('pending', 'completed', 'snoozed', 'cancelled', 'skipped')
+    sets = []
+    params = []
+    for k in allowed:
+        if k in data:
+            if k == 'status' and data[k] not in valid_statuses:
+                return jsonify({'error': f'invalid status, must be one of {valid_statuses}'}), 400
+            sets.append(f'{k} = ?')
+            params.append(data[k])
+    if not sets:
+        return jsonify({'error': 'no updatable fields provided'}), 400
+    sets.append("updated_at = CURRENT_TIMESTAMP")
+    params.append(task_id)
+    execute(f"UPDATE prospecting_tasks SET {', '.join(sets)} WHERE id = ?", params)
+    updated = fetch_one("SELECT * FROM prospecting_tasks WHERE id = ?", [task_id])
+    return jsonify(updated)
+
+
 @prospecting_bp.route('/tasks/<task_id>/complete-with-touchpoint', methods=['POST'])
 def complete_task_with_touchpoint(task_id):
     data = request.get_json(silent=True) or {}
@@ -349,6 +387,36 @@ def get_signalstack_payload(task_id):
     payload = build_signalstack_payload(task_id)
     if not payload:
         return jsonify({'error': 'task not found'}), 404
+    return jsonify(payload)
+
+
+@prospecting_bp.route('/signalstack/contact/<cid>', methods=['GET'])
+def signalstack_by_contact(cid):
+    task = fetch_one(
+        "SELECT id FROM prospecting_tasks WHERE contact_id = ? AND status = 'pending' "
+        "ORDER BY priority DESC, due_at ASC LIMIT 1",
+        [cid]
+    )
+    if not task:
+        return jsonify({'error': 'no pending task for contact'}), 404
+    payload = build_signalstack_payload(task['id'])
+    if not payload:
+        return jsonify({'error': 'payload build failed'}), 404
+    return jsonify(payload)
+
+
+@prospecting_bp.route('/signalstack/group/<gid>', methods=['GET'])
+def signalstack_by_group(gid):
+    task = fetch_one(
+        "SELECT id FROM prospecting_tasks WHERE capital_group_id = ? AND status = 'pending' "
+        "ORDER BY priority DESC, due_at ASC LIMIT 1",
+        [gid]
+    )
+    if not task:
+        return jsonify({'error': 'no pending task for group'}), 404
+    payload = build_signalstack_payload(task['id'])
+    if not payload:
+        return jsonify({'error': 'payload build failed'}), 404
     return jsonify(payload)
 
 
