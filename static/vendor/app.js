@@ -2298,7 +2298,8 @@ function ProspectingPage({ user }) {
     { id: 'groups', label: 'Groups' },
     { id: 'contacts', label: 'Contacts' },
     { id: 'notices', label: 'Notices' },
-    { id: 'sequences', label: 'Sequences' }
+    { id: 'sequences', label: 'Sequences' },
+    { id: 'canvas', label: 'Canvas' }
   ];
 
   return React.createElement('div', null,
@@ -2357,6 +2358,8 @@ function ProspectingPage({ user }) {
         ? React.createElement(ProspectingScheduleTab)
       : tab === 'feed'
         ? React.createElement(ProspectingFeedTab)
+      : tab === 'canvas'
+        ? React.createElement(ProspectingCanvasTab)
         : null
   );
 }
@@ -4132,6 +4135,249 @@ function ProspectingFeedTab() {
             }
           }, 'No activity matches this filter.')
         : items.map((it, i) => feedRow(it, i === items.length - 1))
+    )
+  );
+}
+
+function ProspectingCanvasTab() {
+  const [imageUrl, setImageUrl] = useState('');
+  const [loadedSrc, setLoadedSrc] = useState(null);
+  const [imgError, setImgError] = useState(null);
+  const [dotGrid, setDotGrid] = useState(null);
+  const canvasRef = useRef(null);
+
+  const DOT_SPACING = 6;
+  const DOT_RADIUS = 2.2;
+
+  const loadImage = (src) => {
+    if (!src) return;
+    setImgError(null);
+    setDotGrid(null);
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      setLoadedSrc(src);
+      buildDotGrid(img);
+    };
+    img.onerror = () => setImgError('Could not load image. Check the URL or try another.');
+    img.src = src;
+  };
+
+  const buildDotGrid = (img) => {
+    const maxW = 480, maxH = 360;
+    let w = img.width, h = img.height;
+    if (w > maxW) { h = h * (maxW / w); w = maxW; }
+    if (h > maxH) { w = w * (maxH / h); h = maxH; }
+    w = Math.round(w); h = Math.round(h);
+
+    const offscreen = document.createElement('canvas');
+    offscreen.width = w; offscreen.height = h;
+    const ctx = offscreen.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+    const data = ctx.getImageData(0, 0, w, h).data;
+
+    const dots = [];
+    for (let y = DOT_SPACING; y < h; y += DOT_SPACING) {
+      for (let x = DOT_SPACING; x < w; x += DOT_SPACING) {
+        const i = (y * w + x) * 4;
+        const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+        if (a < 30) continue;
+        dots.push({ x, y, r, g, b, a });
+      }
+    }
+    setDotGrid({ width: w, height: h, dots, total: dots.length });
+  };
+
+  useEffect(() => {
+    if (!dotGrid || !canvasRef.current) return;
+    const cvs = canvasRef.current;
+    cvs.width = dotGrid.width;
+    cvs.height = dotGrid.height;
+    const ctx = cvs.getContext('2d');
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, cvs.width, cvs.height);
+    dotGrid.dots.forEach(d => {
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, DOT_RADIUS, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${d.r},${d.g},${d.b},${(d.a / 255).toFixed(2)})`;
+      ctx.fill();
+    });
+  }, [dotGrid]);
+
+  const handleFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setImageUrl('');
+      loadImage(ev.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const pillStyle = {
+    display: 'inline-block',
+    fontSize: '0.68rem',
+    fontWeight: 600,
+    padding: '0.2rem 0.55rem',
+    borderRadius: '9999px',
+    fontFamily: "'JetBrains Mono', monospace",
+    letterSpacing: '0.03em'
+  };
+
+  return React.createElement('div', {
+    style: { display: 'flex', flexDirection: 'column', gap: '1.25rem' }
+  },
+    React.createElement('div', {
+      style: {
+        background: '#1e293b',
+        border: '1px solid rgba(51,65,85,0.5)',
+        borderRadius: '0.85rem',
+        padding: '1.25rem'
+      }
+    },
+      React.createElement('div', {
+        style: { display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1rem' }
+      },
+        React.createElement('span', { style: { fontSize: '1.1rem' } }, '\u{1F3A8}'),
+        React.createElement('span', {
+          style: {
+            fontFamily: "'Orbitron', sans-serif",
+            fontSize: '0.95rem',
+            fontWeight: 700,
+            color: '#e2e8f0',
+            letterSpacing: '0.04em'
+          }
+        }, 'Relationship Canvas'),
+        React.createElement('span', {
+          style: { ...pillStyle, background: 'rgba(52,211,153,0.12)', color: '#34d399' }
+        }, 'BETA')
+      ),
+      React.createElement('p', {
+        style: { fontSize: '0.82rem', color: '#94a3b8', margin: '0 0 1rem', lineHeight: 1.5 }
+      }, 'Paint a portrait one touchpoint at a time. Each meaningful interaction fills in a dot \u2014 after ~500-1000 touches the full image is revealed.'),
+
+      React.createElement('div', {
+        style: { display: 'flex', gap: '0.75rem', alignItems: 'flex-end', flexWrap: 'wrap' }
+      },
+        React.createElement('div', { style: { flex: '1 1 280px' } },
+          React.createElement('label', {
+            style: { fontSize: '0.72rem', color: '#64748b', display: 'block', marginBottom: '0.35rem', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }
+          }, 'Image URL'),
+          React.createElement('input', {
+            type: 'text',
+            placeholder: 'https://example.com/photo.jpg',
+            value: imageUrl,
+            onChange: (e) => setImageUrl(e.target.value),
+            onKeyDown: (e) => { if (e.key === 'Enter') loadImage(imageUrl); },
+            style: {
+              width: '100%',
+              background: '#0f172a',
+              border: '1px solid #334155',
+              borderRadius: '0.5rem',
+              color: '#e2e8f0',
+              padding: '0.55rem 0.75rem',
+              fontSize: '0.82rem',
+              fontFamily: "'Inter', sans-serif",
+              outline: 'none',
+              boxSizing: 'border-box'
+            }
+          })
+        ),
+        React.createElement('button', {
+          onClick: () => loadImage(imageUrl),
+          disabled: !imageUrl.trim(),
+          style: {
+            background: imageUrl.trim() ? '#34d399' : '#334155',
+            color: imageUrl.trim() ? '#0f172a' : '#64748b',
+            border: 'none',
+            borderRadius: '0.5rem',
+            padding: '0.55rem 1.1rem',
+            fontSize: '0.82rem',
+            fontWeight: 600,
+            cursor: imageUrl.trim() ? 'pointer' : 'default',
+            fontFamily: "'Inter', sans-serif",
+            whiteSpace: 'nowrap'
+          }
+        }, 'Load'),
+        React.createElement('div', {
+          style: { display: 'flex', flexDirection: 'column', gap: '0.25rem' }
+        },
+          React.createElement('label', {
+            style: { fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }
+          }, 'Or upload'),
+          React.createElement('input', {
+            type: 'file',
+            accept: 'image/*',
+            onChange: handleFile,
+            style: {
+              fontSize: '0.75rem',
+              color: '#94a3b8',
+              fontFamily: "'Inter', sans-serif"
+            }
+          })
+        )
+      ),
+      imgError ? React.createElement('div', {
+        style: { color: '#f87171', fontSize: '0.78rem', marginTop: '0.6rem' }
+      }, imgError) : null
+    ),
+
+    React.createElement('div', {
+      style: {
+        background: '#1e293b',
+        border: '1px solid rgba(51,65,85,0.5)',
+        borderRadius: '0.85rem',
+        padding: '1.25rem',
+        minHeight: '300px',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: dotGrid ? 'flex-start' : 'center'
+      }
+    },
+      dotGrid
+        ? React.createElement('div', {
+            style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', width: '100%' }
+          },
+            React.createElement('div', {
+              style: { display: 'flex', alignItems: 'center', gap: '0.75rem', width: '100%', justifyContent: 'space-between', flexWrap: 'wrap' }
+            },
+              React.createElement('span', {
+                style: { fontSize: '0.78rem', color: '#94a3b8' }
+              }, `${dotGrid.total.toLocaleString()} dots mapped`),
+              React.createElement('span', {
+                style: { ...pillStyle, background: 'rgba(96,165,250,0.12)', color: '#60a5fa' }
+              }, 'TEMPLATE READY'),
+              React.createElement('span', {
+                style: { fontSize: '0.72rem', color: '#64748b', fontFamily: "'JetBrains Mono', monospace" }
+              }, `${dotGrid.width}\u00D7${dotGrid.height}px`)
+            ),
+            React.createElement('canvas', {
+              ref: canvasRef,
+              style: {
+                borderRadius: '0.5rem',
+                border: '1px solid #334155',
+                maxWidth: '100%'
+              }
+            }),
+            React.createElement('p', {
+              style: { fontSize: '0.75rem', color: '#64748b', textAlign: 'center', margin: 0, lineHeight: 1.5 }
+            }, 'Each dot represents a future touchpoint. As you build the relationship, dots fill in to reveal the portrait.')
+          )
+        : React.createElement('div', {
+            style: { textAlign: 'center', padding: '2rem' }
+          },
+            React.createElement('div', {
+              style: { fontSize: '2.5rem', marginBottom: '0.75rem', opacity: 0.3 }
+            }, '\u25CC'),
+            React.createElement('div', {
+              style: { fontSize: '0.88rem', color: '#64748b', marginBottom: '0.3rem' }
+            }, 'No image loaded'),
+            React.createElement('div', {
+              style: { fontSize: '0.78rem', color: '#475569' }
+            }, 'Paste a URL or upload a photo above to generate a dot template')
+          )
     )
   );
 }
