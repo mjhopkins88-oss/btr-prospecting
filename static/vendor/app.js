@@ -4148,8 +4148,7 @@ function ProspectingCanvasTab() {
   const [stats, setStats] = useState(null);
   const canvasRef = useRef(null);
 
-  const DOT_SPACING = 5;
-  const DOT_RADIUS = 2.4;
+  const MIN_DOTS = 5000;
 
   const persist = (src) => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ src: src || null })); } catch (_) {}
@@ -4171,7 +4170,7 @@ function ProspectingCanvasTab() {
   };
 
   const buildDotGrid = (img) => {
-    const maxW = 880, maxH = 660;
+    const maxW = 960, maxH = 720;
     let w = img.width, h = img.height;
     if (w > maxW) { h = h * (maxW / w); w = maxW; }
     if (h > maxH) { w = w * (maxH / h); h = maxH; }
@@ -4183,16 +4182,24 @@ function ProspectingCanvasTab() {
     ctx.drawImage(img, 0, 0, w, h);
     const data = ctx.getImageData(0, 0, w, h).data;
 
-    const dots = [];
-    for (let y = DOT_SPACING; y < h; y += DOT_SPACING) {
-      for (let x = DOT_SPACING; x < w; x += DOT_SPACING) {
-        const i = (y * w + x) * 4;
-        const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
-        if (a < 30) continue;
-        dots.push({ x, y, r, g, b, a });
+    var bestDots = null;
+    var bestRadius = 2.4;
+    for (var sp = 6; sp >= 2.5; sp -= 0.5) {
+      var dots = [];
+      for (var y = sp; y < h; y += sp) {
+        for (var x = sp; x < w; x += sp) {
+          var ix = Math.round(x), iy = Math.round(y);
+          var i = (iy * w + ix) * 4;
+          var r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+          if (a < 30) continue;
+          dots.push({ x: ix, y: iy, r: r, g: g, b: b, a: a });
+        }
       }
+      bestDots = dots;
+      bestRadius = Math.max(1.2, sp * 0.44);
+      if (dots.length >= MIN_DOTS) break;
     }
-    setDotGrid({ width: w, height: h, dots, total: dots.length });
+    setDotGrid({ width: w, height: h, dots: bestDots, total: bestDots.length, dotRadius: bestRadius });
   };
 
   useEffect(() => {
@@ -4221,9 +4228,10 @@ function ProspectingCanvasTab() {
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(0, 0, cvs.width, cvs.height);
     const filled = Math.min(touchCount, dotGrid.total);
+    var dr = dotGrid.dotRadius || 2.4;
     dotGrid.dots.forEach((d, i) => {
       ctx.beginPath();
-      ctx.arc(d.x, d.y, DOT_RADIUS, 0, Math.PI * 2);
+      ctx.arc(d.x, d.y, dr, 0, Math.PI * 2);
       if (i < filled) {
         ctx.fillStyle = `rgba(${d.r},${d.g},${d.b},${(d.a / 255).toFixed(2)})`;
       } else {
@@ -4270,14 +4278,153 @@ function ProspectingCanvasTab() {
   const filledDots = dotGrid ? Math.min(touchCount, dotGrid.total) : 0;
   const totalDots = dotGrid ? dotGrid.total : 0;
   const fmtDate = (d) => { if (!d) return '\u2014'; try { return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); } catch(_) { return '\u2014'; } };
-  const statCell = (label, value, color) => React.createElement('div', { key: label },
-    React.createElement('div', {
-      style: { fontSize: '0.6rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, marginBottom: '0.2rem' }
-    }, label),
-    React.createElement('div', {
-      style: { fontSize: '0.92rem', fontWeight: 600, color: color || '#e2e8f0', fontFamily: "'JetBrains Mono', monospace" }
-    }, value != null ? value : '\u2014')
-  );
+
+  var CHANNEL_COLORS = { email: '#3b82f6', linkedin: '#0ea5e9', call: '#14b8a6', meeting: '#8b5cf6', sms: '#f59e0b', other: '#94a3b8' };
+  var channelColor = function(ch) { return CHANNEL_COLORS[ch] || CHANNEL_COLORS.other; };
+  var channelLabel = function(ch) { return ch ? ch.charAt(0).toUpperCase() + ch.slice(1) : 'Other'; };
+
+  var metricCard = function(icon, label, value, accent) {
+    return React.createElement('div', { key: label, style: {
+      background: '#FFFFFF', border: '1px solid #e2e8f0', borderRadius: '0.75rem',
+      padding: '0.85rem 1rem', flex: '1 1 140px', minWidth: '130px',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+    }},
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.35rem' }},
+        React.createElement('span', { style: { fontSize: '0.85rem', opacity: 0.7 }}, icon),
+        React.createElement('span', { style: { fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}, label)
+      ),
+      React.createElement('div', { style: { fontSize: '1.35rem', fontWeight: 700, color: accent || '#1e293b', fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.2 }},
+        value != null ? value : '\u2014')
+    );
+  };
+
+  var buildAreaChart = function(dailyData) {
+    if (!dailyData || dailyData.length === 0) return null;
+    var W = 400, H = 100, padL = 0, padR = 0, padT = 8, padB = 20;
+    var cW = W - padL - padR, cH = H - padT - padB;
+    var maxVal = Math.max.apply(null, dailyData.map(function(d){ return d.cnt; }));
+    if (maxVal === 0) maxVal = 1;
+    var pts = dailyData.map(function(d, i) {
+      var x = padL + (i / Math.max(1, dailyData.length - 1)) * cW;
+      var y = padT + cH - (d.cnt / maxVal) * cH;
+      return { x: x, y: y, v: d.cnt, day: d.day };
+    });
+    var line = pts.map(function(p, i){ return (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ',' + p.y.toFixed(1); }).join(' ');
+    var area = line + ' L' + pts[pts.length-1].x.toFixed(1) + ',' + (padT + cH) + ' L' + pts[0].x.toFixed(1) + ',' + (padT + cH) + ' Z';
+    return React.createElement('svg', { viewBox: '0 0 ' + W + ' ' + H, style: { width: '100%', height: 'auto' }, preserveAspectRatio: 'xMidYMid meet' },
+      React.createElement('defs', null,
+        React.createElement('linearGradient', { id: 'areaGrad', x1: '0', y1: '0', x2: '0', y2: '1' },
+          React.createElement('stop', { offset: '0%', stopColor: '#14b8a6', stopOpacity: '0.25' }),
+          React.createElement('stop', { offset: '100%', stopColor: '#14b8a6', stopOpacity: '0.02' })
+        )
+      ),
+      React.createElement('path', { d: area, fill: 'url(#areaGrad)', stroke: 'none' }),
+      React.createElement('path', { d: line, fill: 'none', stroke: '#14b8a6', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round' }),
+      pts.map(function(p, i) {
+        return React.createElement('circle', { key: i, cx: p.x, cy: p.y, r: dailyData.length <= 15 ? 3 : 2, fill: '#FFFFFF', stroke: '#14b8a6', strokeWidth: '1.5' });
+      }),
+      pts.filter(function(_, i){ var step = Math.max(1, Math.floor(dailyData.length / 5)); return i % step === 0 || i === dailyData.length - 1; }).map(function(p, i) {
+        var lbl = p.day ? p.day.slice(5) : '';
+        return React.createElement('text', { key: 'l'+i, x: p.x, y: H - 2, textAnchor: 'middle', fill: '#94a3b8', fontSize: '8', fontFamily: 'Inter, sans-serif' }, lbl);
+      })
+    );
+  };
+
+  var buildDonut = function(channelData) {
+    if (!channelData || channelData.length === 0) return null;
+    var total = channelData.reduce(function(s, d){ return s + d.cnt; }, 0);
+    if (total === 0) return null;
+    var R = 42, cx = 55, cy = 55, sw = 12;
+    var circ = 2 * Math.PI * R;
+    var offset = 0;
+    var segs = channelData.slice(0, 6).map(function(d, i) {
+      var frac = d.cnt / total;
+      var dash = frac * circ;
+      var gap = circ - dash;
+      var el = React.createElement('circle', {
+        key: i, cx: cx, cy: cy, r: R, fill: 'none',
+        stroke: channelColor(d.channel), strokeWidth: sw,
+        strokeDasharray: dash.toFixed(1) + ' ' + gap.toFixed(1),
+        strokeDashoffset: (-offset).toFixed(1),
+        strokeLinecap: 'butt',
+        style: { transition: 'stroke-dasharray 0.4s' }
+      });
+      offset += dash;
+      return el;
+    });
+    return React.createElement('svg', { viewBox: '0 0 110 110', style: { width: '110px', height: '110px' }},
+      React.createElement('circle', { cx: cx, cy: cy, r: R, fill: 'none', stroke: '#f1f5f9', strokeWidth: sw }),
+      segs,
+      React.createElement('text', { x: cx, y: cy - 4, textAnchor: 'middle', fill: '#1e293b', fontSize: '16', fontWeight: '700', fontFamily: "'JetBrains Mono', monospace" }, total),
+      React.createElement('text', { x: cx, y: cy + 10, textAnchor: 'middle', fill: '#94a3b8', fontSize: '7', fontWeight: '500' }, 'total')
+    );
+  };
+
+  var buildRadialProgress = function(pct) {
+    var R = 42, cx = 55, cy = 55, sw = 10;
+    var circ = 2 * Math.PI * R;
+    var dash = (pct / 100) * circ;
+    var progressColor = pct >= 100 ? '#10b981' : pct >= 50 ? '#14b8a6' : '#3b82f6';
+    return React.createElement('svg', { viewBox: '0 0 110 110', style: { width: '110px', height: '110px' }},
+      React.createElement('circle', { cx: cx, cy: cy, r: R, fill: 'none', stroke: '#f1f5f9', strokeWidth: sw }),
+      React.createElement('circle', { cx: cx, cy: cy, r: R, fill: 'none', stroke: progressColor, strokeWidth: sw,
+        strokeDasharray: dash.toFixed(1) + ' ' + (circ - dash).toFixed(1),
+        strokeDashoffset: (circ * 0.25).toFixed(1), strokeLinecap: 'round',
+        style: { transition: 'stroke-dasharray 0.6s ease' }
+      }),
+      React.createElement('text', { x: cx, y: cy - 2, textAnchor: 'middle', fill: '#1e293b', fontSize: '18', fontWeight: '700', fontFamily: "'JetBrains Mono', monospace" }, pct + '%'),
+      React.createElement('text', { x: cx, y: cy + 12, textAnchor: 'middle', fill: '#94a3b8', fontSize: '7', fontWeight: '500' }, 'complete')
+    );
+  };
+
+  var buildWeeklyBars = function(weeklyData) {
+    if (!weeklyData || weeklyData.length === 0) return null;
+    var maxVal = Math.max.apply(null, weeklyData.map(function(d){ return d.cnt; }));
+    if (maxVal === 0) maxVal = 1;
+    var barW = 32, gap = 8, H = 56;
+    var totalW = weeklyData.length * (barW + gap) - gap;
+    return React.createElement('svg', { viewBox: '0 0 ' + totalW + ' ' + (H + 14), style: { width: '100%', maxWidth: totalW + 'px', height: 'auto' }, preserveAspectRatio: 'xMidYMid meet' },
+      weeklyData.map(function(d, i) {
+        var bH = Math.max(2, (d.cnt / maxVal) * H);
+        var x = i * (barW + gap);
+        var lbl = d.week ? d.week.slice(5) : 'W' + (i + 1);
+        return React.createElement('g', { key: i },
+          React.createElement('rect', { x: x, y: H - bH, width: barW, height: bH, rx: 4, fill: i === weeklyData.length - 1 ? '#14b8a6' : '#e2e8f0' }),
+          React.createElement('text', { x: x + barW / 2, y: H - bH - 4, textAnchor: 'middle', fill: '#64748b', fontSize: '8', fontWeight: '600', fontFamily: "'JetBrains Mono', monospace" }, d.cnt),
+          React.createElement('text', { x: x + barW / 2, y: H + 12, textAnchor: 'middle', fill: '#94a3b8', fontSize: '7', fontFamily: 'Inter, sans-serif' }, lbl)
+        );
+      })
+    );
+  };
+
+  var donutLegend = function(channelData) {
+    if (!channelData || channelData.length === 0) return null;
+    var total = channelData.reduce(function(s,d){ return s + d.cnt; }, 0);
+    return React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' }},
+      channelData.slice(0, 6).map(function(d) {
+        var pct = total > 0 ? Math.round((d.cnt / total) * 100) : 0;
+        return React.createElement('div', { key: d.channel, style: { display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.72rem' }},
+          React.createElement('div', { style: { width: '8px', height: '8px', borderRadius: '2px', background: channelColor(d.channel), flexShrink: 0 }}),
+          React.createElement('span', { style: { color: '#475569', fontWeight: 500 }}, channelLabel(d.channel)),
+          React.createElement('span', { style: { color: '#94a3b8', fontFamily: "'JetBrains Mono', monospace", marginLeft: 'auto' }}, pct + '%')
+        );
+      })
+    );
+  };
+
+  var chartCard = function(title, children, extraStyle) {
+    return React.createElement('div', { style: Object.assign({
+      background: '#FFFFFF', border: '1px solid #e2e8f0', borderRadius: '0.75rem',
+      padding: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+    }, extraStyle || {}) },
+      React.createElement('div', { style: { fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, marginBottom: '0.75rem' }}, title),
+      children
+    );
+  };
+
+  var emptyChart = function(msg) {
+    return React.createElement('div', { style: { textAlign: 'center', padding: '1.5rem 0', color: '#cbd5e1', fontSize: '0.78rem' }}, msg || 'No data yet');
+  };
 
   return React.createElement('div', {
     style: { display: 'flex', flexDirection: 'column', gap: '1rem' }
@@ -4430,26 +4577,81 @@ function ProspectingCanvasTab() {
           )
     ),
 
-    stats ? React.createElement('div', {
+    React.createElement('div', {
       style: {
         background: '#FFFFFF',
         border: '1px solid rgba(226,232,240,0.5)',
         borderRadius: '0.85rem',
-        padding: '0.85rem 1.25rem',
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
-        gap: '0.5rem 1rem'
+        padding: '1.25rem',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '1rem'
       }
     },
-      statCell('Total Touches', stats.total_touchpoints, '#e2e8f0'),
-      statCell('Contacts', stats.contacts_touched, '#34d399'),
-      statCell('Groups', stats.groups_engaged, '#60a5fa'),
-      statCell('Replies', stats.replies, stats.replies > 0 ? '#34d399' : '#64748b'),
-      statCell('Meetings', stats.meetings, stats.meetings > 0 ? '#60a5fa' : '#64748b'),
-      statCell('Last Touch', fmtDate(stats.last_touchpoint_at), '#e2e8f0'),
-      statCell('Canvas', dotGrid ? `${filledDots} / ${totalDots.toLocaleString()}` : '\u2014', '#60a5fa'),
-      statCell('Completion', dotGrid ? `${pctFilled}%` : '\u2014', pctFilled >= 100 ? '#34d399' : '#f59e0b')
-    ) : null
+      React.createElement('div', {
+        style: { display: 'flex', alignItems: 'center', gap: '0.5rem' }
+      },
+        React.createElement('span', { style: { fontSize: '1rem' } }, '\u{1F4CA}'),
+        React.createElement('span', {
+          style: { fontFamily: "'Orbitron', sans-serif", fontSize: '0.85rem', fontWeight: 700, color: '#1e293b', letterSpacing: '0.04em' }
+        }, 'Relationship Progress'),
+        React.createElement('span', {
+          style: { ...pillStyle, background: 'rgba(20,184,166,0.12)', color: '#14b8a6', marginLeft: 'auto' }
+        }, 'ANALYTICS')
+      ),
+
+      React.createElement('div', {
+        style: { display: 'flex', flexWrap: 'wrap', gap: '0.65rem' }
+      },
+        metricCard('\u{1F4E8}', 'Total Touches', stats ? stats.total_touchpoints : 0, '#1e293b'),
+        metricCard('\u{1F465}', 'Contacts', stats ? stats.contacts_touched : 0, '#14b8a6'),
+        metricCard('\u{1F3E2}', 'Groups', stats ? stats.groups_engaged : 0, '#3b82f6'),
+        metricCard('\u{21A9}\uFE0F', 'Replies', stats ? stats.replies : 0, stats && stats.replies > 0 ? '#10b981' : '#94a3b8'),
+        metricCard('\u{1F91D}', 'Meetings', stats ? stats.meetings : 0, stats && stats.meetings > 0 ? '#8b5cf6' : '#94a3b8'),
+        metricCard('\u2705', 'Completion', dotGrid ? pctFilled + '%' : '\u2014', pctFilled >= 100 ? '#10b981' : pctFilled >= 50 ? '#14b8a6' : '#3b82f6')
+      ),
+
+      React.createElement('div', {
+        style: { display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '0.75rem', alignItems: 'start' }
+      },
+        chartCard('Activity \u2014 Last 30 Days',
+          stats && stats.daily_activity && stats.daily_activity.length > 0
+            ? buildAreaChart(stats.daily_activity)
+            : emptyChart('Log touchpoints to see activity trends'),
+          { flex: '1 1 auto' }
+        ),
+
+        chartCard('Channel Mix',
+          React.createElement('div', { style: { display: 'flex', gap: '0.75rem', alignItems: 'center' }},
+            stats && stats.channel_mix && stats.channel_mix.length > 0
+              ? buildDonut(stats.channel_mix)
+              : null,
+            stats && stats.channel_mix && stats.channel_mix.length > 0
+              ? donutLegend(stats.channel_mix)
+              : emptyChart('No channels')
+          ),
+          { minWidth: '220px' }
+        ),
+
+        chartCard('Canvas Progress',
+          dotGrid
+            ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem' }},
+                buildRadialProgress(pctFilled),
+                React.createElement('div', { style: { fontSize: '0.7rem', color: '#64748b', fontFamily: "'JetBrains Mono', monospace", textAlign: 'center' }},
+                  filledDots.toLocaleString() + ' / ' + totalDots.toLocaleString() + ' dots')
+              )
+            : emptyChart('Load an image'),
+          { minWidth: '150px' }
+        )
+      ),
+
+      stats && stats.weekly_activity && stats.weekly_activity.length > 0
+        ? chartCard('Weekly Activity',
+            buildWeeklyBars(stats.weekly_activity),
+            { width: '100%' }
+          )
+        : null
+    )
   );
 }
 

@@ -21,6 +21,7 @@ from services.prospecting_rules import (
     VALID_STAGES
 )
 from shared.database import fetch_all, fetch_one, execute, new_id
+from db import is_postgres as _is_postgres
 
 prospecting_bp = Blueprint(
     'prospecting', __name__, url_prefix='/api/prospecting'
@@ -338,13 +339,55 @@ def canvas_stats():
     last_tp = fetch_one(
         "SELECT occurred_at FROM prospecting_touchpoints ORDER BY occurred_at DESC LIMIT 1", []
     )
+
+    if _is_postgres():
+        daily = fetch_all(
+            "SELECT TO_CHAR(occurred_at::date, 'YYYY-MM-DD') AS day, COUNT(*) AS cnt "
+            "FROM prospecting_touchpoints "
+            "WHERE occurred_at >= CURRENT_DATE - INTERVAL '30 days' "
+            "GROUP BY occurred_at::date ORDER BY occurred_at::date", []
+        )
+        channels = fetch_all(
+            "SELECT COALESCE(channel, 'other') AS channel, COUNT(*) AS cnt "
+            "FROM prospecting_touchpoints "
+            "GROUP BY COALESCE(channel, 'other') ORDER BY cnt DESC", []
+        )
+        weekly = fetch_all(
+            "SELECT TO_CHAR(DATE_TRUNC('week', occurred_at::date), 'YYYY-MM-DD') AS week, COUNT(*) AS cnt "
+            "FROM prospecting_touchpoints "
+            "WHERE occurred_at >= CURRENT_DATE - INTERVAL '56 days' "
+            "GROUP BY DATE_TRUNC('week', occurred_at::date) "
+            "ORDER BY DATE_TRUNC('week', occurred_at::date)", []
+        )
+    else:
+        daily = fetch_all(
+            "SELECT DATE(occurred_at) AS day, COUNT(*) AS cnt "
+            "FROM prospecting_touchpoints "
+            "WHERE occurred_at >= DATE('now', '-30 days') "
+            "GROUP BY DATE(occurred_at) ORDER BY day", []
+        )
+        channels = fetch_all(
+            "SELECT COALESCE(channel, 'other') AS channel, COUNT(*) AS cnt "
+            "FROM prospecting_touchpoints "
+            "GROUP BY COALESCE(channel, 'other') ORDER BY cnt DESC", []
+        )
+        weekly = fetch_all(
+            "SELECT DATE(occurred_at, 'weekday 0', '-6 days') AS week, COUNT(*) AS cnt "
+            "FROM prospecting_touchpoints "
+            "WHERE occurred_at >= DATE('now', '-56 days') "
+            "GROUP BY DATE(occurred_at, 'weekday 0', '-6 days') ORDER BY week", []
+        )
+
     return jsonify({
         'total_touchpoints': (total or {}).get('cnt', 0),
         'contacts_touched': (contacts_touched or {}).get('cnt', 0),
         'groups_engaged': (groups_engaged or {}).get('cnt', 0),
         'replies': (replies or {}).get('cnt', 0),
         'meetings': (mtgs or {}).get('cnt', 0),
-        'last_touchpoint_at': (last_tp or {}).get('occurred_at')
+        'last_touchpoint_at': (last_tp or {}).get('occurred_at'),
+        'daily_activity': daily or [],
+        'channel_mix': channels or [],
+        'weekly_activity': weekly or []
     })
 
 
