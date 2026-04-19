@@ -5068,6 +5068,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   const [dueLeads, setDueLeads] = useState([]);
   const [dueLoading, setDueLoading] = useState(true);
   const [clockTime, setClockTime] = useState(new Date());
+  const [weather, setWeather] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -5079,6 +5080,12 @@ function CommandCenter({ user, prospects, setActiveTab }) {
       })
       .catch(() => {})
       .finally(() => { if (!cancelled) setDueLoading(false); });
+
+    fetch(API_BASE + '/api/dashboard/weather')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) { if (!cancelled && d && !d.error) setWeather(d); })
+      .catch(function() {});
+
     return () => { cancelled = true; };
   }, []);
 
@@ -5212,17 +5219,28 @@ function CommandCenter({ user, prospects, setActiveTab }) {
         React.createElement('div', {
           style: { width: '1px', height: '28px', background: '#e2e8f0' }
         }),
-        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.4rem' } },
-          React.createElement('span', { style: { fontSize: '1.1rem' } }, '\u2600\uFE0F'),
-          React.createElement('div', null,
-            React.createElement('div', {
-              style: { fontSize: '0.82rem', fontWeight: 600, color: '#1e293b', lineHeight: 1.2 }
-            }, 'Sunbelt'),
-            React.createElement('div', {
-              style: { fontSize: '0.68rem', color: '#94a3b8' }
-            }, 'Clear skies')
-          )
-        )
+        weather
+          ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } },
+              weather.icon
+                ? React.createElement('img', {
+                    src: weather.icon.startsWith('//') ? 'https:' + weather.icon : weather.icon,
+                    alt: weather.condition || '',
+                    style: { width: '28px', height: '28px' }
+                  })
+                : null,
+              React.createElement('div', null,
+                React.createElement('div', {
+                  style: { fontSize: '0.82rem', fontWeight: 600, color: '#1e293b', lineHeight: 1.2 }
+                }, weather.location + (weather.temp != null ? ' \u00b7 ' + Math.round(weather.temp) + '\u00b0F' : '')),
+                React.createElement('div', {
+                  style: { fontSize: '0.68rem', color: '#94a3b8' }
+                }, weather.condition || '')
+              )
+            )
+          : React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.4rem' } },
+              React.createElement('span', { style: { fontSize: '0.85rem', opacity: 0.4 } }, '\u2600\uFE0F'),
+              React.createElement('span', { style: { fontSize: '0.72rem', color: '#cbd5e1' } }, 'Loading weather\u2026')
+            )
       )
     ),
 
