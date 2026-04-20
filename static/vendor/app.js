@@ -2967,7 +2967,7 @@ function ProspectingGroupsTab() {
                 }
               }, g.communities),
               React.createElement('span', {
-                style: { fontSize: '0.78rem', color: '#64748b' }
+                style: { fontSize: '0.78rem', color: /^(Follow up|Check in|Reconnect|Touch base|Reach out)/.test(g.nextAction) ? '#f59e0b' : '#64748b' }
               }, g.nextAction)
             );
           })
@@ -5099,14 +5099,14 @@ function CommandCenter({ user, prospects, setActiveTab }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_BASE}/api/crm/leads?due=1`)
-      .then(r => r.json())
-      .then(d => {
+    fetch(API_BASE + '/api/prospecting/followup-queue?limit=30')
+      .then(function(r) { return r.ok ? r.json() : []; })
+      .then(function(d) {
         if (cancelled) return;
-        if (d && d.success) setDueLeads(Array.isArray(d.leads) ? d.leads : []);
+        setDueLeads(Array.isArray(d) ? d : []);
       })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setDueLoading(false); });
+      .catch(function() {})
+      .finally(function() { if (!cancelled) setDueLoading(false); });
 
     fetch(API_BASE + '/api/dashboard/weather')
       .then(function(r) { return r.ok ? r.json() : null; })
@@ -5502,8 +5502,8 @@ function CommandCenter({ user, prospects, setActiveTab }) {
           React.createElement('h3', { style: panelTitle }, 'Follow-ups Due (' + dueCount + ')'),
           React.createElement('button', {
             style: { ...styles.actionBtn, fontSize: '0.7rem' },
-            onClick: function() { setActiveTab('followups'); }
-          }, 'Open \u2192')
+            onClick: function() { setActiveTab('capital_groups'); }
+          }, 'Groups \u2192')
         ),
         dueLoading
           ? React.createElement('div', {
@@ -5522,8 +5522,15 @@ function CommandCenter({ user, prospects, setActiveTab }) {
               )
             : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.4rem' } },
                 dueLeads.slice(0, 5).map(function(l) {
+                  var _goGroup = function() {
+                    if (l.capital_group_id) {
+                      try { sessionStorage.setItem('capital_group_deeplink', l.capital_group_id); } catch(_) {}
+                      setActiveTab('capital_groups');
+                    }
+                  };
+                  var badge = l.days_inactive != null ? l.days_inactive + 'd ago' : 'never';
                   return React.createElement('div', {
-                    key: l.id,
+                    key: l.capital_group_id,
                     style: {
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                       gap: '0.6rem', padding: '0.55rem 0.8rem',
@@ -5531,22 +5538,22 @@ function CommandCenter({ user, prospects, setActiveTab }) {
                       borderRadius: '0.5rem', fontSize: '0.82rem',
                       cursor: 'pointer', transition: 'background 0.15s'
                     },
-                    onClick: function() { setActiveTab('followups'); }
+                    onClick: _goGroup
                   },
                     React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 } },
                       React.createElement('div', {
-                        style: { width: '6px', height: '6px', borderRadius: '50%', background: '#f59e0b', flexShrink: 0 }
+                        style: { width: '6px', height: '6px', borderRadius: '50%', background: l.days_inactive >= 60 ? '#ef4444' : '#f59e0b', flexShrink: 0 }
                       }),
-                      React.createElement('span', { style: { color: '#1e293b', fontWeight: 600 } }, l.company_name || '\u2014')
+                      React.createElement('span', { style: { color: '#1e293b', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, l.label || l.group_name || '\u2014')
                     ),
                     React.createElement('span', {
                       style: { fontSize: '0.7rem', color: '#94a3b8', padding: '0.1rem 0.45rem', background: '#f1f5f9', borderRadius: '0.25rem', flexShrink: 0 }
-                    }, l.status || 'due')
+                    }, badge)
                   );
                 }),
                 dueCount > 5 ? React.createElement('div', {
                   style: { textAlign: 'center', fontSize: '0.72rem', color: '#94a3b8', padding: '0.25rem 0', cursor: 'pointer' },
-                  onClick: function() { setActiveTab('followups'); }
+                  onClick: function() { setActiveTab('capital_groups'); }
                 }, '+' + (dueCount - 5) + ' more') : null
               )
       )

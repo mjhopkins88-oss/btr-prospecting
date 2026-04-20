@@ -321,6 +321,12 @@ def get_groups_list(search='', type_filter='', status_filter='', sort_by='warmth
         params
     )
 
+    now = _now()
+
+    followup_map = {}
+    for fq in get_followup_queue(limit=30):
+        followup_map[fq['capital_group_id']] = fq['label']
+
     result = []
     for g in groups:
         markets = []
@@ -330,7 +336,6 @@ def get_groups_list(search='', type_filter='', status_filter='', sort_by='warmth
             if g.get('markets'):
                 markets = [g['markets']]
 
-        nba = get_next_best_action(g['id'])
         props = fetch_one(
             "SELECT COUNT(*) AS c FROM li_projects WHERE capital_group_id = ?", [g['id']]
         ) or {}
@@ -339,7 +344,7 @@ def get_groups_list(search='', type_filter='', status_filter='', sort_by='warmth
         if last_touch:
             try:
                 lt_dt = datetime.fromisoformat(last_touch)
-                delta = (_now() - lt_dt).days
+                delta = (now - lt_dt).days
                 if delta == 0:
                     lt_label = 'today'
                 elif delta == 1:
@@ -351,6 +356,15 @@ def get_groups_list(search='', type_filter='', status_filter='', sort_by='warmth
         else:
             lt_label = 'never'
 
+        if g['id'] in followup_map:
+            next_action = followup_map[g['id']]
+        else:
+            nba = get_next_best_action(g['id'])
+            if nba and not nba['title'].startswith('Research '):
+                next_action = nba['title']
+            else:
+                next_action = 'No pending tasks'
+
         result.append({
             'id': g['id'],
             'name': g['name'],
@@ -360,7 +374,7 @@ def get_groups_list(search='', type_filter='', status_filter='', sort_by='warmth
             'warmth': g.get('warmth_score', 1),
             'lastTouch': lt_label,
             'communities': props.get('c', 0),
-            'nextAction': nba['title'] if nba else 'No pending tasks'
+            'nextAction': next_action
         })
     return result
 
@@ -470,8 +484,11 @@ def get_todays_focus(limit=10):
     )
 
     result = []
+    seen_groups = set()
     for r in rows:
         contact_name = ' '.join(filter(None, [r.get('contact_first'), r.get('contact_last')])) or None
+        if r.get('capital_group_id'):
+            seen_groups.add(r['capital_group_id'])
         result.append({
             'id': r['id'],
             'type': r['type'],
@@ -491,6 +508,92 @@ def get_todays_focus(limit=10):
             'nba_type': r.get('next_best_action_type'),
             'reason': r.get('generated_reason'),
             'trigger_rule': r.get('trigger_rule'),
+        })
+
+    if len(result) < limit:
+        for fq in get_followup_queue(limit=30):
+            if len(result) >= limit:
+                break
+            if fq['capital_group_id'] in seen_groups:
+                continue
+            seen_groups.add(fq['capital_group_id'])
+            days = fq['days_inactive']
+            reason = f'No contact in {days} days' if days else 'No contact on record'
+            result.append({
+                'id': 'fq_' + fq['capital_group_id'],
+                'type': 'follow_up',
+                'title': fq['label'],
+                'description': reason,
+                'priority': 6,
+                'due_at': None,
+                'channel': None,
+                'group_name': fq['group_name'],
+                'contact_name': None,
+                'contact_id': None,
+                'capital_group_id': fq['capital_group_id'],
+                'signal_id': None,
+                'signal_title': None,
+                'signal_type': None,
+                'signal_summary': None,
+                'nba_type': 'overdue_followup',
+                'reason': reason,
+                'trigger_rule': 'followup_queue',
+            })
+
+    return result
+
+
+# ── Shared follow-up queue (single source of truth) ───────────────
+_FOLLOWUP_VERBS = ['Follow up with', 'Check in with', 'Reconnect with',
+                   'Touch base with', 'Reach out to']
+
+def _followup_label(group_name, days_inactive):
+    idx = hash(group_name) % len(_FOLLOWUP_VERBS)
+    if days_inactive is None:
+        return f'Follow up with {group_name}'
+    if days_inactive >= 60:
+        return f'Reconnect with {group_name}'
+    if days_inactive >= 45:
+        return f'Check in with {group_name}'
+    return _FOLLOWUP_VERBS[idx] + f' {group_name}'
+
+
+def get_followup_queue(limit=30):
+    now = _now()
+    threshold = (now - timedelta(days=30)).isoformat()
+
+    rows = fetch_all(
+        "SELECT id, name, type, warmth_score, last_contacted_at, relationship_status "
+        "FROM capital_groups "
+        "WHERE last_contacted_at IS NULL OR last_contacted_at < ? "
+        "ORDER BY "
+        "CASE WHEN last_contacted_at IS NOT NULL THEN 0 ELSE 1 END, "
+        "last_contacted_at ASC, "
+        "warmth_score DESC",
+        [threshold]
+    )
+
+    result = []
+    for r in rows[:limit]:
+        last = r.get('last_contacted_at')
+        if last:
+            try:
+                days = (now - datetime.fromisoformat(last)).days
+            except (ValueError, TypeError):
+                days = None
+        else:
+            days = None
+
+        result.append({
+            'capital_group_id': r['id'],
+            'group_name': r['name'],
+            'type': r.get('type', 'developer'),
+            'warmth': r.get('warmth_score', 1),
+            'status': r.get('relationship_status', 'prospect'),
+            'days_inactive': days,
+            'last_contacted_at': last,
+            'label': _followup_label(r['name'], days),
+            'nba_type': 'overdue_followup',
         })
     return result
 
