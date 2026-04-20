@@ -428,6 +428,29 @@ def list_touchpoints(group_id):
     return jsonify({'touchpoints': rows, 'count': len(rows)})
 
 
+@capital_groups_bp.route('/<group_id>/schedule-followup', methods=['POST'])
+def schedule_group_followup(group_id):
+    """Schedule a follow-up task for the group using interval-based selection."""
+    group = fetch_one('SELECT id, name FROM capital_groups WHERE id = ?', [group_id])
+    if not group:
+        return jsonify({'error': 'not found'}), 404
+    data = request.get_json(silent=True) or {}
+    intervals = {'1w': 7, '2w': 14, '3w': 21, '1m': 30, '6wk': 42, '2m': 60}
+    interval = data.get('interval', '2w')
+    days = intervals.get(interval, 14)
+    from datetime import datetime, timedelta
+    due_at = (datetime.utcnow() + timedelta(days=days)).isoformat()
+    task_id = new_id()
+    execute(
+        "INSERT INTO prospecting_tasks (id, capital_group_id, type, title, description, "
+        "status, priority, due_at, trigger_rule, created_at) "
+        "VALUES (?, ?, 'follow_up', ?, ?, 'pending', 6, ?, 'manual_followup', ?)",
+        [task_id, group_id, f"Follow up with {group['name']}",
+         f'Scheduled {interval} follow-up', due_at, datetime.utcnow().isoformat()]
+    )
+    return jsonify({'task_id': task_id, 'due_at': due_at, 'days': days}), 201
+
+
 # ---------------------------------------------------------------------------
 # STATUS — convenience endpoint for the quick-action dropdown on the list
 # ---------------------------------------------------------------------------

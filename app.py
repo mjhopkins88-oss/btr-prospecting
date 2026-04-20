@@ -1227,10 +1227,13 @@ def init_db():
             relationship_stage TEXT DEFAULT 'cold',
             owner_user_id TEXT,
             notes TEXT,
+            is_favorite INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_contacts', 'is_favorite', 'INTEGER DEFAULT 0')
 
     c.execute('''
         CREATE TABLE IF NOT EXISTS prospecting_properties (
