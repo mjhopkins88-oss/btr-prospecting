@@ -2328,8 +2328,9 @@ def dashboard_weather():
 # DASHBOARD — Finance Snapshot (FRED + Alpha Vantage)
 # ===================================================================
 
-FRED_API_KEY = os.getenv('FRED_API_KEY', '')
-ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY', '')
+_FINANCE_FALLBACK = os.getenv('FINANCE_API_KEY', '')
+FRED_API_KEY = os.getenv('FRED_API_KEY', '') or _FINANCE_FALLBACK
+ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY', '') or _FINANCE_FALLBACK
 print(f"[Finance] FRED key loaded: {bool(FRED_API_KEY)}")
 print(f"[Finance] Alpha Vantage key loaded: {bool(ALPHA_VANTAGE_API_KEY)}")
 
