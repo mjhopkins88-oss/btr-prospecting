@@ -4425,6 +4425,7 @@ function ProspectingCanvasTab() {
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(0, 0, cvs.width, cvs.height);
     const filled = Math.min(touchCount, dotGrid.total);
+    console.log('[Canvas] total_touchpoints=' + touchCount + ' total_dots=' + dotGrid.total + ' filled_dots=' + filled);
     var dr = dotGrid.dotRadius || 2.4;
     dotGrid.dots.forEach((d, i) => {
       ctx.beginPath();
