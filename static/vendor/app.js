@@ -4335,7 +4335,7 @@ function ProspectingCanvasTab() {
   const [stats, setStats] = useState(null);
   const canvasRef = useRef(null);
 
-  const MIN_DOTS = 5000;
+  const MAX_DOTS = 5000;
 
   const persist = (src) => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ src: src || null })); } catch (_) {}
@@ -4369,9 +4369,11 @@ function ProspectingCanvasTab() {
     ctx.drawImage(img, 0, 0, w, h);
     const data = ctx.getImageData(0, 0, w, h).data;
 
+    var approxSp = Math.sqrt((w * h) / MAX_DOTS);
+    var startSp = Math.max(3, Math.floor((approxSp - 2) * 2) / 2);
     var bestDots = null;
     var bestRadius = 2.4;
-    for (var sp = 6; sp >= 2.5; sp -= 0.5) {
+    for (var sp = startSp; sp <= 30; sp += 0.5) {
       var dots = [];
       for (var y = sp; y < h; y += sp) {
         for (var x = sp; x < w; x += sp) {
@@ -4384,7 +4386,15 @@ function ProspectingCanvasTab() {
       }
       bestDots = dots;
       bestRadius = Math.max(1.2, sp * 0.44);
-      if (dots.length >= MIN_DOTS) break;
+      if (dots.length <= MAX_DOTS) break;
+    }
+    if (bestDots.length > MAX_DOTS) {
+      var step = bestDots.length / MAX_DOTS;
+      var sampled = [];
+      for (var si = 0; si < MAX_DOTS; si++) {
+        sampled.push(bestDots[Math.floor(si * step)]);
+      }
+      bestDots = sampled;
     }
     setDotGrid({ width: w, height: h, dots: bestDots, total: bestDots.length, dotRadius: bestRadius });
   };
