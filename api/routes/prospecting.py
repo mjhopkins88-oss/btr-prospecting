@@ -327,9 +327,12 @@ def list_contact_touchpoints(cid):
 
 @prospecting_bp.route('/canvas-stats', methods=['GET'])
 def canvas_stats():
-    total = fetch_one(
-        "SELECT COUNT(*) AS cnt FROM prospecting_touchpoints", []
-    )
+    prosp_cnt = fetch_one("SELECT COUNT(*) AS cnt FROM prospecting_touchpoints", []) or {}
+    crm_cnt = fetch_one("SELECT COUNT(*) AS cnt FROM crm_touchpoints", []) or {}
+    cg_cnt = fetch_one("SELECT COUNT(*) AS cnt FROM capital_group_touchpoints", []) or {}
+    total_touchpoints = prosp_cnt.get('cnt', 0) + crm_cnt.get('cnt', 0) + cg_cnt.get('cnt', 0)
+    print(f"[Canvas] total_touchpoints={total_touchpoints} (prospecting={prosp_cnt.get('cnt',0)} crm={crm_cnt.get('cnt',0)} capital_group={cg_cnt.get('cnt',0)})")
+
     contacts_touched = fetch_one(
         "SELECT COUNT(DISTINCT contact_id) AS cnt FROM prospecting_touchpoints WHERE contact_id IS NOT NULL", []
     )
@@ -385,7 +388,7 @@ def canvas_stats():
         )
 
     return jsonify({
-        'total_touchpoints': (total or {}).get('cnt', 0),
+        'total_touchpoints': total_touchpoints,
         'contacts_touched': (contacts_touched or {}).get('cnt', 0),
         'groups_engaged': (groups_engaged or {}).get('cnt', 0),
         'replies': (replies or {}).get('cnt', 0),
