@@ -2303,7 +2303,7 @@ def dashboard_weather():
         import requests as _wreq
         resp = _wreq.get(
             'https://api.weatherapi.com/v1/current.json',
-            params={'key': WEATHER_API_KEY, 'q': 'Phoenix'},
+            params={'key': WEATHER_API_KEY, 'q': 'Los Angeles'},
             timeout=5,
         )
         resp.raise_for_status()
@@ -2312,7 +2312,7 @@ def dashboard_weather():
         cur = d.get('current', {})
         cond = cur.get('condition', {})
         return jsonify({
-            'location': loc.get('name', 'Phoenix'),
+            'location': loc.get('name', 'Los Angeles'),
             'region': loc.get('region', ''),
             'time': loc.get('localtime', ''),
             'temp': cur.get('temp_f'),
