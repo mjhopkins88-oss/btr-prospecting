@@ -6,7 +6,7 @@ Summary, Schedule, Feed, Groups, Sequences.
 """
 from flask import Blueprint, request, jsonify
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from services.task_engine import (
     get_summary_stats, get_task_buckets, get_schedule,
@@ -198,7 +198,7 @@ def list_contacts():
         "SELECT c.*, g.name AS group_name, g.type AS group_type "
         "FROM prospecting_contacts c LEFT JOIN capital_groups g ON g.id = c.group_id "
         f"WHERE {' AND '.join(where)} "
-        "ORDER BY COALESCE(c.last_touch_at, c.first_reached_out_at, c.created_at) DESC",
+        "ORDER BY COALESCE(c.is_favorite, 0) DESC, COALESCE(c.last_touch_at, c.first_reached_out_at, c.created_at) DESC",
         params
     )
     for r in rows:
@@ -265,7 +265,7 @@ def update_contact(cid):
     data = request.get_json(force=True)
 
     allowed = ['group_id', 'first_name', 'last_name', 'title', 'linkedin_url', 'email', 'phone',
-               'first_reached_out_at', 'last_touch_at', 'relationship_stage', 'owner_user_id', 'notes']
+               'first_reached_out_at', 'last_touch_at', 'relationship_stage', 'owner_user_id', 'notes', 'is_favorite']
     sets = []
     params = []
     for k in allowed:
@@ -292,6 +292,17 @@ def update_contact(cid):
 def delete_contact(cid):
     execute("DELETE FROM prospecting_contacts WHERE id = ?", [cid])
     return jsonify({'status': 'deleted'})
+
+
+@prospecting_bp.route('/contacts/<cid>/favorite', methods=['PATCH'])
+def toggle_favorite(cid):
+    row = fetch_one("SELECT is_favorite FROM prospecting_contacts WHERE id = ?", [cid])
+    if not row:
+        return jsonify({'error': 'not found'}), 404
+    new_val = 0 if row.get('is_favorite') else 1
+    execute("UPDATE prospecting_contacts SET is_favorite = ?, updated_at = ? WHERE id = ?",
+            [new_val, datetime.utcnow().isoformat(), cid])
+    return jsonify({'is_favorite': new_val})
 
 
 @prospecting_bp.route('/contacts/<cid>/touchpoints', methods=['POST'])
@@ -325,6 +336,67 @@ def list_contact_touchpoints(cid):
         [cid]
     )
     return jsonify({'touchpoints': rows, 'count': len(rows)})
+
+
+@prospecting_bp.route('/touchpoints/<tp_id>', methods=['PUT'])
+def edit_touchpoint(tp_id):
+    existing = fetch_one("SELECT * FROM prospecting_touchpoints WHERE id = ?", [tp_id])
+    if not existing:
+        existing = fetch_one("SELECT * FROM capital_group_touchpoints WHERE id = ?", [tp_id])
+        if not existing:
+            return jsonify({'error': 'not found'}), 404
+        data = request.get_json(force=True)
+        sets, params = [], []
+        for k in ['type', 'outcome', 'notes', 'contact_id', 'occurred_at']:
+            if k in data:
+                sets.append(f'{k} = ?')
+                params.append(data[k])
+        if not sets:
+            return jsonify({'error': 'no fields'}), 400
+        params.append(tp_id)
+        execute(f"UPDATE capital_group_touchpoints SET {', '.join(sets)} WHERE id = ?", params)
+        updated = fetch_one("SELECT * FROM capital_group_touchpoints WHERE id = ?", [tp_id])
+        return jsonify(updated)
+
+    data = request.get_json(force=True)
+    sets, params = [], []
+    for k in ['channel', 'direction', 'subject', 'summary', 'occurred_at', 'outcome', 'contact_id']:
+        if k in data:
+            sets.append(f'{k} = ?')
+            params.append(data[k])
+    if not sets:
+        return jsonify({'error': 'no fields'}), 400
+    params.append(tp_id)
+    execute(f"UPDATE prospecting_touchpoints SET {', '.join(sets)} WHERE id = ?", params)
+    updated = fetch_one("SELECT * FROM prospecting_touchpoints WHERE id = ?", [tp_id])
+    return jsonify(updated)
+
+
+FOLLOWUP_INTERVALS = {
+    '1w': 7, '2w': 14, '3w': 21, '1m': 30, '6wk': 42, '2m': 60
+}
+
+
+@prospecting_bp.route('/contacts/<cid>/schedule-followup', methods=['POST'])
+def schedule_followup(cid):
+    contact = fetch_one("SELECT id, group_id, first_name, last_name FROM prospecting_contacts WHERE id = ?", [cid])
+    if not contact:
+        return jsonify({'error': 'not found'}), 404
+    data = request.get_json(force=True)
+    interval = data.get('interval', '2w')
+    days = FOLLOWUP_INTERVALS.get(interval, 14)
+    due_at = (datetime.utcnow() + timedelta(days=days)).isoformat()
+    name = ' '.join(filter(None, [contact.get('first_name'), contact.get('last_name')])) or 'contact'
+    task_id = new_id()
+    execute(
+        "INSERT INTO prospecting_tasks (id, capital_group_id, contact_id, type, title, description, "
+        "status, priority, due_at, trigger_rule, created_at) "
+        "VALUES (?, ?, ?, 'follow_up', ?, ?, 'pending', 6, ?, 'manual_followup', ?)",
+        [task_id, contact.get('group_id'), cid,
+         f'Follow up with {name}', f'Scheduled {interval} follow-up',
+         due_at, datetime.utcnow().isoformat()]
+    )
+    return jsonify({'task_id': task_id, 'due_at': due_at, 'days': days}), 201
 
 
 # ---------------------------------------------------------------------------

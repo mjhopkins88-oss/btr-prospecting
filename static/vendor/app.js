@@ -959,6 +959,11 @@ function App({
   onLogout
 }) {
   const [activeTab, setActiveTab] = useState('command');
+  useEffect(function() {
+    var handler = function(e) { if (e.detail && e.detail.tab) setActiveTab(e.detail.tab); };
+    window.addEventListener('btr-navigate', handler);
+    return function() { window.removeEventListener('btr-navigate', handler); };
+  }, []);
   const [prospects, setProspects] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedProspect, setSelectedProspect] = useState(null);
@@ -1798,6 +1803,8 @@ function CapitalGroupsPage({ user }) {
   const [showForm, setShowForm] = useState(false);
   const [editingGroup, setEditingGroup] = useState(null);
   const [showTpForm, setShowTpForm] = useState(false);
+  const [editingTp, setEditingTp] = useState(null);
+  const [tpFollowup, setTpFollowup] = useState('');
 
   const [fName, setFName] = useState('');
   const [fType, setFType] = useState('developer');
@@ -1942,19 +1949,34 @@ function CapitalGroupsPage({ user }) {
       var payload = { type: tpType, outcome: tpOutcome, notes: tpNotes };
       if (tpContactId) payload.contact_id = tpContactId;
       if (tpDate) payload.occurred_at = tpDate + 'T12:00:00';
-      const res = await fetch(`${API_BASE}/api/capital-groups/${selectedGroup.id}/touchpoints`, {
-        method: 'POST',
+      var url, method;
+      if (editingTp) {
+        url = `${API_BASE}/api/prospecting/touchpoints/${editingTp}`;
+        method = 'PUT';
+      } else {
+        url = `${API_BASE}/api/capital-groups/${selectedGroup.id}/touchpoints`;
+        method = 'POST';
+      }
+      const res = await fetch(url, {
+        method: method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
       const d = await res.json();
       if (d.error) { alert(d.error); return; }
-      setShowTpForm(false);
-      setTpType('call'); setTpOutcome(''); setTpNotes(''); setTpContactId(''); setTpDate(new Date().toISOString().slice(0, 10));
+      if (tpFollowup && selectedGroup) {
+        await fetch(`${API_BASE}/api/capital-groups/${selectedGroup.id}/schedule-followup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ interval: tpFollowup })
+        });
+      }
+      setShowTpForm(false); setEditingTp(null);
+      setTpType('call'); setTpOutcome(''); setTpNotes(''); setTpContactId(''); setTpDate(new Date().toISOString().slice(0, 10)); setTpFollowup('');
       loadDetail(selectedGroup.id);
       loadGroups();
     } catch (e) {
-      alert('Error logging touchpoint');
+      alert('Error saving touchpoint');
     }
   };
 
@@ -2298,7 +2320,7 @@ function CapitalGroupsPage({ user }) {
             React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' } },
               React.createElement('h3', { style: { color: '#1e293b', fontSize: '0.9rem', fontWeight: 600, margin: 0, fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.04em' } }, 'ACTIVITY TIMELINE'),
               React.createElement('button', {
-                onClick: () => { setShowTpForm(true); setTpType('call'); setTpOutcome(''); setTpNotes(''); setTpContactId(''); setTpDate(new Date().toISOString().slice(0, 10)); },
+                onClick: () => { setShowTpForm(true); setEditingTp(null); setTpType('call'); setTpOutcome(''); setTpNotes(''); setTpContactId(''); setTpDate(new Date().toISOString().slice(0, 10)); setTpFollowup(''); },
                 style: { ...styles.btnPrimary, padding: '0.35rem 0.75rem', fontSize: '0.75rem' }
               }, '+ Log Touchpoint')
             ),
@@ -2347,9 +2369,28 @@ function CapitalGroupsPage({ user }) {
                 rows: 2,
                 style: { ...styles.input, width: '100%', minWidth: 0, resize: 'vertical', marginBottom: '0.5rem', boxSizing: 'border-box' }
               }),
+              React.createElement('div', { style: { marginBottom: '0.5rem' } },
+                React.createElement('div', { style: { fontSize: '0.68rem', color: '#64748b', marginBottom: '0.25rem', fontWeight: 600 } }, 'Schedule follow-up:'),
+                React.createElement('div', { style: { display: 'flex', gap: '0.3rem', flexWrap: 'wrap' } },
+                  [['', 'None'], ['1w', '1 wk'], ['2w', '2 wk'], ['3w', '3 wk'], ['1m', '1 mo'], ['6wk', '6 wk'], ['2m', '2 mo']].map(function(opt) {
+                    return React.createElement('button', {
+                      key: opt[0],
+                      type: 'button',
+                      onClick: function() { setTpFollowup(opt[0]); },
+                      style: {
+                        padding: '0.2rem 0.45rem', fontSize: '0.68rem', borderRadius: '0.3rem',
+                        border: tpFollowup === opt[0] ? '1px solid #14b8a6' : '1px solid #e2e8f0',
+                        background: tpFollowup === opt[0] ? 'rgba(20,184,166,0.08)' : '#FFFFFF',
+                        color: tpFollowup === opt[0] ? '#0d9488' : '#64748b',
+                        cursor: 'pointer', fontFamily: "'Inter', sans-serif", fontWeight: 500
+                      }
+                    }, opt[1]);
+                  })
+                )
+              ),
               React.createElement('div', { style: { display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' } },
-                React.createElement('button', { onClick: () => setShowTpForm(false), style: { ...styles.btn, padding: '0.3rem 0.7rem', fontSize: '0.75rem' } }, 'Cancel'),
-                React.createElement('button', { onClick: saveTouchpoint, style: { ...styles.btnPrimary, padding: '0.3rem 0.7rem', fontSize: '0.75rem' } }, 'Save')
+                React.createElement('button', { onClick: () => { setShowTpForm(false); setEditingTp(null); }, style: { ...styles.btn, padding: '0.3rem 0.7rem', fontSize: '0.75rem' } }, 'Cancel'),
+                React.createElement('button', { onClick: saveTouchpoint, style: { ...styles.btnPrimary, padding: '0.3rem 0.7rem', fontSize: '0.75rem' } }, editingTp ? 'Update' : 'Save')
               )
             ),
 
@@ -2378,7 +2419,20 @@ function CapitalGroupsPage({ user }) {
                           React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 } },
                             tpDateStr && React.createElement('span', { style: { fontSize: '0.7rem', color: '#94a3b8', fontFamily: "'JetBrains Mono', monospace" } }, tpDateStr),
                             React.createElement('span', { style: { fontSize: '0.65rem', color: '#cbd5e1' } }, '\u00b7'),
-                            React.createElement('span', { style: { fontSize: '0.7rem', color: '#64748b' } }, timeAgo(tp.occurred_at))
+                            React.createElement('span', { style: { fontSize: '0.7rem', color: '#64748b' } }, timeAgo(tp.occurred_at)),
+                            React.createElement('button', {
+                              onClick: function() {
+                                setEditingTp(tp.id);
+                                setTpType(tp.type || 'call');
+                                setTpOutcome(tp.outcome || '');
+                                setTpNotes(tp.notes || '');
+                                setTpContactId(tp.contact_id || '');
+                                setTpDate(tp.occurred_at ? tp.occurred_at.slice(0, 10) : new Date().toISOString().slice(0, 10));
+                                setTpFollowup('');
+                                setShowTpForm(true);
+                              },
+                              style: { background: 'none', border: 'none', color: '#94a3b8', fontSize: '0.65rem', cursor: 'pointer', padding: '0 0.2rem', fontFamily: "'Inter', sans-serif" }
+                            }, 'edit')
                           )
                         ),
                         tp.outcome && React.createElement('div', { style: { fontSize: '0.78rem', color: '#475569', marginTop: '0.15rem' } }, tp.outcome),
@@ -3109,7 +3163,22 @@ function ProspectingContactsTab({ user }) {
     style: { fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }
   }, text);
 
-  const COLS = '1.6fr 1.1fr 1.3fr 1fr 0.9fr 0.9fr 1.3fr 0.8fr';
+  const toggleFavorite = (cid) => {
+    fetch(API_BASE + '/api/prospecting/contacts/' + cid + '/favorite', { method: 'PATCH' })
+      .then(r => r.json())
+      .then(d => {
+        setRows(prev => prev.map(r => r.id === cid ? { ...r, is_favorite: d.is_favorite } : r));
+      })
+      .catch(() => {});
+  };
+
+  const goToGroup = (groupId) => {
+    if (!groupId) return;
+    try { sessionStorage.setItem('capital_group_deeplink', groupId); } catch(_) {}
+    window.dispatchEvent(new CustomEvent('btr-navigate', { detail: { tab: 'capital_groups' } }));
+  };
+
+  const COLS = '0.2fr 1.5fr 1.1fr 1.3fr 1fr 0.9fr 0.9fr 1.3fr 0.8fr';
 
   const headerCell = (label) => React.createElement('span', {
     key: label,
@@ -3451,13 +3520,22 @@ function ProspectingContactsTab({ user }) {
                     }
                   },
                     React.createElement('div', {
-                      style: { fontSize: '0.78rem', fontWeight: 600, color: '#1e293b', marginBottom: '0.2rem', lineHeight: 1.3 }
-                    }, name),
+                      style: { display: 'flex', alignItems: 'center', gap: '0.3rem', marginBottom: '0.2rem' }
+                    },
+                      React.createElement('span', {
+                        onClick: function(e) { e.stopPropagation(); e.preventDefault(); toggleFavorite(c.id); },
+                        style: { cursor: 'pointer', fontSize: '0.72rem', opacity: c.is_favorite ? 1 : 0.3, transition: 'opacity 0.15s' }
+                      }, c.is_favorite ? '★' : '☆'),
+                      React.createElement('span', {
+                        style: { fontSize: '0.78rem', fontWeight: 600, color: '#1e293b', lineHeight: 1.3 }
+                      }, name)
+                    ),
                     c.title ? React.createElement('div', {
                       style: { fontSize: '0.68rem', color: '#64748b', marginBottom: '0.15rem', lineHeight: 1.25 }
                     }, c.title) : null,
                     c.group_name ? React.createElement('div', {
-                      style: { fontSize: '0.68rem', color: '#64748b', marginBottom: '0.25rem', lineHeight: 1.25 }
+                      onClick: function(e) { e.stopPropagation(); e.preventDefault(); goToGroup(c.group_id); },
+                      style: { fontSize: '0.68rem', color: '#14b8a6', marginBottom: '0.25rem', lineHeight: 1.25, cursor: 'pointer' }
                     }, c.group_name) : null,
                     React.createElement('div', {
                       style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.15rem' }
@@ -3554,6 +3632,7 @@ function ProspectingContactsTab({ user }) {
               background: '#F1F5F9'
             }
           },
+            headerCell('★'),
             headerCell('Name'),
             headerCell('Title'),
             headerCell('Group'),
@@ -3586,13 +3665,18 @@ function ProspectingContactsTab({ user }) {
                 }
               },
                 React.createElement('span', {
+                  onClick: function(e) { e.stopPropagation(); toggleFavorite(c.id); },
+                  style: { cursor: 'pointer', fontSize: '0.82rem', opacity: c.is_favorite ? 1 : 0.3, transition: 'opacity 0.15s', textAlign: 'center' }
+                }, c.is_favorite ? '\u2605' : '\u2606'),
+                React.createElement('span', {
                   style: { fontSize: '0.86rem', fontWeight: 600, color: '#1e293b' }
                 }, [c.first_name, c.last_name].filter(Boolean).join(' ') || '\u2014'),
                 React.createElement('span', {
                   style: { fontSize: '0.78rem', color: '#64748b' }
                 }, c.title || '\u2014'),
                 React.createElement('span', {
-                  style: { fontSize: '0.78rem', color: '#64748b' }
+                  onClick: function() { goToGroup(c.group_id); },
+                  style: { fontSize: '0.78rem', color: c.group_id ? '#14b8a6' : '#64748b', cursor: c.group_id ? 'pointer' : 'default' }
                 }, c.group_name || '\u2014'),
                 stageBadge(c.relationship_stage),
                 React.createElement('span', {
