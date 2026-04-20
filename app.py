@@ -2325,6 +2325,90 @@ def dashboard_weather():
 
 
 # ===================================================================
+# DASHBOARD — Finance Snapshot (FRED + Alpha Vantage)
+# ===================================================================
+
+FRED_API_KEY = os.getenv('FRED_API_KEY', '')
+ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY', '')
+print(f"[Finance] FRED key loaded: {bool(FRED_API_KEY)}")
+print(f"[Finance] Alpha Vantage key loaded: {bool(ALPHA_VANTAGE_API_KEY)}")
+
+_finance_cache = {'data': None, 'ts': 0}
+_FINANCE_TTL = 600  # 10 minutes
+
+
+@app.route('/api/dashboard/finance', methods=['GET'])
+def dashboard_finance():
+    import time
+    now = time.time()
+    if _finance_cache['data'] and (now - _finance_cache['ts']) < _FINANCE_TTL:
+        return jsonify(_finance_cache['data'])
+
+    import requests as _freq
+    result = {}
+    errors = []
+
+    # FRED: 10-Year Treasury Yield (DGS10)
+    if FRED_API_KEY:
+        try:
+            r = _freq.get('https://api.stlouisfed.org/fred/series/observations', params={
+                'series_id': 'DGS10', 'api_key': FRED_API_KEY,
+                'file_type': 'json', 'sort_order': 'desc', 'limit': 1
+            }, timeout=8)
+            r.raise_for_status()
+            obs = r.json().get('observations', [])
+            if obs and obs[0].get('value', '.') != '.':
+                result['tenYearYield'] = float(obs[0]['value'])
+        except Exception as e:
+            errors.append(f'FRED DGS10: {e}')
+
+        # FRED: Fed Funds Rate (FEDFUNDS)
+        try:
+            r = _freq.get('https://api.stlouisfed.org/fred/series/observations', params={
+                'series_id': 'FEDFUNDS', 'api_key': FRED_API_KEY,
+                'file_type': 'json', 'sort_order': 'desc', 'limit': 1
+            }, timeout=8)
+            r.raise_for_status()
+            obs = r.json().get('observations', [])
+            if obs and obs[0].get('value', '.') != '.':
+                result['fedFundsRate'] = float(obs[0]['value'])
+        except Exception as e:
+            errors.append(f'FRED FEDFUNDS: {e}')
+    else:
+        errors.append('FRED_API_KEY not set')
+
+    # Alpha Vantage: S&P 500 via SPY
+    if ALPHA_VANTAGE_API_KEY:
+        try:
+            r = _freq.get('https://www.alphavantage.co/query', params={
+                'function': 'GLOBAL_QUOTE', 'symbol': 'SPY',
+                'apikey': ALPHA_VANTAGE_API_KEY
+            }, timeout=8)
+            r.raise_for_status()
+            gq = r.json().get('Global Quote', {})
+            price = gq.get('05. price')
+            change_pct = gq.get('10. change percent', '').replace('%', '')
+            if price:
+                result['sp500'] = float(price)
+            if change_pct:
+                result['sp500Change'] = float(change_pct)
+        except Exception as e:
+            errors.append(f'AlphaVantage SPY: {e}')
+    else:
+        errors.append('ALPHA_VANTAGE_API_KEY not set')
+
+    if errors:
+        print(f"[Finance] errors: {errors}")
+
+    if not result:
+        return jsonify({'error': 'finance_unavailable'}), 503
+
+    _finance_cache['data'] = result
+    _finance_cache['ts'] = now
+    return jsonify(result)
+
+
+# ===================================================================
 # AUTH HELPERS & MIDDLEWARE
 # ===================================================================
 
