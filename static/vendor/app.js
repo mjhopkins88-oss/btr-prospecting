@@ -4345,7 +4345,7 @@ function ProspectingCanvasTab() {
   const [stats, setStats] = useState(null);
   const canvasRef = useRef(null);
 
-  const MAX_DOTS = 5000;
+  const MAX_DOTS = 1000;
 
   const persist = (src) => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ src: src || null })); } catch (_) {}
