@@ -1845,6 +1845,16 @@ function CapitalGroupsPage({ user }) {
 
   useEffect(() => { loadGroups(); }, [search, typeFilter, statusFilter]);
 
+  useEffect(() => {
+    try {
+      var deepId = sessionStorage.getItem('capital_group_deeplink');
+      if (deepId) {
+        sessionStorage.removeItem('capital_group_deeplink');
+        loadDetail(deepId);
+      }
+    } catch (_) {}
+  }, []);
+
   const loadDetail = async (id) => {
     setDetailLoading(true);
     try {
@@ -5096,8 +5106,12 @@ function CommandCenter({ user, prospects, setActiveTab }) {
 
     fetch(API_BASE + '/api/dashboard/weather')
       .then(function(r) { return r.ok ? r.json() : null; })
-      .then(function(d) { if (!cancelled && d && !d.error) setWeather(d); })
-      .catch(function() {});
+      .then(function(d) {
+        if (cancelled) return;
+        if (d && !d.error) setWeather(d);
+        else setWeather({ unavailable: true });
+      })
+      .catch(function() { if (!cancelled) setWeather({ unavailable: true }); });
 
     fetch(API_BASE + '/api/prospecting/todays-focus?limit=8')
       .then(function(r) { return r.ok ? r.json() : []; })
@@ -5251,7 +5265,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
         React.createElement('div', {
           style: { width: '1px', height: '28px', background: '#e2e8f0' }
         }),
-        weather
+        weather && weather.location
           ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } },
               weather.icon
                 ? React.createElement('img', {
@@ -5269,10 +5283,15 @@ function CommandCenter({ user, prospects, setActiveTab }) {
                 }, weather.condition || '')
               )
             )
-          : React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.4rem' } },
-              React.createElement('span', { style: { fontSize: '0.85rem', opacity: 0.4 } }, '\u2600\uFE0F'),
-              React.createElement('span', { style: { fontSize: '0.72rem', color: '#cbd5e1' } }, 'Loading weather\u2026')
-            )
+          : weather && weather.unavailable
+            ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.4rem' } },
+                React.createElement('span', { style: { fontSize: '0.85rem', opacity: 0.4 } }, '\u2600\uFE0F'),
+                React.createElement('span', { style: { fontSize: '0.72rem', color: '#94a3b8' } }, 'Weather unavailable')
+              )
+            : React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.4rem' } },
+                React.createElement('span', { style: { fontSize: '0.85rem', opacity: 0.4 } }, '\u2600\uFE0F'),
+                React.createElement('span', { style: { fontSize: '0.72rem', color: '#cbd5e1' } }, 'Loading weather\u2026')
+              )
       )
     ),
 
@@ -5350,14 +5369,22 @@ function CommandCenter({ user, prospects, setActiveTab }) {
             : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.5rem' } },
                 focusItems.slice(0, 6).map(function(item) {
                   var m = _focusMeta(item);
+                  var _goToGroup = function() {
+                    if (item.capital_group_id) {
+                      try { sessionStorage.setItem('capital_group_deeplink', item.capital_group_id); } catch(_) {}
+                      setActiveTab('capital_groups');
+                    }
+                  };
                   return React.createElement('div', {
                     key: item.id,
                     style: {
                       display: 'flex', alignItems: 'center', gap: '0.65rem',
                       padding: '0.65rem 0.85rem', background: m.bg,
                       border: '1px solid ' + m.border, borderRadius: '0.5rem',
-                      transition: 'box-shadow 0.15s'
-                    }
+                      transition: 'box-shadow 0.15s',
+                      cursor: item.capital_group_id ? 'pointer' : 'default'
+                    },
+                    onClick: _goToGroup
                   },
                     React.createElement('span', { style: { fontSize: '0.9rem', flexShrink: 0 } }, m.icon),
                     React.createElement('div', { style: { flex: 1, minWidth: 0 } },
@@ -5377,7 +5404,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
                       }, item.signal_title || item.reason) : null
                     ),
                     React.createElement('button', {
-                      onClick: function() { _draftFromTask(item.id); },
+                      onClick: function(e) { e.stopPropagation(); _draftFromTask(item.id); },
                       style: {
                         background: 'rgba(20,184,166,0.1)', border: '1px solid rgba(20,184,166,0.25)',
                         color: '#0d9488', padding: '0.2rem 0.5rem', borderRadius: '0.3rem',
