@@ -2340,6 +2340,7 @@ _FINANCE_TTL = 600  # 10 minutes
 
 @app.route('/api/dashboard/finance', methods=['GET'])
 def dashboard_finance():
+    print("[Finance] endpoint hit")
     import time
     now = time.time()
     if _finance_cache['data'] and (now - _finance_cache['ts']) < _FINANCE_TTL:

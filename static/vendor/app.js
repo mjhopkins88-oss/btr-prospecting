@@ -5091,6 +5091,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   const [clockTime, setClockTime] = useState(new Date());
   const [weather, setWeather] = useState(null);
   const [finance, setFinance] = useState(null);
+  const [financeLoading, setFinanceLoading] = useState(true);
   const [focusItems, setFocusItems] = useState([]);
   const [focusLoading, setFocusLoading] = useState(true);
 
@@ -5122,8 +5123,13 @@ function CommandCenter({ user, prospects, setActiveTab }) {
 
     fetch(API_BASE + '/api/dashboard/finance')
       .then(function(r) { return r.ok ? r.json() : null; })
-      .then(function(d) { if (!cancelled && d && !d.error) setFinance(d); })
-      .catch(function() {});
+      .then(function(d) {
+        if (cancelled) return;
+        console.log('[Finance] data:', d);
+        if (d && !d.error) setFinance(d);
+      })
+      .catch(function(e) { console.log('[Finance] fetch error:', e); })
+      .finally(function() { if (!cancelled) setFinanceLoading(false); });
 
     return () => { cancelled = true; };
   }, []);
@@ -5313,39 +5319,50 @@ function CommandCenter({ user, prospects, setActiveTab }) {
       kpiCard('\u{1F517}', 'LinkedIn', withLinkedIn, '#3b82f6', withLinkedIn > 0 ? liPct + '% coverage' : null)
     ),
 
-    finance ? React.createElement('div', {
+    React.createElement('div', {
       style: {
-        display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap',
-        background: '#FFFFFF', border: '1px solid #e2e8f0', borderRadius: '0.85rem',
-        padding: '0.75rem 1.15rem', boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-        alignItems: 'center'
+        ...sectionCard, marginBottom: '1.5rem'
       }
     },
-      React.createElement('span', {
-        style: { fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, marginRight: '0.25rem' }
-      }, 'Market Snapshot'),
-      finance.tenYearYield != null ? React.createElement('div', {
-        style: { display: 'flex', alignItems: 'baseline', gap: '0.3rem', padding: '0.25rem 0.65rem', background: 'rgba(59,130,246,0.06)', borderRadius: '0.4rem', border: '1px solid rgba(59,130,246,0.12)' }
-      },
-        React.createElement('span', { style: { fontSize: '0.65rem', color: '#64748b', fontWeight: 600 } }, '10Y'),
-        React.createElement('span', { style: { fontSize: '0.88rem', fontWeight: 700, color: '#1e293b', fontFamily: "'JetBrains Mono', monospace" } }, finance.tenYearYield.toFixed(2) + '%')
-      ) : null,
-      finance.fedFundsRate != null ? React.createElement('div', {
-        style: { display: 'flex', alignItems: 'baseline', gap: '0.3rem', padding: '0.25rem 0.65rem', background: 'rgba(139,92,246,0.06)', borderRadius: '0.4rem', border: '1px solid rgba(139,92,246,0.12)' }
-      },
-        React.createElement('span', { style: { fontSize: '0.65rem', color: '#64748b', fontWeight: 600 } }, 'Fed'),
-        React.createElement('span', { style: { fontSize: '0.88rem', fontWeight: 700, color: '#1e293b', fontFamily: "'JetBrains Mono', monospace" } }, finance.fedFundsRate.toFixed(2) + '%')
-      ) : null,
-      finance.sp500 != null ? React.createElement('div', {
-        style: { display: 'flex', alignItems: 'baseline', gap: '0.3rem', padding: '0.25rem 0.65rem', background: 'rgba(20,184,166,0.06)', borderRadius: '0.4rem', border: '1px solid rgba(20,184,166,0.12)' }
-      },
-        React.createElement('span', { style: { fontSize: '0.65rem', color: '#64748b', fontWeight: 600 } }, 'SPY'),
-        React.createElement('span', { style: { fontSize: '0.88rem', fontWeight: 700, color: '#1e293b', fontFamily: "'JetBrains Mono', monospace" } }, '$' + finance.sp500.toFixed(2)),
-        finance.sp500Change != null ? React.createElement('span', {
-          style: { fontSize: '0.68rem', fontWeight: 600, color: finance.sp500Change >= 0 ? '#10b981' : '#ef4444' }
-        }, (finance.sp500Change >= 0 ? '+' : '') + finance.sp500Change.toFixed(2) + '%') : null
-      ) : null
-    ) : null,
+      React.createElement('div', { style: { ...panelHeader, marginBottom: '0.6rem' } },
+        React.createElement('h3', { style: panelTitle }, 'Finance Snapshot')
+      ),
+      financeLoading
+        ? React.createElement('div', {
+            style: { color: '#94a3b8', fontSize: '0.82rem', padding: '0.5rem 0', textAlign: 'center' }
+          }, 'Loading\u2026')
+        : !finance
+          ? React.createElement('div', {
+              style: { color: '#94a3b8', fontSize: '0.82rem', padding: '0.5rem 0', textAlign: 'center' }
+            }, 'Finance data unavailable')
+          : React.createElement('div', {
+              style: { display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }
+            },
+              finance.tenYearYield != null ? React.createElement('div', {
+                style: { display: 'flex', alignItems: 'baseline', gap: '0.35rem', padding: '0.3rem 0.7rem', background: 'rgba(59,130,246,0.06)', borderRadius: '0.4rem', border: '1px solid rgba(59,130,246,0.12)' }
+              },
+                React.createElement('span', { style: { fontSize: '0.65rem', color: '#64748b', fontWeight: 600 } }, '10Y Treasury'),
+                React.createElement('span', { style: { fontSize: '0.92rem', fontWeight: 700, color: '#1e293b', fontFamily: "'JetBrains Mono', monospace" } }, finance.tenYearYield.toFixed(2) + '%'),
+                React.createElement('span', { style: { fontSize: '0.78rem', color: finance.tenYearYield >= 4.5 ? '#ef4444' : '#10b981' } }, finance.tenYearYield >= 4.5 ? '\u2191' : '\u2193')
+              ) : null,
+              finance.fedFundsRate != null ? React.createElement('div', {
+                style: { display: 'flex', alignItems: 'baseline', gap: '0.35rem', padding: '0.3rem 0.7rem', background: 'rgba(139,92,246,0.06)', borderRadius: '0.4rem', border: '1px solid rgba(139,92,246,0.12)' }
+              },
+                React.createElement('span', { style: { fontSize: '0.65rem', color: '#64748b', fontWeight: 600 } }, 'Fed Funds'),
+                React.createElement('span', { style: { fontSize: '0.92rem', fontWeight: 700, color: '#1e293b', fontFamily: "'JetBrains Mono', monospace" } }, finance.fedFundsRate.toFixed(2) + '%'),
+                React.createElement('span', { style: { fontSize: '0.78rem', color: '#64748b' } }, '\u2192')
+              ) : null,
+              finance.sp500 != null ? React.createElement('div', {
+                style: { display: 'flex', alignItems: 'baseline', gap: '0.35rem', padding: '0.3rem 0.7rem', background: 'rgba(20,184,166,0.06)', borderRadius: '0.4rem', border: '1px solid rgba(20,184,166,0.12)' }
+              },
+                React.createElement('span', { style: { fontSize: '0.65rem', color: '#64748b', fontWeight: 600 } }, 'S&P 500'),
+                React.createElement('span', { style: { fontSize: '0.92rem', fontWeight: 700, color: '#1e293b', fontFamily: "'JetBrains Mono', monospace" } }, '$' + finance.sp500.toFixed(2)),
+                finance.sp500Change != null ? React.createElement('span', {
+                  style: { fontSize: '0.78rem', fontWeight: 600, color: finance.sp500Change >= 0 ? '#10b981' : '#ef4444' }
+                }, (finance.sp500Change > 0 ? '\u2191' : finance.sp500Change < 0 ? '\u2193' : '\u2192') + ' ' + (finance.sp500Change >= 0 ? '+' : '') + finance.sp500Change.toFixed(2) + '%') : null
+              ) : null
+            )
+    ),
 
     total > 0 ? React.createElement('div', {
       style: {
