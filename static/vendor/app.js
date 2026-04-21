@@ -1831,6 +1831,7 @@ function CapitalGroupsPage({ user }) {
   const [showForm, setShowForm] = useState(false);
   const [editingGroup, setEditingGroup] = useState(null);
   const [showTpForm, setShowTpForm] = useState(false);
+  const [toast, setToast] = useState(null);
   const [editingTp, setEditingTp] = useState(null);
   const [tpFollowup, setTpFollowup] = useState('');
 
@@ -1978,6 +1979,8 @@ function CapitalGroupsPage({ user }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ opportunity_stage: stage })
       });
+      setToast(stage ? 'Stage: ' + stage.replace('_', ' ') : 'Opportunity cleared');
+      setTimeout(function() { setToast(null); }, 2500);
       loadGroups();
       if (selectedGroup?.id === id) loadDetail(id);
     } catch (e) {
@@ -2015,6 +2018,8 @@ function CapitalGroupsPage({ user }) {
       }
       setShowTpForm(false); setEditingTp(null);
       setTpType('call'); setTpOutcome(''); setTpNotes(''); setTpContactId(''); setTpDate(new Date().toISOString().slice(0, 10)); setTpFollowup('');
+      setToast(editingTp ? 'Touchpoint updated' : 'Touchpoint logged');
+      setTimeout(function() { setToast(null); }, 2500);
       loadDetail(selectedGroup.id);
       loadGroups();
     } catch (e) {
@@ -2594,7 +2599,17 @@ function CapitalGroupsPage({ user }) {
       style: { position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.15)', zIndex: 899 },
       onClick: function() { setSelectedGroup(null); }
     }),
-    renderDetailDrawer()
+    renderDetailDrawer(),
+    toast && React.createElement('div', {
+      style: {
+        position: 'fixed', bottom: '1.5rem', right: '1.5rem', zIndex: 9999,
+        background: '#0f172a', color: '#f8fafc', padding: '0.6rem 1.1rem',
+        borderRadius: '0.5rem', fontSize: '0.8rem', fontWeight: 500,
+        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        animation: 'fadeInUp 0.2s ease-out',
+        fontFamily: "'Inter', sans-serif"
+      }
+    }, toast)
   );
 }
 
@@ -5243,6 +5258,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   const [focusItems, setFocusItems] = useState([]);
   const [focusLoading, setFocusLoading] = useState(true);
   const [opportunities, setOpportunities] = useState([]);
+  const [engagement, setEngagement] = useState({ streak: 0, today_touchpoints: 0, going_cold: [], stalled_opportunities: [] });
   const [financeIdx, setFinanceIdx] = useState(0);
   const [financeHover, setFinanceHover] = useState(false);
 
@@ -5275,6 +5291,11 @@ function CommandCenter({ user, prospects, setActiveTab }) {
     fetch(API_BASE + '/api/capital-groups?has_opportunity=1&limit=10')
       .then(function(r) { return r.ok ? r.json() : { capital_groups: [] }; })
       .then(function(d) { if (!cancelled) setOpportunities(d.capital_groups || []); })
+      .catch(function() {});
+
+    fetch(API_BASE + '/api/prospecting/engagement')
+      .then(function(r) { return r.ok ? r.json() : {}; })
+      .then(function(d) { if (!cancelled) setEngagement(d); })
       .catch(function() {});
 
     fetch(API_BASE + '/api/dashboard/finance')
@@ -5421,9 +5442,12 @@ function CommandCenter({ user, prospects, setActiveTab }) {
             color: '#1e293b', letterSpacing: '0.03em'
           }
         }, greeting + (firstName ? ', ' + firstName : '')),
-        React.createElement('p', {
-          style: { color: '#94a3b8', margin: '0.15rem 0 0', fontSize: '0.75rem' }
-        }, fmtDay)
+        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.6rem', marginTop: '0.15rem' } },
+          React.createElement('span', { style: { color: '#94a3b8', fontSize: '0.75rem' } }, fmtDay),
+          engagement.streak > 0 && React.createElement('span', {
+            style: { fontSize: '0.68rem', fontWeight: 600, color: '#f59e0b', background: 'rgba(245,158,11,0.08)', padding: '0.1rem 0.4rem', borderRadius: '0.3rem' }
+          }, engagement.streak + 'd streak')
+        )
       ),
 
       React.createElement('div', {
@@ -5543,7 +5567,12 @@ function CommandCenter({ user, prospects, setActiveTab }) {
     },
       React.createElement('div', { style: sectionCard },
         React.createElement('div', { style: panelHeader },
-          React.createElement('h3', { style: panelTitle }, "Today\u2019s Focus" + (focusItems.length > 0 ? ' (' + focusItems.length + ')' : '')),
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } },
+            React.createElement('h3', { style: panelTitle }, "Today\u2019s Mission"),
+            engagement.today_touchpoints > 0 && React.createElement('span', {
+              style: { fontSize: '0.6rem', fontWeight: 700, color: '#10b981', background: 'rgba(16,185,129,0.08)', padding: '0.1rem 0.35rem', borderRadius: '0.25rem' }
+            }, engagement.today_touchpoints + ' done')
+          ),
           React.createElement('button', {
             style: { ...styles.actionBtn, fontSize: '0.7rem' },
             onClick: function() { setActiveTab('prospecting'); }
@@ -5561,8 +5590,12 @@ function CommandCenter({ user, prospects, setActiveTab }) {
                 style: { textAlign: 'center', padding: '1.5rem 0' }
               },
                 React.createElement('div', { style: { fontSize: '1.5rem', marginBottom: '0.4rem', opacity: 0.3 } }, '\u2705'),
-                React.createElement('div', { style: { fontSize: '0.85rem', fontWeight: 600, color: '#10b981', marginBottom: '0.15rem' } }, 'No pending actions'),
-                React.createElement('div', { style: { fontSize: '0.75rem', color: '#94a3b8' } }, 'Signal-driven tasks will appear here')
+                React.createElement('div', { style: { fontSize: '0.85rem', fontWeight: 600, color: '#10b981', marginBottom: '0.15rem' } },
+                  engagement.today_touchpoints > 0 ? 'Mission complete' : 'No pending actions'),
+                React.createElement('div', { style: { fontSize: '0.75rem', color: '#94a3b8' } },
+                  engagement.today_touchpoints > 0
+                    ? engagement.today_touchpoints + ' touchpoint' + (engagement.today_touchpoints > 1 ? 's' : '') + ' logged today'
+                    : 'Signal-driven tasks will appear here')
               )
             : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.5rem' } },
                 focusItems.slice(0, 6).map(function(item) {
@@ -5707,6 +5740,40 @@ function CommandCenter({ user, prospects, setActiveTab }) {
           },
             React.createElement('span', { style: { fontSize: '0.82rem', color: '#1e293b', fontWeight: 600 } }, opp.name),
             React.createElement('span', { style: { fontSize: '0.7rem', fontWeight: 600, padding: '0.1rem 0.45rem', borderRadius: '9999px', background: (stageColors[opp.opportunity_stage] || '#6366f1') + '18', color: stageColors[opp.opportunity_stage] || '#6366f1' } }, stageLabels[opp.opportunity_stage] || opp.opportunity_stage)
+          );
+        })
+      )
+    ),
+
+    (engagement.going_cold.length > 0 || engagement.stalled_opportunities.length > 0) && React.createElement('div', {
+      style: { ...sectionCard, marginBottom: '1rem', borderColor: 'rgba(239,68,68,0.15)' }
+    },
+      React.createElement('h3', { style: { ...panelTitle, color: '#ef4444', marginBottom: '0.6rem' } }, 'Needs Attention'),
+      React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.35rem' } },
+        engagement.going_cold.map(function(item) {
+          return React.createElement('div', {
+            key: 'cold-' + item.id,
+            style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.4rem 0.6rem', background: 'rgba(239,68,68,0.03)', borderRadius: '0.35rem', cursor: 'pointer' },
+            onClick: function() { try { sessionStorage.setItem('capital_group_deeplink', item.id); } catch(_) {} setActiveTab('capital_groups'); }
+          },
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.4rem' } },
+              React.createElement('span', { style: { width: '5px', height: '5px', borderRadius: '50%', background: '#ef4444', flexShrink: 0 } }),
+              React.createElement('span', { style: { fontSize: '0.78rem', color: '#1e293b', fontWeight: 500 } }, item.name)
+            ),
+            React.createElement('span', { style: { fontSize: '0.68rem', color: '#ef4444', fontWeight: 600 } }, item.days_silent + 'd silent')
+          );
+        }),
+        engagement.stalled_opportunities.map(function(item) {
+          return React.createElement('div', {
+            key: 'stall-' + item.id,
+            style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.4rem 0.6rem', background: 'rgba(245,158,11,0.03)', borderRadius: '0.35rem', cursor: 'pointer' },
+            onClick: function() { try { sessionStorage.setItem('capital_group_deeplink', item.id); } catch(_) {} setActiveTab('capital_groups'); }
+          },
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.4rem' } },
+              React.createElement('span', { style: { width: '5px', height: '5px', borderRadius: '50%', background: '#f59e0b', flexShrink: 0 } }),
+              React.createElement('span', { style: { fontSize: '0.78rem', color: '#1e293b', fontWeight: 500 } }, item.name)
+            ),
+            React.createElement('span', { style: { fontSize: '0.68rem', color: '#f59e0b', fontWeight: 600 } }, 'stalled: ' + item.stage)
           );
         })
       )
@@ -15156,6 +15223,11 @@ function ActivityModal({
 }
 
 // ======= PIPELINE PAGE =======
+if (typeof document !== 'undefined' && !document.getElementById('btr-toast-anim')) {
+  var _ta = document.createElement('style'); _ta.id = 'btr-toast-anim';
+  _ta.textContent = '@keyframes fadeInUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}';
+  document.head.appendChild(_ta);
+}
 if (typeof document !== 'undefined' && !document.getElementById('pipeline-panel-anim')) {
   var _s = document.createElement('style'); _s.id = 'pipeline-panel-anim';
   _s.textContent = '@keyframes slideInRight{from{transform:translateX(100%)}to{transform:translateX(0)}}' +

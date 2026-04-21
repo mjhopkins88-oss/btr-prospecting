@@ -649,3 +649,69 @@ def create_property():
          data.get('state'), data.get('stage'), now, now]
     )
     return jsonify({'id': pid}), 201
+
+
+@prospecting_bp.route('/engagement', methods=['GET'])
+def engagement_data():
+    now = datetime.utcnow()
+    today_str = now.strftime('%Y-%m-%d')
+
+    # Streak: count consecutive days with at least one touchpoint
+    streak = 0
+    for days_ago in range(0, 90):
+        d = (now - timedelta(days=days_ago)).strftime('%Y-%m-%d')
+        row = fetch_one(
+            "SELECT COUNT(*) as cnt FROM capital_group_touchpoints WHERE DATE(occurred_at) = ?", [d]
+        )
+        if row and row['cnt'] > 0:
+            streak += 1
+        else:
+            if days_ago == 0:
+                streak = 0
+            break
+
+    # Today's touchpoints count
+    today_tp = fetch_one(
+        "SELECT COUNT(*) as cnt FROM capital_group_touchpoints WHERE DATE(occurred_at) = ?",
+        [today_str]
+    )
+    today_count = today_tp['cnt'] if today_tp else 0
+
+    # Loss signals: relationships going cold (last_contacted > 45 days, status not dormant/cold)
+    cold_rows = fetch_all(
+        """SELECT id, name, last_contacted_at, relationship_status, warmth_score
+           FROM capital_groups
+           WHERE last_contacted_at IS NOT NULL
+             AND last_contacted_at < ?
+             AND relationship_status NOT IN ('dormant', 'cold')
+           ORDER BY last_contacted_at ASC LIMIT 5""",
+        [(now - timedelta(days=45)).isoformat()]
+    )
+    going_cold = []
+    for r in cold_rows:
+        days_silent = (now - datetime.fromisoformat(str(r['last_contacted_at']).replace('Z', ''))).days
+        going_cold.append({
+            'id': r['id'], 'name': r['name'],
+            'days_silent': days_silent,
+            'status': r['relationship_status']
+        })
+
+    # Stalled opportunities (opportunity_stage set but no touchpoint in 14+ days)
+    stalled_rows = fetch_all(
+        """SELECT id, name, opportunity_stage, last_contacted_at
+           FROM capital_groups
+           WHERE opportunity_stage IS NOT NULL
+             AND opportunity_stage NOT IN ('won', 'lost')
+             AND (last_contacted_at IS NULL OR last_contacted_at < ?)
+           ORDER BY last_contacted_at ASC LIMIT 5""",
+        [(now - timedelta(days=14)).isoformat()]
+    )
+    stalled = [{'id': r['id'], 'name': r['name'], 'stage': r['opportunity_stage']} for r in stalled_rows]
+
+    return jsonify({
+        'streak': streak,
+        'today_touchpoints': today_count,
+        'going_cold': going_cold,
+        'stalled_opportunities': stalled
+    })
+
