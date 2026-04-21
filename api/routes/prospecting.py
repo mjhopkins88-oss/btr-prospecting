@@ -708,10 +708,37 @@ def engagement_data():
     )
     stalled = [{'id': r['id'], 'name': r['name'], 'stage': r['opportunity_stage']} for r in stalled_rows]
 
+    # Open loops: contacted 2-14 days ago with no follow-up touchpoint since
+    open_loop_row = fetch_one(
+        """SELECT COUNT(*) as cnt FROM capital_groups
+           WHERE last_contacted_at IS NOT NULL
+             AND last_contacted_at > ?
+             AND last_contacted_at < ?
+             AND relationship_status IN ('active', 'warm', 'hot')""",
+        [(now - timedelta(days=14)).isoformat(), (now - timedelta(days=2)).isoformat()]
+    )
+    open_loops = open_loop_row['cnt'] if open_loop_row else 0
+
+    # Momentum: based on activity volume over last 7 days
+    week_tp = fetch_one(
+        "SELECT COUNT(*) as cnt FROM capital_group_touchpoints WHERE occurred_at > ?",
+        [(now - timedelta(days=7)).isoformat()]
+    )
+    week_count = week_tp['cnt'] if week_tp else 0
+    if week_count >= 15:
+        momentum = 'high'
+    elif week_count >= 5:
+        momentum = 'building'
+    else:
+        momentum = 'low'
+
     return jsonify({
         'streak': streak,
         'today_touchpoints': today_count,
         'going_cold': going_cold,
-        'stalled_opportunities': stalled
+        'stalled_opportunities': stalled,
+        'open_loops': open_loops,
+        'momentum': momentum,
+        'week_touchpoints': week_count
     })
 
