@@ -1409,8 +1409,261 @@ function App({
     onSaved: () => {
       loadCrmStatuses(prospects);
     }
-  }));
+  }), React.createElement(AssistantChat, { user: user }));
 }
+
+// ===================================================================
+// AI ASSISTANT CHAT
+// ===================================================================
+function AssistantChat({ user }) {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(function() {
+    if (open && inputRef.current) inputRef.current.focus();
+  }, [open]);
+
+  useEffect(function() {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages]);
+
+  var sendMessage = function() {
+    var text = input.trim();
+    if (!text || loading) return;
+    var newMsgs = messages.concat([{ role: 'user', content: text }]);
+    setMessages(newMsgs);
+    setInput('');
+    setLoading(true);
+    fetch(API_BASE + '/api/assistant/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: newMsgs })
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        var content = (d.content || '').replace(/<action>[\s\S]*?<\/action>/g, '').trim();
+        setMessages(function(prev) {
+          return prev.concat([{ role: 'assistant', content: content, action: d.action || null }]);
+        });
+        setLoading(false);
+      })
+      .catch(function() {
+        setMessages(function(prev) {
+          return prev.concat([{ role: 'assistant', content: 'Connection error. Please try again.' }]);
+        });
+        setLoading(false);
+      });
+  };
+
+  var executeAction = function(action) {
+    fetch(API_BASE + '/api/assistant/execute-action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: action })
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        setMessages(function(prev) {
+          return prev.concat([{ role: 'assistant', content: d.message || 'Action completed.' }]);
+        });
+      })
+      .catch(function() {
+        setMessages(function(prev) {
+          return prev.concat([{ role: 'assistant', content: 'Failed to execute action.' }]);
+        });
+      });
+  };
+
+  var handleKeyDown = function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  var actionLabel = function(action) {
+    if (!action) return null;
+    if (action.action === 'log_touchpoint') return 'Log touchpoint';
+    if (action.action === 'draft_outreach') return 'Use this draft';
+    if (action.action === 'update_stage') return 'Update stage';
+    return 'Execute';
+  };
+
+  if (!open) {
+    return React.createElement('button', {
+      onClick: function() { setOpen(true); },
+      style: {
+        position: 'fixed', bottom: '1.5rem', right: '1.5rem', zIndex: 9990,
+        width: '48px', height: '48px', borderRadius: '50%',
+        background: '#0f172a', border: '2px solid #334155',
+        color: '#f8fafc', fontSize: '1.2rem', cursor: 'pointer',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'transform 0.15s, box-shadow 0.15s'
+      },
+      onMouseEnter: function(e) { e.currentTarget.style.transform = 'scale(1.08)'; },
+      onMouseLeave: function(e) { e.currentTarget.style.transform = 'scale(1)'; }
+    }, '✨');
+  }
+
+  return React.createElement('div', {
+    style: {
+      position: 'fixed', bottom: '1.5rem', right: '1.5rem', zIndex: 9990,
+      width: '380px', height: '520px', maxHeight: 'calc(100vh - 6rem)',
+      background: '#FFFFFF', border: '1px solid #e2e8f0',
+      borderRadius: '0.75rem', boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      fontFamily: "'Inter', -apple-system, sans-serif",
+      animation: 'fadeInUp 0.2s ease-out'
+    }
+  },
+    React.createElement('div', {
+      style: {
+        padding: '0.75rem 1rem', background: '#0f172a', color: '#f8fafc',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        flexShrink: 0
+      }
+    },
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } },
+        React.createElement('span', { style: { fontSize: '0.9rem' } }, '✨'),
+        React.createElement('span', {
+          style: { fontFamily: "'Orbitron', sans-serif", fontSize: '0.78rem', fontWeight: 700, letterSpacing: '0.04em' }
+        }, 'BTR Assistant')
+      ),
+      React.createElement('button', {
+        onClick: function() { setOpen(false); },
+        style: {
+          background: 'none', border: 'none', color: '#94a3b8', fontSize: '1.1rem',
+          cursor: 'pointer', padding: '0.1rem 0.3rem', lineHeight: 1
+        }
+      }, '✕')
+    ),
+
+    React.createElement('div', {
+      ref: scrollRef,
+      style: {
+        flex: 1, overflowY: 'auto', padding: '0.75rem',
+        display: 'flex', flexDirection: 'column', gap: '0.5rem'
+      }
+    },
+      messages.length === 0 && React.createElement('div', {
+        style: { textAlign: 'center', padding: '2rem 1rem', color: '#94a3b8' }
+      },
+        React.createElement('div', { style: { fontSize: '1.5rem', marginBottom: '0.5rem', opacity: 0.3 } }, '✨'),
+        React.createElement('div', { style: { fontSize: '0.82rem', fontWeight: 500, marginBottom: '0.3rem', color: '#64748b' } }, 'How can I help?'),
+        React.createElement('div', { style: { fontSize: '0.72rem', lineHeight: 1.5 } },
+          'Ask about your pipeline, draft outreach, log touchpoints, or get suggestions.'
+        ),
+        React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem', marginTop: '0.75rem' } },
+          [
+            'Who needs a follow-up?',
+            'Draft an email to my warmest contact',
+            'What should I work on today?'
+          ].map(function(q) {
+            return React.createElement('button', {
+              key: q,
+              onClick: function() { setInput(q); },
+              style: {
+                background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '0.4rem',
+                padding: '0.4rem 0.65rem', fontSize: '0.72rem', color: '#475569',
+                cursor: 'pointer', textAlign: 'left', fontFamily: "'Inter', sans-serif"
+              }
+            }, q);
+          })
+        )
+      ),
+
+      messages.map(function(m, i) {
+        var isUser = m.role === 'user';
+        return React.createElement('div', {
+          key: i,
+          style: {
+            display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start'
+          }
+        },
+          React.createElement('div', {
+            style: {
+              maxWidth: '85%',
+              background: isUser ? '#0f172a' : '#f8fafc',
+              color: isUser ? '#f8fafc' : '#1e293b',
+              border: isUser ? 'none' : '1px solid #e2e8f0',
+              borderRadius: isUser ? '0.6rem 0.6rem 0.15rem 0.6rem' : '0.6rem 0.6rem 0.6rem 0.15rem',
+              padding: '0.55rem 0.75rem',
+              fontSize: '0.78rem',
+              lineHeight: 1.55,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word'
+            }
+          },
+            m.content,
+            m.action && React.createElement('div', { style: { marginTop: '0.5rem' } },
+              React.createElement('button', {
+                onClick: function() { executeAction(m.action); },
+                style: {
+                  background: '#14b8a6', border: 'none', color: '#FFFFFF',
+                  padding: '0.3rem 0.65rem', borderRadius: '0.35rem',
+                  fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer',
+                  fontFamily: "'Inter', sans-serif"
+                }
+              }, actionLabel(m.action))
+            )
+          )
+        );
+      }),
+
+      loading && React.createElement('div', {
+        style: { display: 'flex', justifyContent: 'flex-start' }
+      },
+        React.createElement('div', {
+          style: {
+            background: '#f8fafc', border: '1px solid #e2e8f0',
+            borderRadius: '0.6rem 0.6rem 0.6rem 0.15rem',
+            padding: '0.55rem 0.75rem', fontSize: '0.78rem', color: '#94a3b8'
+          }
+        }, 'Thinking…')
+      )
+    ),
+
+    React.createElement('div', {
+      style: {
+        padding: '0.5rem 0.75rem', borderTop: '1px solid #e2e8f0',
+        display: 'flex', gap: '0.4rem', flexShrink: 0, background: '#FFFFFF'
+      }
+    },
+      React.createElement('textarea', {
+        ref: inputRef,
+        value: input,
+        onChange: function(e) { setInput(e.target.value); },
+        onKeyDown: handleKeyDown,
+        placeholder: 'Ask anything…',
+        rows: 1,
+        style: {
+          flex: 1, resize: 'none', border: '1px solid #e2e8f0',
+          borderRadius: '0.4rem', padding: '0.5rem 0.65rem',
+          fontSize: '0.78rem', fontFamily: "'Inter', sans-serif",
+          color: '#1e293b', background: '#f8fafc', outline: 'none',
+          lineHeight: 1.4, maxHeight: '80px', overflowY: 'auto'
+        }
+      }),
+      React.createElement('button', {
+        onClick: sendMessage,
+        disabled: loading || !input.trim(),
+        style: {
+          background: loading || !input.trim() ? '#cbd5e1' : '#0f172a',
+          border: 'none', color: '#f8fafc', borderRadius: '0.4rem',
+          padding: '0.5rem 0.75rem', fontSize: '0.78rem', fontWeight: 600,
+          cursor: loading || !input.trim() ? 'default' : 'pointer',
+          fontFamily: "'Inter', sans-serif", flexShrink: 0
+        }
+      }, '→')
+    )
+  );
+}
+
 function Header({
   user,
   onLogout
