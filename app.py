@@ -1105,6 +1105,65 @@ def init_db():
         pass
 
     # ===================================================================
+    # CENTERS OF INFLUENCE — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS centers_of_influence (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            type TEXT DEFAULT 'broker',
+            markets TEXT,
+            specialty TEXT,
+            notes TEXT,
+            relationship_status TEXT DEFAULT 'prospect',
+            warmth_score INTEGER DEFAULT 1,
+            last_contacted_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(name, type)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS coi_touchpoints (
+            id TEXT PRIMARY KEY,
+            coi_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            outcome TEXT,
+            notes TEXT,
+            occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'centers_of_influence', 'website', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'centers_of_influence', 'linkedin_url', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'centers_of_influence', 'contact_name', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'centers_of_influence', 'contact_email', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'centers_of_influence', 'contact_phone', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'centers_of_influence', 'contact_linkedin', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'coi_touchpoints', 'contact_id', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_contacts', 'coi_id', 'TEXT')
+
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_coi_type ON centers_of_influence(type)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_coi_status ON centers_of_influence(relationship_status)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_coi_contacted ON centers_of_influence(last_contacted_at DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_coi_touchpoints_coi ON coi_touchpoints(coi_id, occurred_at DESC)')
+    except Exception:
+        pass
+
+    # ===================================================================
     # PROSPECTING TASK ENGINE — Tables
     # ===================================================================
 
@@ -2270,6 +2329,7 @@ from api.routes.corridors import corridors_bp
 from api.routes.signal_discovery import signal_discovery_bp
 from api.routes.capital_groups import capital_groups_bp
 from api.routes.prospecting import prospecting_bp
+from api.routes.coi import coi_bp
 
 app.register_blueprint(leads_bp)
 app.register_blueprint(projects_bp)
@@ -2289,6 +2349,7 @@ app.register_blueprint(corridors_bp)
 app.register_blueprint(signal_discovery_bp)
 app.register_blueprint(capital_groups_bp)
 app.register_blueprint(prospecting_bp)
+app.register_blueprint(coi_bp)
 
 # ===================================================================
 # DASHBOARD — Weather endpoint (WeatherAPI.com)

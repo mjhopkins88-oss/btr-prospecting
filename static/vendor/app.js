@@ -1380,6 +1380,8 @@ function App({
     user: user
   }), activeTab === 'capital_groups' && /*#__PURE__*/React.createElement(CapitalGroupsPage, {
     user: user
+  }), activeTab === 'coi' && /*#__PURE__*/React.createElement(CentersOfInfluencePage, {
+    user: user
   }), activeTab === 'linkedinhub' && /*#__PURE__*/React.createElement(LinkedInHub, {
     user: user
   }), activeTab === 'admin' && user && user.is_super_admin && /*#__PURE__*/React.createElement(AdminPage, {
@@ -1788,6 +1790,32 @@ function LinkedInHub({
     }, url)));
   })))))));
 }
+// ===================================================================
+// CENTERS OF INFLUENCE — placeholder (Phase 1)
+// ===================================================================
+
+function CentersOfInfluencePage({ user }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/coi`)
+      .then(r => r.json())
+      .then(d => { setItems(d.centers_of_influence || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  return React.createElement('div', null,
+    React.createElement('h2', {
+      style: { fontFamily: "'Orbitron', sans-serif", fontSize: '1.3rem', fontWeight: 700, color: '#1e293b', margin: '0 0 0.5rem', letterSpacing: '0.04em' }
+    }, 'Centers of Influence'),
+    React.createElement('p', { style: { color: '#64748b', fontSize: '0.85rem', margin: '0 0 1rem' } },
+      loading ? 'Loading...' : `${items.length} relationship${items.length !== 1 ? 's' : ''} tracked`
+    ),
+    React.createElement('p', { style: { color: '#94a3b8', fontSize: '0.8rem' } }, 'COI page wired successfully. Full UI coming next phase.')
+  );
+}
+
 // ===================================================================
 // CAPITAL GROUPS — relationship tracking for repeat capital deployers
 // ===================================================================
@@ -4972,6 +5000,7 @@ const NAV_SECTIONS = [
       { id: 'prospecting', label: 'Dashboard' },
       { id: 'search', label: 'Properties' },
       { id: 'capital_groups', label: 'Capital Groups' },
+      { id: 'coi', label: 'Centers of Influence' },
       { id: 'linkedinhub', label: 'LinkedIn Hub' },
       { id: 'dealboard', label: 'Saved Prospects' }
     ]
