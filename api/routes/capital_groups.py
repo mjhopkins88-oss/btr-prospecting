@@ -101,7 +101,8 @@ def list_capital_groups():
     sql = '''
         SELECT id, name, type, markets, strategy, notes,
                relationship_status, warmth_score,
-               last_contacted_at, created_at, updated_at
+               last_contacted_at, created_at, updated_at,
+               opportunity_stage, opportunity_value, opportunity_notes, opportunity_updated_at
         FROM capital_groups
         WHERE 1=1
     '''
@@ -121,6 +122,8 @@ def list_capital_groups():
         # markets is a JSON array string; fall back to substring match.
         sql += ' AND LOWER(markets) LIKE ?'
         params.append(f'%{market.lower()}%')
+    if request.args.get('has_opportunity'):
+        sql += ' AND opportunity_stage IS NOT NULL'
 
     sql += ' ORDER BY warmth_score DESC, name ASC LIMIT ? OFFSET ?'
     params.extend([limit, offset])
@@ -298,6 +301,16 @@ def update_capital_group(group_id):
     if 'linkedin_url' in data:
         sets.append('linkedin_url = ?')
         params.append(data['linkedin_url'])
+    if 'opportunity_stage' in data:
+        sets.append('opportunity_stage = ?')
+        params.append(data['opportunity_stage'] or None)
+        sets.append('opportunity_updated_at = CURRENT_TIMESTAMP')
+    if 'opportunity_value' in data:
+        sets.append('opportunity_value = ?')
+        params.append(data['opportunity_value'])
+    if 'opportunity_notes' in data:
+        sets.append('opportunity_notes = ?')
+        params.append(data['opportunity_notes'])
 
     if not sets:
         return jsonify({'error': 'no updatable fields provided'}), 400

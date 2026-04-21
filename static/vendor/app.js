@@ -1971,6 +1971,20 @@ function CapitalGroupsPage({ user }) {
     }
   };
 
+  const quickOpportunity = async (id, stage) => {
+    try {
+      await fetch(`${API_BASE}/api/capital-groups/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ opportunity_stage: stage })
+      });
+      loadGroups();
+      if (selectedGroup?.id === id) loadDetail(id);
+    } catch (e) {
+      console.error('Opportunity update failed', e);
+    }
+  };
+
   const saveTouchpoint = async () => {
     if (!selectedGroup) return;
     try {
@@ -2172,7 +2186,19 @@ function CapitalGroupsPage({ user }) {
             typeBadge(g.type), statusBadge(g.relationship_status), warmthBar(g.warmth_score || 1)
           )
         ),
-        React.createElement('div', { style: { display: 'flex', gap: '0.5rem' } },
+        React.createElement('div', { style: { display: 'flex', gap: '0.5rem', alignItems: 'center' } },
+          React.createElement('select', {
+            value: g.opportunity_stage || '',
+            onChange: e => { quickOpportunity(g.id, e.target.value || null); },
+            style: { ...styles.select, fontSize: '0.75rem', padding: '0.35rem 0.5rem', color: g.opportunity_stage ? '#6366f1' : '#94a3b8', borderColor: g.opportunity_stage ? '#a5b4fc' : '#e2e8f0' }
+          },
+            React.createElement('option', { value: '' }, 'No Opportunity'),
+            React.createElement('option', { value: 'in_discussion' }, 'In Discussion'),
+            React.createElement('option', { value: 'quoted' }, 'Quoted'),
+            React.createElement('option', { value: 'won' }, 'Won'),
+            React.createElement('option', { value: 'lost' }, 'Lost'),
+            React.createElement('option', { value: 'nurture' }, 'Nurture')
+          ),
           React.createElement('button', {
             onClick: () => openEdit(g),
             style: { ...styles.btn, borderColor: '#3b82f6', color: '#60a5fa', padding: '0.4rem 0.8rem', fontSize: '0.8rem' }
@@ -2531,7 +2557,10 @@ function CapitalGroupsPage({ user }) {
                   React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.35rem' } },
                     React.createElement('span', { style: { ...styles.companyName, fontSize: '1rem', marginBottom: 0 } }, g.name),
                     typeBadge(g.type),
-                    statusBadge(g.relationship_status)
+                    statusBadge(g.relationship_status),
+                    g.opportunity_stage && React.createElement('span', {
+                      style: { display: 'inline-block', fontSize: '0.7rem', fontWeight: 600, padding: '0.15rem 0.55rem', borderRadius: '9999px', background: 'rgba(99,102,241,0.1)', color: '#6366f1', textTransform: 'uppercase', letterSpacing: '0.04em' }
+                    }, g.opportunity_stage)
                   ),
                   g.markets && g.markets.length > 0 && React.createElement('div', { style: { color: '#64748b', fontSize: '0.8rem', marginBottom: '0.25rem' } },
                     g.markets.join(' \u00b7 ')
@@ -5207,6 +5236,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   const [financeLoading, setFinanceLoading] = useState(true);
   const [focusItems, setFocusItems] = useState([]);
   const [focusLoading, setFocusLoading] = useState(true);
+  const [opportunities, setOpportunities] = useState([]);
   const [financeIdx, setFinanceIdx] = useState(0);
   const [financeHover, setFinanceHover] = useState(false);
 
@@ -5235,6 +5265,11 @@ function CommandCenter({ user, prospects, setActiveTab }) {
       .then(function(d) { if (!cancelled) setFocusItems(Array.isArray(d) ? d : []); })
       .catch(function() {})
       .finally(function() { if (!cancelled) setFocusLoading(false); });
+
+    fetch(API_BASE + '/api/capital-groups?has_opportunity=1&limit=10')
+      .then(function(r) { return r.ok ? r.json() : { capital_groups: [] }; })
+      .then(function(d) { if (!cancelled) setOpportunities(d.capital_groups || []); })
+      .catch(function() {});
 
     fetch(API_BASE + '/api/dashboard/finance')
       .then(function(r) { return r.ok ? r.json() : null; })
@@ -5490,7 +5525,8 @@ function CommandCenter({ user, prospects, setActiveTab }) {
       kpiCard('\u{1F3AF}', 'Total Prospects', total, '#14b8a6', total > 0 ? 'in your database' : null),
       kpiCard('\u{1F525}', 'Hot Leads', hot, '#ef4444', hot > 0 ? hotPct + '% of total' : null),
       kpiCard('\u{1F4CB}', 'Follow-ups Due', dueCount, dueCount > 0 ? '#f59e0b' : '#94a3b8', dueCount > 0 ? 'action needed' : 'all clear'),
-      kpiCard('\u{1F517}', 'LinkedIn', withLinkedIn, '#3b82f6', withLinkedIn > 0 ? liPct + '% coverage' : null)
+      kpiCard('\u{1F517}', 'LinkedIn', withLinkedIn, '#3b82f6', withLinkedIn > 0 ? liPct + '% coverage' : null),
+      kpiCard('\u{1F4BC}', 'Opportunities', opportunities.length, opportunities.length > 0 ? '#6366f1' : '#94a3b8', opportunities.length > 0 ? 'active deals' : 'none yet')
     ),
 
     total > 0 ? React.createElement('div', {
@@ -5669,6 +5705,34 @@ function CommandCenter({ user, prospects, setActiveTab }) {
                   onClick: function() { setActiveTab('capital_groups'); }
                 }, '+' + (dueCount - 5) + ' more') : null
               )
+      )
+    ),
+
+    opportunities.length > 0 && React.createElement('div', { style: { ...sectionCard, marginBottom: '1rem' } },
+      React.createElement('div', { style: panelHeader },
+        React.createElement('h3', { style: panelTitle }, 'Active Opportunities (' + opportunities.length + ')'),
+        React.createElement('button', {
+          style: { ...styles.actionBtn, fontSize: '0.7rem' },
+          onClick: function() { setActiveTab('capital_groups'); }
+        }, 'View all →')
+      ),
+      React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.4rem' } },
+        opportunities.slice(0, 5).map(function(opp) {
+          var stageLabels = { in_discussion: 'In Discussion', quoted: 'Quoted', won: 'Won', lost: 'Lost', nurture: 'Nurture' };
+          var stageColors = { in_discussion: '#f59e0b', quoted: '#3b82f6', won: '#10b981', lost: '#ef4444', nurture: '#8b5cf6' };
+          var _goOpp = function() {
+            try { sessionStorage.setItem('capital_group_deeplink', opp.id); } catch(_) {}
+            setActiveTab('capital_groups');
+          };
+          return React.createElement('div', {
+            key: opp.id,
+            style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.6rem', padding: '0.55rem 0.8rem', background: '#F7F9FC', border: '1px solid #e2e8f0', borderRadius: '0.5rem', cursor: 'pointer' },
+            onClick: _goOpp
+          },
+            React.createElement('span', { style: { fontSize: '0.82rem', color: '#1e293b', fontWeight: 600 } }, opp.name),
+            React.createElement('span', { style: { fontSize: '0.7rem', fontWeight: 600, padding: '0.1rem 0.45rem', borderRadius: '9999px', background: (stageColors[opp.opportunity_stage] || '#6366f1') + '18', color: stageColors[opp.opportunity_stage] || '#6366f1' } }, stageLabels[opp.opportunity_stage] || opp.opportunity_stage)
+          );
+        })
       )
     ),
 
@@ -15136,6 +15200,13 @@ function PipelinePage({
   const [activityTarget, setActivityTarget] = useState(null);
   const [workspaceUsers, setWorkspaceUsers] = useState([]);
   const [panelLead, setPanelLead] = useState(null);
+  const [oppGroups, setOppGroups] = useState([]);
+  useEffect(() => {
+    fetch(`${API_BASE}/api/capital-groups?has_opportunity=1&limit=50`)
+      .then(r => r.ok ? r.json() : { capital_groups: [] })
+      .then(d => setOppGroups(d.capital_groups || []))
+      .catch(() => {});
+  }, []);
   useEffect(() => {
     loadLeads();
     if (user?.role === 'admin') {
@@ -15190,7 +15261,30 @@ function PipelinePage({
     fontFamily: 'Inter,sans-serif',
     fontWeight: 500
   });
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  var _oppStageLabels = { in_discussion: 'In Discussion', quoted: 'Quoted', won: 'Won', lost: 'Lost', nurture: 'Nurture' };
+  var _oppStageColors = { in_discussion: '#f59e0b', quoted: '#3b82f6', won: '#10b981', lost: '#ef4444', nurture: '#8b5cf6' };
+  return /*#__PURE__*/React.createElement("div", null,
+    oppGroups.length > 0 && React.createElement('div', { style: { marginBottom: '1.5rem', padding: '1rem', background: '#FFFFFF', border: '1px solid #e2e8f0', borderRadius: '0.75rem' } },
+      React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' } },
+        React.createElement('h3', { style: { fontFamily: "'Orbitron', sans-serif", fontSize: '0.85rem', fontWeight: 700, color: '#1e293b', margin: 0, letterSpacing: '0.04em' } }, 'PROSPECTING OPPORTUNITIES'),
+        React.createElement('span', { style: { fontSize: '0.72rem', color: '#6366f1', fontWeight: 600 } }, oppGroups.length + ' active')
+      ),
+      React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.4rem' } },
+        oppGroups.map(function(og) {
+          return React.createElement('div', { key: og.id, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0.75rem', background: '#F7F9FC', borderRadius: '0.5rem', border: '1px solid #f1f5f9' } },
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } },
+              React.createElement('span', { style: { fontSize: '0.82rem', color: '#1e293b', fontWeight: 600 } }, og.name),
+              og.strategy && React.createElement('span', { style: { fontSize: '0.7rem', color: '#94a3b8' } }, og.strategy)
+            ),
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } },
+              og.opportunity_value && React.createElement('span', { style: { fontSize: '0.72rem', color: '#64748b', fontFamily: "'JetBrains Mono', monospace" } }, og.opportunity_value),
+              React.createElement('span', { style: { fontSize: '0.68rem', fontWeight: 600, padding: '0.1rem 0.4rem', borderRadius: '9999px', background: (_oppStageColors[og.opportunity_stage] || '#6366f1') + '18', color: _oppStageColors[og.opportunity_stage] || '#6366f1' } }, _oppStageLabels[og.opportunity_stage] || og.opportunity_stage)
+            )
+          );
+        })
+      )
+    ),
+    /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: '0.5rem',
