@@ -1833,6 +1833,7 @@ function CapitalGroupsPage({ user }) {
   const [showTpForm, setShowTpForm] = useState(false);
   const [toast, setToast] = useState(null);
   const [nextActions, setNextActions] = useState(null);
+  const [highlightedId, setHighlightedId] = useState(null);
   const [editingTp, setEditingTp] = useState(null);
   const [tpFollowup, setTpFollowup] = useState('');
 
@@ -1859,6 +1860,15 @@ function CapitalGroupsPage({ user }) {
   const [cfNotes, setCfNotes] = useState('');
   const [editingContactId, setEditingContactId] = useState(null);
   const [editingContactNotes, setEditingContactNotes] = useState('');
+
+  const _reward = function(msg, targetId) {
+    setToast(msg);
+    setTimeout(function() { setToast(null); }, 2200);
+    if (targetId) {
+      setHighlightedId(targetId);
+      setTimeout(function() { setHighlightedId(null); }, 900);
+    }
+  };
 
   const typeLabels = { developer: 'Developer', capital_partner: 'Capital Partner', operator: 'Operator', broker: 'Broker' };
   const statusLabels = { prospect: 'Prospect', warm: 'Warm', engaged: 'Engaged', partner: 'Partner', dormant: 'Dormant', cold: 'Cold' };
@@ -1966,10 +1976,12 @@ function CapitalGroupsPage({ user }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ relationship_status: newStatus })
       });
+      var label = statusLabels[newStatus] || newStatus;
+      _reward('Moved to ' + label, id);
       loadGroups();
       if (selectedGroup?.id === id) loadDetail(id);
     } catch (e) {
-      console.error('Status update failed', e);
+      _reward('Status update failed');
     }
   };
 
@@ -1980,8 +1992,8 @@ function CapitalGroupsPage({ user }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ opportunity_stage: stage })
       });
-      setToast(stage ? 'Stage: ' + stage.replace('_', ' ') : 'Opportunity cleared');
-      setTimeout(function() { setToast(null); }, 2500);
+      var stageNames = { in_discussion: 'In Discussion', quoted: 'Quoted', won: 'Won', lost: 'Lost', nurture: 'Nurture' };
+      _reward(stage ? 'Stage: ' + (stageNames[stage] || stage) : 'Opportunity cleared', id);
       if (stage) {
         try {
           var _sess = JSON.parse(localStorage.getItem('btr_session_stats') || '{}');
@@ -1993,7 +2005,7 @@ function CapitalGroupsPage({ user }) {
       loadGroups();
       if (selectedGroup?.id === id) loadDetail(id);
     } catch (e) {
-      console.error('Opportunity update failed', e);
+      _reward('Opportunity update failed');
     }
   };
 
@@ -2027,8 +2039,7 @@ function CapitalGroupsPage({ user }) {
       }
       setShowTpForm(false); setEditingTp(null);
       setTpType('call'); setTpOutcome(''); setTpNotes(''); setTpContactId(''); setTpDate(new Date().toISOString().slice(0, 10)); setTpFollowup('');
-      setToast(editingTp ? 'Touchpoint updated' : 'Touchpoint logged');
-      setTimeout(function() { setToast(null); }, 2500);
+      _reward(editingTp ? 'Touchpoint updated' : 'Touchpoint logged +1', selectedGroup?.id);
       if (!editingTp && selectedGroup) {
         var _suggestions = [];
         if (!selectedGroup.opportunity_stage) _suggestions.push({ label: 'Set opportunity stage', action: 'opportunity' });
@@ -2581,7 +2592,7 @@ function CapitalGroupsPage({ user }) {
         : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.75rem' } },
             groups.map(g => React.createElement('div', {
               key: g.id,
-              style: { ...styles.card, borderRadius: '0.5rem', padding: '0.7rem 1rem', cursor: 'pointer', transition: 'border-color 0.15s' },
+              style: { ...styles.card, borderRadius: '0.5rem', padding: '0.7rem 1rem', cursor: 'pointer', transition: 'border-color 0.15s, box-shadow 0.3s', animation: highlightedId === g.id ? 'btrPulse 0.8s ease-out' : 'none' },
               onClick: () => loadDetail(g.id)
             },
               React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
@@ -2629,13 +2640,18 @@ function CapitalGroupsPage({ user }) {
     toast && React.createElement('div', {
       style: {
         position: 'fixed', bottom: '1.5rem', right: '1.5rem', zIndex: 9999,
-        background: '#0f172a', color: '#f8fafc', padding: '0.6rem 1.1rem',
+        background: toast.includes('failed') ? '#7f1d1d' : '#0f172a', color: '#f8fafc',
+        padding: '0.6rem 1.1rem',
         borderRadius: '0.5rem', fontSize: '0.8rem', fontWeight: 500,
         boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
         animation: 'fadeInUp 0.2s ease-out',
-        fontFamily: "'Inter', sans-serif"
+        fontFamily: "'Inter', sans-serif",
+        display: 'flex', alignItems: 'center', gap: '0.5rem'
       }
-    }, toast),
+    },
+      !toast.includes('failed') && React.createElement('span', { style: { color: '#34d399', fontSize: '0.9rem' } }, '✓'),
+      toast
+    ),
     nextActions && React.createElement('div', {
       style: {
         position: 'fixed', bottom: '3.5rem', right: '1.5rem', zIndex: 9998,
@@ -3231,6 +3247,8 @@ function ProspectingContactsTab({ user }) {
   const [dragId, setDragId] = useState(null);
   const [dragOver, setDragOver] = useState(null);
   const [assignId, setAssignId] = useState(null);
+  const [contactToast, setContactToast] = useState(null);
+  const [favAnimId, setFavAnimId] = useState(null);
 
   const emptyForm = {
     first_name: '', last_name: '', title: '', group_id: '',
@@ -3305,6 +3323,10 @@ function ProspectingContactsTab({ user }) {
       .then(r => r.json())
       .then(d => {
         setRows(prev => prev.map(r => r.id === cid ? { ...r, is_favorite: d.is_favorite } : r));
+        setContactToast(d.is_favorite ? 'Added to favorites' : 'Removed from favorites');
+        setTimeout(function() { setContactToast(null); }, 2000);
+        setFavAnimId(cid);
+        setTimeout(function() { setFavAnimId(null); }, 800);
       })
       .catch(() => {});
   };
@@ -3661,7 +3683,7 @@ function ProspectingContactsTab({ user }) {
                     },
                       React.createElement('span', {
                         onClick: function(e) { e.stopPropagation(); e.preventDefault(); toggleFavorite(c.id); },
-                        style: { cursor: 'pointer', fontSize: '0.72rem', opacity: c.is_favorite ? 1 : 0.3, transition: 'opacity 0.15s' }
+                        style: { cursor: 'pointer', fontSize: '0.72rem', opacity: c.is_favorite ? 1 : 0.3, transition: 'opacity 0.15s, transform 0.3s', transform: favAnimId === c.id ? 'scale(1.6)' : 'scale(1)' }
                       }, c.is_favorite ? '★' : '☆'),
                       React.createElement('span', {
                         style: { fontSize: '0.78rem', fontWeight: 600, color: '#1e293b', lineHeight: 1.3 }
@@ -3803,7 +3825,7 @@ function ProspectingContactsTab({ user }) {
               },
                 React.createElement('span', {
                   onClick: function(e) { e.stopPropagation(); toggleFavorite(c.id); },
-                  style: { cursor: 'pointer', fontSize: '0.82rem', opacity: c.is_favorite ? 1 : 0.3, transition: 'opacity 0.15s', textAlign: 'center' }
+                  style: { cursor: 'pointer', fontSize: '0.82rem', opacity: c.is_favorite ? 1 : 0.3, transition: 'opacity 0.15s, transform 0.3s', transform: favAnimId === c.id ? 'scale(1.5)' : 'scale(1)', textAlign: 'center' }
                 }, c.is_favorite ? '\u2605' : '\u2606'),
                 React.createElement('span', {
                   style: { fontSize: '0.86rem', fontWeight: 600, color: '#1e293b' }
@@ -3828,7 +3850,17 @@ function ProspectingContactsTab({ user }) {
                   ssBtn(c)
                 )
               ))
-        )
+        ),
+    contactToast && React.createElement('div', {
+      style: {
+        position: 'fixed', bottom: '1.5rem', right: '1.5rem', zIndex: 9999,
+        background: '#0f172a', color: '#f8fafc', padding: '0.6rem 1.1rem',
+        borderRadius: '0.5rem', fontSize: '0.8rem', fontWeight: 500,
+        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        animation: 'fadeInUp 0.2s ease-out',
+        fontFamily: "'Inter', sans-serif"
+      }
+    }, contactToast)
   );
 }
 
@@ -15326,7 +15358,9 @@ function ActivityModal({
 // ======= PIPELINE PAGE =======
 if (typeof document !== 'undefined' && !document.getElementById('btr-toast-anim')) {
   var _ta = document.createElement('style'); _ta.id = 'btr-toast-anim';
-  _ta.textContent = '@keyframes fadeInUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}';
+  _ta.textContent = '@keyframes fadeInUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}' +
+    '@keyframes btrPulse{0%{box-shadow:0 0 0 0 rgba(16,185,129,0.4)}70%{box-shadow:0 0 0 8px rgba(16,185,129,0)}100%{box-shadow:0 0 0 0 rgba(16,185,129,0)}}' +
+    '@keyframes btrGlow{0%{background-color:rgba(16,185,129,0.12)}100%{background-color:transparent}}';
   document.head.appendChild(_ta);
 }
 if (typeof document !== 'undefined' && !document.getElementById('pipeline-panel-anim')) {
@@ -15912,6 +15946,7 @@ function FollowUpsPage({
   const [loading, setLoading] = useState(true);
   const [touchpointTarget, setTouchpointTarget] = useState(null);
   const [activityTarget, setActivityTarget] = useState(null);
+  const [fuToast, setFuToast] = useState(null);
   useEffect(() => {
     loadDueLeads();
   }, []);
@@ -15937,9 +15972,18 @@ function FollowUpsPage({
           [field]: value
         })
       });
+      if (field === 'status' && value === 'contacted') {
+        setFuToast('Follow-up completed');
+        setTimeout(function() { setFuToast(null); }, 2200);
+      } else if (field === 'stage') {
+        setFuToast('Moved to ' + (value || 'updated'));
+        setTimeout(function() { setFuToast(null); }, 2200);
+      }
       loadDueLeads();
     } catch (e) {
       console.error('Lead update error:', e);
+      setFuToast('Update failed');
+      setTimeout(function() { setFuToast(null); }, 2200);
     }
   };
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(SectionHeader, {
@@ -16066,7 +16110,15 @@ function FollowUpsPage({
     companyName: activityTarget.company_name,
     onClose: () => setActivityTarget(null),
     user: user
-  }));
+  }), fuToast && React.createElement('div', {
+    style: {
+      position: 'fixed', bottom: '1.5rem', right: '1.5rem', zIndex: 9999,
+      background: fuToast.includes('failed') ? '#7f1d1d' : '#0f172a', color: '#f8fafc',
+      padding: '0.6rem 1.1rem', borderRadius: '0.5rem', fontSize: '0.8rem', fontWeight: 500,
+      boxShadow: '0 4px 12px rgba(0,0,0,0.15)', animation: 'fadeInUp 0.2s ease-out',
+      fontFamily: "'Inter', sans-serif", display: 'flex', alignItems: 'center', gap: '0.5rem'
+    }
+  }, !fuToast.includes('failed') && React.createElement('span', { style: { color: '#34d399', fontSize: '0.9rem' } }, '✓'), fuToast));
 }
 
 // Discovery styles
