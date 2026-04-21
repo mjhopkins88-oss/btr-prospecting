@@ -3249,6 +3249,9 @@ function ProspectingContactsTab({ user }) {
   const [assignId, setAssignId] = useState(null);
   const [contactToast, setContactToast] = useState(null);
   const [favAnimId, setFavAnimId] = useState(null);
+  const [movedContactId, setMovedContactId] = useState(null);
+  const [highlightedCol, setHighlightedCol] = useState(null);
+  const [exitingCardId, setExitingCardId] = useState(null);
 
   const emptyForm = {
     first_name: '', last_name: '', title: '', group_id: '',
@@ -3602,27 +3605,42 @@ function ProspectingContactsTab({ user }) {
                 if (!cid) return;
                 var card = rows.find(function(r) { return String(r.id) === cid; });
                 if (!card || (card.relationship_stage || 'cold') === col.key) { setDragId(null); return; }
-                setRows(function(prev) { return prev.map(function(r) {
-                  return String(r.id) === cid ? Object.assign({}, r, { relationship_stage: col.key }) : r;
-                }); });
+                var contactName = [card.first_name, card.last_name].filter(Boolean).join(' ') || 'Contact';
+                setExitingCardId(cid);
                 setDragId(null);
                 fetch(API_BASE + '/api/prospecting/contacts/' + cid, {
                   method: 'PATCH',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ relationship_stage: col.key })
                 }).then(function(r) {
-                  if (!r.ok) setRefreshKey(function(k) { return k + 1; });
+                  if (!r.ok) throw new Error('failed');
+                  setExitingCardId(null);
+                  setRows(function(prev) { return prev.map(function(r) {
+                    return String(r.id) === cid ? Object.assign({}, r, { relationship_stage: col.key }) : r;
+                  }); });
+                  setMovedContactId(cid);
+                  setHighlightedCol(col.key);
+                  setContactToast('Moved ' + contactName + ' to ' + col.label);
+                  setTimeout(function() { setContactToast(null); }, 2400);
+                  setTimeout(function() { setMovedContactId(null); }, 1200);
+                  setTimeout(function() { setHighlightedCol(null); }, 900);
+                }).catch(function() {
+                  setExitingCardId(null);
+                  setContactToast('Could not update stage');
+                  setTimeout(function() { setContactToast(null); }, 2400);
+                  setRefreshKey(function(k) { return k + 1; });
                 });
               },
               style: {
                 flex: '1 0 180px', maxWidth: '240px', minWidth: '180px',
-                background: isOver ? 'rgba(20,184,166,0.06)' : '#FFFFFF',
-                border: isOver ? '1px solid ' + col.accent : '1px solid rgba(226,232,240,0.4)',
+                background: isOver ? 'rgba(20,184,166,0.06)' : highlightedCol === col.key ? col.accent + '10' : '#FFFFFF',
+                border: isOver ? '1px solid ' + col.accent : highlightedCol === col.key ? '1px solid ' + col.accent : '1px solid rgba(226,232,240,0.4)',
                 borderTop: '2px solid ' + col.accent,
                 borderRadius: '0.75rem',
                 display: 'flex', flexDirection: 'column',
                 overflow: 'hidden',
-                transition: 'background 0.15s, border-color 0.15s'
+                transition: 'background 0.3s, border-color 0.3s, box-shadow 0.3s',
+                boxShadow: highlightedCol === col.key ? '0 0 12px ' + col.accent + '30' : 'none'
               }
             },
               React.createElement('div', {
@@ -3640,8 +3658,12 @@ function ProspectingContactsTab({ user }) {
                 }, col.label),
                 React.createElement('span', {
                   style: {
-                    fontSize: '0.66rem', fontWeight: 600, color: '#94a3b8',
-                    fontFamily: "'JetBrains Mono', monospace"
+                    fontSize: '0.66rem', fontWeight: 600,
+                    color: highlightedCol === col.key ? col.accent : '#94a3b8',
+                    fontFamily: "'JetBrains Mono', monospace",
+                    transition: 'color 0.3s, transform 0.3s',
+                    transform: highlightedCol === col.key ? 'scale(1.3)' : 'scale(1)',
+                    display: 'inline-block'
                   }
                 }, String(colRows.length))
               ),
@@ -3657,6 +3679,8 @@ function ProspectingContactsTab({ user }) {
                   var name = [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Unnamed';
                   var lastTouch = c.last_touch_at ? c.last_touch_at.slice(0, 10) : '—';
                   var isDragging = dragId === String(c.id);
+                  var isExiting = exitingCardId === String(c.id);
+                  var justMoved = movedContactId === String(c.id);
                   return React.createElement('div', {
                     key: c.id,
                     draggable: true,
@@ -3667,15 +3691,16 @@ function ProspectingContactsTab({ user }) {
                     },
                     onDragEnd: function() { setDragId(null); setDragOver(null); },
                     style: {
-                      background: '#FFFFFF',
-                      border: '1px solid rgba(226,232,240,0.5)',
+                      background: justMoved ? 'rgba(16,185,129,0.04)' : '#FFFFFF',
+                      border: justMoved ? '1px solid rgba(16,185,129,0.4)' : '1px solid rgba(226,232,240,0.5)',
                       borderRadius: '0.5rem',
                       padding: '0.55rem 0.6rem',
                       cursor: 'grab',
-                      opacity: isDragging ? 0.5 : 1,
-                      transform: isDragging ? 'scale(1.03)' : 'none',
-                      boxShadow: isDragging ? '0 4px 12px rgba(0,0,0,0.1)' : 'none',
-                      transition: 'opacity 0.15s, transform 0.15s, box-shadow 0.15s'
+                      opacity: isExiting ? 0.3 : isDragging ? 0.5 : 1,
+                      transform: isExiting ? 'scale(0.95) translateY(-4px)' : isDragging ? 'scale(1.03)' : justMoved ? 'scale(1)' : 'none',
+                      boxShadow: isDragging ? '0 4px 12px rgba(0,0,0,0.1)' : justMoved ? '0 0 8px rgba(16,185,129,0.25)' : 'none',
+                      transition: 'opacity 0.2s, transform 0.25s, box-shadow 0.3s, background 0.3s, border-color 0.3s',
+                      animation: justMoved ? 'fadeInUp 0.28s ease-out' : 'none'
                     }
                   },
                     React.createElement('div', {
@@ -3854,13 +3879,18 @@ function ProspectingContactsTab({ user }) {
     contactToast && React.createElement('div', {
       style: {
         position: 'fixed', bottom: '1.5rem', right: '1.5rem', zIndex: 9999,
-        background: '#0f172a', color: '#f8fafc', padding: '0.6rem 1.1rem',
+        background: contactToast.includes('Could not') ? '#7f1d1d' : '#0f172a',
+        color: '#f8fafc', padding: '0.6rem 1.1rem',
         borderRadius: '0.5rem', fontSize: '0.8rem', fontWeight: 500,
         boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
         animation: 'fadeInUp 0.2s ease-out',
-        fontFamily: "'Inter', sans-serif"
+        fontFamily: "'Inter', sans-serif",
+        display: 'flex', alignItems: 'center', gap: '0.5rem'
       }
-    }, contactToast)
+    },
+      !contactToast.includes('Could not') && React.createElement('span', { style: { color: '#34d399', fontSize: '0.9rem' } }, '✓'),
+      contactToast
+    )
   );
 }
 
