@@ -1832,6 +1832,7 @@ function CapitalGroupsPage({ user }) {
   const [editingGroup, setEditingGroup] = useState(null);
   const [showTpForm, setShowTpForm] = useState(false);
   const [toast, setToast] = useState(null);
+  const [nextActions, setNextActions] = useState(null);
   const [editingTp, setEditingTp] = useState(null);
   const [tpFollowup, setTpFollowup] = useState('');
 
@@ -1981,6 +1982,14 @@ function CapitalGroupsPage({ user }) {
       });
       setToast(stage ? 'Stage: ' + stage.replace('_', ' ') : 'Opportunity cleared');
       setTimeout(function() { setToast(null); }, 2500);
+      if (stage) {
+        try {
+          var _sess = JSON.parse(localStorage.getItem('btr_session_stats') || '{}');
+          _sess.opportunitiesCreated = (_sess.opportunitiesCreated || 0) + 1;
+          if (!_sess.startTime) _sess.startTime = new Date().toISOString();
+          localStorage.setItem('btr_session_stats', JSON.stringify(_sess));
+        } catch(_) {}
+      }
       loadGroups();
       if (selectedGroup?.id === id) loadDetail(id);
     } catch (e) {
@@ -2020,8 +2029,25 @@ function CapitalGroupsPage({ user }) {
       setTpType('call'); setTpOutcome(''); setTpNotes(''); setTpContactId(''); setTpDate(new Date().toISOString().slice(0, 10)); setTpFollowup('');
       setToast(editingTp ? 'Touchpoint updated' : 'Touchpoint logged');
       setTimeout(function() { setToast(null); }, 2500);
+      if (!editingTp && selectedGroup) {
+        var _suggestions = [];
+        if (!selectedGroup.opportunity_stage) _suggestions.push({ label: 'Set opportunity stage', action: 'opportunity' });
+        if ((selectedGroup.contacts || []).length === 0) _suggestions.push({ label: 'Add a contact', action: 'contact' });
+        if (!tpFollowup) _suggestions.push({ label: 'Schedule follow-up', action: 'followup' });
+        if (_suggestions.length > 0) {
+          setNextActions(_suggestions.slice(0, 3));
+          setTimeout(function() { setNextActions(null); }, 8000);
+        }
+      }
       loadDetail(selectedGroup.id);
       loadGroups();
+      try {
+        var _session = JSON.parse(localStorage.getItem('btr_session_stats') || '{}');
+        _session.touchpoints = (_session.touchpoints || 0) + 1;
+        _session.lastAction = new Date().toISOString();
+        if (!_session.startTime) _session.startTime = new Date().toISOString();
+        localStorage.setItem('btr_session_stats', JSON.stringify(_session));
+      } catch(_) {}
     } catch (e) {
       alert('Error saving touchpoint');
     }
@@ -2609,7 +2635,40 @@ function CapitalGroupsPage({ user }) {
         animation: 'fadeInUp 0.2s ease-out',
         fontFamily: "'Inter', sans-serif"
       }
-    }, toast)
+    }, toast),
+    nextActions && React.createElement('div', {
+      style: {
+        position: 'fixed', bottom: '3.5rem', right: '1.5rem', zIndex: 9998,
+        background: '#FFFFFF', border: '1px solid #e2e8f0', padding: '0.7rem 0.9rem',
+        borderRadius: '0.6rem', boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+        animation: 'fadeInUp 0.25s ease-out', fontFamily: "'Inter', sans-serif",
+        maxWidth: '240px'
+      }
+    },
+      React.createElement('div', { style: { fontSize: '0.65rem', color: '#94a3b8', fontWeight: 600, marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.04em' } }, 'Next action?'),
+      React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
+        nextActions.map(function(na) {
+          return React.createElement('button', {
+            key: na.action,
+            onClick: function() {
+              setNextActions(null);
+              if (na.action === 'contact') setShowContactForm(true);
+              if (na.action === 'followup') setShowTpForm(true);
+            },
+            style: {
+              display: 'block', width: '100%', textAlign: 'left',
+              background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '0.35rem',
+              padding: '0.35rem 0.6rem', fontSize: '0.75rem', color: '#334155',
+              fontWeight: 500, cursor: 'pointer', fontFamily: "'Inter', sans-serif"
+            }
+          }, na.label);
+        })
+      ),
+      React.createElement('button', {
+        onClick: function() { setNextActions(null); },
+        style: { marginTop: '0.35rem', background: 'none', border: 'none', fontSize: '0.65rem', color: '#94a3b8', cursor: 'pointer', padding: 0 }
+      }, 'Dismiss')
+    )
   );
 }
 
@@ -5258,7 +5317,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   const [focusItems, setFocusItems] = useState([]);
   const [focusLoading, setFocusLoading] = useState(true);
   const [opportunities, setOpportunities] = useState([]);
-  const [engagement, setEngagement] = useState({ streak: 0, today_touchpoints: 0, going_cold: [], stalled_opportunities: [] });
+  const [engagement, setEngagement] = useState({ streak: 0, today_touchpoints: 0, going_cold: [], stalled_opportunities: [], open_loops: 0, momentum: 'low', week_touchpoints: 0 });
   const [financeIdx, setFinanceIdx] = useState(0);
   const [financeHover, setFinanceHover] = useState(false);
 
@@ -5446,7 +5505,15 @@ function CommandCenter({ user, prospects, setActiveTab }) {
           React.createElement('span', { style: { color: '#94a3b8', fontSize: '0.75rem' } }, fmtDay),
           engagement.streak > 0 && React.createElement('span', {
             style: { fontSize: '0.68rem', fontWeight: 600, color: '#f59e0b', background: 'rgba(245,158,11,0.08)', padding: '0.1rem 0.4rem', borderRadius: '0.3rem' }
-          }, engagement.streak + 'd streak')
+          }, engagement.streak + 'd streak'),
+          React.createElement('span', {
+            style: {
+              fontSize: '0.68rem', fontWeight: 600,
+              color: engagement.momentum === 'high' ? '#10b981' : engagement.momentum === 'building' ? '#3b82f6' : '#94a3b8',
+              background: engagement.momentum === 'high' ? 'rgba(16,185,129,0.08)' : engagement.momentum === 'building' ? 'rgba(59,130,246,0.08)' : 'rgba(148,163,184,0.08)',
+              padding: '0.1rem 0.4rem', borderRadius: '0.3rem'
+            }
+          }, (engagement.momentum === 'high' ? '↑' : engagement.momentum === 'building' ? '↗' : '→') + ' ' + engagement.momentum)
         )
       ),
 
@@ -5554,7 +5621,8 @@ function CommandCenter({ user, prospects, setActiveTab }) {
       kpiCard('\u{1F525}', 'Hot Leads', hot, '#ef4444', hot > 0 ? hotPct + '% of total' : null),
       kpiCard('\u{1F4CB}', 'Follow-ups Due', dueCount, dueCount > 0 ? '#f59e0b' : '#94a3b8', dueCount > 0 ? 'action needed' : 'all clear'),
       kpiCard('\u{1F517}', 'LinkedIn', withLinkedIn, '#3b82f6', withLinkedIn > 0 ? liPct + '% coverage' : null),
-      kpiCard('\u{1F4BC}', 'Opportunities', opportunities.length, opportunities.length > 0 ? '#6366f1' : '#94a3b8', opportunities.length > 0 ? 'active deals' : 'none yet')
+      kpiCard('\u{1F4BC}', 'Opportunities', opportunities.length, opportunities.length > 0 ? '#6366f1' : '#94a3b8', opportunities.length > 0 ? 'active deals' : 'none yet'),
+      kpiCard('\u{1F4AC}', 'Open Loops', engagement.open_loops, engagement.open_loops > 0 ? '#8b5cf6' : '#94a3b8', engagement.open_loops > 0 ? 'awaiting reply' : 'all followed up')
     ),
 
     null,
@@ -5800,7 +5868,40 @@ function CommandCenter({ user, prospects, setActiveTab }) {
           );
         })
       )
-    )
+    ),
+
+    (function() {
+      try {
+        var sess = JSON.parse(localStorage.getItem('btr_session_stats') || '{}');
+        if (!sess.touchpoints && !sess.searchesRun && !sess.opportunitiesCreated) return null;
+        var startTime = sess.startTime ? new Date(sess.startTime) : null;
+        var duration = startTime ? Math.round((Date.now() - startTime.getTime()) / 60000) : 0;
+        return React.createElement('div', { style: { ...sectionCard, marginTop: '1rem', background: '#f8fafc' } },
+          React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' } },
+            React.createElement('h3', { style: { ...panelTitle, fontSize: '0.75rem' } }, 'This Session'),
+            duration > 0 && React.createElement('span', { style: { fontSize: '0.65rem', color: '#94a3b8' } }, duration + ' min')
+          ),
+          React.createElement('div', { style: { display: 'flex', gap: '1rem', flexWrap: 'wrap' } },
+            sess.touchpoints ? React.createElement('div', { style: { fontSize: '0.75rem', color: '#334155' } },
+              React.createElement('span', { style: { fontWeight: 700, color: '#10b981' } }, String(sess.touchpoints)),
+              ' touchpoint' + (sess.touchpoints > 1 ? 's' : '')
+            ) : null,
+            sess.searchesRun ? React.createElement('div', { style: { fontSize: '0.75rem', color: '#334155' } },
+              React.createElement('span', { style: { fontWeight: 700, color: '#3b82f6' } }, String(sess.searchesRun)),
+              ' search' + (sess.searchesRun > 1 ? 'es' : '')
+            ) : null,
+            sess.opportunitiesCreated ? React.createElement('div', { style: { fontSize: '0.75rem', color: '#334155' } },
+              React.createElement('span', { style: { fontWeight: 700, color: '#6366f1' } }, String(sess.opportunitiesCreated)),
+              ' opportunit' + (sess.opportunitiesCreated > 1 ? 'ies' : 'y')
+            ) : null
+          ),
+          React.createElement('button', {
+            onClick: function() { localStorage.removeItem('btr_session_stats'); window.location.reload(); },
+            style: { marginTop: '0.5rem', background: 'none', border: 'none', fontSize: '0.65rem', color: '#94a3b8', cursor: 'pointer', padding: 0, textDecoration: 'underline' }
+          }, 'Reset session')
+        );
+      } catch(_) { return null; }
+    })()
   );
 }
 
