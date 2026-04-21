@@ -5382,6 +5382,9 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   const [engagement, setEngagement] = useState({ streak: 0, today_touchpoints: 0, going_cold: [], stalled_opportunities: [], open_loops: 0, momentum: 'low', week_touchpoints: 0 });
   const [financeIdx, setFinanceIdx] = useState(0);
   const [financeHover, setFinanceHover] = useState(false);
+  const [queueToast, setQueueToast] = useState(null);
+  const [showOneMore, setShowOneMore] = useState(false);
+  const [sinceLast, setSinceLast] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -5418,6 +5421,29 @@ function CommandCenter({ user, prospects, setActiveTab }) {
       .then(function(r) { return r.ok ? r.json() : {}; })
       .then(function(d) { if (!cancelled) setEngagement(d); })
       .catch(function() {});
+
+    try {
+      var _lastVisit = localStorage.getItem('btr_last_visit');
+      var _now = new Date().toISOString();
+      if (_lastVisit) {
+        var hoursAgo = (Date.now() - new Date(_lastVisit).getTime()) / 36e5;
+        if (hoursAgo >= 2) {
+          fetch(API_BASE + '/api/prospecting/engagement')
+            .then(function(r) { return r.ok ? r.json() : {}; })
+            .then(function(d) {
+              if (cancelled) return;
+              setSinceLast({
+                hoursAgo: Math.round(hoursAgo),
+                followupsDue: d.going_cold ? d.going_cold.length : 0,
+                openLoops: d.open_loops || 0,
+                stalled: d.stalled_opportunities ? d.stalled_opportunities.length : 0
+              });
+            })
+            .catch(function() {});
+        }
+      }
+      localStorage.setItem('btr_last_visit', _now);
+    } catch(_) {}
 
     fetch(API_BASE + '/api/dashboard/finance')
       .then(function(r) { return r.ok ? r.json() : null; })
@@ -5481,6 +5507,33 @@ function CommandCenter({ user, prospects, setActiveTab }) {
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(payload) { if (payload) _launchSignalStack(payload); })
       .catch(function() {});
+  };
+
+  var _completeQueueItem = function(taskId, itemTitle) {
+    fetch(API_BASE + '/api/prospecting/tasks/' + taskId + '/complete', { method: 'POST' })
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) {
+        if (!d) { setQueueToast('Could not mark complete'); setTimeout(function() { setQueueToast(null); }, 2200); return; }
+        setFocusItems(function(prev) { return prev.filter(function(it) { return it.id !== taskId; }); });
+        setQueueToast('Done: ' + (itemTitle || 'Task complete'));
+        setTimeout(function() { setQueueToast(null); }, 2200);
+        setShowOneMore(true);
+        setTimeout(function() { setShowOneMore(false); }, 10000);
+      })
+      .catch(function() {
+        setQueueToast('Could not mark complete');
+        setTimeout(function() { setQueueToast(null); }, 2200);
+      });
+  };
+
+  var _whyContext = function(item) {
+    var parts = [];
+    if (item.reason) parts.push(item.reason);
+    if (item.signal_title) parts.push(item.signal_title);
+    if (item.days_since_touch != null) parts.push(item.days_since_touch + ' days since last touch');
+    if (item.nba_type === 'overdue_followup') parts.push('follow-up overdue');
+    if (item.nba_type === 'stale_checkin') parts.push('relationship cooling');
+    return parts.slice(0, 2);
   };
 
   var role = user?.role || 'producer';
@@ -5687,7 +5740,107 @@ function CommandCenter({ user, prospects, setActiveTab }) {
       kpiCard('\u{1F4AC}', 'Open Loops', engagement.open_loops, engagement.open_loops > 0 ? '#8b5cf6' : '#94a3b8', engagement.open_loops > 0 ? 'awaiting reply' : 'all followed up')
     ),
 
-    null,
+    sinceLast && (sinceLast.followupsDue > 0 || sinceLast.openLoops > 0 || sinceLast.stalled > 0) && React.createElement('div', {
+      style: { ...sectionCard, marginBottom: '1rem', background: '#f8fafc', borderLeft: '3px solid #6366f1' }
+    },
+      React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+        React.createElement('div', null,
+          React.createElement('div', { style: { fontSize: '0.65rem', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '0.25rem' } }, 'Since last session'),
+          React.createElement('div', { style: { fontSize: '0.82rem', color: '#334155' } },
+            [
+              sinceLast.followupsDue > 0 ? sinceLast.followupsDue + ' going cold' : null,
+              sinceLast.openLoops > 0 ? sinceLast.openLoops + ' open loops' : null,
+              sinceLast.stalled > 0 ? sinceLast.stalled + ' stalled' : null
+            ].filter(Boolean).join(' · ')
+          )
+        ),
+        React.createElement('span', { style: { fontSize: '0.65rem', color: '#94a3b8' } }, sinceLast.hoursAgo + 'h ago')
+      )
+    ),
+
+    focusItems.length > 0 && (function() {
+      var item = focusItems[0];
+      var meta = _focusMeta(item);
+      var why = _whyContext(item);
+      var name = [item.first_name, item.last_name].filter(Boolean).join(' ');
+      var target = name || item.group_name || item.title;
+      return React.createElement('div', {
+        style: {
+          ...sectionCard, marginBottom: '1rem',
+          background: 'linear-gradient(135deg, #FFFFFF 0%, ' + meta.bg + ' 100%)',
+          borderLeft: '3px solid ' + meta.color
+        }
+      },
+        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' } },
+          React.createElement('div', { style: { flex: 1, minWidth: 0 } },
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.3rem' } },
+              React.createElement('span', { style: { fontSize: '0.62rem', fontWeight: 700, color: meta.color, letterSpacing: '0.06em', textTransform: 'uppercase' } }, 'Next Best Action'),
+              React.createElement('span', { style: { fontSize: '0.6rem', color: '#94a3b8' } }, focusItems.length > 1 ? '· ' + (focusItems.length - 1) + ' more queued' : '')
+            ),
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' } },
+              React.createElement('span', { style: { fontSize: '1.05rem' } }, meta.icon),
+              React.createElement('h3', {
+                style: { fontFamily: "'Orbitron', sans-serif", fontSize: '0.95rem', fontWeight: 700, margin: 0, color: '#1e293b', letterSpacing: '0.02em' }
+              }, item.title || ('Follow up with ' + (target || 'contact')))
+            ),
+            why.length > 0 && React.createElement('div', { style: { fontSize: '0.72rem', color: '#64748b', marginTop: '0.2rem' } },
+              React.createElement('span', { style: { fontWeight: 600, color: '#94a3b8' } }, 'Why: '),
+              why.join(' · ')
+            )
+          ),
+          React.createElement('div', { style: { display: 'flex', gap: '0.4rem', flexShrink: 0 } },
+            item.capital_group_id && React.createElement('button', {
+              onClick: function() {
+                try { sessionStorage.setItem('capital_group_deeplink', item.capital_group_id); } catch(_) {}
+                setActiveTab('capital_groups');
+              },
+              style: {
+                background: '#FFFFFF', border: '1px solid #e2e8f0', color: '#475569',
+                padding: '0.4rem 0.75rem', borderRadius: '0.4rem', fontSize: '0.72rem',
+                fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter', sans-serif"
+              }
+            }, 'Open'),
+            React.createElement('button', {
+              onClick: function() { _completeQueueItem(item.id, item.title); },
+              style: {
+                background: meta.color, border: '1px solid ' + meta.color, color: '#FFFFFF',
+                padding: '0.4rem 0.85rem', borderRadius: '0.4rem', fontSize: '0.72rem',
+                fontWeight: 700, cursor: 'pointer', fontFamily: "'Inter', sans-serif"
+              }
+            }, 'Done ✓')
+          )
+        ),
+        showOneMore && focusItems.length > 1 && React.createElement('div', {
+          style: { marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px dashed ' + meta.border, animation: 'fadeInUp 0.25s ease-out' }
+        },
+          React.createElement('div', { style: { fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '0.4rem' } }, 'One more?'),
+          React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
+            focusItems.slice(1, 4).map(function(next) {
+              var nm = _focusMeta(next);
+              return React.createElement('button', {
+                key: next.id,
+                onClick: function() {
+                  setShowOneMore(false);
+                  if (next.capital_group_id) {
+                    try { sessionStorage.setItem('capital_group_deeplink', next.capital_group_id); } catch(_) {}
+                    setActiveTab('capital_groups');
+                  }
+                },
+                style: {
+                  textAlign: 'left', display: 'flex', alignItems: 'center', gap: '0.5rem',
+                  background: '#FFFFFF', border: '1px solid ' + nm.border, borderRadius: '0.4rem',
+                  padding: '0.4rem 0.65rem', fontSize: '0.75rem', color: '#334155',
+                  cursor: 'pointer', fontFamily: "'Inter', sans-serif"
+                }
+              },
+                React.createElement('span', { style: { fontSize: '0.8rem' } }, nm.icon),
+                React.createElement('span', null, next.title)
+              );
+            })
+          )
+        )
+      );
+    })(),
 
     React.createElement('div', {
       style: {
@@ -5963,7 +6116,23 @@ function CommandCenter({ user, prospects, setActiveTab }) {
           }, 'Reset session')
         );
       } catch(_) { return null; }
-    })()
+    })(),
+
+    queueToast && React.createElement('div', {
+      style: {
+        position: 'fixed', top: '5rem', right: '1.5rem', zIndex: 9999,
+        background: queueToast.includes('Could not') ? '#7f1d1d' : '#0f172a',
+        color: '#f8fafc', padding: '0.6rem 1.1rem',
+        borderRadius: '0.5rem', fontSize: '0.8rem', fontWeight: 500,
+        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        animation: 'fadeInUp 0.2s ease-out',
+        fontFamily: "'Inter', sans-serif",
+        display: 'flex', alignItems: 'center', gap: '0.5rem'
+      }
+    },
+      !queueToast.includes('Could not') && React.createElement('span', { style: { color: '#34d399', fontSize: '0.9rem' } }, '✓'),
+      queueToast
+    )
   );
 }
 
