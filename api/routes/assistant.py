@@ -9,6 +9,8 @@ import os
 import anthropic
 import json
 
+from services.proactive_suggestions import get_proactive_suggestions
+
 assistant_bp = Blueprint('assistant', __name__, url_prefix='/api/assistant')
 
 SYSTEM_PROMPT = """You are a concise, professional AI assistant embedded inside a commercial real estate prospecting application called BTR Prospecting.
@@ -147,10 +149,16 @@ def chat():
             except (json.JSONDecodeError, IndexError):
                 pass
 
+        try:
+            suggestions = get_proactive_suggestions()
+        except Exception:
+            suggestions = None
+
         return jsonify({
             'role': 'assistant',
             'content': reply,
-            'action': action
+            'action': action,
+            'suggestions': suggestions
         })
     except anthropic.APIError as e:
         return jsonify({
