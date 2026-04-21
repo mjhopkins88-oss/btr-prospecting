@@ -1459,7 +1459,21 @@ function AssistantChat({ user }) {
       });
   };
 
+  var copyDraftToClipboard = function(text) {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(function() {
+        setMessages(function(prev) {
+          return prev.concat([{ role: 'assistant', content: 'Draft copied to clipboard.' }]);
+        });
+      });
+    }
+  };
+
   var executeAction = function(action) {
+    if (action.action === 'draft_message' || action.action === 'draft_outreach') {
+      copyDraftToClipboard((action.subject ? 'Subject: ' + action.subject + '\n\n' : '') + (action.body || ''));
+      return;
+    }
     fetch(API_BASE + '/api/assistant/execute-action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1488,9 +1502,46 @@ function AssistantChat({ user }) {
   var actionLabel = function(action) {
     if (!action) return null;
     if (action.action === 'log_touchpoint') return 'Log touchpoint';
-    if (action.action === 'draft_outreach') return 'Use this draft';
+    if (action.action === 'draft_message' || action.action === 'draft_outreach') return 'Copy draft';
     if (action.action === 'update_stage') return 'Update stage';
     return 'Execute';
+  };
+
+  var renderDraftCard = function(action) {
+    if (!action || (action.action !== 'draft_message' && action.action !== 'draft_outreach')) return null;
+    var channel = action.channel || 'email';
+    var channelLabel = channel === 'email' ? 'Email' : channel === 'linkedin' ? 'LinkedIn' : channel === 'call' ? 'Call Script' : channel;
+    return React.createElement('div', {
+      style: {
+        marginTop: '0.5rem', background: '#f0fdf4', border: '1px solid #bbf7d0',
+        borderRadius: '0.5rem', padding: '0.6rem 0.7rem', fontSize: '0.74rem'
+      }
+    },
+      React.createElement('div', {
+        style: { display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.35rem', color: '#15803d', fontWeight: 600, fontSize: '0.7rem' }
+      },
+        React.createElement('span', null, channelLabel + ' Draft'),
+        action.target_name ? React.createElement('span', { style: { fontWeight: 400, color: '#4b5563' } }, ' — ' + action.target_name) : null
+      ),
+      action.subject ? React.createElement('div', {
+        style: { fontWeight: 600, color: '#1e293b', marginBottom: '0.3rem', fontSize: '0.74rem' }
+      }, action.subject) : null,
+      React.createElement('div', {
+        style: { color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.5, fontSize: '0.72rem', maxHeight: '160px', overflowY: 'auto' }
+      }, action.body || ''),
+      action.context_note ? React.createElement('div', {
+        style: { marginTop: '0.3rem', fontSize: '0.65rem', color: '#6b7280', fontStyle: 'italic' }
+      }, action.context_note) : null,
+      React.createElement('button', {
+        onClick: function() { executeAction(action); },
+        style: {
+          marginTop: '0.4rem', background: '#15803d', border: 'none', color: '#FFFFFF',
+          padding: '0.3rem 0.65rem', borderRadius: '0.35rem',
+          fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer',
+          fontFamily: "'Inter', sans-serif"
+        }
+      }, 'Copy to clipboard')
+    );
   };
 
   if (!open) {
@@ -1600,17 +1651,19 @@ function AssistantChat({ user }) {
             }
           },
             m.content,
-            m.action && React.createElement('div', { style: { marginTop: '0.5rem' } },
-              React.createElement('button', {
-                onClick: function() { executeAction(m.action); },
-                style: {
-                  background: '#14b8a6', border: 'none', color: '#FFFFFF',
-                  padding: '0.3rem 0.65rem', borderRadius: '0.35rem',
-                  fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer',
-                  fontFamily: "'Inter', sans-serif"
-                }
-              }, actionLabel(m.action))
-            )
+            m.action && (m.action.action === 'draft_message' || m.action.action === 'draft_outreach')
+              ? renderDraftCard(m.action)
+              : m.action && React.createElement('div', { style: { marginTop: '0.5rem' } },
+                  React.createElement('button', {
+                    onClick: function() { executeAction(m.action); },
+                    style: {
+                      background: '#14b8a6', border: 'none', color: '#FFFFFF',
+                      padding: '0.3rem 0.65rem', borderRadius: '0.35rem',
+                      fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer',
+                      fontFamily: "'Inter', sans-serif"
+                    }
+                  }, actionLabel(m.action))
+                )
           )
         );
       }),

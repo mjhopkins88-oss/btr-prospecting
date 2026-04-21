@@ -22,10 +22,20 @@ You help users with:
 - Logging touchpoints from natural language (you'll return structured JSON for this)
 - Updating follow-up intervals or relationship stages
 
-When the user asks to log a touchpoint, draft outreach, or update a record, respond with a JSON action block in this format:
+When the user asks to log a touchpoint or update a record, respond with a JSON action block:
 {"action": "log_touchpoint", "group_id": "...", "type": "email", "notes": "..."}
-{"action": "draft_outreach", "to": "...", "subject": "...", "body": "..."}
 {"action": "update_stage", "group_id": "...", "new_stage": "..."}
+
+When the user asks you to draft an email, LinkedIn message, or call script, respond with a draft_message action block containing the ACTUAL full message text:
+{"action": "draft_message", "channel": "email", "target_name": "John Smith", "subject": "Following up on our conversation", "body": "Hi John,\\n\\nI wanted to follow up...", "context_note": "Based on your warm relationship and last touch 5 days ago"}
+
+CRITICAL DRAFT RULES:
+- The "body" field MUST contain the complete, ready-to-send message text. Never put commentary or explanations in the body.
+- Write the draft AS the user, in first person, professional tone.
+- Use real names, companies, and context from the DATA CONTEXT below.
+- For emails: include subject and full body. For LinkedIn: include body only. For call scripts: include talking points as the body.
+- Do NOT explain what the draft does or why you wrote it a certain way. Just provide the draft in the action block.
+- Any brief context (1 sentence max) goes in "context_note", not in the body.
 
 Always embed the JSON block inside a <action>...</action> tag so the frontend can parse it.
 
@@ -209,4 +219,17 @@ def execute_action():
         )
         return jsonify({'success': True, 'message': f'Stage updated to {new_stage}'})
 
-    return jsonify({'success': True, 'message': 'Action noted (no handler yet)', 'action_type': action_type})
+    if action_type in ('draft_message', 'draft_outreach'):
+        return jsonify({
+            'success': True,
+            'message': 'Draft ready',
+            'draft': {
+                'channel': action.get('channel', 'email'),
+                'target_name': action.get('target_name', action.get('to', '')),
+                'subject': action.get('subject', ''),
+                'body': action.get('body', ''),
+                'context_note': action.get('context_note', '')
+            }
+        })
+
+    return jsonify({'error': f'Unknown action type: {action_type}'}), 400
