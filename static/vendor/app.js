@@ -2171,17 +2171,20 @@ function CapitalGroupsPage({ user }) {
     )
   );
 
-  // ---- DETAIL VIEW ----
-  if (selectedGroup) {
+  // ---- DETAIL VIEW (drawer) ----
+  var renderDetailDrawer = function() {
+    if (!selectedGroup) return null;
     const g = selectedGroup;
-    return React.createElement('div', null,
-      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' } },
+    return React.createElement('div', {
+      style: { position: 'fixed', top: 0, right: 0, bottom: 0, width: '580px', maxWidth: '90vw', background: '#FFFFFF', borderLeft: '1px solid #e2e8f0', boxShadow: '-4px 0 20px rgba(0,0,0,0.08)', zIndex: 900, overflow: 'auto', padding: '1.25rem' }
+    },
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' } },
         React.createElement('button', {
           onClick: () => setSelectedGroup(null),
-          style: { ...styles.btn, padding: '0.4rem 0.8rem', fontSize: '0.8rem' }
-        }, '\u2190 Back'),
+          style: { ...styles.btn, padding: '0.25rem 0.55rem', fontSize: '0.75rem', borderRadius: '0.35rem' }
+        }, '\u2715'),
         React.createElement('div', { style: { flex: 1 } },
-          React.createElement('h2', { style: { ...styles.sectionTitle, fontSize: '1.3rem', margin: 0 } }, g.name),
+          React.createElement('h2', { style: { fontSize: '1.1rem', fontWeight: 700, color: '#0f172a', margin: 0 } }, g.name),
           React.createElement('div', { style: { display: 'flex', gap: '0.5rem', marginTop: '0.35rem', alignItems: 'center' } },
             typeBadge(g.type), statusBadge(g.relationship_status), warmthBar(g.warmth_score || 1)
           )
@@ -2212,10 +2215,9 @@ function CapitalGroupsPage({ user }) {
 
       detailLoading
         ? React.createElement('div', { style: { textAlign: 'center', padding: '2rem', color: '#64748b' } }, 'Loading...')
-        : React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' } },
-          React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '1.25rem' } },
-            React.createElement('div', { style: { ...styles.card, padding: '1.25rem' } },
-              React.createElement('h3', { style: { color: '#1e293b', fontSize: '0.9rem', fontWeight: 600, margin: '0 0 0.75rem', fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.04em' } }, 'DETAILS'),
+        : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '1rem' } },
+          React.createElement('div', { style: { ...styles.card, padding: '1rem' } },
+              React.createElement('h3', { style: { color: '#64748b', fontSize: '0.72rem', fontWeight: 700, margin: '0 0 0.6rem', textTransform: 'uppercase', letterSpacing: '0.06em' } }, 'DETAILS'),
               g.markets && g.markets.length > 0 && React.createElement('div', { style: { marginBottom: '0.5rem' } },
                 React.createElement('span', { style: { color: '#64748b', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 600 } }, 'Markets'),
                 React.createElement('div', { style: { display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.25rem' } },
@@ -2239,7 +2241,7 @@ function CapitalGroupsPage({ user }) {
             ),
 
             React.createElement('div', { style: { ...styles.card, padding: '1.25rem' } },
-              React.createElement('h3', { style: { color: '#1e293b', fontSize: '0.9rem', fontWeight: 600, margin: '0 0 0.75rem', fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.04em' } }, 'LINKED PROPERTIES'),
+              React.createElement('h3', { style: { color: '#64748b', fontSize: '0.72rem', fontWeight: 700, margin: '0 0 0.6rem', textTransform: 'uppercase', letterSpacing: '0.06em' } }, 'LINKED PROPERTIES'),
               (!g.properties || g.properties.length === 0)
                 ? React.createElement('p', { style: { color: '#94a3b8', fontSize: '0.85rem' } }, 'No properties linked yet')
                 : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.5rem' } },
@@ -2264,7 +2266,7 @@ function CapitalGroupsPage({ user }) {
 
             React.createElement('div', { style: { ...styles.card, padding: '1.25rem' } },
               React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' } },
-                React.createElement('h3', { style: { color: '#1e293b', fontSize: '0.9rem', fontWeight: 600, margin: 0, fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.04em' } }, 'CONTACTS'),
+                React.createElement('h3', { style: { color: '#64748b', fontSize: '0.72rem', fontWeight: 700, margin: 0, textTransform: 'uppercase', letterSpacing: '0.06em' } }, 'CONTACTS'),
                 React.createElement('button', {
                   onClick: () => { setShowContactForm(true); setCfFirst(''); setCfLast(''); setCfTitle(''); setCfEmail(''); setCfPhone(''); setCfNotes(''); },
                   style: { ...styles.btnPrimary, padding: '0.35rem 0.75rem', fontSize: '0.75rem' }
@@ -2367,12 +2369,11 @@ function CapitalGroupsPage({ user }) {
                       );
                     })
                   )
-            )
-          ),
+            ),
 
-          React.createElement('div', { style: { ...styles.card, padding: '1.25rem' } },
+          React.createElement('div', { style: { ...styles.card, padding: '1rem' } },
             React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' } },
-              React.createElement('h3', { style: { color: '#1e293b', fontSize: '0.9rem', fontWeight: 600, margin: 0, fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.04em' } }, 'ACTIVITY TIMELINE'),
+              React.createElement('h3', { style: { color: '#1e293b', fontSize: '0.85rem', fontWeight: 600, margin: 0, letterSpacing: '0.03em' } }, 'ACTIVITY'),
               React.createElement('button', {
                 onClick: () => { setShowTpForm(true); setEditingTp(null); setTpType('call'); setTpOutcome(''); setTpNotes(''); setTpContactId(''); setTpDate(new Date().toISOString().slice(0, 10)); setTpFollowup(''); },
                 style: { ...styles.btnPrimary, padding: '0.35rem 0.75rem', fontSize: '0.75rem' }
@@ -2500,7 +2501,7 @@ function CapitalGroupsPage({ user }) {
 
       renderFormModal()
     );
-  }
+  };
 
   // ---- LIST VIEW ----
   return React.createElement('div', null,
@@ -2549,7 +2550,7 @@ function CapitalGroupsPage({ user }) {
         : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.75rem' } },
             groups.map(g => React.createElement('div', {
               key: g.id,
-              style: { ...styles.card, borderRadius: '0.75rem', padding: '1rem 1.25rem', cursor: 'pointer', transition: 'border-color 0.2s' },
+              style: { ...styles.card, borderRadius: '0.5rem', padding: '0.7rem 1rem', cursor: 'pointer', transition: 'border-color 0.15s' },
               onClick: () => loadDetail(g.id)
             },
               React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
@@ -2588,7 +2589,12 @@ function CapitalGroupsPage({ user }) {
             ))
           ),
 
-    renderFormModal()
+    renderFormModal(),
+    selectedGroup && React.createElement('div', {
+      style: { position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.15)', zIndex: 899 },
+      onClick: function() { setSelectedGroup(null); }
+    }),
+    renderDetailDrawer()
   );
 }
 
@@ -5348,10 +5354,10 @@ function CommandCenter({ user, prospects, setActiveTab }) {
 
   var sectionCard = {
     background: '#FFFFFF',
-    border: '1px solid #e2e8f0',
-    borderRadius: '0.85rem',
-    padding: '1.25rem',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03)'
+    border: '1px solid #f1f5f9',
+    borderRadius: '0.6rem',
+    padding: '1rem',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
   };
   var panelHeader = {
     display: 'flex',
@@ -5374,22 +5380,21 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   var kpiCard = function(icon, label, value, accent, sub) {
     return React.createElement('div', {
       style: {
-        background: '#FFFFFF', border: '1px solid #e2e8f0', borderRadius: '0.85rem',
-        padding: '1.15rem 1.25rem', boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-        display: 'flex', flexDirection: 'column', gap: '0.15rem', position: 'relative', overflow: 'hidden'
+        background: '#FFFFFF', border: '1px solid #f1f5f9', borderRadius: '0.6rem',
+        padding: '0.75rem 1rem', display: 'flex', alignItems: 'center', gap: '0.75rem',
+        position: 'relative', overflow: 'hidden'
       }
     },
-      React.createElement('div', { style: { position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: accent, opacity: 0.5, borderRadius: '0.85rem 0.85rem 0 0' } }),
-      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.15rem' } },
-        React.createElement('span', { style: { fontSize: '0.85rem', opacity: 0.7 } }, icon),
-        React.createElement('span', {
-          style: { fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }
-        }, label)
-      ),
+      React.createElement('div', { style: { position: 'absolute', top: 0, left: 0, bottom: 0, width: '3px', background: accent, opacity: 0.6 } }),
       React.createElement('div', {
-        style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '1.75rem', fontWeight: 700, color: '#1e293b', lineHeight: 1.2 }
+        style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '1.4rem', fontWeight: 700, color: '#1e293b', lineHeight: 1 }
       }, String(value)),
-      sub ? React.createElement('div', { style: { fontSize: '0.72rem', color: '#94a3b8', marginTop: '0.1rem' } }, sub) : null
+      React.createElement('div', null,
+        React.createElement('div', {
+          style: { fontSize: '0.7rem', color: '#64748b', fontWeight: 600, lineHeight: 1.3 }
+        }, label),
+        sub ? React.createElement('div', { style: { fontSize: '0.65rem', color: '#94a3b8' } }, sub) : null
+      )
     );
   };
 
@@ -5405,21 +5410,20 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   return React.createElement('div', null,
     React.createElement('div', {
       style: {
-        display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-        gap: '1rem', marginBottom: '1.75rem', flexWrap: 'wrap'
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        gap: '1rem', marginBottom: '1rem', flexWrap: 'wrap'
       }
     },
       React.createElement('div', null,
         React.createElement('h2', {
           style: {
-            fontFamily: "'Orbitron', sans-serif", fontSize: '1.8rem', fontWeight: 900, margin: 0,
-            background: 'linear-gradient(135deg, #14b8a6 0%, #3b82f6 100%)',
-            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', letterSpacing: '0.03em'
+            fontFamily: "'Orbitron', sans-serif", fontSize: '1.2rem', fontWeight: 700, margin: 0,
+            color: '#1e293b', letterSpacing: '0.03em'
           }
-        }, 'Command Center'),
+        }, greeting + (firstName ? ', ' + firstName : '')),
         React.createElement('p', {
-          style: { color: '#64748b', margin: '0.35rem 0 0', fontSize: '0.9rem' }
-        }, greeting + (firstName ? ', ' + firstName : '') + '. Here\u2019s where your day starts.')
+          style: { color: '#94a3b8', margin: '0.15rem 0 0', fontSize: '0.75rem' }
+        }, fmtDay)
       ),
 
       React.createElement('div', {
@@ -5529,35 +5533,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
       kpiCard('\u{1F4BC}', 'Opportunities', opportunities.length, opportunities.length > 0 ? '#6366f1' : '#94a3b8', opportunities.length > 0 ? 'active deals' : 'none yet')
     ),
 
-    total > 0 ? React.createElement('div', {
-      style: {
-        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-        gap: '0.85rem', marginBottom: '1.5rem'
-      }
-    },
-      React.createElement('div', { style: { ...sectionCard, padding: '0.85rem 1rem' } },
-        React.createElement('div', { style: { fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '0.4rem' } }, 'Hot Lead Rate'),
-        miniBar(hotPct, '#ef4444'),
-        React.createElement('div', { style: { fontSize: '0.72rem', color: '#64748b', marginTop: '0.25rem', fontFamily: "'JetBrains Mono', monospace" } }, hotPct + '%')
-      ),
-      React.createElement('div', { style: { ...sectionCard, padding: '0.85rem 1rem' } },
-        React.createElement('div', { style: { fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '0.4rem' } }, 'LinkedIn Coverage'),
-        miniBar(liPct, '#3b82f6'),
-        React.createElement('div', { style: { fontSize: '0.72rem', color: '#64748b', marginTop: '0.25rem', fontFamily: "'JetBrains Mono', monospace" } }, liPct + '%')
-      ),
-      React.createElement('div', { style: { ...sectionCard, padding: '0.85rem 1rem' } },
-        React.createElement('div', { style: { fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '0.4rem' } }, 'Follow-up Rate'),
-        miniBar(total > 0 ? Math.round((dueCount / total) * 100) : 0, '#f59e0b'),
-        React.createElement('div', { style: { fontSize: '0.72rem', color: '#64748b', marginTop: '0.25rem', fontFamily: "'JetBrains Mono', monospace" } },
-          (total > 0 ? Math.round((dueCount / total) * 100) : 0) + '%')
-      ),
-      React.createElement('div', { style: { ...sectionCard, padding: '0.85rem 1rem' } },
-        React.createElement('div', { style: { fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '0.4rem' } }, 'Database Health'),
-        miniBar(Math.min(100, Math.round(((hot + withLinkedIn) / Math.max(1, total * 2)) * 100)), '#14b8a6'),
-        React.createElement('div', { style: { fontSize: '0.72rem', color: '#64748b', marginTop: '0.25rem', fontFamily: "'JetBrains Mono', monospace" } },
-          Math.min(100, Math.round(((hot + withLinkedIn) / Math.max(1, total * 2)) * 100)) + '%')
-      )
-    ) : null,
+    null,
 
     React.createElement('div', {
       style: {
@@ -5601,7 +5577,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
                     key: item.id,
                     style: {
                       display: 'flex', alignItems: 'center', gap: '0.65rem',
-                      padding: '0.65rem 0.85rem', background: m.bg,
+                      padding: '0.5rem 0.7rem', background: m.bg,
                       border: '1px solid ' + m.border, borderRadius: '0.5rem',
                       transition: 'box-shadow 0.15s',
                       cursor: item.capital_group_id ? 'pointer' : 'default'
@@ -16417,11 +16393,11 @@ const styles = {
   card: {
     background: '#FFFFFF',
     border: '1px solid rgba(226,232,240,0.5)',
-    borderRadius: '1rem',
-    padding: '1rem',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)',
+    borderRadius: '0.75rem',
+    padding: '0.85rem',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
     display: 'grid',
-    gap: '0.75rem'
+    gap: '0.6rem'
   },
   cardHeader: {
     display: 'flex',
@@ -16430,11 +16406,11 @@ const styles = {
     gap: '1rem'
   },
   companyName: {
-    fontFamily: "'Orbitron', sans-serif",
-    fontSize: '1.15rem',
+    fontFamily: "'Inter', sans-serif",
+    fontSize: '1rem',
     fontWeight: 700,
     color: '#0f172a',
-    marginBottom: '0.2rem'
+    marginBottom: '0.15rem'
   },
   location: {
     color: '#64748b',
