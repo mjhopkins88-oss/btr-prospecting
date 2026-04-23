@@ -6678,7 +6678,22 @@ function CommandCenter({ user, prospects, setActiveTab }) {
             React.createElement('span', { style: { fontSize: '0.78rem' } }, a.icon),
             a.label
           );
-        })
+        }),
+        React.createElement('button', {
+          key: 'brief',
+          className: 'action-btn',
+          style: {
+            display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+            padding: '0.4rem 0.75rem', fontSize: '0.72rem', fontWeight: 500,
+            color: '#475569', background: '#FFFFFF', border: '1px solid #eef2f7',
+            borderRadius: '0.4rem', cursor: 'pointer', transition: 'all 0.15s',
+            fontFamily: "'Inter', sans-serif"
+          },
+          onClick: function() { window.open(API_BASE + '/api/prospecting/brief', '_blank'); }
+        },
+          React.createElement('span', { style: { fontSize: '0.78rem' } }, '\u{1F4CB}'),
+          'Download Brief'
+        )
       )
     ),
 
