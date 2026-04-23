@@ -5869,10 +5869,10 @@ function CommandCenter({ user, prospects, setActiveTab }) {
 
   var sectionCard = {
     background: '#FFFFFF',
-    border: '1px solid #f1f5f9',
-    borderRadius: '0.6rem',
-    padding: '1rem',
-    boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+    border: '1px solid #eef2f7',
+    borderRadius: '0.75rem',
+    padding: '1.1rem',
+    boxShadow: '0 1px 4px rgba(0,0,0,0.04), 0 0 0 1px rgba(0,0,0,0.01)'
   };
   var panelHeader = {
     display: 'flex',
@@ -5882,8 +5882,8 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   };
   var panelTitle = {
     fontFamily: "'Orbitron', sans-serif",
-    fontSize: '0.85rem',
-    color: '#1e293b',
+    fontSize: '0.82rem',
+    color: '#0f172a',
     margin: 0,
     letterSpacing: '0.03em',
     fontWeight: 700
@@ -5895,20 +5895,21 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   var kpiCard = function(icon, label, value, accent, sub) {
     return React.createElement('div', {
       style: {
-        background: '#FFFFFF', border: '1px solid #f1f5f9', borderRadius: '0.6rem',
+        background: '#FFFFFF', border: '1px solid #eef2f7', borderRadius: '0.75rem',
         padding: '0.75rem 1rem', display: 'flex', alignItems: 'center', gap: '0.75rem',
-        position: 'relative', overflow: 'hidden'
+        position: 'relative', overflow: 'hidden',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
       }
     },
-      React.createElement('div', { style: { position: 'absolute', top: 0, left: 0, bottom: 0, width: '3px', background: accent, opacity: 0.6 } }),
+      React.createElement('div', { style: { position: 'absolute', top: 0, left: 0, bottom: 0, width: '3px', background: accent, opacity: 0.7 } }),
       React.createElement('div', {
-        style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '1.4rem', fontWeight: 700, color: '#1e293b', lineHeight: 1 }
+        style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '1.4rem', fontWeight: 700, color: '#0f172a', lineHeight: 1 }
       }, String(value)),
       React.createElement('div', null,
         React.createElement('div', {
-          style: { fontSize: '0.7rem', color: '#64748b', fontWeight: 600, lineHeight: 1.3 }
+          style: { fontSize: '0.7rem', color: '#475569', fontWeight: 600, lineHeight: 1.3 }
         }, label),
-        sub ? React.createElement('div', { style: { fontSize: '0.65rem', color: '#94a3b8' } }, sub) : null
+        sub ? React.createElement('div', { style: { fontSize: '0.62rem', color: '#a1afc4' } }, sub) : null
       )
     );
   };
@@ -5954,18 +5955,22 @@ function CommandCenter({ user, prospects, setActiveTab }) {
 
     React.createElement('div', {
       style: {
-        display: 'flex', alignItems: 'center', gap: '1rem',
-        background: '#FFFFFF', border: '1px solid #e2e8f0', borderRadius: '0.6rem',
-        padding: '0.55rem 1rem', marginBottom: '0.75rem', boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+        display: 'flex', alignItems: 'center', gap: '0.85rem',
+        background: '#FFFFFF', border: '1px solid #eef2f7', borderRadius: '0.6rem',
+        padding: '0.5rem 1rem', marginBottom: '0.75rem',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
         flexWrap: 'wrap'
       }
     },
-      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: '220px', flex: 1 } },
-        React.createElement('span', { style: { fontSize: '0.7rem', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap' } },
-          engagement.week_tp_count + ' / ' + engagement.weekly_goal),
+      React.createElement('span', {
+        style: { fontSize: '0.58rem', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.06em', textTransform: 'uppercase', whiteSpace: 'nowrap' }
+      }, 'WEEK'),
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: '200px', flex: 1 } },
+        React.createElement('span', { style: { fontSize: '0.72rem', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap', fontFamily: "'JetBrains Mono', monospace" } },
+          engagement.week_tp_count + '/' + engagement.weekly_goal),
         React.createElement('div', {
           style: {
-            flex: 1, height: '6px', background: '#f1f5f9', borderRadius: '3px', overflow: 'hidden', minWidth: '80px'
+            flex: 1, height: '5px', background: '#f1f5f9', borderRadius: '3px', overflow: 'hidden', minWidth: '60px'
           }
         },
           React.createElement('div', {
@@ -5976,20 +5981,22 @@ function CommandCenter({ user, prospects, setActiveTab }) {
               transition: 'width 0.4s ease'
             }
           })
-        ),
-        React.createElement('span', { style: { fontSize: '0.62rem', color: '#94a3b8', whiteSpace: 'nowrap' } }, engagement.week_pct + '%')
+        )
       ),
       React.createElement('span', {
         style: {
-          fontSize: '0.65rem', fontWeight: 600, whiteSpace: 'nowrap',
-          padding: '0.15rem 0.4rem', borderRadius: '0.25rem',
+          fontSize: '0.63rem', fontWeight: 700, whiteSpace: 'nowrap',
+          padding: '0.15rem 0.45rem', borderRadius: '0.25rem',
           color: engagement.week_pace === 'ahead' ? '#10b981' : engagement.week_pace === 'behind' ? '#ef4444' : '#3b82f6',
           background: engagement.week_pace === 'ahead' ? 'rgba(16,185,129,0.08)' : engagement.week_pace === 'behind' ? 'rgba(239,68,68,0.08)' : 'rgba(59,130,246,0.08)'
         }
-      }, engagement.week_pace === 'ahead' ? 'Ahead of pace' : engagement.week_pace === 'behind' ? 'Behind pace' : 'On track'),
+      }, engagement.week_pace === 'ahead' ? 'Ahead' : engagement.week_pace === 'behind' ? 'Behind' : 'On track'),
       engagement.streak > 0 && React.createElement('span', {
-        style: { fontSize: '0.65rem', fontWeight: 600, color: '#f59e0b', whiteSpace: 'nowrap' }
-      }, engagement.streak + 'd streak')
+        style: { fontSize: '0.63rem', fontWeight: 700, color: '#f59e0b', whiteSpace: 'nowrap', background: 'rgba(245,158,11,0.06)', padding: '0.15rem 0.45rem', borderRadius: '0.25rem' }
+      }, engagement.streak + 'd'),
+      engagement.today_touchpoints > 0 && React.createElement('span', {
+        style: { fontSize: '0.63rem', fontWeight: 700, color: '#10b981', whiteSpace: 'nowrap' }
+      }, engagement.today_touchpoints + ' today')
     ),
 
       React.createElement('div', {
@@ -6128,27 +6135,28 @@ function CommandCenter({ user, prospects, setActiveTab }) {
         style: {
           ...sectionCard, marginBottom: '1rem',
           background: 'linear-gradient(135deg, #FFFFFF 0%, ' + meta.bg + ' 100%)',
-          borderLeft: '3px solid ' + meta.color
+          borderLeft: '3px solid ' + meta.color,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.06), 0 0 0 1px ' + meta.border
         }
       },
         React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' } },
           React.createElement('div', { style: { flex: 1, minWidth: 0 } },
             React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.3rem' } },
-              React.createElement('span', { style: { fontSize: '0.62rem', fontWeight: 700, color: meta.color, letterSpacing: '0.06em', textTransform: 'uppercase' } }, 'Next Best Action'),
-              React.createElement('span', { style: { fontSize: '0.6rem', color: '#94a3b8' } }, focusItems.length > 1 ? '· ' + (focusItems.length - 1) + ' more queued' : '')
+              React.createElement('span', { style: { fontSize: '0.6rem', fontWeight: 700, color: meta.color, letterSpacing: '0.07em', textTransform: 'uppercase' } }, 'Next Best Action'),
+              focusItems.length > 1 && React.createElement('span', { style: { fontSize: '0.58rem', color: '#a1afc4', fontWeight: 500 } }, '1 of ' + focusItems.length)
             ),
-            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' } },
-              React.createElement('span', { style: { fontSize: '1.05rem' } }, meta.icon),
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' } },
+              React.createElement('span', { style: { fontSize: '1.1rem' } }, meta.icon),
               React.createElement('h3', {
-                style: { fontFamily: "'Orbitron', sans-serif", fontSize: '0.95rem', fontWeight: 700, margin: 0, color: '#1e293b', letterSpacing: '0.02em' }
+                style: { fontFamily: "'Orbitron', sans-serif", fontSize: '0.95rem', fontWeight: 700, margin: 0, color: '#0f172a', letterSpacing: '0.02em' }
               }, item.title || ('Follow up with ' + (target || 'contact')))
             ),
-            why.length > 0 && React.createElement('div', { style: { fontSize: '0.72rem', color: '#64748b', marginTop: '0.2rem' } },
-              React.createElement('span', { style: { fontWeight: 600, color: '#94a3b8' } }, 'Why: '),
+            target && React.createElement('div', { style: { fontSize: '0.75rem', color: '#334155', fontWeight: 600, marginBottom: '0.15rem' } }, target),
+            why.length > 0 && React.createElement('div', { style: { fontSize: '0.7rem', color: '#64748b' } },
               why.join(' · ')
             )
           ),
-          React.createElement('div', { style: { display: 'flex', gap: '0.4rem', flexShrink: 0 } },
+          React.createElement('div', { style: { display: 'flex', gap: '0.35rem', flexShrink: 0 } },
             item.capital_group_id && React.createElement('button', {
               onClick: function() {
                 try { sessionStorage.setItem('capital_group_deeplink', item.capital_group_id); } catch(_) {}
@@ -6156,27 +6164,48 @@ function CommandCenter({ user, prospects, setActiveTab }) {
               },
               style: {
                 background: '#FFFFFF', border: '1px solid #e2e8f0', color: '#475569',
-                padding: '0.4rem 0.75rem', borderRadius: '0.4rem', fontSize: '0.72rem',
+                padding: '0.35rem 0.65rem', borderRadius: '0.4rem', fontSize: '0.7rem',
                 fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter', sans-serif"
               }
             }, 'Open'),
             React.createElement('button', {
+              onClick: function() { _draftFromTask(item.id); },
+              style: {
+                background: 'rgba(20,184,166,0.1)', border: '1px solid rgba(20,184,166,0.25)', color: '#0d9488',
+                padding: '0.35rem 0.65rem', borderRadius: '0.4rem', fontSize: '0.7rem',
+                fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter', sans-serif"
+              }
+            }, 'Draft'),
+            React.createElement('button', {
+              onClick: function() {
+                setFocusItems(function(prev) { return prev.filter(function(it) { return it.id !== item.id; }); });
+                setQueueToast('Skipped');
+                setTimeout(function() { setQueueToast(null); }, 1500);
+              },
+              style: {
+                background: '#FFFFFF', border: '1px solid #e2e8f0', color: '#94a3b8',
+                padding: '0.35rem 0.55rem', borderRadius: '0.4rem', fontSize: '0.7rem',
+                fontWeight: 500, cursor: 'pointer', fontFamily: "'Inter', sans-serif"
+              }
+            }, 'Skip'),
+            React.createElement('button', {
               onClick: function() { _completeQueueItem(item.id, item.title); },
               style: {
                 background: meta.color, border: '1px solid ' + meta.color, color: '#FFFFFF',
-                padding: '0.4rem 0.85rem', borderRadius: '0.4rem', fontSize: '0.72rem',
+                padding: '0.35rem 0.85rem', borderRadius: '0.4rem', fontSize: '0.7rem',
                 fontWeight: 700, cursor: 'pointer', fontFamily: "'Inter', sans-serif"
               }
-            }, 'Done ✓')
+            }, 'Done')
           )
         ),
         showOneMore && focusItems.length > 1 && React.createElement('div', {
-          style: { marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px dashed ' + meta.border, animation: 'fadeInUp 0.25s ease-out' }
+          style: { marginTop: '0.65rem', paddingTop: '0.65rem', borderTop: '1px solid ' + meta.border, animation: 'fadeInUp 0.25s ease-out' }
         },
-          React.createElement('div', { style: { fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '0.4rem' } }, 'One more?'),
+          React.createElement('div', { style: { fontSize: '0.6rem', fontWeight: 700, color: meta.color, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '0.35rem' } }, 'Up next'),
           React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
             focusItems.slice(1, 4).map(function(next) {
               var nm = _focusMeta(next);
+              var nextTarget = [next.first_name, next.last_name].filter(Boolean).join(' ') || next.group_name || '';
               return React.createElement('button', {
                 key: next.id,
                 onClick: function() {
@@ -6189,12 +6218,15 @@ function CommandCenter({ user, prospects, setActiveTab }) {
                 style: {
                   textAlign: 'left', display: 'flex', alignItems: 'center', gap: '0.5rem',
                   background: '#FFFFFF', border: '1px solid ' + nm.border, borderRadius: '0.4rem',
-                  padding: '0.4rem 0.65rem', fontSize: '0.75rem', color: '#334155',
+                  padding: '0.4rem 0.65rem', fontSize: '0.73rem', color: '#334155',
                   cursor: 'pointer', fontFamily: "'Inter', sans-serif"
                 }
               },
                 React.createElement('span', { style: { fontSize: '0.8rem' } }, nm.icon),
-                React.createElement('span', null, next.title)
+                React.createElement('div', { style: { flex: 1, minWidth: 0 } },
+                  React.createElement('div', { style: { fontWeight: 600, fontSize: '0.73rem' } }, next.title),
+                  nextTarget && React.createElement('div', { style: { fontSize: '0.62rem', color: '#94a3b8' } }, nextTarget)
+                )
               );
             })
           )
@@ -6230,15 +6262,44 @@ function CommandCenter({ user, prospects, setActiveTab }) {
             )
           : focusItems.length === 0
             ? React.createElement('div', {
-                style: { textAlign: 'center', padding: '1.5rem 0' }
+                style: { textAlign: 'center', padding: '1.25rem 0' }
               },
-                React.createElement('div', { style: { fontSize: '1.5rem', marginBottom: '0.4rem', opacity: 0.3 } }, '\u2705'),
-                React.createElement('div', { style: { fontSize: '0.85rem', fontWeight: 600, color: '#10b981', marginBottom: '0.15rem' } },
-                  engagement.today_touchpoints > 0 ? 'Mission complete' : 'No pending actions'),
-                React.createElement('div', { style: { fontSize: '0.75rem', color: '#94a3b8' } },
-                  engagement.today_touchpoints > 0
-                    ? engagement.today_touchpoints + ' touchpoint' + (engagement.today_touchpoints > 1 ? 's' : '') + ' logged today'
-                    : 'Signal-driven tasks will appear here')
+                engagement.today_touchpoints > 0
+                  ? React.createElement(React.Fragment, null,
+                      React.createElement('div', { style: { fontSize: '0.88rem', fontWeight: 700, color: '#10b981', marginBottom: '0.2rem' } }, 'Mission complete'),
+                      React.createElement('div', { style: { fontSize: '0.72rem', color: '#64748b', marginBottom: '0.6rem' } },
+                        engagement.today_touchpoints + ' touchpoint' + (engagement.today_touchpoints > 1 ? 's' : '') + ' today'),
+                      React.createElement('button', {
+                        onClick: function() { setActiveTab('capital_groups'); },
+                        style: {
+                          background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#15803d',
+                          padding: '0.35rem 0.75rem', borderRadius: '0.4rem', fontSize: '0.7rem',
+                          fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter', sans-serif"
+                        }
+                      }, 'Log another touchpoint')
+                    )
+                  : React.createElement(React.Fragment, null,
+                      React.createElement('div', { style: { fontSize: '0.85rem', fontWeight: 600, color: '#475569', marginBottom: '0.25rem' } }, 'Ready to start'),
+                      React.createElement('div', { style: { fontSize: '0.72rem', color: '#94a3b8', marginBottom: '0.6rem' } }, 'Pick an action below to get going'),
+                      React.createElement('div', { style: { display: 'flex', gap: '0.4rem', justifyContent: 'center' } },
+                        React.createElement('button', {
+                          onClick: function() { setActiveTab('search'); },
+                          style: {
+                            background: '#FFFFFF', border: '1px solid #e2e8f0', color: '#475569',
+                            padding: '0.3rem 0.65rem', borderRadius: '0.35rem', fontSize: '0.68rem',
+                            fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter', sans-serif"
+                          }
+                        }, 'Run a search'),
+                        React.createElement('button', {
+                          onClick: function() { setActiveTab('capital_groups'); },
+                          style: {
+                            background: '#FFFFFF', border: '1px solid #e2e8f0', color: '#475569',
+                            padding: '0.3rem 0.65rem', borderRadius: '0.35rem', fontSize: '0.68rem',
+                            fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter', sans-serif"
+                          }
+                        }, 'Review groups')
+                      )
+                    )
               )
             : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.5rem' } },
                 focusItems.slice(0, 6).map(function(item) {
@@ -6252,44 +6313,41 @@ function CommandCenter({ user, prospects, setActiveTab }) {
                   return React.createElement('div', {
                     key: item.id,
                     style: {
-                      display: 'flex', alignItems: 'center', gap: '0.65rem',
-                      padding: '0.5rem 0.7rem', background: m.bg,
-                      border: '1px solid ' + m.border, borderRadius: '0.5rem',
-                      transition: 'box-shadow 0.15s',
+                      display: 'flex', alignItems: 'center', gap: '0.6rem',
+                      padding: '0.5rem 0.7rem', background: '#FFFFFF',
+                      border: '1px solid #eef2f7', borderLeft: '3px solid ' + m.color,
+                      borderRadius: '0.5rem',
                       cursor: item.capital_group_id ? 'pointer' : 'default'
                     },
                     onClick: _goToGroup
                   },
-                    React.createElement('span', { style: { fontSize: '0.9rem', flexShrink: 0 } }, m.icon),
                     React.createElement('div', { style: { flex: 1, minWidth: 0 } },
                       React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.1rem' } },
                         React.createElement('span', {
-                          style: { fontSize: '0.6rem', fontWeight: 700, color: m.color, textTransform: 'uppercase', letterSpacing: '0.06em' }
+                          style: { fontSize: '0.58rem', fontWeight: 700, color: m.color, textTransform: 'uppercase', letterSpacing: '0.06em' }
                         }, m.label),
                         item.group_name ? React.createElement('span', {
-                          style: { fontSize: '0.6rem', color: '#94a3b8' }
-                        }, '\u00B7 ' + item.group_name) : null
+                          style: { fontSize: '0.58rem', color: '#a1afc4' }
+                        }, '· ' + item.group_name) : null
                       ),
                       React.createElement('div', {
-                        style: { fontSize: '0.82rem', color: '#334155', fontWeight: 500, lineHeight: 1.35 }
+                        style: { fontSize: '0.8rem', color: '#0f172a', fontWeight: 600, lineHeight: 1.35 }
                       }, item.title),
                       (item.reason || item.signal_title) ? React.createElement('div', {
-                        style: { fontSize: '0.68rem', color: '#94a3b8', marginTop: '0.15rem', lineHeight: 1.3 }
+                        style: { fontSize: '0.65rem', color: '#a1afc4', marginTop: '0.1rem', lineHeight: 1.3 }
                       }, item.signal_title || item.reason) : null
                     ),
                     React.createElement('button', {
                       onClick: function(e) { e.stopPropagation(); _draftFromTask(item.id); },
                       style: {
-                        background: 'rgba(20,184,166,0.1)', border: '1px solid rgba(20,184,166,0.25)',
+                        background: 'rgba(20,184,166,0.08)', border: '1px solid rgba(20,184,166,0.2)',
                         color: '#0d9488', padding: '0.2rem 0.5rem', borderRadius: '0.3rem',
                         fontSize: '0.65rem', fontWeight: 600, cursor: 'pointer',
                         fontFamily: "'Inter',sans-serif", whiteSpace: 'nowrap', flexShrink: 0
                       }
-                    }, 'Draft'),
-                    React.createElement('div', {
-                      style: { width: '6px', height: '6px', borderRadius: '50%', background: m.color, flexShrink: 0, boxShadow: '0 0 6px ' + m.color }
-                    })
+                    }, 'Draft')
                   );
+
                 }),
                 focusItems.length > 6 ? React.createElement('div', {
                   style: { textAlign: 'center', fontSize: '0.72rem', color: '#94a3b8', padding: '0.25rem 0', cursor: 'pointer' },
@@ -6315,11 +6373,18 @@ function CommandCenter({ user, prospects, setActiveTab }) {
             )
           : dueLeads.length === 0
             ? React.createElement('div', {
-                style: { textAlign: 'center', padding: '1.5rem 0' }
+                style: { textAlign: 'center', padding: '1.25rem 0' }
               },
-                React.createElement('div', { style: { fontSize: '1.5rem', marginBottom: '0.4rem', opacity: 0.3 } }, '\u2705'),
-                React.createElement('div', { style: { fontSize: '0.85rem', fontWeight: 600, color: '#10b981', marginBottom: '0.15rem' } }, 'All caught up'),
-                React.createElement('div', { style: { fontSize: '0.75rem', color: '#94a3b8' } }, 'No follow-ups overdue right now')
+                React.createElement('div', { style: { fontSize: '0.85rem', fontWeight: 700, color: '#10b981', marginBottom: '0.2rem' } }, 'All caught up'),
+                React.createElement('div', { style: { fontSize: '0.72rem', color: '#94a3b8', marginBottom: '0.5rem' } }, 'No follow-ups overdue'),
+                React.createElement('button', {
+                  onClick: function() { setActiveTab('prospecting'); },
+                  style: {
+                    background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#15803d',
+                    padding: '0.3rem 0.65rem', borderRadius: '0.35rem', fontSize: '0.68rem',
+                    fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter', sans-serif"
+                  }
+                }, 'Do proactive outreach')
               )
             : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.4rem' } },
                 dueLeads.slice(0, 5).map(function(l) {
@@ -6330,25 +6395,24 @@ function CommandCenter({ user, prospects, setActiveTab }) {
                     }
                   };
                   var badge = l.days_inactive != null ? l.days_inactive + 'd ago' : 'never';
+                  var urgentColor = l.days_inactive >= 60 ? '#ef4444' : l.days_inactive >= 30 ? '#f59e0b' : '#3b82f6';
                   return React.createElement('div', {
                     key: l.capital_group_id,
                     style: {
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                      gap: '0.6rem', padding: '0.55rem 0.8rem',
-                      background: '#F7F9FC', border: '1px solid #e2e8f0',
+                      gap: '0.6rem', padding: '0.5rem 0.75rem',
+                      background: '#FFFFFF', border: '1px solid #eef2f7',
+                      borderLeft: '3px solid ' + urgentColor,
                       borderRadius: '0.5rem', fontSize: '0.82rem',
                       cursor: 'pointer', transition: 'background 0.15s'
                     },
                     onClick: _goGroup
                   },
                     React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 } },
-                      React.createElement('div', {
-                        style: { width: '6px', height: '6px', borderRadius: '50%', background: l.days_inactive >= 60 ? '#ef4444' : '#f59e0b', flexShrink: 0 }
-                      }),
-                      React.createElement('span', { style: { color: '#1e293b', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, l.label || l.group_name || '\u2014')
+                      React.createElement('span', { style: { color: '#0f172a', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, l.label || l.group_name || '\u2014')
                     ),
                     React.createElement('span', {
-                      style: { fontSize: '0.7rem', color: '#94a3b8', padding: '0.1rem 0.45rem', background: '#f1f5f9', borderRadius: '0.25rem', flexShrink: 0 }
+                      style: { fontSize: '0.68rem', color: urgentColor, fontWeight: 600, padding: '0.1rem 0.45rem', background: urgentColor + '0a', borderRadius: '0.25rem', flexShrink: 0 }
                     }, badge)
                   );
                 }),
@@ -6378,10 +6442,10 @@ function CommandCenter({ user, prospects, setActiveTab }) {
           };
           return React.createElement('div', {
             key: opp.id,
-            style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.6rem', padding: '0.55rem 0.8rem', background: '#F7F9FC', border: '1px solid #e2e8f0', borderRadius: '0.5rem', cursor: 'pointer' },
+            style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.6rem', padding: '0.5rem 0.75rem', background: '#FFFFFF', border: '1px solid #eef2f7', borderRadius: '0.5rem', cursor: 'pointer' },
             onClick: _goOpp
           },
-            React.createElement('span', { style: { fontSize: '0.82rem', color: '#1e293b', fontWeight: 600 } }, opp.name),
+            React.createElement('span', { style: { fontSize: '0.82rem', color: '#0f172a', fontWeight: 600 } }, opp.name),
             React.createElement('span', { style: { fontSize: '0.7rem', fontWeight: 600, padding: '0.1rem 0.45rem', borderRadius: '9999px', background: (stageColors[opp.opportunity_stage] || '#6366f1') + '18', color: stageColors[opp.opportunity_stage] || '#6366f1' } }, stageLabels[opp.opportunity_stage] || opp.opportunity_stage)
           );
         })
@@ -6422,23 +6486,23 @@ function CommandCenter({ user, prospects, setActiveTab }) {
       )
     ),
 
-    React.createElement('div', { style: sectionCard },
-      React.createElement('h3', { style: { ...panelTitle, marginBottom: '0.85rem' } }, 'Quick Actions'),
-      React.createElement('div', { style: { display: 'flex', gap: '0.5rem', flexWrap: 'wrap' } },
+    React.createElement('div', { style: { ...sectionCard, background: '#fafbfc' } },
+      React.createElement('h3', { style: { ...panelTitle, marginBottom: '0.75rem', fontSize: '0.75rem', color: '#64748b' } }, 'Quick Actions'),
+      React.createElement('div', { style: { display: 'flex', gap: '0.4rem', flexWrap: 'wrap' } },
         quickActions.map(function(a) {
           return React.createElement('button', {
             key: a.id,
             className: 'action-btn',
             style: {
-              display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
-              padding: '0.5rem 0.9rem', fontSize: '0.78rem', fontWeight: 500,
-              color: '#475569', background: '#FFFFFF', border: '1px solid #e2e8f0',
-              borderRadius: '0.5rem', cursor: 'pointer', transition: 'all 0.15s',
+              display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+              padding: '0.4rem 0.75rem', fontSize: '0.72rem', fontWeight: 500,
+              color: '#475569', background: '#FFFFFF', border: '1px solid #eef2f7',
+              borderRadius: '0.4rem', cursor: 'pointer', transition: 'all 0.15s',
               fontFamily: "'Inter', sans-serif"
             },
             onClick: function() { setActiveTab(a.id); }
           },
-            React.createElement('span', { style: { fontSize: '0.85rem' } }, a.icon),
+            React.createElement('span', { style: { fontSize: '0.78rem' } }, a.icon),
             a.label
           );
         })
