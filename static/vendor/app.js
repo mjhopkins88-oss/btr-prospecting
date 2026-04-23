@@ -2286,6 +2286,10 @@ function CapitalGroupsPage({ user }) {
       _reward('Moved to ' + label, id);
       loadGroups();
       if (selectedGroup?.id === id) loadDetail(id);
+      if (!selectedGroup.opportunity_stage) {
+        setNextActions([{ label: 'Set opportunity stage', action: 'opportunity' }]);
+        setTimeout(function() { setNextActions(null); }, 6000);
+      }
     } catch (e) {
       _reward('Status update failed');
     }
@@ -2310,6 +2314,10 @@ function CapitalGroupsPage({ user }) {
       }
       loadGroups();
       if (selectedGroup?.id === id) loadDetail(id);
+      if (stage && stage !== 'won' && stage !== 'lost') {
+        setNextActions([{ label: 'Log a touchpoint', action: 'touchpoint' }, { label: 'Schedule follow-up', action: 'followup' }]);
+        setTimeout(function() { setNextActions(null); }, 6000);
+      }
     } catch (e) {
       _reward('Opportunity update failed');
     }
@@ -5699,7 +5707,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   const [focusItems, setFocusItems] = useState([]);
   const [focusLoading, setFocusLoading] = useState(true);
   const [opportunities, setOpportunities] = useState([]);
-  const [engagement, setEngagement] = useState({ streak: 0, today_touchpoints: 0, going_cold: [], stalled_opportunities: [], open_loops: 0, momentum: 'low', week_touchpoints: 0, week_tp_count: 0, weekly_goal: 40, week_pace: 'on_track', week_pct: 0 });
+  const [engagement, setEngagement] = useState({ streak: 0, today_touchpoints: 0, going_cold: [], stalled_opportunities: [], open_loops: 0, momentum: 'low', momentum_trend: 'steady', week_touchpoints: 0, week_tp_count: 0, weekly_goal: 40, week_pace: 'on_track', week_pct: 0, remaining_for_pace: 0, daily_checklist: { followups: 0, outreach: 0, relationship: 0 }, expected_count: 0 });
   const [financeIdx, setFinanceIdx] = useState(0);
   const [financeHover, setFinanceHover] = useState(false);
   const [queueToast, setQueueToast] = useState(null);
@@ -5835,8 +5843,19 @@ function CommandCenter({ user, prospects, setActiveTab }) {
       .then(function(d) {
         if (!d) { setQueueToast('Could not mark complete'); setTimeout(function() { setQueueToast(null); }, 2200); return; }
         setFocusItems(function(prev) { return prev.filter(function(it) { return it.id !== taskId; }); });
-        setQueueToast('Done: ' + (itemTitle || 'Task complete'));
-        setTimeout(function() { setQueueToast(null); }, 2200);
+        fetch(API_BASE + '/api/prospecting/engagement')
+          .then(function(r) { return r.ok ? r.json() : {}; })
+          .then(function(eng) {
+            setEngagement(eng);
+            var msg = 'Done: ' + (itemTitle || 'Task complete');
+            if (eng.week_tp_count != null) msg += ' · ' + eng.week_tp_count + '/' + eng.weekly_goal;
+            setQueueToast(msg);
+            setTimeout(function() { setQueueToast(null); }, 2800);
+          })
+          .catch(function() {
+            setQueueToast('Done: ' + (itemTitle || 'Task complete'));
+            setTimeout(function() { setQueueToast(null); }, 2200);
+          });
         setShowOneMore(true);
         setTimeout(function() { setShowOneMore(false); }, 10000);
       })
@@ -5991,12 +6010,18 @@ function CommandCenter({ user, prospects, setActiveTab }) {
           background: engagement.week_pace === 'ahead' ? 'rgba(16,185,129,0.08)' : engagement.week_pace === 'behind' ? 'rgba(239,68,68,0.08)' : 'rgba(59,130,246,0.08)'
         }
       }, engagement.week_pace === 'ahead' ? 'Ahead' : engagement.week_pace === 'behind' ? 'Behind' : 'On track'),
+      engagement.remaining_for_pace > 0 && React.createElement('span', {
+        style: { fontSize: '0.6rem', fontWeight: 600, color: engagement.week_pace === 'behind' ? '#ef4444' : '#64748b', whiteSpace: 'nowrap' }
+      }, engagement.remaining_for_pace + ' to pace'),
       engagement.streak > 0 && React.createElement('span', {
         style: { fontSize: '0.63rem', fontWeight: 700, color: '#f59e0b', whiteSpace: 'nowrap', background: 'rgba(245,158,11,0.06)', padding: '0.15rem 0.45rem', borderRadius: '0.25rem' }
       }, engagement.streak + 'd'),
-      engagement.today_touchpoints > 0 && React.createElement('span', {
-        style: { fontSize: '0.63rem', fontWeight: 700, color: '#10b981', whiteSpace: 'nowrap' }
-      }, engagement.today_touchpoints + ' today')
+      React.createElement('span', {
+        style: {
+          fontSize: '0.6rem', fontWeight: 700, whiteSpace: 'nowrap',
+          color: engagement.momentum === 'high' ? '#10b981' : engagement.momentum === 'building' ? '#3b82f6' : '#94a3b8'
+        }
+      }, (engagement.momentum_trend === 'slipping' ? '↓' : engagement.momentum_trend === 'rising' ? '↑' : '') + ' ' + engagement.momentum)
     ),
 
       React.createElement('div', {
@@ -6122,6 +6147,79 @@ function CommandCenter({ user, prospects, setActiveTab }) {
           )
         ),
         React.createElement('span', { style: { fontSize: '0.65rem', color: '#94a3b8' } }, sinceLast.hoursAgo + 'h ago')
+      )
+    ),
+
+    React.createElement('div', {
+      style: {
+        display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap'
+      }
+    },
+      React.createElement('div', {
+        style: { ...sectionCard, flex: '1 1 200px', minWidth: '180px', padding: '0.75rem 0.85rem' }
+      },
+        React.createElement('div', { style: { fontSize: '0.6rem', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '0.5rem' } }, "Today's checklist"),
+        React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
+          [
+            { key: 'followups', label: 'Follow-ups', count: (engagement.daily_checklist || {}).followups || 0 },
+            { key: 'outreach', label: 'Outreach', count: (engagement.daily_checklist || {}).outreach || 0 },
+            { key: 'relationship', label: 'Relationship', count: (engagement.daily_checklist || {}).relationship || 0 }
+          ].map(function(item) {
+            var done = item.count > 0;
+            return React.createElement('div', {
+              key: item.key,
+              style: { display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.72rem' }
+            },
+              React.createElement('span', {
+                style: { width: '14px', height: '14px', borderRadius: '3px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6rem', flexShrink: 0, background: done ? '#10b981' : '#f1f5f9', color: done ? '#FFFFFF' : '#cbd5e1', fontWeight: 700 }
+              }, done ? '✓' : ''),
+              React.createElement('span', { style: { color: done ? '#334155' : '#94a3b8', fontWeight: done ? 600 : 400 } }, item.label),
+              item.count > 1 && React.createElement('span', { style: { fontSize: '0.6rem', color: '#10b981', fontWeight: 700 } }, 'x' + item.count)
+            );
+          })
+        ),
+        (engagement.daily_checklist || {}).followups === 0 && (engagement.daily_checklist || {}).outreach === 0 && (engagement.daily_checklist || {}).relationship === 0
+          ? React.createElement('div', { style: { fontSize: '0.62rem', color: '#94a3b8', marginTop: '0.3rem' } }, '3 types to complete')
+          : null
+      ),
+
+      React.createElement('div', {
+        style: { ...sectionCard, flex: '1 1 200px', minWidth: '180px', padding: '0.75rem 0.85rem' }
+      },
+        React.createElement('div', { style: { fontSize: '0.6rem', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '0.5rem' } }, 'Momentum'),
+        React.createElement('div', { style: { display: 'flex', alignItems: 'baseline', gap: '0.4rem', marginBottom: '0.25rem' } },
+          React.createElement('span', {
+            style: { fontSize: '1rem', fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: engagement.momentum === 'high' ? '#10b981' : engagement.momentum === 'building' ? '#3b82f6' : '#94a3b8' }
+          }, engagement.week_touchpoints || 0),
+          React.createElement('span', { style: { fontSize: '0.62rem', color: '#94a3b8' } }, 'touches this week')
+        ),
+        React.createElement('div', {
+          style: {
+            fontSize: '0.72rem', fontWeight: 700,
+            color: engagement.momentum === 'high' ? '#10b981' : engagement.momentum === 'building' ? '#3b82f6' : engagement.momentum_trend === 'slipping' ? '#ef4444' : '#94a3b8'
+          }
+        }, engagement.momentum === 'high' ? 'High momentum' : engagement.momentum === 'building' ? 'Building' : engagement.momentum_trend === 'slipping' ? 'Slipping — act today' : 'Low — get started'),
+        engagement.momentum_trend === 'slipping' && React.createElement('div', { style: { fontSize: '0.6rem', color: '#ef4444', marginTop: '0.15rem' } }, 'Activity dropped vs last week')
+      ),
+
+      (engagement.going_cold.length > 0 || engagement.week_pace === 'behind' || engagement.stalled_opportunities.length > 0) && React.createElement('div', {
+        style: { ...sectionCard, flex: '1 1 200px', minWidth: '180px', padding: '0.75rem 0.85rem', borderLeft: '3px solid #ef4444' }
+      },
+        React.createElement('div', { style: { fontSize: '0.6rem', fontWeight: 700, color: '#ef4444', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '0.4rem' } }, 'At risk'),
+        React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem' } },
+          engagement.going_cold.length > 0 && React.createElement('div', { style: { fontSize: '0.72rem', color: '#334155' } },
+            React.createElement('span', { style: { fontWeight: 700, color: '#ef4444' } }, String(engagement.going_cold.length)),
+            ' relationship' + (engagement.going_cold.length > 1 ? 's' : '') + ' going cold'
+          ),
+          engagement.stalled_opportunities.length > 0 && React.createElement('div', { style: { fontSize: '0.72rem', color: '#334155' } },
+            React.createElement('span', { style: { fontWeight: 700, color: '#f59e0b' } }, String(engagement.stalled_opportunities.length)),
+            ' stalled deal' + (engagement.stalled_opportunities.length > 1 ? 's' : '')
+          ),
+          engagement.week_pace === 'behind' && React.createElement('div', { style: { fontSize: '0.72rem', color: '#334155' } },
+            React.createElement('span', { style: { fontWeight: 700, color: '#ef4444' } }, String(engagement.remaining_for_pace)),
+            ' touchpoints behind pace'
+          )
+        )
       )
     ),
 

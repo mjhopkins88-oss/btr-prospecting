@@ -764,12 +764,48 @@ def engagement_data():
         [(now - timedelta(days=7)).isoformat()]
     )
     week_count = week_tp['cnt'] if week_tp else 0
+
+    prev_week_tp = fetch_one(
+        "SELECT COUNT(*) as cnt FROM capital_group_touchpoints WHERE occurred_at > ? AND occurred_at <= ?",
+        [(now - timedelta(days=14)).isoformat(), (now - timedelta(days=7)).isoformat()]
+    )
+    prev_week_count = prev_week_tp['cnt'] if prev_week_tp else 0
+
     if week_count >= 15:
         momentum = 'high'
     elif week_count >= 5:
         momentum = 'building'
     else:
         momentum = 'low'
+
+    if prev_week_count > 0 and week_count < prev_week_count * 0.6:
+        momentum_trend = 'slipping'
+    elif week_count > prev_week_count:
+        momentum_trend = 'rising'
+    else:
+        momentum_trend = 'steady'
+
+    # Daily checklist: count completed types today
+    today_followups = fetch_one(
+        "SELECT COUNT(*) as cnt FROM capital_group_touchpoints WHERE DATE(occurred_at) = ? AND type IN ('call', 'email', 'follow_up')",
+        [today_str]
+    )
+    today_outreach = fetch_one(
+        "SELECT COUNT(*) as cnt FROM capital_group_touchpoints WHERE DATE(occurred_at) = ? AND type IN ('outreach', 'linkedin', 'intro')",
+        [today_str]
+    )
+    today_relationship = fetch_one(
+        "SELECT COUNT(*) as cnt FROM capital_group_touchpoints WHERE DATE(occurred_at) = ? AND type IN ('meeting', 'note', 'referral')",
+        [today_str]
+    )
+
+    daily_checklist = {
+        'followups': today_followups['cnt'] if today_followups else 0,
+        'outreach': today_outreach['cnt'] if today_outreach else 0,
+        'relationship': today_relationship['cnt'] if today_relationship else 0
+    }
+
+    remaining_for_pace = max(0, expected_count - week_tp_count)
 
     return jsonify({
         'streak': streak,
@@ -778,10 +814,14 @@ def engagement_data():
         'stalled_opportunities': stalled,
         'open_loops': open_loops,
         'momentum': momentum,
+        'momentum_trend': momentum_trend,
         'week_touchpoints': week_count,
         'week_tp_count': week_tp_count,
         'weekly_goal': weekly_goal,
         'week_pace': week_pace,
-        'week_pct': round(actual_pct * 100)
+        'week_pct': round(actual_pct * 100),
+        'remaining_for_pace': remaining_for_pace,
+        'daily_checklist': daily_checklist,
+        'expected_count': expected_count
     })
 
