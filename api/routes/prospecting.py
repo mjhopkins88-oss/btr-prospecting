@@ -203,6 +203,12 @@ def list_contacts():
     )
     for r in rows:
         r['next_best_action'] = compute_next_best_action(contact_id=r['id'])
+        conv = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_touchpoints "
+            "WHERE contact_id = ? AND channel IN ('call', 'meeting', 'conversation')",
+            [r['id']]
+        )
+        r['has_conversation'] = (conv['cnt'] > 0) if conv else False
     return jsonify(rows)
 
 
