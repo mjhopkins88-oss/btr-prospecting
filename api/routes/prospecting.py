@@ -619,6 +619,69 @@ def create_signal():
     return jsonify({'id': sid}), 201
 
 
+@prospecting_bp.route('/signals/<signal_id>/engage', methods=['POST'])
+def engage_signal(signal_id):
+    """Engage a signal: create touchpoints for linked contact + group, return signal data."""
+    signal = fetch_one("SELECT * FROM prospecting_signals WHERE id = ?", [signal_id])
+    if not signal:
+        return jsonify({'error': 'signal not found'}), 404
+
+    data = request.get_json(silent=True) or {}
+    task_id = data.get('task_id')
+    now_iso = datetime.utcnow().isoformat()
+
+    contact_id = signal.get('contact_id') or data.get('contact_id')
+    group_id = signal.get('group_id') or data.get('group_id')
+
+    if task_id:
+        task = fetch_one("SELECT contact_id, capital_group_id FROM prospecting_tasks WHERE id = ?", [task_id])
+        if task:
+            contact_id = contact_id or task.get('contact_id')
+            group_id = group_id or task.get('capital_group_id')
+
+    tp_note = 'Signal: ' + (signal.get('title') or 'Untitled')
+    if signal.get('source_url'):
+        tp_note += ' — ' + signal['source_url']
+
+    tp_id = None
+    if group_id:
+        tp_id = new_id()
+        execute(
+            "INSERT INTO capital_group_touchpoints (id, capital_group_id, type, notes, outcome, contact_id, occurred_at, created_at) "
+            "VALUES (?, ?, 'signal_outreach', ?, 'signal engaged', ?, ?, ?)",
+            [tp_id, group_id, tp_note, contact_id, now_iso, now_iso]
+        )
+        execute("UPDATE capital_groups SET last_contacted_at = ?, last_touch_at = ? WHERE id = ?",
+                [now_iso, now_iso, group_id])
+
+    prosp_tp_id = None
+    if contact_id:
+        prosp_tp_id = new_id()
+        execute(
+            "INSERT INTO prospecting_touchpoints (id, contact_id, group_id, channel, direction, subject, summary, occurred_at, created_at) "
+            "VALUES (?, ?, ?, 'signal_outreach', 'outbound', ?, ?, ?, ?)",
+            [prosp_tp_id, contact_id, group_id, signal.get('title', ''), tp_note, now_iso, now_iso]
+        )
+        execute("UPDATE prospecting_contacts SET last_touch_at = ? WHERE id = ?", [now_iso, contact_id])
+
+    return jsonify({
+        'success': True,
+        'signal': {
+            'id': signal['id'],
+            'title': signal.get('title'),
+            'summary': signal.get('summary'),
+            'source_url': signal.get('source_url'),
+            'signal_type': signal.get('signal_type'),
+            'signal_scope': signal.get('signal_scope'),
+            'detected_at': signal.get('detected_at'),
+        },
+        'touchpoint_id': tp_id,
+        'contact_touchpoint_id': prosp_tp_id,
+        'group_id': group_id,
+        'contact_id': contact_id,
+    })
+
+
 @prospecting_bp.route('/rules/daily', methods=['POST'])
 def run_relationship_rules():
     return jsonify(run_daily_rules())

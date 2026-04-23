@@ -464,7 +464,8 @@ def get_todays_focus(limit=10):
         "t.generated_reason, t.next_best_action_type, t.channel, "
         "g.name AS group_name, "
         "c.first_name AS contact_first, c.last_name AS contact_last, "
-        "s.title AS signal_title, s.signal_type, s.summary AS signal_summary "
+        "s.title AS signal_title, s.signal_type, s.summary AS signal_summary, "
+        "s.source_url AS signal_source_url "
         "FROM prospecting_tasks t "
         "LEFT JOIN capital_groups g ON g.id = t.capital_group_id "
         "LEFT JOIN prospecting_contacts c ON c.id = t.contact_id "
@@ -505,6 +506,7 @@ def get_todays_focus(limit=10):
             'signal_title': r.get('signal_title'),
             'signal_type': r.get('signal_type'),
             'signal_summary': r.get('signal_summary'),
+            'signal_source_url': r.get('signal_source_url'),
             'nba_type': r.get('next_best_action_type'),
             'reason': r.get('generated_reason'),
             'trigger_rule': r.get('trigger_rule'),
@@ -535,6 +537,7 @@ def get_todays_focus(limit=10):
                 'signal_title': None,
                 'signal_type': None,
                 'signal_summary': None,
+                'signal_source_url': None,
                 'nba_type': 'overdue_followup',
                 'reason': reason,
                 'trigger_rule': 'followup_queue',

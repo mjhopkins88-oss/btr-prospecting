@@ -2862,7 +2862,50 @@ function CapitalGroupsPage({ user }) {
                     );
                   })
                 )
-          )
+          ),
+
+          (g.signals && g.signals.length > 0) ? React.createElement('div', { style: { ...styles.card, padding: '1.25rem' } },
+            React.createElement('h3', { style: { color: '#64748b', fontSize: '0.72rem', fontWeight: 700, margin: '0 0 0.75rem', textTransform: 'uppercase', letterSpacing: '0.06em' } }, 'INTELLIGENCE'),
+            React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.5rem' } },
+              g.signals.map(function(sig) {
+                var sigDate = '';
+                try { sigDate = sig.detected_at ? new Date(sig.detected_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : sig.created_at ? new Date(sig.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''; } catch(_) {}
+                var contactMatch = sig.contact_id ? (g.contacts || []).find(function(c) { return c.id === sig.contact_id; }) : null;
+                var contactLabel = contactMatch ? [contactMatch.first_name, contactMatch.last_name].filter(Boolean).join(' ') : null;
+                var typeLabel = sig.signal_type ? sig.signal_type.replace(/_/g, ' ') : '';
+                return React.createElement('div', {
+                  key: sig.id,
+                  style: { padding: '0.6rem 0.75rem', background: '#F7F0FF', borderRadius: '0.5rem', border: '1px solid #e9d5ff' }
+                },
+                  React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' } },
+                    React.createElement('div', { style: { flex: 1, minWidth: 0 } },
+                      React.createElement('div', { style: { fontSize: '0.82rem', fontWeight: 600, color: '#1e293b', lineHeight: 1.3 } }, sig.title),
+                      sig.summary && React.createElement('div', { style: { fontSize: '0.75rem', color: '#64748b', marginTop: '0.2rem', lineHeight: 1.4 } }, sig.summary),
+                      React.createElement('div', { style: { display: 'flex', gap: '0.5rem', marginTop: '0.3rem', flexWrap: 'wrap', alignItems: 'center' } },
+                        sigDate && React.createElement('span', { style: { fontSize: '0.68rem', color: '#94a3b8', fontFamily: "'JetBrains Mono', monospace" } }, sigDate),
+                        typeLabel && React.createElement('span', {
+                          style: { fontSize: '0.62rem', fontWeight: 600, padding: '0.1rem 0.4rem', borderRadius: '9999px', background: 'rgba(139,92,246,0.1)', color: '#7c3aed', textTransform: 'capitalize' }
+                        }, typeLabel),
+                        contactLabel && React.createElement('span', {
+                          style: { fontSize: '0.68rem', fontWeight: 500, color: '#14b8a6', background: 'rgba(20,184,166,0.08)', padding: '0.05rem 0.4rem', borderRadius: '9999px' }
+                        }, contactLabel)
+                      )
+                    ),
+                    sig.source_url && React.createElement('a', {
+                      href: sig.source_url, target: '_blank', rel: 'noopener noreferrer',
+                      onClick: function(e) { e.stopPropagation(); },
+                      style: {
+                        fontSize: '0.68rem', fontWeight: 600, color: '#7c3aed', textDecoration: 'none',
+                        padding: '0.2rem 0.5rem', borderRadius: '0.3rem',
+                        border: '1px solid rgba(139,92,246,0.2)', background: 'rgba(139,92,246,0.06)',
+                        whiteSpace: 'nowrap', flexShrink: 0
+                      }
+                    }, 'Source ↗')
+                  )
+                );
+              })
+            )
+          ) : null
         ),
 
       renderFormModal()
@@ -5844,15 +5887,43 @@ function CommandCenter({ user, prospects, setActiveTab }) {
     return { color: '#64748b', bg: 'rgba(100,116,139,0.06)', border: 'rgba(100,116,139,0.18)', icon: '\u{1F4CB}', label: 'TASK' };
   };
 
-  var _draftFromTask = function(taskId) {
-    fetch(API_BASE + '/api/prospecting/tasks/' + taskId + '/signalstack-payload')
-      .then(function(r) { return r.ok ? r.json() : null; })
-      .then(function(payload) { if (payload) _launchSignalStack(payload); })
-      .catch(function() {});
+  var _engageSignal = function(signalId, taskId, contactId, groupId) {
+    return fetch(API_BASE + '/api/prospecting/signals/' + signalId + '/engage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: taskId, contact_id: contactId, group_id: groupId })
+    }).then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) {
+        if (d && d.success) {
+          setQueueToast('Signal attached to contact and company');
+          setTimeout(function() { setQueueToast(null); }, 2400);
+          setProgressJustUpdated(true);
+          setTimeout(function() { setProgressJustUpdated(false); }, 1200);
+          fetch(API_BASE + '/api/prospecting/engagement').then(function(r) { return r.ok ? r.json() : {}; }).then(function(eng) { setEngagement(eng); }).catch(function() {});
+        }
+        return d;
+      })
+      .catch(function() { return null; });
   };
 
-  var _completeQueueItem = function(taskId, itemTitle) {
+  var _draftFromTask = function(taskId, item) {
+    var engagePromise = (item && item.signal_id)
+      ? _engageSignal(item.signal_id, taskId, item.contact_id, item.capital_group_id)
+      : Promise.resolve(null);
+    engagePromise.then(function() {
+      fetch(API_BASE + '/api/prospecting/tasks/' + taskId + '/signalstack-payload')
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(payload) { if (payload) _launchSignalStack(payload); })
+        .catch(function() {});
+    });
+  };
+
+  var _completeQueueItem = function(taskId, itemTitle, item) {
     setCompletingItemId(taskId);
+    var preEngage = (item && item.signal_id)
+      ? _engageSignal(item.signal_id, taskId, item.contact_id, item.capital_group_id)
+      : Promise.resolve(null);
+    preEngage.then(function() {
     fetch(API_BASE + '/api/prospecting/tasks/' + taskId + '/complete', { method: 'POST' })
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(d) {
@@ -5886,6 +5957,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
         setQueueToast('Could not mark complete');
         setTimeout(function() { setQueueToast(null); }, 2200);
       });
+    });
   };
 
   var _whyContext = function(item) {
@@ -6290,6 +6362,17 @@ function CommandCenter({ user, prospects, setActiveTab }) {
             )
           ),
           React.createElement('div', { style: { display: 'flex', gap: '0.35rem', flexShrink: 0 } },
+            item.signal_source_url && React.createElement('button', {
+              onClick: function() {
+                window.open(item.signal_source_url, '_blank');
+                if (item.signal_id) _engageSignal(item.signal_id, item.id, item.contact_id, item.capital_group_id);
+              },
+              style: {
+                background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.2)', color: '#7c3aed',
+                padding: '0.35rem 0.65rem', borderRadius: '0.4rem', fontSize: '0.7rem',
+                fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter', sans-serif"
+              }
+            }, 'View Source'),
             item.capital_group_id && React.createElement('button', {
               onClick: function() {
                 try { sessionStorage.setItem('capital_group_deeplink', item.capital_group_id); } catch(_) {}
@@ -6302,7 +6385,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
               }
             }, 'Open'),
             React.createElement('button', {
-              onClick: function() { _draftFromTask(item.id); },
+              onClick: function() { _draftFromTask(item.id, item); },
               style: {
                 background: 'rgba(20,184,166,0.1)', border: '1px solid rgba(20,184,166,0.25)', color: '#0d9488',
                 padding: '0.35rem 0.65rem', borderRadius: '0.4rem', fontSize: '0.7rem',
@@ -6322,7 +6405,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
               }
             }, 'Skip'),
             React.createElement('button', {
-              onClick: function() { _completeQueueItem(item.id, item.title); },
+              onClick: function() { _completeQueueItem(item.id, item.title, item); },
               style: {
                 background: meta.color, border: '1px solid ' + meta.color, color: '#FFFFFF',
                 padding: '0.35rem 0.85rem', borderRadius: '0.4rem', fontSize: '0.7rem',
@@ -6473,7 +6556,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
                       }, item.signal_title || item.reason) : null
                     ),
                     React.createElement('button', {
-                      onClick: function(e) { e.stopPropagation(); _draftFromTask(item.id); },
+                      onClick: function(e) { e.stopPropagation(); _draftFromTask(item.id, item); },
                       style: {
                         background: 'rgba(20,184,166,0.08)', border: '1px solid rgba(20,184,166,0.2)',
                         color: '#0d9488', padding: '0.2rem 0.5rem', borderRadius: '0.3rem',
