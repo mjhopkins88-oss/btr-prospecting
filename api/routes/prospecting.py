@@ -655,18 +655,23 @@ def create_property():
 def engagement_data():
     now = datetime.utcnow()
     today_str = now.strftime('%Y-%m-%d')
+    day_of_week = now.weekday()  # 0=Mon, 6=Sun
 
-    # Streak: count consecutive days with at least one touchpoint
+    # Streak: count consecutive WEEKDAYS with at least one touchpoint
+    # Weekends (Sat/Sun) are skipped — they don't count and don't break streaks
     streak = 0
-    for days_ago in range(0, 90):
-        d = (now - timedelta(days=days_ago)).strftime('%Y-%m-%d')
+    for days_ago in range(0, 180):
+        d = now - timedelta(days=days_ago)
+        if d.weekday() >= 5:  # Saturday or Sunday — skip
+            continue
         row = fetch_one(
-            "SELECT COUNT(*) as cnt FROM capital_group_touchpoints WHERE DATE(occurred_at) = ?", [d]
+            "SELECT COUNT(*) as cnt FROM capital_group_touchpoints WHERE DATE(occurred_at) = ?",
+            [d.strftime('%Y-%m-%d')]
         )
         if row and row['cnt'] > 0:
             streak += 1
         else:
-            if days_ago == 0:
+            if days_ago == 0 and day_of_week < 5:
                 streak = 0
             break
 
@@ -676,6 +681,34 @@ def engagement_data():
         [today_str]
     )
     today_count = today_tp['cnt'] if today_tp else 0
+
+    # Weekly touchpoints: Monday through Sunday of current week
+    days_since_monday = day_of_week  # Monday=0 so this is correct
+    week_start = (now - timedelta(days=days_since_monday)).strftime('%Y-%m-%d')
+    week_end = (now - timedelta(days=days_since_monday) + timedelta(days=6)).strftime('%Y-%m-%d')
+    week_tp_row = fetch_one(
+        "SELECT COUNT(*) as cnt FROM capital_group_touchpoints WHERE DATE(occurred_at) >= ? AND DATE(occurred_at) <= ?",
+        [week_start, week_end]
+    )
+    week_tp_count = week_tp_row['cnt'] if week_tp_row else 0
+
+    # Weekly goal and pace
+    weekly_goal = 40
+    # Expected progress: proportional to weekday position (Mon=1/5, Tue=2/5, ..., Fri=5/5)
+    # Weekend days don't advance the target
+    if day_of_week >= 5:
+        expected_pct = 1.0
+    else:
+        expected_pct = (day_of_week + 1) / 5.0
+    expected_count = int(weekly_goal * expected_pct)
+    actual_pct = week_tp_count / weekly_goal if weekly_goal > 0 else 0
+
+    if week_tp_count >= expected_count + 3:
+        week_pace = 'ahead'
+    elif week_tp_count >= expected_count - 3:
+        week_pace = 'on_track'
+    else:
+        week_pace = 'behind'
 
     # Loss signals: relationships going cold (last_contacted > 45 days, status not dormant/cold)
     cold_rows = fetch_all(
@@ -739,6 +772,10 @@ def engagement_data():
         'stalled_opportunities': stalled,
         'open_loops': open_loops,
         'momentum': momentum,
-        'week_touchpoints': week_count
+        'week_touchpoints': week_count,
+        'week_tp_count': week_tp_count,
+        'weekly_goal': weekly_goal,
+        'week_pace': week_pace,
+        'week_pct': round(actual_pct * 100)
     })
 
