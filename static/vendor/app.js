@@ -2916,6 +2916,7 @@ function CapitalGroupsPage({ user }) {
         : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.75rem' } },
             groups.map(g => React.createElement('div', {
               key: g.id,
+              className: 'btr-card-hover',
               style: { ...styles.card, borderRadius: '0.5rem', padding: '0.7rem 1rem', cursor: 'pointer', transition: 'border-color 0.15s, box-shadow 0.3s', animation: highlightedId === g.id ? 'btrPulse 0.8s ease-out' : 'none' },
               onClick: () => loadDetail(g.id)
             },
@@ -3576,6 +3577,7 @@ function ProspectingContactsTab({ user }) {
   const [movedContactId, setMovedContactId] = useState(null);
   const [highlightedCol, setHighlightedCol] = useState(null);
   const [exitingCardId, setExitingCardId] = useState(null);
+  const [countPulseCols, setCountPulseCols] = useState([]);
 
   const emptyForm = {
     first_name: '', last_name: '', title: '', group_id: '',
@@ -3934,6 +3936,7 @@ function ProspectingContactsTab({ user }) {
                 var card = rows.find(function(r) { return String(r.id) === cid; });
                 if (!card || (card.relationship_stage || 'cold') === col.key) { setDragId(null); return; }
                 var contactName = [card.first_name, card.last_name].filter(Boolean).join(' ') || 'Contact';
+                var sourceCol = card.relationship_stage || 'cold';
                 setExitingCardId(cid);
                 setDragId(null);
                 fetch(API_BASE + '/api/prospecting/contacts/' + cid, {
@@ -3948,10 +3951,12 @@ function ProspectingContactsTab({ user }) {
                   }); });
                   setMovedContactId(cid);
                   setHighlightedCol(col.key);
+                  setCountPulseCols([sourceCol, col.key]);
                   setContactToast('Moved ' + contactName + ' to ' + col.label);
                   setTimeout(function() { setContactToast(null); }, 2400);
                   setTimeout(function() { setMovedContactId(null); }, 1200);
                   setTimeout(function() { setHighlightedCol(null); }, 900);
+                  setTimeout(function() { setCountPulseCols([]); }, 500);
                 }).catch(function() {
                   setExitingCardId(null);
                   setContactToast('Could not update stage');
@@ -3968,7 +3973,9 @@ function ProspectingContactsTab({ user }) {
                 display: 'flex', flexDirection: 'column',
                 overflow: 'hidden',
                 transition: 'background 0.3s, border-color 0.3s, box-shadow 0.3s',
-                boxShadow: highlightedCol === col.key ? '0 0 12px ' + col.accent + '30' : 'none'
+                boxShadow: highlightedCol === col.key ? '0 0 12px ' + col.accent + '30' : 'none',
+                animation: highlightedCol === col.key ? 'btrColPulse 900ms ease-out' : 'none',
+                '--col-accent': col.accent + '35'
               }
             },
               React.createElement('div', {
@@ -3987,11 +3994,11 @@ function ProspectingContactsTab({ user }) {
                 React.createElement('span', {
                   style: {
                     fontSize: '0.66rem', fontWeight: 600,
-                    color: highlightedCol === col.key ? col.accent : '#94a3b8',
+                    color: countPulseCols.includes(col.key) ? col.accent : highlightedCol === col.key ? col.accent : '#94a3b8',
                     fontFamily: "'JetBrains Mono', monospace",
-                    transition: 'color 0.3s, transform 0.3s',
-                    transform: highlightedCol === col.key ? 'scale(1.3)' : 'scale(1)',
-                    display: 'inline-block'
+                    transition: 'color 0.3s',
+                    display: 'inline-block',
+                    animation: countPulseCols.includes(col.key) ? 'btrCountBump 500ms ease-out' : 'none'
                   }
                 }, String(colRows.length))
               ),
@@ -4018,17 +4025,18 @@ function ProspectingContactsTab({ user }) {
                       setDragId(String(c.id));
                     },
                     onDragEnd: function() { setDragId(null); setDragOver(null); },
+                    className: 'btr-card-hover',
                     style: {
                       background: justMoved ? 'rgba(16,185,129,0.04)' : '#FFFFFF',
                       border: justMoved ? '1px solid rgba(16,185,129,0.4)' : '1px solid rgba(226,232,240,0.5)',
                       borderRadius: '0.5rem',
                       padding: '0.55rem 0.6rem',
                       cursor: 'grab',
-                      opacity: isExiting ? 0.3 : isDragging ? 0.5 : 1,
-                      transform: isExiting ? 'scale(0.95) translateY(-4px)' : isDragging ? 'scale(1.03)' : justMoved ? 'scale(1)' : 'none',
-                      boxShadow: isDragging ? '0 4px 12px rgba(0,0,0,0.1)' : justMoved ? '0 0 8px rgba(16,185,129,0.25)' : 'none',
+                      opacity: isDragging ? 0.5 : 1,
+                      transform: isDragging ? 'scale(1.03)' : 'none',
+                      boxShadow: isDragging ? '0 4px 12px rgba(0,0,0,0.1)' : 'none',
                       transition: 'opacity 0.2s, transform 0.25s, box-shadow 0.3s, background 0.3s, border-color 0.3s',
-                      animation: justMoved ? 'fadeInUp 0.28s ease-out' : 'none'
+                      animation: isExiting ? 'btrCardExit 200ms ease-in forwards' : justMoved ? 'btrCardEnter 280ms ease-out, btrCardGlow 1100ms ease-out' : 'none'
                     }
                   },
                     React.createElement('div', {
@@ -4167,13 +4175,15 @@ function ProspectingContactsTab({ user }) {
               )
             : rows.map(c => React.createElement('div', {
                 key: c.id,
+                className: 'btr-card-hover',
                 style: {
                   display: 'grid',
                   gridTemplateColumns: COLS,
                   gap: '0.5rem',
                   padding: '0.7rem 1rem',
                   borderBottom: '1px solid rgba(226,232,240,0.3)',
-                  alignItems: 'center'
+                  alignItems: 'center',
+                  border: '1px solid transparent'
                 }
               },
                 React.createElement('span', {
@@ -5708,11 +5718,15 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   const [focusLoading, setFocusLoading] = useState(true);
   const [opportunities, setOpportunities] = useState([]);
   const [engagement, setEngagement] = useState({ streak: 0, today_touchpoints: 0, going_cold: [], stalled_opportunities: [], open_loops: 0, momentum: 'low', momentum_trend: 'steady', week_touchpoints: 0, week_tp_count: 0, weekly_goal: 40, week_pace: 'on_track', week_pct: 0, remaining_for_pace: 0, daily_checklist: { followups: 0, outreach: 0, relationship: 0 }, expected_count: 0 });
+  const [progressJustUpdated, setProgressJustUpdated] = useState(false);
   const [financeIdx, setFinanceIdx] = useState(0);
   const [financeHover, setFinanceHover] = useState(false);
   const [queueToast, setQueueToast] = useState(null);
   const [showOneMore, setShowOneMore] = useState(false);
   const [sinceLast, setSinceLast] = useState(null);
+  const [completingItemId, setCompletingItemId] = useState(null);
+  const [lastCompletedAction, setLastCompletedAction] = useState(null);
+  const [completingFollowupId, setCompletingFollowupId] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -5838,11 +5852,17 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   };
 
   var _completeQueueItem = function(taskId, itemTitle) {
+    setCompletingItemId(taskId);
     fetch(API_BASE + '/api/prospecting/tasks/' + taskId + '/complete', { method: 'POST' })
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(d) {
-        if (!d) { setQueueToast('Could not mark complete'); setTimeout(function() { setQueueToast(null); }, 2200); return; }
-        setFocusItems(function(prev) { return prev.filter(function(it) { return it.id !== taskId; }); });
+        if (!d) { setCompletingItemId(null); setQueueToast('Could not mark complete'); setTimeout(function() { setQueueToast(null); }, 2200); return; }
+        setLastCompletedAction(taskId);
+        setTimeout(function() {
+          setFocusItems(function(prev) { return prev.filter(function(it) { return it.id !== taskId; }); });
+          setCompletingItemId(null);
+          setTimeout(function() { setLastCompletedAction(null); }, 300);
+        }, 250);
         fetch(API_BASE + '/api/prospecting/engagement')
           .then(function(r) { return r.ok ? r.json() : {}; })
           .then(function(eng) {
@@ -5851,6 +5871,8 @@ function CommandCenter({ user, prospects, setActiveTab }) {
             if (eng.week_tp_count != null) msg += ' · ' + eng.week_tp_count + '/' + eng.weekly_goal;
             setQueueToast(msg);
             setTimeout(function() { setQueueToast(null); }, 2800);
+            setProgressJustUpdated(true);
+            setTimeout(function() { setProgressJustUpdated(false); }, 1200);
           })
           .catch(function() {
             setQueueToast('Done: ' + (itemTitle || 'Task complete'));
@@ -5860,6 +5882,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
         setTimeout(function() { setShowOneMore(false); }, 10000);
       })
       .catch(function() {
+        setCompletingItemId(null);
         setQueueToast('Could not mark complete');
         setTimeout(function() { setQueueToast(null); }, 2200);
       });
@@ -5985,8 +6008,15 @@ function CommandCenter({ user, prospects, setActiveTab }) {
         style: { fontSize: '0.58rem', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.06em', textTransform: 'uppercase', whiteSpace: 'nowrap' }
       }, 'WEEK'),
       React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: '200px', flex: 1 } },
-        React.createElement('span', { style: { fontSize: '0.72rem', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap', fontFamily: "'JetBrains Mono', monospace" } },
-          engagement.week_tp_count + '/' + engagement.weekly_goal),
+        React.createElement('span', {
+          style: {
+            fontSize: '0.72rem', fontWeight: 700, whiteSpace: 'nowrap', fontFamily: "'JetBrains Mono', monospace",
+            color: progressJustUpdated ? '#10b981' : '#0f172a',
+            transition: 'color 0.3s',
+            animation: progressJustUpdated ? 'btrCountBump 500ms ease-out' : 'none',
+            display: 'inline-block'
+          }
+        }, engagement.week_tp_count + '/' + engagement.weekly_goal),
         React.createElement('div', {
           style: {
             flex: 1, height: '5px', background: '#f1f5f9', borderRadius: '3px', overflow: 'hidden', minWidth: '60px'
@@ -5997,7 +6027,8 @@ function CommandCenter({ user, prospects, setActiveTab }) {
               width: Math.min(engagement.week_pct, 100) + '%',
               height: '100%', borderRadius: '3px',
               background: engagement.week_pct >= 100 ? '#10b981' : engagement.week_pace === 'behind' ? '#f59e0b' : '#3b82f6',
-              transition: 'width 0.4s ease'
+              transition: 'width 0.4s ease',
+              animation: progressJustUpdated ? 'btrBarGlow 1000ms ease-out, btrBarPulse 600ms ease-in-out' : 'none'
             }
           })
         )
@@ -6225,6 +6256,8 @@ function CommandCenter({ user, prospects, setActiveTab }) {
 
     focusItems.length > 0 && (function() {
       var item = focusItems[0];
+      var isCompleting = completingItemId === item.id;
+      var isNewAfterComplete = lastCompletedAction && lastCompletedAction !== item.id;
       var meta = _focusMeta(item);
       var why = _whyContext(item);
       var name = [item.first_name, item.last_name].filter(Boolean).join(' ');
@@ -6234,7 +6267,9 @@ function CommandCenter({ user, prospects, setActiveTab }) {
           ...sectionCard, marginBottom: '1rem',
           background: 'linear-gradient(135deg, #FFFFFF 0%, ' + meta.bg + ' 100%)',
           borderLeft: '3px solid ' + meta.color,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.06), 0 0 0 1px ' + meta.border
+          boxShadow: '0 2px 8px rgba(0,0,0,0.06), 0 0 0 1px ' + meta.border,
+          animation: isCompleting ? 'btrFadeOut 250ms ease-in forwards' : isNewAfterComplete ? 'btrSlideIn 280ms ease-out' : 'none',
+          transition: 'opacity 0.25s, transform 0.25s'
         }
       },
         React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' } },
@@ -6410,12 +6445,14 @@ function CommandCenter({ user, prospects, setActiveTab }) {
                   };
                   return React.createElement('div', {
                     key: item.id,
+                    className: 'btr-card-hover',
                     style: {
                       display: 'flex', alignItems: 'center', gap: '0.6rem',
                       padding: '0.5rem 0.7rem', background: '#FFFFFF',
                       border: '1px solid #eef2f7', borderLeft: '3px solid ' + m.color,
                       borderRadius: '0.5rem',
-                      cursor: item.capital_group_id ? 'pointer' : 'default'
+                      cursor: item.capital_group_id ? 'pointer' : 'default',
+                      transition: 'opacity 0.2s, transform 0.25s'
                     },
                     onClick: _goToGroup
                   },
@@ -6494,24 +6531,61 @@ function CommandCenter({ user, prospects, setActiveTab }) {
                   };
                   var badge = l.days_inactive != null ? l.days_inactive + 'd ago' : 'never';
                   var urgentColor = l.days_inactive >= 60 ? '#ef4444' : l.days_inactive >= 30 ? '#f59e0b' : '#3b82f6';
+                  var isCompletingFu = completingFollowupId === l.capital_group_id;
                   return React.createElement('div', {
                     key: l.capital_group_id,
+                    className: 'btr-card-hover',
                     style: {
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                       gap: '0.6rem', padding: '0.5rem 0.75rem',
                       background: '#FFFFFF', border: '1px solid #eef2f7',
                       borderLeft: '3px solid ' + urgentColor,
                       borderRadius: '0.5rem', fontSize: '0.82rem',
-                      cursor: 'pointer', transition: 'background 0.15s'
+                      cursor: 'pointer',
+                      transition: 'background 0.15s, opacity 0.25s, transform 0.25s',
+                      animation: isCompletingFu ? 'btrFadeOut 280ms ease-in forwards' : 'none'
                     },
                     onClick: _goGroup
                   },
-                    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 } },
+                    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0, flex: 1 } },
                       React.createElement('span', { style: { color: '#0f172a', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, l.label || l.group_name || '\u2014')
                     ),
                     React.createElement('span', {
                       style: { fontSize: '0.68rem', color: urgentColor, fontWeight: 600, padding: '0.1rem 0.45rem', background: urgentColor + '0a', borderRadius: '0.25rem', flexShrink: 0 }
-                    }, badge)
+                    }, badge),
+                    React.createElement('button', {
+                      onClick: function(e) {
+                        e.stopPropagation();
+                        var gid = l.capital_group_id;
+                        setCompletingFollowupId(gid);
+                        fetch(API_BASE + '/api/capital-groups/' + gid + '/touchpoints', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ type: 'follow_up', notes: 'Follow-up completed', outcome: '' })
+                        }).then(function(r) {
+                          if (!r.ok) throw new Error('failed');
+                          setTimeout(function() {
+                            setDueLeads(function(prev) { return prev.filter(function(x) { return x.capital_group_id !== gid; }); });
+                            setCompletingFollowupId(null);
+                            setQueueToast('Follow-up completed');
+                            setTimeout(function() { setQueueToast(null); }, 2400);
+                            setProgressJustUpdated(true);
+                            setTimeout(function() { setProgressJustUpdated(false); }, 1200);
+                            fetch(API_BASE + '/api/prospecting/engagement').then(function(r) { return r.ok ? r.json() : {}; }).then(function(eng) { setEngagement(eng); }).catch(function() {});
+                          }, 300);
+                        }).catch(function() {
+                          setCompletingFollowupId(null);
+                          setQueueToast('Could not complete');
+                          setTimeout(function() { setQueueToast(null); }, 2200);
+                        });
+                      },
+                      style: {
+                        background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)',
+                        color: '#059669', padding: '0.15rem 0.45rem', borderRadius: '0.3rem',
+                        fontSize: '0.62rem', fontWeight: 600, cursor: 'pointer',
+                        fontFamily: "'Inter',sans-serif", whiteSpace: 'nowrap', flexShrink: 0
+                      }
+                    }, 'Done')
                   );
                 }),
                 dueCount > 5 ? React.createElement('div', {
@@ -6540,6 +6614,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
           };
           return React.createElement('div', {
             key: opp.id,
+            className: 'btr-card-hover',
             style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.6rem', padding: '0.5rem 0.75rem', background: '#FFFFFF', border: '1px solid #eef2f7', borderRadius: '0.5rem', cursor: 'pointer' },
             onClick: _goOpp
           },
@@ -16081,7 +16156,19 @@ if (typeof document !== 'undefined' && !document.getElementById('btr-toast-anim'
   var _ta = document.createElement('style'); _ta.id = 'btr-toast-anim';
   _ta.textContent = '@keyframes fadeInUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}' +
     '@keyframes btrPulse{0%{box-shadow:0 0 0 0 rgba(16,185,129,0.4)}70%{box-shadow:0 0 0 8px rgba(16,185,129,0)}100%{box-shadow:0 0 0 0 rgba(16,185,129,0)}}' +
-    '@keyframes btrGlow{0%{background-color:rgba(16,185,129,0.12)}100%{background-color:transparent}}';
+    '@keyframes btrGlow{0%{background-color:rgba(16,185,129,0.12)}100%{background-color:transparent}}' +
+    '@keyframes btrCardExit{from{opacity:1;transform:translateX(0) scale(1)}to{opacity:0;transform:translateX(20px) scale(0.97)}}' +
+    '@keyframes btrCardEnter{from{opacity:0;transform:scale(0.98)}to{opacity:1;transform:scale(1)}}' +
+    '@keyframes btrColPulse{0%{box-shadow:0 0 0 0 var(--col-accent,rgba(20,184,166,0.35))}50%{box-shadow:0 0 12px 3px var(--col-accent,rgba(20,184,166,0.18))}100%{box-shadow:0 0 0 0 var(--col-accent,rgba(20,184,166,0))}}' +
+    '@keyframes btrCountBump{0%{transform:scale(1)}40%{transform:scale(1.35)}100%{transform:scale(1)}}' +
+    '@keyframes btrCardGlow{0%{box-shadow:0 0 10px rgba(16,185,129,0.35)}100%{box-shadow:0 0 0 rgba(16,185,129,0)}}' +
+    '@keyframes btrBarGlow{0%{box-shadow:0 0 8px rgba(59,130,246,0.4)}100%{box-shadow:none}}' +
+    '@keyframes btrBarPulse{0%{opacity:1}50%{opacity:0.7}100%{opacity:1}}' +
+    '@keyframes btrFadeOut{from{opacity:1;transform:scale(1)}to{opacity:0;transform:scale(0.96) translateY(-4px)}}' +
+    '@keyframes btrSlideIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}' +
+    '@keyframes btrLift{from{transform:translateY(0)}to{transform:translateY(-2px)}}' +
+    '.btr-card-hover{transition:transform 0.18s ease,box-shadow 0.18s ease,border-color 0.18s ease!important}' +
+    '.btr-card-hover:hover{transform:translateY(-2px)!important;box-shadow:0 4px 14px rgba(0,0,0,0.08)!important;border-color:rgba(148,163,184,0.35)!important}';
   document.head.appendChild(_ta);
 }
 if (typeof document !== 'undefined' && !document.getElementById('pipeline-panel-anim')) {
