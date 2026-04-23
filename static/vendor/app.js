@@ -3908,7 +3908,11 @@ function ProspectingContactsTab({ user }) {
             { key: 'strategic',          label: 'Partner',           accent: '#a78bfa' },
             { key: 'dormant',            label: 'Dormant',           accent: '#94a3b8' }
           ].map(col => {
-            var colRows = rows.filter(c => (c.relationship_stage || 'cold') === col.key);
+            var colRows = rows.filter(function(c) {
+              if ((c.relationship_stage || 'cold') !== col.key) return false;
+              if (col.key === 'cold' || col.key === 'initial_outreach') return !!c.has_conversation;
+              return true;
+            });
             var isOver = dragOver === col.key && dragId;
             return React.createElement('div', {
               key: col.key,
