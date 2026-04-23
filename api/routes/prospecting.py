@@ -4,7 +4,7 @@ API Routes: Prospecting Dashboard
 Exposes the task engine data for the Prospecting page tabs:
 Summary, Schedule, Feed, Groups, Sequences.
 """
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, make_response
 
 from datetime import datetime, timedelta
 
@@ -825,3 +825,415 @@ def engagement_data():
         'expected_count': expected_count
     })
 
+
+@prospecting_bp.route('/brief', methods=['GET'])
+def prospecting_brief():
+    """Generate a downloadable Prospecting Brief as printable HTML."""
+    now = datetime.utcnow()
+    day_of_week = now.weekday()
+
+    # --- Core counts ---
+    total_groups_row = fetch_one("SELECT COUNT(*) AS c FROM capital_groups") or {}
+    total_groups = total_groups_row.get('c', 0)
+
+    total_contacts_row = fetch_one("SELECT COUNT(*) AS c FROM prospecting_contacts") or {}
+    total_contacts = total_contacts_row.get('c', 0)
+
+    total_tp_cg = fetch_one("SELECT COUNT(*) AS c FROM capital_group_touchpoints") or {}
+    total_tp_prosp = fetch_one("SELECT COUNT(*) AS c FROM prospecting_touchpoints") or {}
+    total_touchpoints = total_tp_cg.get('c', 0) + total_tp_prosp.get('c', 0)
+
+    # --- Relationship breakdown ---
+    warm_row = fetch_one("SELECT COUNT(*) AS c FROM capital_groups WHERE relationship_status IN ('warm', 'engaged', 'partner')") or {}
+    warm_active = warm_row.get('c', 0)
+
+    prospect_row = fetch_one("SELECT COUNT(*) AS c FROM capital_groups WHERE relationship_status = 'prospect'") or {}
+    prospect_count = prospect_row.get('c', 0)
+
+    dormant_row = fetch_one("SELECT COUNT(*) AS c FROM capital_groups WHERE relationship_status IN ('dormant', 'cold')") or {}
+    dormant_count = dormant_row.get('c', 0)
+
+    # --- Activity breakdown by type ---
+    tp_types = fetch_all(
+        "SELECT COALESCE(type, 'other') AS tp_type, COUNT(*) AS cnt "
+        "FROM capital_group_touchpoints GROUP BY COALESCE(type, 'other') ORDER BY cnt DESC", []
+    ) or []
+    type_map = {r['tp_type']: r['cnt'] for r in tp_types}
+    calls_count = type_map.get('call', 0)
+    meetings_count = type_map.get('meeting', 0)
+    emails_count = type_map.get('email', 0)
+    linkedin_count = type_map.get('linkedin', 0) + type_map.get('outreach', 0)
+    followups_count = type_map.get('follow_up', 0)
+
+    # --- Opportunities ---
+    active_opps_row = fetch_one(
+        "SELECT COUNT(*) AS c FROM capital_groups WHERE opportunity_stage IS NOT NULL AND opportunity_stage NOT IN ('won', 'lost')"
+    ) or {}
+    active_opps = active_opps_row.get('c', 0)
+
+    won_opps_row = fetch_one("SELECT COUNT(*) AS c FROM capital_groups WHERE opportunity_stage = 'won'") or {}
+    won_opps = won_opps_row.get('c', 0)
+
+    # --- Weekly metrics ---
+    days_since_monday = day_of_week
+    week_start = (now - timedelta(days=days_since_monday)).strftime('%Y-%m-%d')
+    week_end = (now - timedelta(days=days_since_monday) + timedelta(days=6)).strftime('%Y-%m-%d')
+    week_tp_row = fetch_one(
+        "SELECT COUNT(*) as cnt FROM capital_group_touchpoints WHERE DATE(occurred_at) >= ? AND DATE(occurred_at) <= ?",
+        [week_start, week_end]
+    )
+    week_tp_count = week_tp_row['cnt'] if week_tp_row else 0
+    weekly_goal = 40
+    if day_of_week >= 5:
+        expected_pct = 1.0
+    else:
+        expected_pct = (day_of_week + 1) / 5.0
+    expected_count = int(weekly_goal * expected_pct)
+    week_pct = round((week_tp_count / weekly_goal) * 100) if weekly_goal > 0 else 0
+
+    if week_tp_count >= expected_count + 3:
+        week_pace = 'Ahead of pace'
+    elif week_tp_count >= expected_count - 3:
+        week_pace = 'On track'
+    else:
+        week_pace = 'Behind pace'
+
+    # Streak
+    streak = 0
+    for days_ago in range(0, 180):
+        d = now - timedelta(days=days_ago)
+        if d.weekday() >= 5:
+            continue
+        row = fetch_one(
+            "SELECT COUNT(*) as cnt FROM capital_group_touchpoints WHERE DATE(occurred_at) = ?",
+            [d.strftime('%Y-%m-%d')]
+        )
+        if row and row['cnt'] > 0:
+            streak += 1
+        else:
+            if days_ago == 0 and day_of_week < 5:
+                streak = 0
+            break
+
+    # --- Momentum ---
+    week_7d = fetch_one(
+        "SELECT COUNT(*) as cnt FROM capital_group_touchpoints WHERE occurred_at > ?",
+        [(now - timedelta(days=7)).isoformat()]
+    )
+    week_7d_count = week_7d['cnt'] if week_7d else 0
+    prev_7d = fetch_one(
+        "SELECT COUNT(*) as cnt FROM capital_group_touchpoints WHERE occurred_at > ? AND occurred_at <= ?",
+        [(now - timedelta(days=14)).isoformat(), (now - timedelta(days=7)).isoformat()]
+    )
+    prev_7d_count = prev_7d['cnt'] if prev_7d else 0
+
+    if week_7d_count >= 15:
+        momentum_label = 'Strong'
+        momentum_desc = 'High activity volume with consistent engagement across the pipeline.'
+    elif week_7d_count >= 5:
+        momentum_label = 'Building'
+        momentum_desc = 'Activity is growing. Continued consistency will compound results.'
+    else:
+        momentum_label = 'Mixed'
+        momentum_desc = 'Activity has been lighter than typical. Focus on core daily actions to rebuild cadence.'
+
+    if prev_7d_count > 0 and week_7d_count < prev_7d_count * 0.6:
+        momentum_trend = 'Slipping week-over-week'
+    elif week_7d_count > prev_7d_count:
+        momentum_trend = 'Trending up from prior week'
+    else:
+        momentum_trend = 'Holding steady'
+
+    # --- Areas to Watch ---
+    cold_rows = fetch_all(
+        """SELECT name, last_contacted_at FROM capital_groups
+           WHERE last_contacted_at IS NOT NULL AND last_contacted_at < ?
+             AND relationship_status NOT IN ('dormant', 'cold')
+           ORDER BY last_contacted_at ASC LIMIT 5""",
+        [(now - timedelta(days=45)).isoformat()]
+    ) or []
+    going_cold = []
+    for r in cold_rows:
+        days_s = (now - datetime.fromisoformat(str(r['last_contacted_at']).replace('Z', ''))).days
+        going_cold.append({'name': r['name'], 'days': days_s})
+
+    stalled_rows = fetch_all(
+        """SELECT name, opportunity_stage FROM capital_groups
+           WHERE opportunity_stage IS NOT NULL AND opportunity_stage NOT IN ('won', 'lost')
+             AND (last_contacted_at IS NULL OR last_contacted_at < ?)
+           ORDER BY last_contacted_at ASC LIMIT 5""",
+        [(now - timedelta(days=14)).isoformat()]
+    ) or []
+
+    followup_queue_count = fetch_one(
+        "SELECT COUNT(*) AS c FROM capital_groups WHERE last_contacted_at IS NULL OR last_contacted_at < ?",
+        [(now - timedelta(days=30)).isoformat()]
+    ) or {}
+    overdue_followups = followup_queue_count.get('c', 0)
+
+    # --- Contacts with real conversations ---
+    real_convos_row = fetch_one(
+        "SELECT COUNT(DISTINCT contact_id) AS c FROM prospecting_touchpoints "
+        "WHERE channel IN ('call', 'meeting', 'conversation') AND contact_id IS NOT NULL"
+    ) or {}
+    real_convos = real_convos_row.get('c', 0)
+
+    # --- Top highlights ---
+    most_active = fetch_all(
+        """SELECT g.name, COUNT(t.id) AS cnt FROM capital_group_touchpoints t
+           JOIN capital_groups g ON g.id = t.capital_group_id
+           WHERE t.occurred_at > ?
+           GROUP BY g.id, g.name ORDER BY cnt DESC LIMIT 5""",
+        [(now - timedelta(days=30)).isoformat()]
+    ) or []
+
+    most_engaged_contacts = fetch_all(
+        """SELECT c.first_name, c.last_name, g.name AS group_name, COUNT(t.id) AS cnt
+           FROM prospecting_touchpoints t
+           JOIN prospecting_contacts c ON c.id = t.contact_id
+           LEFT JOIN capital_groups g ON g.id = c.group_id
+           WHERE t.occurred_at > ?
+           GROUP BY c.id, c.first_name, c.last_name, g.name ORDER BY cnt DESC LIMIT 5""",
+        [(now - timedelta(days=30)).isoformat()]
+    ) or []
+
+    recent_stage_ups = fetch_all(
+        """SELECT name, relationship_status FROM capital_groups
+           WHERE relationship_status IN ('warm', 'engaged', 'partner')
+             AND updated_at > ?
+           ORDER BY updated_at DESC LIMIT 5""",
+        [(now - timedelta(days=30)).isoformat()]
+    ) or []
+
+    # --- Executive Summary ---
+    exec_lines = []
+    exec_lines.append(
+        f"The prospecting operation is actively managing {total_groups} capital group{'s' if total_groups != 1 else ''} "
+        f"with {total_contacts} contact{'s' if total_contacts != 1 else ''} across the pipeline."
+    )
+    if total_touchpoints > 0:
+        exec_lines.append(
+            f"A total of {total_touchpoints} touchpoints have been logged, "
+            f"including {calls_count} call{'s' if calls_count != 1 else ''} and {meetings_count} meeting{'s' if meetings_count != 1 else ''}."
+        )
+    if warm_active > 0:
+        exec_lines.append(
+            f"{warm_active} relationship{'s' if warm_active != 1 else ''} {'are' if warm_active != 1 else 'is'} "
+            f"at warm or active status, reflecting sustained engagement effort."
+        )
+    if active_opps > 0:
+        exec_lines.append(f"{active_opps} active opportunit{'ies' if active_opps != 1 else 'y'} {'are' if active_opps != 1 else 'is'} in the pipeline.")
+    exec_summary = ' '.join(exec_lines)
+
+    # --- Opportunities to Accelerate ---
+    accelerators = []
+    if dormant_count > 0:
+        accelerators.append(f"Re-engage {dormant_count} dormant relationship{'s' if dormant_count != 1 else ''} to recover pipeline coverage.")
+    if overdue_followups > 5:
+        accelerators.append(f"Address the {overdue_followups} groups overdue for follow-up to prevent relationship decay.")
+    if linkedin_count < calls_count and linkedin_count < 5:
+        accelerators.append("Increase LinkedIn activity to diversify outreach channels.")
+    if real_convos < total_contacts * 0.3 and total_contacts > 5:
+        accelerators.append(f"Only {real_convos} of {total_contacts} contacts have had a real conversation. "
+                            "Prioritize converting initial outreach into calls or meetings.")
+    if week_7d_count < 10:
+        accelerators.append("Boost daily activity volume to sustain momentum above the 10-per-week baseline.")
+
+    # --- Build HTML ---
+    generated = now.strftime('%B %d, %Y at %I:%M %p UTC')
+    week_label = f"Week of {(now - timedelta(days=days_since_monday)).strftime('%b %d')} – {(now - timedelta(days=days_since_monday) + timedelta(days=6)).strftime('%b %d, %Y')}"
+
+    bar_color = '#10b981' if week_pct >= 100 else ('#f59e0b' if week_pace == 'Behind pace' else '#3b82f6')
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prospecting Brief — {now.strftime('%b %d, %Y')}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; color: #1e293b; background: #fff; line-height: 1.6; padding: 2rem; max-width: 820px; margin: 0 auto; }}
+  @media print {{ body {{ padding: 0.5in; max-width: none; }} .no-print {{ display: none !important; }} }}
+  .header {{ text-align: center; margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 2px solid #e2e8f0; }}
+  .header h1 {{ font-size: 1.6rem; font-weight: 700; color: #0f172a; letter-spacing: 0.02em; margin-bottom: 0.25rem; }}
+  .header .sub {{ font-size: 0.8rem; color: #64748b; }}
+  .section {{ margin-bottom: 1.5rem; }}
+  .section-title {{ font-size: 0.85rem; font-weight: 700; color: #0f172a; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.6rem; padding-bottom: 0.35rem; border-bottom: 1px solid #e2e8f0; }}
+  .exec-summary {{ font-size: 0.88rem; color: #334155; line-height: 1.7; padding: 0.75rem 1rem; background: #f8fafc; border-radius: 0.5rem; border-left: 3px solid #3b82f6; }}
+  .metrics-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; }}
+  .metric-card {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 0.75rem; text-align: center; }}
+  .metric-card .value {{ font-size: 1.4rem; font-weight: 700; color: #0f172a; line-height: 1.2; }}
+  .metric-card .label {{ font-size: 0.68rem; color: #64748b; font-weight: 500; margin-top: 0.15rem; }}
+  .two-col {{ display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }}
+  .list-item {{ display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0; border-bottom: 1px solid #f1f5f9; font-size: 0.8rem; }}
+  .list-item:last-child {{ border-bottom: none; }}
+  .list-item .name {{ color: #334155; font-weight: 500; }}
+  .list-item .badge {{ color: #64748b; font-size: 0.72rem; }}
+  .progress-container {{ background: #e2e8f0; border-radius: 4px; height: 8px; overflow: hidden; margin: 0.5rem 0; }}
+  .progress-fill {{ height: 100%; border-radius: 4px; transition: width 0.3s; }}
+  .status-pill {{ display: inline-block; padding: 0.15rem 0.5rem; border-radius: 9999px; font-size: 0.7rem; font-weight: 600; }}
+  .callout {{ padding: 0.65rem 0.85rem; border-radius: 0.5rem; font-size: 0.8rem; margin-bottom: 0.5rem; }}
+  .callout-blue {{ background: #eff6ff; border-left: 3px solid #3b82f6; color: #1e40af; }}
+  .callout-amber {{ background: #fffbeb; border-left: 3px solid #f59e0b; color: #92400e; }}
+  .callout-green {{ background: #f0fdf4; border-left: 3px solid #10b981; color: #065f46; }}
+  .callout-red {{ background: #fef2f2; border-left: 3px solid #ef4444; color: #991b1b; }}
+  .toolbar {{ text-align: center; margin-bottom: 1.5rem; }}
+  .toolbar button {{ padding: 0.5rem 1.25rem; font-size: 0.8rem; font-weight: 600; border: 1px solid #e2e8f0; border-radius: 0.4rem; cursor: pointer; background: #0f172a; color: #fff; font-family: inherit; }}
+  .toolbar button:hover {{ background: #1e293b; }}
+  .footer {{ text-align: center; padding-top: 1.5rem; margin-top: 2rem; border-top: 1px solid #e2e8f0; font-size: 0.7rem; color: #94a3b8; }}
+</style>
+</head>
+<body>
+
+<div class="toolbar no-print">
+  <button onclick="window.print()">Print / Save as PDF</button>
+</div>
+
+<div class="header">
+  <h1>Prospecting Brief</h1>
+  <div class="sub">BTR Prospecting &middot; Generated {generated}</div>
+  <div class="sub" style="margin-top:0.15rem">{week_label}</div>
+</div>
+
+<div class="section">
+  <div class="section-title">Executive Summary</div>
+  <div class="exec-summary">{exec_summary}</div>
+</div>
+
+<div class="section">
+  <div class="section-title">Core Metrics</div>
+  <div class="metrics-grid">
+    <div class="metric-card"><div class="value">{total_groups}</div><div class="label">Capital Groups</div></div>
+    <div class="metric-card"><div class="value">{total_contacts}</div><div class="label">Contacts</div></div>
+    <div class="metric-card"><div class="value">{total_touchpoints}</div><div class="label">Total Touchpoints</div></div>
+    <div class="metric-card"><div class="value">{week_tp_count}</div><div class="label">This Week</div></div>
+    <div class="metric-card"><div class="value">{calls_count}</div><div class="label">Calls</div></div>
+    <div class="metric-card"><div class="value">{meetings_count}</div><div class="label">Meetings</div></div>
+    <div class="metric-card"><div class="value">{warm_active}</div><div class="label">Active Relationships</div></div>
+    <div class="metric-card"><div class="value">{active_opps}</div><div class="label">Active Opportunities</div></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">Pipeline Health</div>
+  <div class="two-col">
+    <div>
+      <div class="list-item"><span class="name">Groups actively managed</span><span class="badge" style="font-weight:700;color:#0f172a">{total_groups}</span></div>
+      <div class="list-item"><span class="name">Contacts with conversations</span><span class="badge" style="font-weight:700;color:#0f172a">{real_convos}</span></div>
+      <div class="list-item"><span class="name">Warm / active relationships</span><span class="badge" style="font-weight:700;color:#10b981">{warm_active}</span></div>
+      <div class="list-item"><span class="name">Prospects in pipeline</span><span class="badge" style="font-weight:700;color:#3b82f6">{prospect_count}</span></div>
+    </div>
+    <div>
+      <div class="list-item"><span class="name">Dormant / cold</span><span class="badge" style="font-weight:700;color:#94a3b8">{dormant_count}</span></div>
+      <div class="list-item"><span class="name">Overdue for follow-up</span><span class="badge" style="font-weight:700;color:#f59e0b">{overdue_followups}</span></div>
+      <div class="list-item"><span class="name">Active opportunities</span><span class="badge" style="font-weight:700;color:#6366f1">{active_opps}</span></div>
+      <div class="list-item"><span class="name">Won opportunities</span><span class="badge" style="font-weight:700;color:#10b981">{won_opps}</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">Activity Breakdown</div>
+  <div class="metrics-grid" style="grid-template-columns: repeat(5, 1fr);">
+    <div class="metric-card"><div class="value">{calls_count}</div><div class="label">Calls</div></div>
+    <div class="metric-card"><div class="value">{meetings_count}</div><div class="label">Meetings</div></div>
+    <div class="metric-card"><div class="value">{emails_count}</div><div class="label">Emails</div></div>
+    <div class="metric-card"><div class="value">{linkedin_count}</div><div class="label">LinkedIn</div></div>
+    <div class="metric-card"><div class="value">{followups_count}</div><div class="label">Follow-ups</div></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">Weekly Progress</div>
+  <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.4rem">
+    <span style="font-size:1.1rem;font-weight:700">{week_tp_count} / {weekly_goal}</span>
+    <span class="status-pill" style="background:{'#f0fdf4' if week_pace == 'Ahead of pace' else '#eff6ff' if week_pace == 'On track' else '#fef3c7'};color:{'#065f46' if week_pace == 'Ahead of pace' else '#1e40af' if week_pace == 'On track' else '#92400e'}">{week_pace}</span>
+  </div>
+  <div class="progress-container">
+    <div class="progress-fill" style="width:{min(week_pct, 100)}%;background:{bar_color}"></div>
+  </div>
+  <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:#64748b;margin-top:0.25rem">
+    <span>{week_pct}% of weekly goal</span>
+    <span>{'Streak: ' + str(streak) + ' day' + ('s' if streak != 1 else '') if streak > 0 else 'No active streak'}</span>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">Momentum</div>
+  <div class="callout {'callout-green' if momentum_label == 'Strong' else 'callout-blue' if momentum_label == 'Building' else 'callout-amber'}">
+    <strong>{momentum_label}</strong> &mdash; {momentum_desc}<br>
+    <span style="font-size:0.75rem">{momentum_trend} &middot; {week_7d_count} touchpoints in the last 7 days (prior 7 days: {prev_7d_count})</span>
+  </div>
+</div>"""
+
+    # Areas to Watch
+    watch_items = []
+    if going_cold:
+        names = ', '.join([g['name'] + ' (' + str(g['days']) + 'd)' for g in going_cold[:3]])
+        watch_items.append(f"Relationships going cold: {names}")
+    if stalled_rows:
+        names = ', '.join([s['name'] for s in stalled_rows[:3]])
+        watch_items.append(f"Stalled opportunities: {names}")
+    if overdue_followups > 5:
+        watch_items.append(f"{overdue_followups} groups are overdue for follow-up (30+ days since last touch)")
+    if week_7d_count < prev_7d_count * 0.6 and prev_7d_count > 0:
+        watch_items.append(f"Activity volume dropped from {prev_7d_count} to {week_7d_count} touchpoints week-over-week")
+
+    if watch_items:
+        html += '\n<div class="section">\n  <div class="section-title">Areas to Watch</div>\n'
+        for item in watch_items:
+            html += f'  <div class="callout callout-amber" style="margin-bottom:0.4rem">{item}</div>\n'
+        html += '</div>\n'
+
+    # Opportunities to Accelerate
+    if accelerators:
+        html += '\n<div class="section">\n  <div class="section-title">Opportunities to Accelerate</div>\n'
+        for acc in accelerators:
+            html += f'  <div class="callout callout-blue" style="margin-bottom:0.4rem">{acc}</div>\n'
+        html += '</div>\n'
+
+    # Top Highlights
+    html += '\n<div class="section">\n  <div class="section-title">Top Highlights</div>\n  <div class="two-col">\n'
+
+    # Most active groups
+    html += '    <div>\n      <div style="font-size:0.72rem;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.4rem">Most Active Groups (30d)</div>\n'
+    if most_active:
+        for g in most_active:
+            html += f'      <div class="list-item"><span class="name">{g["name"]}</span><span class="badge">{g["cnt"]} touchpoints</span></div>\n'
+    else:
+        html += '      <div style="font-size:0.78rem;color:#94a3b8">No group activity in the last 30 days</div>\n'
+    html += '    </div>\n'
+
+    # Most engaged contacts
+    html += '    <div>\n      <div style="font-size:0.72rem;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.4rem">Most Engaged Contacts (30d)</div>\n'
+    if most_engaged_contacts:
+        for c in most_engaged_contacts:
+            cname = ((c.get('first_name') or '') + ' ' + (c.get('last_name') or '')).strip() or 'Unnamed'
+            gname = c.get('group_name') or ''
+            html += f'      <div class="list-item"><span class="name">{cname}{" — " + gname if gname else ""}</span><span class="badge">{c["cnt"]} touches</span></div>\n'
+    else:
+        html += '      <div style="font-size:0.78rem;color:#94a3b8">No contact activity in the last 30 days</div>\n'
+    html += '    </div>\n  </div>\n'
+
+    # Recent relationship progress
+    if recent_stage_ups:
+        html += '  <div style="margin-top:0.75rem"><div style="font-size:0.72rem;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.4rem">Recent Relationship Progress</div>\n'
+        for r in recent_stage_ups:
+            status_label = {'warm': 'Warm', 'engaged': 'Engaged', 'partner': 'Partner'}.get(r['relationship_status'], r['relationship_status'])
+            html += f'    <div class="list-item"><span class="name">{r["name"]}</span><span class="status-pill" style="background:#f0fdf4;color:#065f46">{status_label}</span></div>\n'
+        html += '  </div>\n'
+
+    html += '</div>\n'
+
+    html += f"""
+<div class="footer">
+  BTR Prospecting &middot; Confidential &middot; {now.strftime('%Y')}
+</div>
+</body>
+</html>"""
+
+    resp = make_response(html)
+    resp.headers['Content-Type'] = 'text/html; charset=utf-8'
+    return resp
