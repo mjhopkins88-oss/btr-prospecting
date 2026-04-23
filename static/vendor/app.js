@@ -2345,7 +2345,17 @@ function CapitalGroupsPage({ user }) {
       }
       setShowTpForm(false); setEditingTp(null);
       setTpType('call'); setTpOutcome(''); setTpNotes(''); setTpContactId(''); setTpDate(new Date().toISOString().slice(0, 10)); setTpFollowup('');
-      _reward(editingTp ? 'Touchpoint updated' : 'Touchpoint logged +1', selectedGroup?.id);
+      if (!editingTp) {
+        try {
+          var _weekRes = await fetch(API_BASE + '/api/prospecting/engagement');
+          var _weekData = await _weekRes.json();
+          _reward('Touchpoint logged +1 · Week: ' + (_weekData.week_tp_count || '?') + '/' + (_weekData.weekly_goal || 40), selectedGroup?.id);
+        } catch(_) {
+          _reward('Touchpoint logged +1', selectedGroup?.id);
+        }
+      } else {
+        _reward('Touchpoint updated', selectedGroup?.id);
+      }
       if (!editingTp && selectedGroup) {
         var _suggestions = [];
         if (!selectedGroup.opportunity_stage) _suggestions.push({ label: 'Set opportunity stage', action: 'opportunity' });
@@ -5685,7 +5695,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   const [focusItems, setFocusItems] = useState([]);
   const [focusLoading, setFocusLoading] = useState(true);
   const [opportunities, setOpportunities] = useState([]);
-  const [engagement, setEngagement] = useState({ streak: 0, today_touchpoints: 0, going_cold: [], stalled_opportunities: [], open_loops: 0, momentum: 'low', week_touchpoints: 0 });
+  const [engagement, setEngagement] = useState({ streak: 0, today_touchpoints: 0, going_cold: [], stalled_opportunities: [], open_loops: 0, momentum: 'low', week_touchpoints: 0, week_tp_count: 0, weekly_goal: 40, week_pace: 'on_track', week_pct: 0 });
   const [financeIdx, setFinanceIdx] = useState(0);
   const [financeHover, setFinanceHover] = useState(false);
   const [queueToast, setQueueToast] = useState(null);
@@ -5937,6 +5947,46 @@ function CommandCenter({ user, prospects, setActiveTab }) {
           }, (engagement.momentum === 'high' ? '↑' : engagement.momentum === 'building' ? '↗' : '→') + ' ' + engagement.momentum)
         )
       ),
+
+    React.createElement('div', {
+      style: {
+        display: 'flex', alignItems: 'center', gap: '1rem',
+        background: '#FFFFFF', border: '1px solid #e2e8f0', borderRadius: '0.6rem',
+        padding: '0.55rem 1rem', marginBottom: '0.75rem', boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+        flexWrap: 'wrap'
+      }
+    },
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: '220px', flex: 1 } },
+        React.createElement('span', { style: { fontSize: '0.7rem', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap' } },
+          engagement.week_tp_count + ' / ' + engagement.weekly_goal),
+        React.createElement('div', {
+          style: {
+            flex: 1, height: '6px', background: '#f1f5f9', borderRadius: '3px', overflow: 'hidden', minWidth: '80px'
+          }
+        },
+          React.createElement('div', {
+            style: {
+              width: Math.min(engagement.week_pct, 100) + '%',
+              height: '100%', borderRadius: '3px',
+              background: engagement.week_pct >= 100 ? '#10b981' : engagement.week_pace === 'behind' ? '#f59e0b' : '#3b82f6',
+              transition: 'width 0.4s ease'
+            }
+          })
+        ),
+        React.createElement('span', { style: { fontSize: '0.62rem', color: '#94a3b8', whiteSpace: 'nowrap' } }, engagement.week_pct + '%')
+      ),
+      React.createElement('span', {
+        style: {
+          fontSize: '0.65rem', fontWeight: 600, whiteSpace: 'nowrap',
+          padding: '0.15rem 0.4rem', borderRadius: '0.25rem',
+          color: engagement.week_pace === 'ahead' ? '#10b981' : engagement.week_pace === 'behind' ? '#ef4444' : '#3b82f6',
+          background: engagement.week_pace === 'ahead' ? 'rgba(16,185,129,0.08)' : engagement.week_pace === 'behind' ? 'rgba(239,68,68,0.08)' : 'rgba(59,130,246,0.08)'
+        }
+      }, engagement.week_pace === 'ahead' ? 'Ahead of pace' : engagement.week_pace === 'behind' ? 'Behind pace' : 'On track'),
+      engagement.streak > 0 && React.createElement('span', {
+        style: { fontSize: '0.65rem', fontWeight: 600, color: '#f59e0b', whiteSpace: 'nowrap' }
+      }, engagement.streak + 'd streak')
+    ),
 
       React.createElement('div', {
         style: {
