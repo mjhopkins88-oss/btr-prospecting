@@ -243,6 +243,19 @@ def get_capital_group(group_id):
         [group_id],
     )
 
+    # Signals linked to this group.
+    out['signals'] = fetch_all(
+        '''
+        SELECT id, title, summary, source_url, signal_type, signal_scope,
+               importance, detected_at, contact_id, created_at
+        FROM prospecting_signals
+        WHERE group_id = ?
+        ORDER BY detected_at DESC NULLS LAST, created_at DESC
+        LIMIT 20
+        ''',
+        [group_id],
+    )
+
     return jsonify(out)
 
 
