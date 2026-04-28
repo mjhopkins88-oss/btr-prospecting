@@ -3,6 +3,10 @@ window.PerformancePage = function PerformancePage() {
 
   var _wo = useState(false); var workout = _wo[0]; var setWorkout = _wo[1];
   var _sq = useState(0); var squats = _sq[0]; var setSquats = _sq[1];
+  var _rev = useState(0); var revenue = _rev[0]; var setRevenue = _rev[1];
+  var _tgt = useState(50000); var revTarget = _tgt[0]; var setRevTarget = _tgt[1];
+  var _editRev = useState(false); var editingRev = _editRev[0]; var setEditingRev = _editRev[1];
+  var _editTgt = useState(false); var editingTgt = _editTgt[0]; var setEditingTgt = _editTgt[1];
   var touchpoints = 4;
   var followups = 2;
   var relActions = 1;
@@ -157,9 +161,90 @@ window.PerformancePage = function PerformancePage() {
         _checklistRow('Follow-ups', followups, '#f59e0b'),
         _checklistRow('Relationship Actions', relActions, '#3b82f6')
       )
-    )
+    ),
+
+    _revenueCard(revenue, setRevenue, revTarget, setRevTarget, editingRev, setEditingRev, editingTgt, setEditingTgt)
   );
 };
+
+function _revenueCard(revenue, setRevenue, target, setTarget, editingRev, setEditingRev, editingTgt, setEditingTgt) {
+  var pct = target > 0 ? Math.min(100, Math.round((revenue / target) * 100)) : 0;
+  var gap = Math.max(0, target - revenue);
+  var barColor = pct >= 100 ? '#10b981' : pct >= 60 ? '#14b8a6' : pct >= 30 ? '#f59e0b' : '#ef4444';
+
+  var sectionLabel = {
+    fontSize: '0.72rem', color: '#64748b', fontWeight: 700,
+    textTransform: 'uppercase', letterSpacing: '0.06em',
+    margin: '0 0 0.85rem', fontFamily: "'Inter', sans-serif"
+  };
+  var inputStyle = {
+    fontFamily: "'JetBrains Mono', monospace", fontSize: '0.85rem', fontWeight: 600,
+    color: '#0f172a', background: '#FFFFFF', border: '1px solid #e2e8f0',
+    borderRadius: '0.35rem', padding: '0.3rem 0.5rem', width: '8rem', outline: 'none'
+  };
+
+  function revDisplay() {
+    if (editingRev) {
+      return React.createElement('input', {
+        type: 'number', autoFocus: true, defaultValue: revenue,
+        style: inputStyle,
+        onBlur: function(e) { setRevenue(parseFloat(e.target.value) || 0); setEditingRev(false); },
+        onKeyDown: function(e) { if (e.key === 'Enter') { e.target.blur(); } }
+      });
+    }
+    return React.createElement('span', {
+      style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '1.1rem', fontWeight: 700, color: '#0f172a', cursor: 'pointer' },
+      onClick: function() { setEditingRev(true); }
+    }, '$' + revenue.toLocaleString());
+  }
+
+  function tgtDisplay() {
+    if (editingTgt) {
+      return React.createElement('input', {
+        type: 'number', autoFocus: true, defaultValue: target,
+        style: inputStyle,
+        onBlur: function(e) { setTarget(parseFloat(e.target.value) || 0); setEditingTgt(false); },
+        onKeyDown: function(e) { if (e.key === 'Enter') { e.target.blur(); } }
+      });
+    }
+    return React.createElement('span', {
+      style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '0.85rem', fontWeight: 600, color: '#64748b', cursor: 'pointer' },
+      onClick: function() { setEditingTgt(true); }
+    }, '$' + target.toLocaleString());
+  }
+
+  return React.createElement('div', {
+    style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.75rem', padding: '1.25rem', marginBottom: '1.5rem' }
+  },
+    React.createElement('h3', { style: sectionLabel }, 'Revenue'),
+
+    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.6rem' } },
+      React.createElement('div', null,
+        React.createElement('div', { style: { fontSize: '0.68rem', color: '#94a3b8', fontWeight: 600, marginBottom: '0.15rem' } }, 'CURRENT MONTH'),
+        revDisplay()
+      ),
+      React.createElement('div', { style: { textAlign: 'right' } },
+        React.createElement('div', { style: { fontSize: '0.68rem', color: '#94a3b8', fontWeight: 600, marginBottom: '0.15rem' } }, 'TARGET'),
+        tgtDisplay()
+      )
+    ),
+
+    React.createElement('div', {
+      style: { height: '0.5rem', background: '#f1f5f9', borderRadius: '9999px', overflow: 'hidden', marginBottom: '0.5rem' }
+    },
+      React.createElement('div', {
+        style: { height: '100%', width: pct + '%', background: barColor, borderRadius: '9999px', transition: 'width 0.3s' }
+      })
+    ),
+
+    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: '#94a3b8' } },
+      React.createElement('span', null, pct + '% of target'),
+      gap > 0
+        ? React.createElement('span', null, '$' + gap.toLocaleString() + ' remaining')
+        : React.createElement('span', { style: { color: '#10b981', fontWeight: 600 } }, 'Target reached!')
+    )
+  );
+}
 
 function _checklistRow(label, count, accent) {
   return React.createElement('div', {
