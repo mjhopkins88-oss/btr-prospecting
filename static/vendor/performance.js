@@ -26,8 +26,15 @@ window.PerformancePage = function PerformancePage() {
   var followups = eng ? (eng.daily_checklist || {}).followups || 0 : 0;
   var relActions = eng ? (eng.daily_checklist || {}).relationship || 0 : 0;
   var callsMeetings = eng ? ((eng.daily_checklist || {}).followups || 0) + ((eng.daily_checklist || {}).outreach || 0) : 0;
-  var streak = eng ? eng.streak : 0;
   var engMomentum = eng ? (eng.momentum || 'low') : 'low';
+
+  var todayHasActivity = workout || touchpoints > 0 || followups > 0 || relActions > 0;
+  var dayOfWeek = new Date().getDay();
+  var isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
+  var serverStreak = eng ? eng.streak : 0;
+  var streak = serverStreak;
+  if (isWeekday && todayHasActivity && serverStreak === 0) streak = 1;
+  if (isWeekday && !todayHasActivity && serverStreak > 0) streak = serverStreak - 1;
 
   var revPct = revTarget > 0 ? revenue / revTarget : 0;
   var daily = _perfScore(workout, squats, touchpoints, followups, relActions, revPct);
