@@ -25,8 +25,11 @@ window.PerformancePage = function PerformancePage() {
   var streak = eng ? eng.streak : 0;
   var engMomentum = eng ? (eng.momentum || 'low') : 'low';
 
-  var daily = 72;
-  var weekly = 310;
+  var revPct = revTarget > 0 ? revenue / revTarget : 0;
+  var daily = _perfScore(workout, squats, touchpoints, followups, relActions, revPct);
+  var weeklyTp = eng ? (eng.week_tp_count || 0) : 0;
+  var weeklyGoal = eng ? (eng.weekly_goal || 40) : 40;
+  var weekly = Math.min(100, Math.round((weeklyTp / weeklyGoal) * 100));
   var momentum = engMomentum === 'high' ? 'HIGH' : engMomentum === 'building' ? 'BUILDING' : 'SLIPPING';
 
   var momentumColors = {
@@ -290,6 +293,17 @@ function _businessOutputCard(tp, calls, fu, rel) {
       })
     )
   );
+}
+
+function _perfScore(workout, squats, tp, fu, rel, revPct) {
+  var s = 0;
+  s += workout ? 10 : 0;                        // Workout: 10
+  s += Math.min(10, Math.floor(squats / 5));     // Squats: 1pt per 5, max 10
+  s += Math.min(30, tp * 3);                     // Touchpoints: 3pt each, max 30
+  s += Math.min(15, fu * 5);                     // Follow-ups: 5pt each, max 15
+  s += Math.min(15, rel * 5);                    // Relationships: 5pt each, max 15
+  s += Math.min(20, Math.round(revPct * 20));    // Revenue %: proportional, max 20
+  return Math.min(100, s);
 }
 
 function _checklistRow(label, count, accent) {
