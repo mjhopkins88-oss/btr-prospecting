@@ -1,5 +1,7 @@
 window.PerformancePage = function PerformancePage() {
   var useState = React.useState;
+  var useEffect = React.useEffect;
+  var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:5000' : window.location.origin;
 
   var _wo = useState(false); var workout = _wo[0]; var setWorkout = _wo[1];
   var _sq = useState(0); var squats = _sq[0]; var setSquats = _sq[1];
@@ -7,14 +9,25 @@ window.PerformancePage = function PerformancePage() {
   var _tgt = useState(50000); var revTarget = _tgt[0]; var setRevTarget = _tgt[1];
   var _editRev = useState(false); var editingRev = _editRev[0]; var setEditingRev = _editRev[1];
   var _editTgt = useState(false); var editingTgt = _editTgt[0]; var setEditingTgt = _editTgt[1];
-  var touchpoints = 4;
-  var followups = 2;
-  var relActions = 1;
+  var _eng = useState(null); var eng = _eng[0]; var setEng = _eng[1];
+
+  useEffect(function() {
+    fetch(API_BASE + '/api/prospecting/engagement')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) { if (d) setEng(d); })
+      .catch(function() {});
+  }, []);
+
+  var touchpoints = eng ? eng.today_touchpoints : 0;
+  var followups = eng ? (eng.daily_checklist || {}).followups || 0 : 0;
+  var relActions = eng ? (eng.daily_checklist || {}).relationship || 0 : 0;
+  var callsMeetings = eng ? ((eng.daily_checklist || {}).followups || 0) + ((eng.daily_checklist || {}).outreach || 0) : 0;
+  var streak = eng ? eng.streak : 0;
+  var engMomentum = eng ? (eng.momentum || 'low') : 'low';
 
   var daily = 72;
   var weekly = 310;
-  var streak = 5;
-  var momentum = 'BUILDING';
+  var momentum = engMomentum === 'high' ? 'HIGH' : engMomentum === 'building' ? 'BUILDING' : 'SLIPPING';
 
   var momentumColors = {
     HIGH: { color: '#10b981', bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.25)' },
@@ -163,7 +176,9 @@ window.PerformancePage = function PerformancePage() {
       )
     ),
 
-    _revenueCard(revenue, setRevenue, revTarget, setRevTarget, editingRev, setEditingRev, editingTgt, setEditingTgt)
+    _revenueCard(revenue, setRevenue, revTarget, setRevTarget, editingRev, setEditingRev, editingTgt, setEditingTgt),
+
+    _businessOutputCard(touchpoints, callsMeetings, followups, relActions)
   );
 };
 
@@ -242,6 +257,37 @@ function _revenueCard(revenue, setRevenue, target, setTarget, editingRev, setEdi
       gap > 0
         ? React.createElement('span', null, '$' + gap.toLocaleString() + ' remaining')
         : React.createElement('span', { style: { color: '#10b981', fontWeight: 600 } }, 'Target reached!')
+    )
+  );
+}
+
+function _businessOutputCard(tp, calls, fu, rel) {
+  var items = [
+    { label: 'Touchpoints Today', value: tp, accent: '#14b8a6' },
+    { label: 'Calls / Meetings', value: calls, accent: '#3b82f6' },
+    { label: 'Follow-ups Completed', value: fu, accent: '#f59e0b' },
+    { label: 'Relationships Advanced', value: rel, accent: '#6366f1' }
+  ];
+  return React.createElement('div', {
+    style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.75rem', padding: '1.25rem', marginBottom: '1.5rem' }
+  },
+    React.createElement('h3', {
+      style: { fontSize: '0.72rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 0.85rem', fontFamily: "'Inter', sans-serif" }
+    }, 'Business Output'),
+    React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' } },
+      items.map(function(it) {
+        return React.createElement('div', {
+          key: it.label,
+          style: { padding: '0.65rem 0.75rem', background: '#F7F9FC', borderRadius: '0.5rem', border: '1px solid #e2e8f0' }
+        },
+          React.createElement('div', {
+            style: { fontSize: '0.68rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.25rem', fontFamily: "'Inter', sans-serif" }
+          }, it.label),
+          React.createElement('div', {
+            style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '1.25rem', fontWeight: 700, color: it.value > 0 ? it.accent : '#cbd5e1' }
+          }, it.value)
+        );
+      })
     )
   );
 }
