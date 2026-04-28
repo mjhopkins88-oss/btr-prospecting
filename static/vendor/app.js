@@ -1382,6 +1382,8 @@ function App({
     user: user
   }), activeTab === 'coi' && /*#__PURE__*/React.createElement(CentersOfInfluencePage, {
     user: user
+  }), activeTab === 'performance' && /*#__PURE__*/React.createElement(PerformancePage, {
+    user: user
   }), activeTab === 'linkedinhub' && /*#__PURE__*/React.createElement(LinkedInHub, {
     user: user
   }), activeTab === 'admin' && user && user.is_super_admin && /*#__PURE__*/React.createElement(AdminPage, {
@@ -5567,6 +5569,14 @@ const NAV_SECTIONS = [
       { id: 'intelligence', label: 'Sunbelt Intelligence' },
       { id: 'predictions', label: 'Predicted Devs' },
       { id: 'markets', label: 'Market Expansion' }
+    ]
+  },
+  {
+    id: 'performance_section',
+    label: 'Performance',
+    icon: '◆', // ◆
+    children: [
+      { id: 'performance', label: 'Dashboard' }
     ]
   },
   {

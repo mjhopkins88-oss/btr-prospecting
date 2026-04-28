@@ -2284,6 +2284,40 @@ def init_db():
     c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dc_city ON development_corridors(city, state)')
     c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dc_density ON development_corridors(signal_density DESC)')
 
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS performance_daily (
+            id TEXT PRIMARY KEY,
+            date_str TEXT NOT NULL,
+            workout INTEGER DEFAULT 0,
+            squats INTEGER DEFAULT 0,
+            revenue REAL DEFAULT 0,
+            revenue_target REAL DEFAULT 0,
+            daily_focus TEXT,
+            extra_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    try:
+        c.safe_execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_perf_daily_date ON performance_daily(date_str)')
+    except Exception:
+        pass
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS performance_logs (
+            id TEXT PRIMARY KEY,
+            date_str TEXT NOT NULL,
+            log_type TEXT NOT NULL,
+            raw_text TEXT,
+            parsed_value TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_perf_logs_date ON performance_logs(date_str, created_at DESC)')
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -2335,6 +2369,7 @@ from api.routes.capital_groups import capital_groups_bp
 from api.routes.prospecting import prospecting_bp
 from api.routes.coi import coi_bp
 from api.routes.assistant import assistant_bp
+from api.routes.performance import performance_bp
 
 app.register_blueprint(leads_bp)
 app.register_blueprint(projects_bp)
@@ -2356,6 +2391,7 @@ app.register_blueprint(capital_groups_bp)
 app.register_blueprint(prospecting_bp)
 app.register_blueprint(coi_bp)
 app.register_blueprint(assistant_bp)
+app.register_blueprint(performance_bp)
 
 # ===================================================================
 # DASHBOARD — Weather endpoint (WeatherAPI.com)
