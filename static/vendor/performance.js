@@ -3,17 +3,35 @@ window.PerformancePage = function PerformancePage() {
   var useEffect = React.useEffect;
   var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:5000' : window.location.origin;
 
-  var _wo = useState(false); var workout = _wo[0]; var setWorkout = _wo[1];
-  var _sq = useState(0); var squats = _sq[0]; var setSquats = _sq[1];
-  var _rev = useState(0); var revenue = _rev[0]; var setRevenue = _rev[1];
-  var _tgt = useState(50000); var revTarget = _tgt[0]; var setRevTarget = _tgt[1];
+  var _today = new Date().toISOString().slice(0, 10);
+  var _month = _today.slice(0, 7);
+
+  function _lsGet(key, fallback) { try { var v = localStorage.getItem(key); return v !== null ? JSON.parse(v) : fallback; } catch(e) { return fallback; } }
+  function _lsSet(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch(e) {} }
+
+  var _wo = useState(function() { return _lsGet('perf_workout_' + _today, false); });
+  var workout = _wo[0]; var setWorkout = _wo[1];
+  var _sq = useState(function() { return _lsGet('perf_squats_' + _today, 0); });
+  var squats = _sq[0]; var setSquats = _sq[1];
+  var _rev = useState(function() { return _lsGet('perf_revenue_' + _month, 0); });
+  var revenue = _rev[0]; var setRevenue = _rev[1];
+  var _tgt = useState(function() { return _lsGet('perf_target_' + _month, 50000); });
+  var revTarget = _tgt[0]; var setRevTarget = _tgt[1];
   var _editRev = useState(false); var editingRev = _editRev[0]; var setEditingRev = _editRev[1];
   var _editTgt = useState(false); var editingTgt = _editTgt[0]; var setEditingTgt = _editTgt[1];
   var _eng = useState(null); var eng = _eng[0]; var setEng = _eng[1];
   var _lt = useState(''); var logText = _lt[0]; var setLogText = _lt[1];
   var _lc = useState(null); var logConfirm = _lc[0]; var setLogConfirm = _lc[1];
-  var _fc = useState(''); var focus = _fc[0]; var setFocus = _fc[1];
-  var _fl = useState(false); var focusLocked = _fl[0]; var setFocusLocked = _fl[1];
+  var _fc = useState(function() { return _lsGet('perf_focus_' + _today, ''); });
+  var focus = _fc[0]; var setFocus = _fc[1];
+  var _fl = useState(function() { var f = _lsGet('perf_focus_' + _today, ''); return f.length > 0; });
+  var focusLocked = _fl[0]; var setFocusLocked = _fl[1];
+
+  useEffect(function() { _lsSet('perf_workout_' + _today, workout); }, [workout]);
+  useEffect(function() { _lsSet('perf_squats_' + _today, squats); }, [squats]);
+  useEffect(function() { _lsSet('perf_revenue_' + _month, revenue); }, [revenue]);
+  useEffect(function() { _lsSet('perf_target_' + _month, revTarget); }, [revTarget]);
+  useEffect(function() { _lsSet('perf_focus_' + _today, focus); }, [focus]);
 
   useEffect(function() {
     fetch(API_BASE + '/api/prospecting/engagement')
