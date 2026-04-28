@@ -1,6 +1,21 @@
+var _perfStylesInjected = false;
+function _injectPerfStyles() {
+  if (_perfStylesInjected) return;
+  _perfStylesInjected = true;
+  var s = document.createElement('style');
+  s.textContent = [
+    '@keyframes perfPulse { 0% { transform: scale(1); } 40% { transform: scale(1.12); } 100% { transform: scale(1); } }',
+    '@keyframes perfBarGlow { 0%,100% { box-shadow: none; } 50% { box-shadow: 0 0 8px rgba(20,184,166,0.4); } }',
+    '@keyframes perfFadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }'
+  ].join('\n');
+  document.head.appendChild(s);
+}
+
 window.PerformancePage = function PerformancePage() {
+  _injectPerfStyles();
   var useState = React.useState;
   var useEffect = React.useEffect;
+  var useRef = React.useRef;
   var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:5000' : window.location.origin;
 
   var _today = new Date().toISOString().slice(0, 10);
@@ -26,12 +41,21 @@ window.PerformancePage = function PerformancePage() {
   var focus = _fc[0]; var setFocus = _fc[1];
   var _fl = useState(function() { var f = _lsGet('perf_focus_' + _today, ''); return f.length > 0; });
   var focusLocked = _fl[0]; var setFocusLocked = _fl[1];
+  var _sp = useState(0); var scorePulse = _sp[0]; var setScorePulse = _sp[1];
+  var prevScoreRef = useRef(null);
 
   useEffect(function() { _lsSet('perf_workout_' + _today, workout); }, [workout]);
   useEffect(function() { _lsSet('perf_squats_' + _today, squats); }, [squats]);
   useEffect(function() { _lsSet('perf_revenue_' + _month, revenue); }, [revenue]);
   useEffect(function() { _lsSet('perf_target_' + _month, revTarget); }, [revTarget]);
   useEffect(function() { _lsSet('perf_focus_' + _today, focus); }, [focus]);
+
+  useEffect(function() {
+    if (prevScoreRef.current !== null && prevScoreRef.current !== daily) {
+      setScorePulse(function(p) { return p + 1; });
+    }
+    prevScoreRef.current = daily;
+  }, [daily]);
 
   useEffect(function() {
     fetch(API_BASE + '/api/prospecting/engagement')
@@ -161,11 +185,11 @@ window.PerformancePage = function PerformancePage() {
     ),
 
     React.createElement('div', {
-      style: { display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.5rem' }
+      style: { display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem' }
     },
       React.createElement('div', { style: cardStyle },
         React.createElement('div', { style: labelStyle }, 'Daily Score'),
-        React.createElement('div', { style: { ...valueStyle, color: '#14b8a6' } }, daily)
+        React.createElement('div', { key: 'ds-' + scorePulse, style: { ...valueStyle, color: '#14b8a6', animation: scorePulse > 0 ? 'perfPulse 0.4s ease-out' : 'none' } }, daily)
       ),
       React.createElement('div', { style: cardStyle },
         React.createElement('div', { style: labelStyle }, 'Weekly Score'),
@@ -226,7 +250,7 @@ window.PerformancePage = function PerformancePage() {
         border: '1px solid rgba(226,232,240,0.5)',
         borderRadius: '0.75rem',
         padding: '1.25rem',
-        marginBottom: '1.5rem'
+        marginBottom: '1.25rem'
       }
     },
       React.createElement('h3', {
@@ -356,7 +380,7 @@ function _revenueCard(revenue, setRevenue, target, setTarget, editingRev, setEdi
   }
 
   return React.createElement('div', {
-    style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.75rem', padding: '1.25rem', marginBottom: '1.5rem' }
+    style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.75rem', padding: '1.25rem', marginBottom: '1.25rem' }
   },
     React.createElement('h3', { style: sectionLabel }, 'Revenue'),
 
@@ -375,7 +399,7 @@ function _revenueCard(revenue, setRevenue, target, setTarget, editingRev, setEdi
       style: { height: '0.5rem', background: '#f1f5f9', borderRadius: '9999px', overflow: 'hidden', marginBottom: '0.5rem' }
     },
       React.createElement('div', {
-        style: { height: '100%', width: pct + '%', background: barColor, borderRadius: '9999px', transition: 'width 0.3s' }
+        style: { height: '100%', width: pct + '%', background: barColor, borderRadius: '9999px', transition: 'width 0.5s ease-out', animation: pct > 0 && pct < 100 ? 'perfBarGlow 2s ease-in-out infinite' : 'none' }
       })
     ),
 
@@ -396,7 +420,7 @@ function _businessOutputCard(tp, calls, fu, rel) {
     { label: 'Relationships Advanced', value: rel, accent: '#6366f1' }
   ];
   return React.createElement('div', {
-    style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.75rem', padding: '1.25rem', marginBottom: '1.5rem' }
+    style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.75rem', padding: '1.25rem', marginBottom: '1.25rem' }
   },
     React.createElement('h3', {
       style: { fontSize: '0.72rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 0.85rem', fontFamily: "'Inter', sans-serif" }
@@ -437,7 +461,7 @@ function _recoveryCard(score, tp, revPct, workout, squats, setWorkout, setSquats
   };
 
   return React.createElement('div', {
-    style: { background: 'rgba(245,158,11,0.04)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: '0.75rem', padding: '1.1rem 1.25rem', marginBottom: '1.5rem' }
+    style: { background: 'rgba(245,158,11,0.04)', border: '1px solid rgba(245,158,11,0.2)', borderLeft: '3px solid #f59e0b', borderRadius: '0.75rem', padding: '1.1rem 1.25rem', marginBottom: '1.25rem', animation: 'perfFadeIn 0.3s ease-out' }
   },
     React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.65rem' } },
       React.createElement('span', { style: { fontSize: '0.95rem' } }, '⚡'),
@@ -477,7 +501,7 @@ function _weeklySummaryCard(weekTp, calls, workout, followups, weeklyScore, week
   ];
 
   return React.createElement('div', {
-    style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.75rem', padding: '1.25rem', marginBottom: '1.5rem' }
+    style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.75rem', padding: '1.25rem', marginBottom: '1.25rem' }
   },
     React.createElement('div', {
       style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }
@@ -527,14 +551,21 @@ function _extractNum(text) {
 }
 
 function _checklistRow(label, count, accent) {
+  var done = count > 0;
   return React.createElement('div', {
-    style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.55rem 0.7rem', background: '#F7F9FC', borderRadius: '0.5rem', border: '1px solid #e2e8f0' }
+    style: {
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '0.55rem 0.7rem', borderRadius: '0.5rem',
+      background: done ? accent + '08' : '#F7F9FC',
+      border: '1px solid ' + (done ? accent + '30' : '#e2e8f0'),
+      transition: 'background 0.25s, border-color 0.25s'
+    }
   },
     React.createElement('span', {
-      style: { fontSize: '0.85rem', fontWeight: 600, color: '#1e293b', fontFamily: "'Inter', sans-serif" }
+      style: { fontSize: '0.85rem', fontWeight: 600, color: done ? accent : '#1e293b', fontFamily: "'Inter', sans-serif", transition: 'color 0.25s' }
     }, label),
     React.createElement('span', {
-      style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '0.95rem', fontWeight: 700, color: count > 0 ? accent : '#94a3b8' }
+      style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '0.95rem', fontWeight: 700, color: done ? accent : '#94a3b8' }
     }, count)
   );
 }
