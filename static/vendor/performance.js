@@ -278,7 +278,9 @@ window.PerformancePage = function PerformancePage() {
 
     _businessOutputCard(touchpoints, callsMeetings, followups, relActions),
 
-    _recoveryCard(daily, touchpoints, revPct, workout, squats, setWorkout, setSquats)
+    _recoveryCard(daily, touchpoints, revPct, workout, squats, setWorkout, setSquats),
+
+    _weeklySummaryCard(weeklyTp, callsMeetings, workout, followups, weekly, weeklyGoal)
   );
 };
 
@@ -431,6 +433,52 @@ function _recoveryCard(score, tp, revPct, workout, squats, setWorkout, setSquats
           a.fn
             ? React.createElement('button', { onClick: a.fn, style: btnStyle }, 'Do it')
             : React.createElement('span', { style: { fontSize: '0.65rem', color: '#d97706', fontWeight: 600 } }, 'Go')
+        );
+      })
+    )
+  );
+}
+
+function _weeklySummaryCard(weekTp, calls, workout, followups, weeklyScore, weeklyGoal) {
+  var status = weeklyScore >= 80 ? 'STRONG' : weeklyScore >= 50 ? 'ON TRACK' : 'BEHIND';
+  var statusColors = { STRONG: '#10b981', 'ON TRACK': '#f59e0b', BEHIND: '#ef4444' };
+  var sc = statusColors[status];
+
+  var items = [
+    { label: 'Touchpoints', value: weekTp, sub: '/ ' + weeklyGoal + ' goal' },
+    { label: 'Calls / Meetings', value: calls, sub: 'this week' },
+    { label: 'Workouts', value: workout ? 1 : 0, sub: 'this week' },
+    { label: 'Follow-ups', value: followups, sub: 'completed' }
+  ];
+
+  return React.createElement('div', {
+    style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.75rem', padding: '1.25rem', marginBottom: '1.5rem' }
+  },
+    React.createElement('div', {
+      style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }
+    },
+      React.createElement('h3', {
+        style: { fontSize: '0.72rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0, fontFamily: "'Inter', sans-serif" }
+      }, 'This Week'),
+      React.createElement('span', {
+        style: { fontSize: '0.7rem', fontWeight: 700, color: sc, background: sc + '12', padding: '0.2rem 0.55rem', borderRadius: '9999px', letterSpacing: '0.04em', fontFamily: "'Inter', sans-serif" }
+      }, status)
+    ),
+    React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' } },
+      items.map(function(it) {
+        return React.createElement('div', {
+          key: it.label,
+          style: { padding: '0.55rem 0.7rem', background: '#F7F9FC', borderRadius: '0.5rem', border: '1px solid #e2e8f0' }
+        },
+          React.createElement('div', {
+            style: { fontSize: '0.68rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.2rem', fontFamily: "'Inter', sans-serif" }
+          }, it.label),
+          React.createElement('div', { style: { display: 'flex', alignItems: 'baseline', gap: '0.3rem' } },
+            React.createElement('span', {
+              style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '1.15rem', fontWeight: 700, color: it.value > 0 ? '#0f172a' : '#cbd5e1' }
+            }, it.value),
+            React.createElement('span', { style: { fontSize: '0.65rem', color: '#94a3b8' } }, it.sub)
+          )
         );
       })
     )
