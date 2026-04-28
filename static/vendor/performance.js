@@ -10,6 +10,8 @@ window.PerformancePage = function PerformancePage() {
   var _editRev = useState(false); var editingRev = _editRev[0]; var setEditingRev = _editRev[1];
   var _editTgt = useState(false); var editingTgt = _editTgt[0]; var setEditingTgt = _editTgt[1];
   var _eng = useState(null); var eng = _eng[0]; var setEng = _eng[1];
+  var _lt = useState(''); var logText = _lt[0]; var setLogText = _lt[1];
+  var _lc = useState(null); var logConfirm = _lc[0]; var setLogConfirm = _lc[1];
 
   useEffect(function() {
     fetch(API_BASE + '/api/prospecting/engagement')
@@ -64,17 +66,72 @@ window.PerformancePage = function PerformancePage() {
     lineHeight: 1.2
   };
 
+  function _handleLog() {
+    var raw = logText.trim();
+    if (!raw) return;
+    var low = raw.toLowerCase();
+    var num = _extractNum(low);
+    var msg = null;
+
+    if (low.indexOf('squat') !== -1) {
+      var add = num > 0 ? num : 10;
+      setSquats(squats + add);
+      msg = '+' + add + ' squats';
+    } else if (low.indexOf('workout') !== -1 || low.indexOf('worked out') !== -1 || low.indexOf('gym') !== -1) {
+      setWorkout(true);
+      msg = 'Workout logged';
+    } else if (low.indexOf('deal') !== -1 || low.indexOf('$') !== -1 || low.indexOf('revenue') !== -1 || low.indexOf('closed') !== -1) {
+      var amt = num > 0 ? num : 0;
+      if (low.indexOf('k') !== -1 && amt < 1000) amt = amt * 1000;
+      if (amt > 0) { setRevenue(revenue + amt); msg = '+$' + amt.toLocaleString() + ' revenue'; }
+      else { msg = 'No amount found'; }
+    } else if (low.indexOf('call') !== -1 || low.indexOf('met ') !== -1 || low.indexOf('meeting') !== -1) {
+      msg = 'Call noted (log a touchpoint in CRM to track)';
+    } else {
+      msg = 'Logged: ' + raw;
+    }
+
+    setLogText('');
+    if (msg) { setLogConfirm(msg); setTimeout(function() { setLogConfirm(null); }, 2500); }
+  }
+
   return React.createElement('div', { style: { padding: '0' } },
-    React.createElement('h2', {
-      style: {
-        fontFamily: "'Orbitron', sans-serif",
-        fontSize: '1.3rem',
-        fontWeight: 700,
-        color: '#0f172a',
-        marginBottom: '1.25rem',
-        letterSpacing: '0.03em'
-      }
-    }, 'Performance'),
+    React.createElement('div', {
+      style: { display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }
+    },
+      React.createElement('h2', {
+        style: {
+          fontFamily: "'Orbitron', sans-serif",
+          fontSize: '1.3rem',
+          fontWeight: 700,
+          color: '#0f172a',
+          margin: 0,
+          letterSpacing: '0.03em',
+          flexShrink: 0
+        }
+      }, 'Performance'),
+      React.createElement('div', { style: { flex: 1, position: 'relative' } },
+        React.createElement('input', {
+          value: logText,
+          onChange: function(e) { setLogText(e.target.value); },
+          onKeyDown: function(e) { if (e.key === 'Enter') _handleLog(); },
+          placeholder: 'Log anything... "did 20 squats" "worked out" "closed deal 15k"',
+          style: {
+            width: '100%', padding: '0.55rem 0.85rem', fontSize: '0.82rem',
+            fontFamily: "'Inter', sans-serif", background: '#F7F9FC',
+            border: '1px solid #e2e8f0', borderRadius: '0.5rem', outline: 'none',
+            color: '#1e293b', boxSizing: 'border-box'
+          }
+        }),
+        logConfirm ? React.createElement('div', {
+          style: {
+            position: 'absolute', top: '100%', left: 0, marginTop: '0.3rem',
+            fontSize: '0.72rem', fontWeight: 600, color: '#10b981',
+            fontFamily: "'Inter', sans-serif", whiteSpace: 'nowrap'
+          }
+        }, logConfirm) : null
+      )
+    ),
 
     React.createElement('div', {
       style: { display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.5rem' }
@@ -304,6 +361,11 @@ function _perfScore(workout, squats, tp, fu, rel, revPct) {
   s += Math.min(15, rel * 5);                    // Relationships: 5pt each, max 15
   s += Math.min(20, Math.round(revPct * 20));    // Revenue %: proportional, max 20
   return Math.min(100, s);
+}
+
+function _extractNum(text) {
+  var m = text.replace(/[$,]/g, '').match(/(\d+(?:\.\d+)?)/);
+  return m ? parseFloat(m[1]) : 0;
 }
 
 function _checklistRow(label, count, accent) {
