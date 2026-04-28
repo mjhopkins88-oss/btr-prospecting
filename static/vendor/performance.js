@@ -1,33 +1,91 @@
+var _perfStylesInjected = false;
+function _injectPerfStyles() {
+  if (_perfStylesInjected) return;
+  _perfStylesInjected = true;
+  var s = document.createElement('style');
+  s.textContent = [
+    '@keyframes perfPulse { 0% { transform: scale(1); } 40% { transform: scale(1.12); } 100% { transform: scale(1); } }',
+    '@keyframes perfBarGlow { 0%,100% { box-shadow: none; } 50% { box-shadow: 0 0 8px rgba(20,184,166,0.4); } }',
+    '@keyframes perfFadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }'
+  ].join('\n');
+  document.head.appendChild(s);
+}
+
 window.PerformancePage = function PerformancePage() {
+  _injectPerfStyles();
   var useState = React.useState;
   var useEffect = React.useEffect;
+  var useRef = React.useRef;
   var API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:5000' : window.location.origin;
 
-  var _wo = useState(false); var workout = _wo[0]; var setWorkout = _wo[1];
-  var _sq = useState(0); var squats = _sq[0]; var setSquats = _sq[1];
-  var _rev = useState(0); var revenue = _rev[0]; var setRevenue = _rev[1];
-  var _tgt = useState(50000); var revTarget = _tgt[0]; var setRevTarget = _tgt[1];
+  var _today = new Date().toISOString().slice(0, 10);
+  var _month = _today.slice(0, 7);
+
+  function _lsGet(key, fallback) { try { var v = localStorage.getItem(key); return v !== null ? JSON.parse(v) : fallback; } catch(e) { return fallback; } }
+  function _lsSet(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch(e) {} }
+
+  var _wo = useState(function() { return _lsGet('perf_workout_' + _today, false); });
+  var workout = _wo[0]; var setWorkout = _wo[1];
+  var _sq = useState(function() { return _lsGet('perf_squats_' + _today, 0); });
+  var squats = _sq[0]; var setSquats = _sq[1];
+  var _rev = useState(function() { return _lsGet('perf_revenue_' + _month, 0); });
+  var revenue = _rev[0]; var setRevenue = _rev[1];
+  var _tgt = useState(function() { return _lsGet('perf_target_' + _month, 50000); });
+  var revTarget = _tgt[0]; var setRevTarget = _tgt[1];
   var _editRev = useState(false); var editingRev = _editRev[0]; var setEditingRev = _editRev[1];
   var _editTgt = useState(false); var editingTgt = _editTgt[0]; var setEditingTgt = _editTgt[1];
   var _eng = useState(null); var eng = _eng[0]; var setEng = _eng[1];
   var _lt = useState(''); var logText = _lt[0]; var setLogText = _lt[1];
   var _lc = useState(null); var logConfirm = _lc[0]; var setLogConfirm = _lc[1];
-  var _fc = useState(''); var focus = _fc[0]; var setFocus = _fc[1];
-  var _fl = useState(false); var focusLocked = _fl[0]; var setFocusLocked = _fl[1];
+  var _fc = useState(function() { return _lsGet('perf_focus_' + _today, ''); });
+  var focus = _fc[0]; var setFocus = _fc[1];
+  var _fl = useState(function() { var f = _lsGet('perf_focus_' + _today, ''); return f.length > 0; });
+  var focusLocked = _fl[0]; var setFocusLocked = _fl[1];
+  var _sp = useState(0); var scorePulse = _sp[0]; var setScorePulse = _sp[1];
+  var prevScoreRef = useRef(null);
+
+  useEffect(function() { _lsSet('perf_workout_' + _today, workout); }, [workout]);
+  useEffect(function() { _lsSet('perf_squats_' + _today, squats); }, [squats]);
+  useEffect(function() { _lsSet('perf_revenue_' + _month, revenue); }, [revenue]);
+  useEffect(function() { _lsSet('perf_target_' + _month, revTarget); }, [revTarget]);
+  useEffect(function() { _lsSet('perf_focus_' + _today, focus); }, [focus]);
 
   useEffect(function() {
+    if (prevScoreRef.current !== null && prevScoreRef.current !== daily) {
+      setScorePulse(function(p) { return p + 1; });
+    }
+    prevScoreRef.current = daily;
+  }, [daily]);
+
+  function _fetchEng() {
     fetch(API_BASE + '/api/prospecting/engagement')
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(d) { if (d) setEng(d); })
       .catch(function() {});
+  }
+
+  useEffect(function() {
+    _fetchEng();
+    var interval = setInterval(_fetchEng, 60000);
+    function onVisible() { if (!document.hidden) _fetchEng(); }
+    document.addEventListener('visibilitychange', onVisible);
+    return function() { clearInterval(interval); document.removeEventListener('visibilitychange', onVisible); };
   }, []);
 
   var touchpoints = eng ? eng.today_touchpoints : 0;
   var followups = eng ? (eng.daily_checklist || {}).followups || 0 : 0;
+  var outreach = eng ? (eng.daily_checklist || {}).outreach || 0 : 0;
   var relActions = eng ? (eng.daily_checklist || {}).relationship || 0 : 0;
-  var callsMeetings = eng ? ((eng.daily_checklist || {}).followups || 0) + ((eng.daily_checklist || {}).outreach || 0) : 0;
-  var streak = eng ? eng.streak : 0;
+  var callsMeetings = followups + outreach;
   var engMomentum = eng ? (eng.momentum || 'low') : 'low';
+
+  var todayHasActivity = workout || touchpoints > 0 || followups > 0 || relActions > 0;
+  var dayOfWeek = new Date().getDay();
+  var isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
+  var serverStreak = eng ? eng.streak : 0;
+  var streak = serverStreak;
+  if (isWeekday && todayHasActivity && serverStreak === 0) streak = 1;
+  if (isWeekday && !todayHasActivity && serverStreak > 0) streak = serverStreak - 1;
 
   var revPct = revTarget > 0 ? revenue / revTarget : 0;
   var daily = _perfScore(workout, squats, touchpoints, followups, relActions, revPct);
@@ -136,11 +194,11 @@ window.PerformancePage = function PerformancePage() {
     ),
 
     React.createElement('div', {
-      style: { display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.5rem' }
+      style: { display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem' }
     },
       React.createElement('div', { style: cardStyle },
         React.createElement('div', { style: labelStyle }, 'Daily Score'),
-        React.createElement('div', { style: { ...valueStyle, color: '#14b8a6' } }, daily)
+        React.createElement('div', { key: 'ds-' + scorePulse, style: { ...valueStyle, color: '#14b8a6', animation: scorePulse > 0 ? 'perfPulse 0.4s ease-out' : 'none' } }, daily)
       ),
       React.createElement('div', { style: cardStyle },
         React.createElement('div', { style: labelStyle }, 'Weekly Score'),
@@ -201,7 +259,7 @@ window.PerformancePage = function PerformancePage() {
         border: '1px solid rgba(226,232,240,0.5)',
         borderRadius: '0.75rem',
         padding: '1.25rem',
-        marginBottom: '1.5rem'
+        marginBottom: '1.25rem'
       }
     },
       React.createElement('h3', {
@@ -276,7 +334,11 @@ window.PerformancePage = function PerformancePage() {
 
     _revenueCard(revenue, setRevenue, revTarget, setRevTarget, editingRev, setEditingRev, editingTgt, setEditingTgt),
 
-    _businessOutputCard(touchpoints, callsMeetings, followups, relActions)
+    _businessOutputCard(touchpoints, callsMeetings, followups, relActions),
+
+    _recoveryCard(daily, touchpoints, revPct, workout, squats, setWorkout, setSquats),
+
+    _weeklySummaryCard(weeklyTp, callsMeetings, workout, followups, weekly, weeklyGoal)
   );
 };
 
@@ -327,7 +389,7 @@ function _revenueCard(revenue, setRevenue, target, setTarget, editingRev, setEdi
   }
 
   return React.createElement('div', {
-    style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.75rem', padding: '1.25rem', marginBottom: '1.5rem' }
+    style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.75rem', padding: '1.25rem', marginBottom: '1.25rem' }
   },
     React.createElement('h3', { style: sectionLabel }, 'Revenue'),
 
@@ -346,7 +408,7 @@ function _revenueCard(revenue, setRevenue, target, setTarget, editingRev, setEdi
       style: { height: '0.5rem', background: '#f1f5f9', borderRadius: '9999px', overflow: 'hidden', marginBottom: '0.5rem' }
     },
       React.createElement('div', {
-        style: { height: '100%', width: pct + '%', background: barColor, borderRadius: '9999px', transition: 'width 0.3s' }
+        style: { height: '100%', width: pct + '%', background: barColor, borderRadius: '9999px', transition: 'width 0.5s ease-out', animation: pct > 0 && pct < 100 ? 'perfBarGlow 2s ease-in-out infinite' : 'none' }
       })
     ),
 
@@ -367,7 +429,7 @@ function _businessOutputCard(tp, calls, fu, rel) {
     { label: 'Relationships Advanced', value: rel, accent: '#6366f1' }
   ];
   return React.createElement('div', {
-    style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.75rem', padding: '1.25rem', marginBottom: '1.5rem' }
+    style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.75rem', padding: '1.25rem', marginBottom: '1.25rem' }
   },
     React.createElement('h3', {
       style: { fontSize: '0.72rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 0.85rem', fontFamily: "'Inter', sans-serif" }
@@ -384,6 +446,97 @@ function _businessOutputCard(tp, calls, fu, rel) {
           React.createElement('div', {
             style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '1.25rem', fontWeight: 700, color: it.value > 0 ? it.accent : '#cbd5e1' }
           }, it.value)
+        );
+      })
+    )
+  );
+}
+
+function _recoveryCard(score, tp, revPct, workout, squats, setWorkout, setSquats) {
+  var show = score < 60 || tp < 4 || revPct < 0.3;
+  if (!show) return null;
+
+  var actions = [];
+  if (!workout) actions.push({ label: 'Complete workout', icon: '+10 pts', fn: function() { setWorkout(true); } });
+  if (squats < 50) actions.push({ label: 'Log 10 squats', icon: '+2 pts', fn: function() { setSquats(squats + 10); } });
+  if (tp < 4) actions.push({ label: 'Add 3 touchpoints', icon: '+9 pts', fn: null });
+  if (actions.length < 3 && revPct < 0.3) actions.push({ label: 'Log a deal or revenue', icon: 'up to +20 pts', fn: null });
+  actions = actions.slice(0, 3);
+
+  var btnStyle = {
+    background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)',
+    color: '#d97706', padding: '0.3rem 0.65rem', borderRadius: '0.35rem',
+    fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter', sans-serif"
+  };
+
+  return React.createElement('div', {
+    style: { background: 'rgba(245,158,11,0.04)', border: '1px solid rgba(245,158,11,0.2)', borderLeft: '3px solid #f59e0b', borderRadius: '0.75rem', padding: '1.1rem 1.25rem', marginBottom: '1.25rem', animation: 'perfFadeIn 0.3s ease-out' }
+  },
+    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.65rem' } },
+      React.createElement('span', { style: { fontSize: '0.95rem' } }, '⚡'),
+      React.createElement('span', {
+        style: { fontSize: '0.82rem', fontWeight: 700, color: '#92400e', fontFamily: "'Inter', sans-serif" }
+      }, 'You\'re behind pace — here\'s how to catch up')
+    ),
+    React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.45rem' } },
+      actions.map(function(a, i) {
+        return React.createElement('div', {
+          key: i,
+          style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.45rem 0.65rem', background: '#FFFFFF', borderRadius: '0.4rem', border: '1px solid rgba(245,158,11,0.15)' }
+        },
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } },
+            React.createElement('span', { style: { fontSize: '0.82rem', fontWeight: 600, color: '#1e293b', fontFamily: "'Inter', sans-serif" } }, a.label),
+            React.createElement('span', { style: { fontSize: '0.65rem', color: '#94a3b8', fontWeight: 500 } }, a.icon)
+          ),
+          a.fn
+            ? React.createElement('button', { onClick: a.fn, style: btnStyle }, 'Do it')
+            : React.createElement('span', { style: { fontSize: '0.65rem', color: '#d97706', fontWeight: 600 } }, 'Go')
+        );
+      })
+    )
+  );
+}
+
+function _weeklySummaryCard(weekTp, calls, workout, followups, weeklyScore, weeklyGoal) {
+  var status = weeklyScore >= 80 ? 'STRONG' : weeklyScore >= 50 ? 'ON TRACK' : 'BEHIND';
+  var statusColors = { STRONG: '#10b981', 'ON TRACK': '#f59e0b', BEHIND: '#ef4444' };
+  var sc = statusColors[status];
+
+  var items = [
+    { label: 'Touchpoints', value: weekTp, sub: '/ ' + weeklyGoal + ' goal' },
+    { label: 'Calls / Meetings', value: calls, sub: 'this week' },
+    { label: 'Workouts', value: workout ? 1 : 0, sub: 'this week' },
+    { label: 'Follow-ups', value: followups, sub: 'completed' }
+  ];
+
+  return React.createElement('div', {
+    style: { background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)', borderRadius: '0.75rem', padding: '1.25rem', marginBottom: '1.25rem' }
+  },
+    React.createElement('div', {
+      style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }
+    },
+      React.createElement('h3', {
+        style: { fontSize: '0.72rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0, fontFamily: "'Inter', sans-serif" }
+      }, 'This Week'),
+      React.createElement('span', {
+        style: { fontSize: '0.7rem', fontWeight: 700, color: sc, background: sc + '12', padding: '0.2rem 0.55rem', borderRadius: '9999px', letterSpacing: '0.04em', fontFamily: "'Inter', sans-serif" }
+      }, status)
+    ),
+    React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' } },
+      items.map(function(it) {
+        return React.createElement('div', {
+          key: it.label,
+          style: { padding: '0.55rem 0.7rem', background: '#F7F9FC', borderRadius: '0.5rem', border: '1px solid #e2e8f0' }
+        },
+          React.createElement('div', {
+            style: { fontSize: '0.68rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.2rem', fontFamily: "'Inter', sans-serif" }
+          }, it.label),
+          React.createElement('div', { style: { display: 'flex', alignItems: 'baseline', gap: '0.3rem' } },
+            React.createElement('span', {
+              style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '1.15rem', fontWeight: 700, color: it.value > 0 ? '#0f172a' : '#cbd5e1' }
+            }, it.value),
+            React.createElement('span', { style: { fontSize: '0.65rem', color: '#94a3b8' } }, it.sub)
+          )
         );
       })
     )
@@ -407,14 +560,21 @@ function _extractNum(text) {
 }
 
 function _checklistRow(label, count, accent) {
+  var done = count > 0;
   return React.createElement('div', {
-    style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.55rem 0.7rem', background: '#F7F9FC', borderRadius: '0.5rem', border: '1px solid #e2e8f0' }
+    style: {
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '0.55rem 0.7rem', borderRadius: '0.5rem',
+      background: done ? accent + '08' : '#F7F9FC',
+      border: '1px solid ' + (done ? accent + '30' : '#e2e8f0'),
+      transition: 'background 0.25s, border-color 0.25s'
+    }
   },
     React.createElement('span', {
-      style: { fontSize: '0.85rem', fontWeight: 600, color: '#1e293b', fontFamily: "'Inter', sans-serif" }
+      style: { fontSize: '0.85rem', fontWeight: 600, color: done ? accent : '#1e293b', fontFamily: "'Inter', sans-serif", transition: 'color 0.25s' }
     }, label),
     React.createElement('span', {
-      style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '0.95rem', fontWeight: 700, color: count > 0 ? accent : '#94a3b8' }
+      style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '0.95rem', fontWeight: 700, color: done ? accent : '#94a3b8' }
     }, count)
   );
 }
