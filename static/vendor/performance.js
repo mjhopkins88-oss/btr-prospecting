@@ -276,7 +276,9 @@ window.PerformancePage = function PerformancePage() {
 
     _revenueCard(revenue, setRevenue, revTarget, setRevTarget, editingRev, setEditingRev, editingTgt, setEditingTgt),
 
-    _businessOutputCard(touchpoints, callsMeetings, followups, relActions)
+    _businessOutputCard(touchpoints, callsMeetings, followups, relActions),
+
+    _recoveryCard(daily, touchpoints, revPct, workout, squats, setWorkout, setSquats)
   );
 };
 
@@ -384,6 +386,51 @@ function _businessOutputCard(tp, calls, fu, rel) {
           React.createElement('div', {
             style: { fontFamily: "'JetBrains Mono', monospace", fontSize: '1.25rem', fontWeight: 700, color: it.value > 0 ? it.accent : '#cbd5e1' }
           }, it.value)
+        );
+      })
+    )
+  );
+}
+
+function _recoveryCard(score, tp, revPct, workout, squats, setWorkout, setSquats) {
+  var show = score < 60 || tp < 4 || revPct < 0.3;
+  if (!show) return null;
+
+  var actions = [];
+  if (!workout) actions.push({ label: 'Complete workout', icon: '+10 pts', fn: function() { setWorkout(true); } });
+  if (squats < 50) actions.push({ label: 'Log 10 squats', icon: '+2 pts', fn: function() { setSquats(squats + 10); } });
+  if (tp < 4) actions.push({ label: 'Add 3 touchpoints', icon: '+9 pts', fn: null });
+  if (actions.length < 3 && revPct < 0.3) actions.push({ label: 'Log a deal or revenue', icon: 'up to +20 pts', fn: null });
+  actions = actions.slice(0, 3);
+
+  var btnStyle = {
+    background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)',
+    color: '#d97706', padding: '0.3rem 0.65rem', borderRadius: '0.35rem',
+    fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter', sans-serif"
+  };
+
+  return React.createElement('div', {
+    style: { background: 'rgba(245,158,11,0.04)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: '0.75rem', padding: '1.1rem 1.25rem', marginBottom: '1.5rem' }
+  },
+    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.65rem' } },
+      React.createElement('span', { style: { fontSize: '0.95rem' } }, '⚡'),
+      React.createElement('span', {
+        style: { fontSize: '0.82rem', fontWeight: 700, color: '#92400e', fontFamily: "'Inter', sans-serif" }
+      }, 'You\'re behind pace — here\'s how to catch up')
+    ),
+    React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.45rem' } },
+      actions.map(function(a, i) {
+        return React.createElement('div', {
+          key: i,
+          style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.45rem 0.65rem', background: '#FFFFFF', borderRadius: '0.4rem', border: '1px solid rgba(245,158,11,0.15)' }
+        },
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } },
+            React.createElement('span', { style: { fontSize: '0.82rem', fontWeight: 600, color: '#1e293b', fontFamily: "'Inter', sans-serif" } }, a.label),
+            React.createElement('span', { style: { fontSize: '0.65rem', color: '#94a3b8', fontWeight: 500 } }, a.icon)
+          ),
+          a.fn
+            ? React.createElement('button', { onClick: a.fn, style: btnStyle }, 'Do it')
+            : React.createElement('span', { style: { fontSize: '0.65rem', color: '#d97706', fontWeight: 600 } }, 'Go')
         );
       })
     )
