@@ -57,17 +57,26 @@ window.PerformancePage = function PerformancePage() {
     prevScoreRef.current = daily;
   }, [daily]);
 
-  useEffect(function() {
+  function _fetchEng() {
     fetch(API_BASE + '/api/prospecting/engagement')
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(d) { if (d) setEng(d); })
       .catch(function() {});
+  }
+
+  useEffect(function() {
+    _fetchEng();
+    var interval = setInterval(_fetchEng, 60000);
+    function onVisible() { if (!document.hidden) _fetchEng(); }
+    document.addEventListener('visibilitychange', onVisible);
+    return function() { clearInterval(interval); document.removeEventListener('visibilitychange', onVisible); };
   }, []);
 
   var touchpoints = eng ? eng.today_touchpoints : 0;
   var followups = eng ? (eng.daily_checklist || {}).followups || 0 : 0;
+  var outreach = eng ? (eng.daily_checklist || {}).outreach || 0 : 0;
   var relActions = eng ? (eng.daily_checklist || {}).relationship || 0 : 0;
-  var callsMeetings = eng ? ((eng.daily_checklist || {}).followups || 0) + ((eng.daily_checklist || {}).outreach || 0) : 0;
+  var callsMeetings = followups + outreach;
   var engMomentum = eng ? (eng.momentum || 'low') : 'low';
 
   var todayHasActivity = workout || touchpoints > 0 || followups > 0 || relActions > 0;
