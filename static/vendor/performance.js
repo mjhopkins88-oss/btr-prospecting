@@ -12,6 +12,8 @@ window.PerformancePage = function PerformancePage() {
   var _eng = useState(null); var eng = _eng[0]; var setEng = _eng[1];
   var _lt = useState(''); var logText = _lt[0]; var setLogText = _lt[1];
   var _lc = useState(null); var logConfirm = _lc[0]; var setLogConfirm = _lc[1];
+  var _fc = useState(''); var focus = _fc[0]; var setFocus = _fc[1];
+  var _fl = useState(false); var focusLocked = _fl[0]; var setFocusLocked = _fl[1];
 
   useEffect(function() {
     fetch(API_BASE + '/api/prospecting/engagement')
@@ -155,6 +157,42 @@ window.PerformancePage = function PerformancePage() {
         React.createElement('div', { style: labelStyle }, 'Momentum'),
         React.createElement('div', { style: { ...valueStyle, color: mc.color, fontSize: '1.4rem' } }, momentum)
       )
+    ),
+
+    React.createElement('div', {
+      style: {
+        background: '#FFFFFF', border: '1px solid rgba(226,232,240,0.5)',
+        borderRadius: '0.75rem', padding: '1rem 1.25rem', marginBottom: '1rem',
+        display: 'flex', alignItems: 'center', gap: '0.75rem'
+      }
+    },
+      React.createElement('span', {
+        style: { fontSize: '0.72rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Inter', sans-serif", flexShrink: 0 }
+      }, 'Focus'),
+      focusLocked && focus
+        ? React.createElement('div', {
+            style: { flex: 1, display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }
+          },
+            React.createElement('span', {
+              style: { fontSize: '0.92rem', fontWeight: 600, color: '#0f172a', fontFamily: "'Inter', sans-serif" }
+            }, focus),
+            React.createElement('button', {
+              onClick: function() { setFocusLocked(false); },
+              style: { background: 'none', border: 'none', color: '#94a3b8', fontSize: '0.68rem', cursor: 'pointer', fontFamily: "'Inter', sans-serif", padding: '0.1rem 0.3rem', flexShrink: 0 }
+            }, 'edit')
+          )
+        : React.createElement('input', {
+            value: focus,
+            onChange: function(e) { setFocus(e.target.value); },
+            onKeyDown: function(e) { if (e.key === 'Enter' && focus.trim()) setFocusLocked(true); },
+            placeholder: 'Enter today\'s main focus...',
+            style: {
+              flex: 1, padding: '0.4rem 0.65rem', fontSize: '0.88rem', fontWeight: 500,
+              fontFamily: "'Inter', sans-serif", background: 'transparent',
+              border: '1px solid #e2e8f0', borderRadius: '0.4rem', outline: 'none',
+              color: '#0f172a', boxSizing: 'border-box'
+            }
+          })
     ),
 
     React.createElement('div', {
