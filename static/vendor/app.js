@@ -1731,10 +1731,16 @@ function Header({
       alignItems: 'center',
       textAlign: 'left'
     }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h1", {
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("img", {
+    src: "/static/logo-btr-command.svg",
+    alt: "BTR Command",
+    style: { height: '36px', width: 'auto', display: 'block', marginBottom: '0.25rem' },
+    onError: function(e) { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }
+  }), /*#__PURE__*/React.createElement("h1", {
     style: {
       ...styles.title,
-      fontSize: '1.8rem'
+      fontSize: '1.8rem',
+      display: 'none'
     }
   }, "BTR COMMAND"), /*#__PURE__*/React.createElement("p", {
     className: "text-sm text-slate-400 mt-0.5"
