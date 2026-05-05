@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 48" fill="none">
+  <defs>
+    <linearGradient id="btrGrad" x1="0" y1="0" x2="320" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#22c1c3"/>
+      <stop offset="100%" stop-color="#3a7bd5"/>
+    </linearGradient>
+    <linearGradient id="iconGrad" x1="0" y1="4" x2="40" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#22c1c3"/>
+      <stop offset="100%" stop-color="#3a7bd5"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Icon: 4-node command grid -->
+  <g>
+    <!-- Grid nodes -->
+    <rect x="4" y="8" width="10" height="10" rx="2.5" fill="url(#iconGrad)"/>
+    <rect x="20" y="8" width="10" height="10" rx="2.5" fill="url(#iconGrad)" opacity="0.7"/>
+    <rect x="4" y="28" width="10" height="10" rx="2.5" fill="url(#iconGrad)" opacity="0.7"/>
+    <rect x="20" y="28" width="10" height="10" rx="2.5" fill="url(#iconGrad)" opacity="0.45"/>
+
+    <!-- Connecting lines -->
+    <line x1="14" y1="13" x2="20" y2="13" stroke="url(#iconGrad)" stroke-width="1.2" opacity="0.35"/>
+    <line x1="14" y1="33" x2="20" y2="33" stroke="url(#iconGrad)" stroke-width="1.2" opacity="0.35"/>
+    <line x1="9" y1="18" x2="9" y2="28" stroke="url(#iconGrad)" stroke-width="1.2" opacity="0.35"/>
+    <line x1="25" y1="18" x2="25" y2="28" stroke="url(#iconGrad)" stroke-width="1.2" opacity="0.35"/>
+
+    <!-- Directional accent arrow -->
+    <path d="M32 23 L38 23 L35.5 19.5 M38 23 L35.5 26.5" stroke="url(#iconGrad)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.55"/>
+  </g>
+
+  <!-- BTR text — heavy -->
+  <text x="50" y="28" font-family="'Inter', -apple-system, BlinkMacSystemFont, sans-serif" font-size="22" font-weight="800" letter-spacing="0.08em" fill="url(#btrGrad)">BTR</text>
+
+  <!-- Separator -->
+  <line x1="108" y1="12" x2="108" y2="36" stroke="#3a7bd5" stroke-width="1" opacity="0.2"/>
+
+  <!-- COMMAND text — lighter -->
+  <text x="118" y="28" font-family="'Inter', -apple-system, BlinkMacSystemFont, sans-serif" font-size="22" font-weight="400" letter-spacing="0.14em" fill="url(#btrGrad)">COMMAND</text>
+</svg>
