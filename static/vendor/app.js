@@ -3948,7 +3948,28 @@ function ProspectingContactsTab({ user }) {
           cursor: 'pointer',
           fontFamily: "'Inter', sans-serif"
         }
-      }, showForm ? 'Cancel' : '+ Add Contact')
+      }, showForm ? 'Cancel' : '+ Add Contact'),
+      React.createElement('button', {
+        onClick: function() {
+          var a = document.createElement('a');
+          a.href = API_BASE + '/api/prospecting/contacts/export';
+          a.download = 'contacts_export_' + new Date().toISOString().slice(0,10) + '.csv';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        },
+        style: {
+          background: 'transparent',
+          border: '1px solid #e2e8f0',
+          color: '#64748b',
+          padding: '0.5rem 0.9rem',
+          borderRadius: '0.5rem',
+          fontSize: '0.8rem',
+          fontWeight: 600,
+          cursor: 'pointer',
+          fontFamily: "'Inter', sans-serif"
+        }
+      }, 'Export Contacts')
     ),
 
     formPanel,

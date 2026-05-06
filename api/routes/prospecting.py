@@ -4,6 +4,8 @@ API Routes: Prospecting Dashboard
 Exposes the task engine data for the Prospecting page tabs:
 Summary, Schedule, Feed, Groups, Sequences.
 """
+import csv
+import io
 from flask import Blueprint, request, jsonify, make_response
 
 from datetime import datetime, timedelta
@@ -210,6 +212,40 @@ def list_contacts():
         )
         r['has_conversation'] = (conv['cnt'] > 0) if conv else False
     return jsonify(rows)
+
+
+@prospecting_bp.route('/contacts/export', methods=['GET'])
+def export_contacts_csv():
+    rows = fetch_all(
+        "SELECT c.first_name, c.last_name, c.title, c.email, c.phone, "
+        "c.relationship_stage, c.last_touch_at, c.notes, "
+        "g.name AS group_name "
+        "FROM prospecting_contacts c "
+        "LEFT JOIN capital_groups g ON g.id = c.group_id "
+        "ORDER BY COALESCE(c.last_touch_at, c.created_at) DESC"
+    )
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(['Contact Name', 'Company', 'Title', 'Email', 'Phone', 'Stage', 'Last Touch', 'Notes'])
+    for r in rows:
+        name = ' '.join(filter(None, [r.get('first_name', ''), r.get('last_name', '')])) or 'Unknown'
+        writer.writerow([
+            name,
+            r.get('group_name') or '',
+            r.get('title') or '',
+            r.get('email') or '',
+            r.get('phone') or '',
+            r.get('relationship_stage') or '',
+            r.get('last_touch_at') or '',
+            r.get('notes') or '',
+        ])
+
+    filename = f"contacts_export_{datetime.utcnow().strftime('%Y-%m-%d')}.csv"
+    resp = make_response(buf.getvalue())
+    resp.headers['Content-Type'] = 'text/csv; charset=utf-8'
+    resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return resp
 
 
 @prospecting_bp.route('/contacts', methods=['POST'])
