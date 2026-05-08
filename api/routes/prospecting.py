@@ -248,6 +248,33 @@ def export_contacts_csv():
     return resp
 
 
+@prospecting_bp.route('/capital-groups-export', methods=['GET'])
+def export_capital_groups_csv():
+    rows = fetch_all(
+        "SELECT name, type, markets, strategy, relationship_status, "
+        "warmth_score, contact_name, contact_email, contact_phone, "
+        "last_contacted_at, notes "
+        "FROM capital_groups ORDER BY name"
+    )
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(['Name', 'Type', 'Markets', 'Strategy', 'Status', 'Warmth',
+                     'Contact', 'Email', 'Phone', 'Last Contact', 'Notes'])
+    for r in rows:
+        writer.writerow([
+            r.get('name') or '', r.get('type') or '', r.get('markets') or '',
+            r.get('strategy') or '', r.get('relationship_status') or '',
+            r.get('warmth_score') or '', r.get('contact_name') or '',
+            r.get('contact_email') or '', r.get('contact_phone') or '',
+            r.get('last_contacted_at') or '', r.get('notes') or ''
+        ])
+    filename = f"capital_partners_{datetime.utcnow().strftime('%Y-%m-%d')}.csv"
+    resp = make_response(buf.getvalue())
+    resp.headers['Content-Type'] = 'text/csv; charset=utf-8'
+    resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return resp
+
+
 @prospecting_bp.route('/contacts', methods=['POST'])
 def create_contact():
     data = request.get_json(force=True)
