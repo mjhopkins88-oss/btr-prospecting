@@ -1368,7 +1368,7 @@ function App({
     onLogTouchpoint: openTouchpoint,
     user: user,
     callTimingScores: callTimingScores
-  })), activeTab === 'discovery' && user?.role !== 'broker' && /*#__PURE__*/React.createElement(DailyDiscovery, null), activeTab === 'pipeline' && user?.role !== 'broker' && /*#__PURE__*/React.createElement(PipelinePage, {
+  })), activeTab === 'discovery' && user?.role !== 'broker' && /*#__PURE__*/React.createElement(DailyDiscovery, null), activeTab === 'pipeline' && user?.role !== 'broker' && /*#__PURE__*/React.createElement(UnderwritingDataPage, {
     user: user
   }), activeTab === 'followups' && user?.role !== 'broker' && /*#__PURE__*/React.createElement(FollowUpsPage, {
     user: user
@@ -1609,7 +1609,7 @@ function AssistantChat({ user }) {
         React.createElement('div', { style: { fontSize: '1.5rem', marginBottom: '0.5rem', opacity: 0.3 } }, '✨'),
         React.createElement('div', { style: { fontSize: '0.82rem', fontWeight: 500, marginBottom: '0.3rem', color: '#64748b' } }, 'How can I help?'),
         React.createElement('div', { style: { fontSize: '0.72rem', lineHeight: 1.5 } },
-          'Ask about your pipeline, draft outreach, log touchpoints, or get suggestions.'
+          'Ask about your deals, draft outreach, log touchpoints, or get suggestions.'
         ),
         React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem', marginTop: '0.75rem' } },
           [
@@ -1878,7 +1878,7 @@ function LinkedInHub({
       fontSize: '0.9rem',
       margin: '0.35rem 0 0'
     }
-  }, "Centralized view of every LinkedIn touchpoint across your prospects, pipeline, and SignalStack contacts.")), /*#__PURE__*/React.createElement("a", {
+  }, "Centralized view of every LinkedIn touchpoint across your prospects, deals, and SignalStack contacts.")), /*#__PURE__*/React.createElement("a", {
     href: "/signalstack",
     target: "_blank",
     rel: "noopener noreferrer",
@@ -5608,10 +5608,10 @@ const NAV_SECTIONS = [
   },
   {
     id: 'pipeline_section',
-    label: 'Pipeline',
+    label: 'Underwriting',
     icon: '\u25B3', // △
     children: [
-      { id: 'pipeline', label: 'My Pipeline' },
+      { id: 'pipeline', label: 'Underwriting / Data' },
       { id: 'quoting', label: 'Quoting' },
       { id: 'underwriting', label: 'Underwriting Sheet' }
     ]
@@ -6012,7 +6012,7 @@ function CommandCenter({ user, prospects, setActiveTab }) {
     { id: 'search', label: 'Run Prospect Search', icon: '\u{1F50D}', roles: ['broker', 'producer', 'admin'] },
     { id: 'discovery', label: 'Daily Discovery', icon: '\u{1F4E1}', roles: ['producer', 'admin'] },
     { id: 'intelligence', label: 'Sunbelt Intelligence', icon: '\u{1F4CA}', roles: ['broker', 'producer', 'admin'] },
-    { id: 'pipeline', label: 'Open Pipeline', icon: '\u{1F4C8}', roles: ['producer', 'admin'] },
+    { id: 'pipeline', label: 'Underwriting / Data', icon: '\u{1F4C8}', roles: ['producer', 'admin'] },
     { id: 'followups', label: 'Follow-ups Due', icon: '\u23F0', roles: ['producer', 'admin'] },
     { id: 'linkedinhub', label: 'LinkedIn Hub', icon: '\u{1F517}', roles: ['broker', 'producer', 'admin'] },
     { id: 'dealboard', label: 'Saved Prospects', icon: '\u2B50', roles: ['broker', 'producer', 'admin'] }
@@ -6941,7 +6941,7 @@ function CommandPalette({
       label: 'Live Intelligence Feed'
     }, {
       id: 'pipeline',
-      label: 'My Pipeline'
+      label: 'Underwriting / Data'
     }, {
       id: 'followups',
       label: 'Follow-ups Due'
@@ -7043,7 +7043,7 @@ function CommandPalette({
       tabId: 'search'
     }, {
       id: 'tool-open-pipeline',
-      label: 'Open Pipeline',
+      label: 'Open Underwriting / Data',
       tabId: 'pipeline'
     }, {
       id: 'tool-run-discovery',
@@ -16284,6 +16284,193 @@ function ActivityModal({
       fontStyle: 'italic'
     }
   }, "(", a.actor.role, ")")))))));
+}
+
+// ======= UNDERWRITING / DATA PAGE =======
+function UnderwritingDataPage({ user }) {
+  const [notes, setNotes] = useState(() => {
+    try { return localStorage.getItem('uw_notes') || ''; } catch(e) { return ''; }
+  });
+  const [assumptions, setAssumptions] = useState(() => {
+    try { return localStorage.getItem('uw_assumptions') || ''; } catch(e) { return ''; }
+  });
+  const [deals, setDeals] = useState([]);
+  const [oppGroups, setOppGroups] = useState([]);
+  const [uwStats, setUwStats] = useState(null);
+
+  useEffect(() => {
+    fetch(API_BASE + '/api/capital-groups?has_opportunity=1&limit=200')
+      .then(r => r.ok ? r.json() : { capital_groups: [] })
+      .then(d => setOppGroups(d.capital_groups || []))
+      .catch(() => {});
+    fetch(API_BASE + '/api/underwriting/rows?latest=true')
+      .then(r => r.ok ? r.json() : { rows: [] })
+      .then(d => {
+        var rows = d.rows || [];
+        setDeals(rows);
+        var totalValue = 0; var count = rows.length;
+        rows.forEach(function(r) {
+          var v = parseFloat(String(r.total_project_cost || r.purchase_price || '0').replace(/[^0-9.]/g, ''));
+          if (v > 0) totalValue += v;
+        });
+        setUwStats({ count: count, avgSize: count > 0 ? totalValue / count : 0, totalValue: totalValue });
+      })
+      .catch(() => {});
+  }, []);
+
+  var saveNotes = function(val) { setNotes(val); try { localStorage.setItem('uw_notes', val); } catch(e) {} };
+  var saveAssumptions = function(val) { setAssumptions(val); try { localStorage.setItem('uw_assumptions', val); } catch(e) {} };
+
+  var cardStyle = {
+    background: '#FFFFFF', border: '1px solid #e2e8f0', borderRadius: '0.75rem',
+    padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem'
+  };
+  var headingStyle = {
+    fontFamily: "'Orbitron', sans-serif", fontSize: '0.8rem', fontWeight: 700,
+    color: '#1e293b', letterSpacing: '0.04em', margin: 0
+  };
+  var statBox = function(label, value) {
+    return React.createElement('div', { style: { textAlign: 'center', flex: 1 } },
+      React.createElement('div', { style: { fontSize: '1.4rem', fontWeight: 700, color: '#14b8a6', fontFamily: "'JetBrains Mono', monospace" } }, value),
+      React.createElement('div', { style: { fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600, marginTop: '0.2rem' } }, label)
+    );
+  };
+  var fmtCurrency = function(n) {
+    if (!n || n === 0) return '$0';
+    if (n >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return '$' + (n / 1e3).toFixed(0) + 'K';
+    return '$' + n.toFixed(0);
+  };
+
+  var exportBtn = function(label, url, filename) {
+    return React.createElement('button', {
+      onClick: function() {
+        var a = document.createElement('a');
+        a.href = url;
+        if (filename) a.download = filename;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      },
+      style: {
+        background: 'transparent', border: '1px solid #e2e8f0', color: '#64748b',
+        padding: '0.5rem 0.9rem', borderRadius: '0.5rem', fontSize: '0.78rem',
+        fontWeight: 600, cursor: 'pointer', fontFamily: "'Inter', sans-serif",
+        display: 'flex', alignItems: 'center', gap: '0.4rem'
+      }
+    }, '⬇ ', label);
+  };
+
+  var _oppStageColors = { in_discussion: '#f59e0b', quoted: '#3b82f6', won: '#10b981', lost: '#ef4444', nurture: '#8b5cf6' };
+  var _oppStageLabels = { in_discussion: 'In Discussion', quoted: 'Quoted', won: 'Won', lost: 'Lost', nurture: 'Nurture' };
+  var _dealStatusColors = { reviewing: '#f59e0b', active: '#10b981', passed: '#94a3b8' };
+
+  return React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '1.25rem' } },
+
+    // Section 1: Underwriting Dashboard
+    React.createElement('div', { style: cardStyle },
+      React.createElement('h3', { style: headingStyle }, 'UNDERWRITING DASHBOARD'),
+      React.createElement('div', { style: { display: 'flex', gap: '1rem', flexWrap: 'wrap' } },
+        statBox('Deals Reviewed', uwStats ? uwStats.count : '—'),
+        statBox('Active Files', oppGroups.length),
+        statBox('Avg Deal Size', uwStats ? fmtCurrency(uwStats.avgSize) : '—'),
+        statBox('Total Volume', uwStats ? fmtCurrency(uwStats.totalValue) : '—')
+      )
+    ),
+
+    // Section 2: Data Room / Exports
+    React.createElement('div', { style: cardStyle },
+      React.createElement('h3', { style: headingStyle }, 'DATA ROOM / EXPORTS'),
+      React.createElement('div', { style: { display: 'flex', gap: '0.5rem', flexWrap: 'wrap' } },
+        exportBtn('Contacts', API_BASE + '/api/prospecting/contacts/export', 'contacts_export_' + new Date().toISOString().slice(0,10) + '.csv'),
+        exportBtn('Capital Partners', API_BASE + '/api/prospecting/capital-groups-export', 'capital_partners_' + new Date().toISOString().slice(0,10) + '.csv'),
+        exportBtn('Underwriting Data', API_BASE + '/api/underwriting/export?mode=latest', 'underwriting_' + new Date().toISOString().slice(0,10) + '.xlsx'),
+        exportBtn('Prospects Master', API_BASE + '/api/export', 'prospects_' + new Date().toISOString().slice(0,10) + '.csv')
+      )
+    ),
+
+    // Section 3: Deal Analysis
+    React.createElement('div', { style: cardStyle },
+      React.createElement('h3', { style: headingStyle }, 'DEAL ANALYSIS'),
+      oppGroups.length === 0 && deals.length === 0
+        ? React.createElement('div', { style: { color: '#94a3b8', fontSize: '0.82rem', padding: '1rem 0', textAlign: 'center' } },
+            'No active deals. Opportunities from Capital Groups and underwriting records will appear here.')
+        : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.35rem' } },
+            oppGroups.map(function(og) {
+              return React.createElement('div', {
+                key: og.id,
+                style: {
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '0.6rem 0.75rem', background: '#F7F9FC', borderRadius: '0.5rem',
+                  border: '1px solid #f1f5f9'
+                }
+              },
+                React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0 } },
+                  React.createElement('span', { style: { fontSize: '0.82rem', color: '#1e293b', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, og.name),
+                  og.markets && React.createElement('span', { style: { fontSize: '0.68rem', color: '#94a3b8' } }, og.markets),
+                  og.strategy && React.createElement('span', { style: { fontSize: '0.68rem', color: '#94a3b8' } }, og.strategy)
+                ),
+                React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 } },
+                  og.opportunity_value && React.createElement('span', { style: { fontSize: '0.75rem', color: '#64748b', fontFamily: "'JetBrains Mono', monospace" } }, og.opportunity_value),
+                  React.createElement('span', {
+                    style: {
+                      fontSize: '0.68rem', fontWeight: 600, padding: '0.15rem 0.45rem', borderRadius: '9999px',
+                      background: (_oppStageColors[og.opportunity_stage] || '#6366f1') + '18',
+                      color: _oppStageColors[og.opportunity_stage] || '#6366f1'
+                    }
+                  }, _oppStageLabels[og.opportunity_stage] || og.opportunity_stage || 'Reviewing')
+                )
+              );
+            }),
+            deals.length > 0 && React.createElement('div', {
+              style: { marginTop: '0.5rem', borderTop: '1px solid #f1f5f9', paddingTop: '0.5rem' }
+            },
+              React.createElement('div', { style: { fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.35rem' } }, 'Underwriting Files'),
+              deals.slice(0, 10).map(function(d, i) {
+                return React.createElement('div', {
+                  key: d.id || i,
+                  style: {
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '0.4rem 0.75rem', fontSize: '0.78rem'
+                  }
+                },
+                  React.createElement('span', { style: { color: '#1e293b', fontWeight: 500 } }, d.community_name || d.property_name || ('Deal ' + (i + 1))),
+                  React.createElement('span', { style: { color: '#94a3b8', fontSize: '0.72rem' } }, d.market || d.state || '')
+                );
+              }),
+              deals.length > 10 && React.createElement('div', { style: { fontSize: '0.72rem', color: '#94a3b8', textAlign: 'center', padding: '0.3rem' } }, '+ ' + (deals.length - 10) + ' more')
+            )
+          )
+    ),
+
+    // Section 4: Notes / Assumptions
+    React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' } },
+      React.createElement('div', { style: cardStyle },
+        React.createElement('h3', { style: headingStyle }, 'NOTES'),
+        React.createElement('textarea', {
+          value: notes,
+          onChange: function(e) { saveNotes(e.target.value); },
+          placeholder: 'Quick notes — deal memos, observations, reminders…',
+          style: {
+            width: '100%', minHeight: '140px', background: '#F7F9FC', border: '1px solid #e2e8f0',
+            borderRadius: '0.5rem', padding: '0.75rem', fontSize: '0.82rem', fontFamily: "'Inter', sans-serif",
+            color: '#1e293b', resize: 'vertical', outline: 'none', boxSizing: 'border-box'
+          }
+        })
+      ),
+      React.createElement('div', { style: cardStyle },
+        React.createElement('h3', { style: headingStyle }, 'ASSUMPTIONS'),
+        React.createElement('textarea', {
+          value: assumptions,
+          onChange: function(e) { saveAssumptions(e.target.value); },
+          placeholder: 'Key assumptions — cap rates, exit strategy, hold period, return targets…',
+          style: {
+            width: '100%', minHeight: '140px', background: '#F7F9FC', border: '1px solid #e2e8f0',
+            borderRadius: '0.5rem', padding: '0.75rem', fontSize: '0.82rem', fontFamily: "'Inter', sans-serif",
+            color: '#1e293b', resize: 'vertical', outline: 'none', boxSizing: 'border-box'
+          }
+        })
+      )
+    )
+  );
 }
 
 // ======= PIPELINE PAGE =======
