@@ -1287,7 +1287,10 @@ function BTRAssistantChat(props) {
         if (card && card.text) {
           card.text = sanitizeDisplayText(card.text);
         }
-        var text = card ? (card.text || '') : sanitizeDisplayText(d.content || '');
+        var cardText = card ? (card.text || '') : '';
+        var rawContent = sanitizeDisplayText(d.content || '');
+        // Use card text first, fall back to content, never leave blank
+        var text = cardText || rawContent || '';
         setMessages(function(prev) {
           return prev.concat([{ role: 'assistant', content: text, card: card, mode: d.mode, intent: d.intent }]);
         });
@@ -1470,6 +1473,9 @@ function BTRAssistantChat(props) {
         var isLastMsg = i === messages.length - 1;
         var cardText = m.card && m.card.text ? sanitizeDisplayText(m.card.text) : '';
         var contentText = m.content ? sanitizeDisplayText(m.content) : '';
+        // Guarantee: at least one of cardText or contentText must be non-empty for display
+        var displayText = cardText || contentText;
+        var showTextBubble = isTextCard ? !!displayText : (!hasCard && !!displayText);
 
         return h('div', { key: i, style: { display: 'flex', justifyContent: 'flex-start', maxWidth: '95%' } },
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem', width: '100%' } },
@@ -1479,8 +1485,8 @@ function BTRAssistantChat(props) {
             // Structured card (non-TextCard): render the card widget
             hasCard ? renderCard(m.card, handleAction) : null,
 
-            // TextCard: show rich text with typing effect for newest message
-            isTextCard && cardText ? h('div', {
+            // Text bubble: TextCard text, content text, or any text alongside structured cards
+            showTextBubble ? h('div', {
               style: {
                 background: '#f8fafc', border: '1px solid #e2e8f0',
                 borderRadius: '0.55rem 0.55rem 0.55rem 0.1rem',
@@ -1488,10 +1494,10 @@ function BTRAssistantChat(props) {
                 fontSize: '0.76rem', lineHeight: 1.55, color: '#1e293b',
                 wordBreak: 'break-word'
               }
-            }, isLastMsg && !loading ? h(TypingText, { text: cardText }) : renderMarkdownText(cardText)) : null,
+            }, isLastMsg && !loading ? h(TypingText, { text: displayText }) : renderMarkdownText(displayText)) : null,
 
-            // Plain text fallback (no card at all): show sanitized text
-            (!m.card && contentText) ? h('div', {
+            // Structured card with text alongside it
+            hasCard && contentText && !cardText ? h('div', {
               style: {
                 background: '#f8fafc', border: '1px solid #e2e8f0',
                 borderRadius: '0.55rem 0.55rem 0.55rem 0.1rem',
@@ -1499,7 +1505,7 @@ function BTRAssistantChat(props) {
                 fontSize: '0.76rem', lineHeight: 1.5, color: '#1e293b',
                 wordBreak: 'break-word'
               }
-            }, isLastMsg && !loading ? h(TypingText, { text: contentText }) : renderMarkdownText(contentText)) : null
+            }, renderMarkdownText(contentText)) : null
           )
         );
       }),

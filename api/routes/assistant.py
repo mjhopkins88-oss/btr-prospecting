@@ -260,8 +260,9 @@ ProbabilityCard: data: {"company":"...","company_id":"...","score":N,"label":"Hi
 ═══════════════════════════════
 RULES
 ═══════════════════════════════
-1. ALWAYS return exactly ONE <card>...</card> block. No text outside it.
-2. Use REAL data from context. Never fabricate.
+1. Return a <card>JSON</card> block when possible. You MAY also include plain text before or after the card.
+2. If you cannot format a card, respond with a direct text answer. NEVER leave the response empty.
+3. Use REAL data from context. Never fabricate.
 3. If data is missing: say exactly what's missing, suggest how to fix it.
 4. Be specific: "Call Ethan Park about the Q3 allocation" not "Follow up with contacts."
 5. Never pretend an action was completed. Only offer executable actions.
@@ -2582,6 +2583,54 @@ def _sanitize_reply_text(text):
 
 
 # ---------------------------------------------------------------------------
+# Fallback response generator — never return blank
+# ---------------------------------------------------------------------------
+
+def _generate_fallback_response(user_msg, intent, mode, context_str):
+    """
+    Build a best-effort response when the Claude API reply couldn't be parsed.
+    Uses available context data to give a real answer, not a placeholder.
+    """
+    parts = ["I wasn't able to fully process that. Here's what I can tell you based on your data:\n"]
+
+    if intent in ('recommend_action', 'brainstorm', 'coach'):
+        plan, total_min = _generate_daily_plan()
+        if plan:
+            parts.append("**Your top priorities right now:**")
+            for item in plan[:3]:
+                parts.append(f"- **{item['action']}** ({item['target']}) — {item['reason']}")
+        else:
+            parts.append("No urgent actions detected. Your pipeline looks clear.")
+
+    elif intent in ('analyze_contact', 'analyze_company'):
+        ranked = _get_ranked_opportunities(limit=3)
+        if ranked:
+            parts.append("**Top opportunities in your pipeline:**")
+            for opp in ranked:
+                parts.append(f"- **{opp['group']['name']}** (score: {opp['score']}) — {opp['reason']}")
+
+    elif intent == 'draft_outreach':
+        parts.append("I couldn't generate a draft. Try **/draft [contact name]** with a specific contact.")
+
+    elif intent in ('explain_metrics', 'diagnose'):
+        parts.append("Try asking a more specific question, like:")
+        parts.append("- \"Why am I not closing deals?\"")
+        parts.append("- \"What does my warmth score mean?\"")
+
+    else:
+        insights = _generate_proactive_insights()
+        if insights:
+            parts.append("**Current system insights:**")
+            for ins in insights[:3]:
+                parts.append(f"- {ins}")
+        else:
+            parts.append("Your data looks healthy. Ask me something specific — I work best with clear questions.")
+
+    parts.append("\nTry rephrasing or use a slash command like **/queue**, **/next**, or **/draft top 5**.")
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # Chat endpoint
 # ---------------------------------------------------------------------------
 
@@ -2788,48 +2837,87 @@ def chat():
             messages=api_messages
         )
         reply = resp.content[0].text if resp.content else ''
+        import logging
+        logger = logging.getLogger('leo')
+        logger.info(f"[Leo] intent={intent} mode={mode} reply_len={len(reply)}")
+
+        if not reply.strip():
+            logger.error(f"[Leo] EMPTY REPLY from Claude for intent={intent} msg={last_msg[:80]}")
 
         card = None
-        # Try <card>JSON</card> format
-        if '<card>' in reply and '</card>' in reply:
-            try:
-                card_str = reply.split('<card>')[1].split('</card>')[0].strip()
-                card = json.loads(card_str)
-            except (json.JSONDecodeError, IndexError):
-                pass
+        text_outside_card = ''
 
-        # Try <card ...attributes>...</card> format
+        # Try <card>JSON</card> format — use regex for robustness
+        card_match = re.search(r'<card>([\s\S]*?)</card>', reply, re.IGNORECASE)
+        if card_match:
+            try:
+                card = json.loads(card_match.group(1).strip())
+                text_outside_card = reply[:card_match.start()] + reply[card_match.end():]
+            except json.JSONDecodeError:
+                logger.warning(f"[Leo] Failed to parse <card>JSON</card>, trying to extract JSON object")
+                inner = card_match.group(1).strip()
+                brace_match = re.search(r'\{[\s\S]*\}', inner)
+                if brace_match:
+                    try:
+                        card = json.loads(brace_match.group())
+                        text_outside_card = reply[:card_match.start()] + reply[card_match.end():]
+                    except json.JSONDecodeError:
+                        pass
+
+        # Try <card type="..." ...>...</card> attribute format
         if not card:
             attr_match = re.search(
-                r'<card\s+[^>]*?type=["\'](\w+)["\'][^>]*>',
+                r'<card\s+[^>]*?type=["\'](\w+)["\'][^>]*>([\s\S]*?)</card>',
                 reply, re.IGNORECASE
             )
             if attr_match:
+                card_type = attr_match.group(1)
+                inner = attr_match.group(2).strip()
+                text_outside_card = reply[:attr_match.start()] + reply[attr_match.end():]
+                brace_match = re.search(r'\{[\s\S]*\}', inner)
+                if brace_match:
+                    try:
+                        card = json.loads(brace_match.group())
+                        if 'type' not in card:
+                            card['type'] = card_type
+                    except json.JSONDecodeError:
+                        pass
+                if not card:
+                    card = {'type': card_type, 'text': _sanitize_reply_text(inner) or '', 'data': {}, 'actions': []}
+
+        # Try <action>JSON</action> format
+        action = None
+        if not card:
+            action_match = re.search(r'<action>([\s\S]*?)</action>', reply, re.IGNORECASE)
+            if action_match:
                 try:
-                    json_match = re.search(r'\{[\s\S]*\}', reply)
-                    if json_match:
-                        card = json.loads(json_match.group())
-                except (json.JSONDecodeError, ValueError):
+                    action = json.loads(action_match.group(1).strip())
+                    card = _action_to_card(action, reply)
+                    text_outside_card = reply[:action_match.start()] + reply[action_match.end():]
+                except json.JSONDecodeError:
                     pass
 
-        action = None
-        if not card and '<action>' in reply and '</action>' in reply:
-            try:
-                action_str = reply.split('<action>')[1].split('</action>')[0].strip()
-                action = json.loads(action_str)
-                card = _action_to_card(action, reply)
-            except (json.JSONDecodeError, IndexError):
-                pass
-
-        if not card:
-            clean = _sanitize_reply_text(reply)
-            card = {
-                'type': 'TextCard', 'text': clean or 'I processed your request.',
-                'source': None, 'data': {}, 'actions': []
-            }
-        else:
+        # Build final response
+        if card:
+            extra_text = _sanitize_reply_text(text_outside_card).strip()
             if card.get('text'):
                 card['text'] = _sanitize_reply_text(card['text'])
+            if extra_text and not card.get('text'):
+                card['text'] = extra_text
+            elif extra_text and card.get('text'):
+                card['text'] = extra_text + '\n\n' + card['text']
+        else:
+            clean = _sanitize_reply_text(reply)
+            if not clean:
+                clean = reply.strip()
+                clean = re.sub(r'<[^>]+>', '', clean).strip()
+            if not clean:
+                logger.error(f"[Leo] ALL PARSING FAILED for intent={intent} raw_reply={reply[:200]}")
+                clean = _generate_fallback_response(last_msg, intent, mode, context)
+            card = {
+                'type': 'TextCard', 'text': clean,
+                'source': None, 'data': {}, 'actions': []
+            }
 
         _persist_chat(messages[-1].get('content', ''), card, intent, mode)
 
@@ -2842,22 +2930,28 @@ def chat():
             'mode': mode
         })
     except anthropic.APIError as e:
+        import logging
+        logging.getLogger('leo').error(f"[Leo] Anthropic API error: {e}")
+        fallback_text = _generate_fallback_response(last_msg, intent, mode, '')
         return jsonify({
-            'role': 'assistant', 'content': str(e),
+            'role': 'assistant', 'content': fallback_text,
             'card': {
-                'type': 'ErrorCard', 'text': 'AI service error.',
-                'data': {'error': str(e), 'suggestion': 'Try again in a moment.'},
-                'actions': []
-            }
+                'type': 'TextCard', 'text': fallback_text,
+                'data': {}, 'actions': []
+            },
+            'intent': intent, 'mode': mode
         })
     except Exception as e:
+        import logging
+        logging.getLogger('leo').error(f"[Leo] Unexpected error: {e}")
+        fallback_text = _generate_fallback_response(last_msg, intent, mode, '')
         return jsonify({
-            'role': 'assistant', 'content': str(e),
+            'role': 'assistant', 'content': fallback_text,
             'card': {
-                'type': 'ErrorCard', 'text': 'Something went wrong.',
-                'data': {'error': str(e), 'suggestion': 'Try rephrasing your request.'},
-                'actions': []
-            }
+                'type': 'TextCard', 'text': fallback_text,
+                'data': {}, 'actions': []
+            },
+            'intent': intent, 'mode': mode
         })
 
 
