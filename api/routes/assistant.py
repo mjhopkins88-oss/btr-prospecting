@@ -45,6 +45,12 @@ INTENT_KEYWORDS = {
                          'what now', 'top action', 'focus on', 'do next'],
     'log_update_crm':   ['log', 'record', 'update stage', 'mark as', 'change status',
                          'touchpoint', 'note that'],
+    'crm_update':       ['called', 'emailed', 'met with', 'texted', 'spoke with',
+                         'had a call', 'log a call', 'add touchpoint', 'move to',
+                         'follow up with', 'follow-up', 'check back', 'create task',
+                         'action item', 'send deck', 'add note to', 'had a meeting',
+                         'sent an email', 'reached out', 'connected with', 'set up',
+                         'scheduled', 'move them to', 'change to', 'update to'],
     'export_report':    ['export', 'download', 'csv', 'report', 'spreadsheet', 'pull data'],
     'troubleshoot':     ['error', 'broken', 'not working', 'bug', 'issue', 'wrong',
                          'fix', 'help with app', 'problem'],
@@ -63,6 +69,7 @@ INTENT_TO_MODE = {
     'analyze_company':  'analyst',
     'recommend_action': 'execution',
     'log_update_crm':   'execution',
+    'crm_update':       'execution',
     'export_report':    'execution',
     'troubleshoot':     'execution',
     'coach':            'coach',
@@ -210,6 +217,8 @@ TouchpointLogCard: data: {"contact_name":"...","contact_id":"...","group_id":"..
 FollowUpCard: data: {"contact_name":"...","contact_id":"...","due_date":"YYYY-MM-DD","task_type":"follow_up|call|meeting","title":"..."}
 ExportCard: data: {"export_type":"contacts|capital_partners|underwriting|prospects","url":"...","filename":"..."}
 ConfirmationCard: data: {"what":"...","result":"...","entity_id":"..."}
+CrmUpdatePreviewCard: data: {"items":["..."],"group_name":"...","contact_name":"...","touchpoint":{"channel":"...","summary":"...","date":"..."}|null,"follow_up":{"title":"...","due_date":"..."}|null,"stage_change":{"entity":"group|contact","new_stage":"..."}|null,"notes":"..."}
+AmbiguityCard: data: {"entity_type":"group|contact","choices":[{"id":"...","label":"...","sublabel":"..."}]}
 ErrorCard: data: {"error":"...","suggestion":"..."}
 
 ═══════════════════════════════
@@ -691,6 +700,394 @@ def _get_recent_chat_summary():
 
 
 # ---------------------------------------------------------------------------
+# Natural-language CRM command parser
+# ---------------------------------------------------------------------------
+
+_CHANNEL_PATTERNS = [
+    (r'\b(called|had a call|spoke with|spoke to|phone call|phoned)\b', 'call'),
+    (r'\b(emailed|sent an email|email to|sent email)\b', 'email'),
+    (r'\b(met with|had a meeting|meeting with|met at|in-person)\b', 'meeting'),
+    (r'\b(texted|sent a text|sms|messaged)\b', 'text'),
+    (r'\b(linkedin|connected on linkedin|linkedin message)\b', 'linkedin'),
+    (r'\b(add note|noted|note that|add a note)\b', 'note'),
+]
+
+_STAGE_ALIASES = {
+    'active': 'active', 'actively pursuing': 'active',
+    'warm': 'warm', 'interested': 'warm',
+    'cold': 'cold', 'dead': 'cold', 'inactive': 'cold',
+    'nurture': 'nurture', 'nurturing': 'nurture',
+    'closing': 'closing', 'close': 'closing',
+    'closed': 'closed', 'won': 'closed', 'closed won': 'closed',
+    'lost': 'lost', 'closed lost': 'lost', 'passed': 'lost',
+    'new': 'new', 'prospect': 'new', 'lead': 'new',
+    'qualified': 'qualified', 'researching': 'researching',
+    'contacted': 'contacted', 'outreach': 'contacted',
+    'loi': 'loi', 'under contract': 'under_contract',
+}
+
+_WEEKDAYS = {
+    'monday': 0, 'tuesday': 1, 'wednesday': 2, 'thursday': 3,
+    'friday': 4, 'saturday': 5, 'sunday': 6,
+}
+
+
+def _detect_channel(text_lower):
+    for pattern, channel in _CHANNEL_PATTERNS:
+        if re.search(pattern, text_lower):
+            return channel
+    return None
+
+
+def _resolve_date_phrase(phrase):
+    """Parse relative date phrases into YYYY-MM-DD strings."""
+    phrase = phrase.lower().strip()
+    today = datetime.utcnow()
+
+    if phrase in ('today', 'now'):
+        return today.strftime('%Y-%m-%d')
+    if phrase in ('tomorrow', 'tmrw'):
+        return (today + timedelta(days=1)).strftime('%Y-%m-%d')
+    if phrase == 'yesterday':
+        return (today - timedelta(days=1)).strftime('%Y-%m-%d')
+
+    m = re.match(r'(?:in\s+)?(\d+)\s*(day|week|month)s?', phrase)
+    if m:
+        n, unit = int(m.group(1)), m.group(2)
+        if unit == 'day':
+            return (today + timedelta(days=n)).strftime('%Y-%m-%d')
+        if unit == 'week':
+            return (today + timedelta(weeks=n)).strftime('%Y-%m-%d')
+        if unit == 'month':
+            return (today + timedelta(days=n * 30)).strftime('%Y-%m-%d')
+
+    if phrase == 'next week':
+        return (today + timedelta(weeks=1)).strftime('%Y-%m-%d')
+    if phrase == 'next month':
+        return (today + timedelta(days=30)).strftime('%Y-%m-%d')
+
+    for day_name, day_num in _WEEKDAYS.items():
+        if f'next {day_name}' in phrase or phrase == day_name:
+            days_ahead = day_num - today.weekday()
+            if days_ahead <= 0:
+                days_ahead += 7
+            return (today + timedelta(days=days_ahead)).strftime('%Y-%m-%d')
+
+    return None
+
+
+def _detect_follow_up(text_lower):
+    """Extract follow-up date from text like 'follow up in 2 weeks'."""
+    patterns = [
+        r'follow[\s-]?up\s+(?:in\s+)?(.+?)(?:\.|$|and\b|,)',
+        r'check\s+back\s+(?:in\s+)?(.+?)(?:\.|$|and\b|,)',
+        r'remind\s+me\s+(?:in\s+)?(.+?)(?:\.|$|and\b|,)',
+        r'circle\s+back\s+(?:in\s+)?(.+?)(?:\.|$|and\b|,)',
+    ]
+    for pat in patterns:
+        m = re.search(pat, text_lower)
+        if m:
+            phrase = m.group(1).strip()
+            resolved = _resolve_date_phrase(phrase)
+            if resolved:
+                return resolved
+    return None
+
+
+def _detect_stage_change(text_lower):
+    """Detect stage change directives like 'move them to active'."""
+    patterns = [
+        r'(?:move|change|update|set)\s+(?:them|it|stage|status)?\s*(?:to|as)\s+["\']?(\w[\w\s]*?)["\']?\s*(?:\.|$|and\b|,)',
+        r'mark\s+(?:them|it|as)\s+["\']?(\w[\w\s]*?)["\']?\s*(?:\.|$|and\b|,)',
+    ]
+    for pat in patterns:
+        m = re.search(pat, text_lower)
+        if m:
+            raw = m.group(1).strip().lower()
+            return _STAGE_ALIASES.get(raw)
+    return None
+
+
+def _find_groups_fuzzy(text):
+    """Find capital groups whose names appear as substrings in user text."""
+    all_groups = fetch_all(
+        "SELECT id, name, relationship_status, warmth_score FROM capital_groups ORDER BY name",
+        []
+    )
+    text_lower = text.lower()
+    matches = []
+    for g in all_groups:
+        gname = (g.get('name') or '').lower()
+        if len(gname) >= 3 and gname in text_lower:
+            matches.append(g)
+    matches.sort(key=lambda g: len(g.get('name', '')), reverse=True)
+    return matches
+
+
+def _find_contacts_fuzzy(text, group_id=None):
+    """Find contacts whose names appear in user text, optionally scoped to a group."""
+    if group_id:
+        contacts = fetch_all(
+            """SELECT c.*, g.name as group_name FROM prospecting_contacts c
+               LEFT JOIN capital_groups g ON c.group_id = g.id
+               WHERE c.group_id = ?""",
+            [group_id]
+        )
+    else:
+        contacts = fetch_all(
+            """SELECT c.*, g.name as group_name FROM prospecting_contacts c
+               LEFT JOIN capital_groups g ON c.group_id = g.id""",
+            []
+        )
+    text_lower = text.lower()
+    matches = []
+    for c in contacts:
+        first = (c.get('first_name') or '').lower()
+        last = (c.get('last_name') or '').lower()
+        full = f"{first} {last}".strip()
+        if full and len(full) >= 2 and full in text_lower:
+            matches.append(c)
+        elif first and len(first) >= 3 and first in text_lower:
+            matches.append(c)
+    return matches
+
+
+def _extract_summary(text, group_name=None, contact_name=None):
+    """Strip command fragments, keep the descriptive notes."""
+    cleaned = text
+    strip_patterns = [
+        r'(?:called|emailed|met with|texted|spoke (?:with|to)|had a (?:call|meeting) (?:with)?)\s*',
+        r'follow[\s-]?up\s+(?:in\s+)?[\w\s]+(?:\.|$)',
+        r'check\s+back\s+(?:in\s+)?[\w\s]+(?:\.|$)',
+        r'(?:move|change|update|set)\s+(?:them|it|stage|status)?\s*(?:to|as)\s+\w+\s*',
+        r'mark\s+(?:them|it|as)\s+\w+',
+        r'\btoday\b|\byesterday\b',
+    ]
+    for pat in strip_patterns:
+        cleaned = re.sub(pat, '', cleaned, flags=re.IGNORECASE)
+    if group_name:
+        cleaned = re.sub(re.escape(group_name), '', cleaned, flags=re.IGNORECASE)
+    if contact_name:
+        cleaned = re.sub(re.escape(contact_name), '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s*[.,]+\s*', '. ', cleaned).strip(' .')
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned if len(cleaned) > 2 else ''
+
+
+def _parse_crm_command(text):
+    """
+    Parse a natural-language CRM command into structured operations.
+    Returns: { 'status': 'ok'|'ambiguous'|'no_entity', 'ops': {...}, 'ambiguous': {...} }
+    """
+    text_lower = text.lower()
+
+    groups = _find_groups_fuzzy(text)
+    contacts = _find_contacts_fuzzy(text)
+
+    group = None
+    contact = None
+
+    if len(groups) == 1:
+        group = groups[0]
+        scoped_contacts = _find_contacts_fuzzy(text, group['id'])
+        if len(scoped_contacts) == 1:
+            contact = scoped_contacts[0]
+        elif len(scoped_contacts) > 1:
+            return {
+                'status': 'ambiguous',
+                'ambiguous': {
+                    'type': 'contact',
+                    'group': group,
+                    'options': scoped_contacts[:5],
+                    'original_message': text,
+                }
+            }
+    elif len(groups) > 1:
+        return {
+            'status': 'ambiguous',
+            'ambiguous': {
+                'type': 'group',
+                'options': groups[:5],
+                'original_message': text,
+            }
+        }
+    elif not groups and contacts:
+        if len(contacts) == 1:
+            contact = contacts[0]
+            if contact.get('group_id'):
+                group = fetch_one("SELECT * FROM capital_groups WHERE id = ?",
+                                  [contact['group_id']])
+        elif len(contacts) > 1:
+            return {
+                'status': 'ambiguous',
+                'ambiguous': {
+                    'type': 'contact',
+                    'options': contacts[:5],
+                    'original_message': text,
+                }
+            }
+
+    if not group and not contact:
+        return {'status': 'no_entity'}
+
+    channel = _detect_channel(text_lower)
+    follow_up_date = _detect_follow_up(text_lower)
+    stage = _detect_stage_change(text_lower)
+
+    group_name = group['name'] if group else ''
+    contact_name = ''
+    if contact:
+        contact_name = f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip()
+
+    summary = _extract_summary(text, group_name, contact_name)
+
+    ops = {
+        'group_id': group['id'] if group else None,
+        'group_name': group_name,
+        'contact_id': contact['id'] if contact else None,
+        'contact_name': contact_name,
+    }
+
+    if channel:
+        ops['touchpoint'] = {
+            'channel': channel,
+            'summary': summary or f"{channel.title()} with {contact_name or group_name}",
+            'date': datetime.utcnow().strftime('%Y-%m-%d'),
+        }
+
+    if follow_up_date:
+        ops['follow_up'] = {
+            'title': f"Follow up with {group_name or contact_name}",
+            'due_date': follow_up_date,
+        }
+
+    if stage:
+        ops['stage_change'] = {
+            'entity': 'group' if group else 'contact',
+            'new_stage': stage,
+        }
+
+    if summary:
+        ops['notes'] = summary
+
+    has_action = any(k in ops for k in ('touchpoint', 'follow_up', 'stage_change'))
+    if not has_action:
+        return {'status': 'no_entity'}
+
+    return {'status': 'ok', 'ops': ops}
+
+
+def _build_preview_card(ops, original_msg):
+    """Build a CrmUpdatePreviewCard from parsed operations."""
+    items = []
+
+    if ops.get('touchpoint'):
+        tp = ops['touchpoint']
+        items.append(f"Log {tp['channel']} touchpoint: \"{tp['summary']}\"")
+    if ops.get('stage_change'):
+        sc = ops['stage_change']
+        items.append(f"Move {ops.get('group_name') or ops.get('contact_name', '')} to {sc['new_stage']}")
+    if ops.get('follow_up'):
+        fu = ops['follow_up']
+        items.append(f"Create follow-up due {fu['due_date']}: \"{fu['title']}\"")
+
+    text = f"**{ops.get('group_name') or ops.get('contact_name', 'Unknown')}** — "
+    text += "here's what I'll update:"
+
+    batch_params = {
+        'group_id': ops.get('group_id'),
+        'group_name': ops.get('group_name'),
+        'contact_id': ops.get('contact_id'),
+        'contact_name': ops.get('contact_name'),
+    }
+    if ops.get('touchpoint'):
+        batch_params['touchpoint'] = ops['touchpoint']
+    if ops.get('follow_up'):
+        batch_params['follow_up'] = ops['follow_up']
+    if ops.get('stage_change'):
+        batch_params['stage_change'] = ops['stage_change']
+    if ops.get('notes'):
+        batch_params['notes'] = ops['notes']
+
+    return {
+        'type': 'CrmUpdatePreviewCard',
+        'text': text,
+        'source': original_msg,
+        'data': {
+            'items': items,
+            'group_name': ops.get('group_name', ''),
+            'contact_name': ops.get('contact_name', ''),
+            'touchpoint': ops.get('touchpoint'),
+            'follow_up': ops.get('follow_up'),
+            'stage_change': ops.get('stage_change'),
+            'notes': ops.get('notes', ''),
+        },
+        'actions': [
+            {'id': 'confirm_batch', 'label': 'Confirm All', 'action': 'execute_batch',
+             'params': batch_params},
+            {'id': 'cancel_batch', 'label': 'Cancel', 'action': 'cancel', 'params': {}},
+        ]
+    }
+
+
+def _build_ambiguity_card(ambiguous_data, original_msg):
+    """Build an AmbiguityCard when multiple entities match."""
+    entity_type = ambiguous_data['type']
+    options = ambiguous_data['options']
+
+    if entity_type == 'group':
+        text = f"I found {len(options)} matching companies. Which one did you mean?"
+        choices = []
+        for g in options:
+            choices.append({
+                'id': g['id'],
+                'label': g['name'],
+                'sublabel': f"Status: {g.get('relationship_status', '?')} · Warmth: {g.get('warmth_score', '?')}",
+            })
+    else:
+        group = ambiguous_data.get('group')
+        text = f"Multiple contacts found"
+        if group:
+            text += f" at {group['name']}"
+        text += ". Which one?"
+        choices = []
+        for c in options:
+            cname = f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
+            choices.append({
+                'id': c['id'],
+                'label': cname,
+                'sublabel': f"{c.get('title', '')} · {c.get('group_name', '')}".strip(' ·'),
+            })
+
+    actions = []
+    for ch in choices:
+        resolve_params = {
+            'entity_type': entity_type,
+            'entity_id': ch['id'],
+            'entity_name': ch['label'],
+            'original_message': original_msg,
+        }
+        if entity_type == 'contact' and ambiguous_data.get('group'):
+            resolve_params['group_id'] = ambiguous_data['group']['id']
+            resolve_params['group_name'] = ambiguous_data['group']['name']
+        actions.append({
+            'id': f"pick_{ch['id'][:8]}",
+            'label': ch['label'],
+            'sublabel': ch.get('sublabel', ''),
+            'action': 'resolve_ambiguity',
+            'params': resolve_params,
+        })
+
+    return {
+        'type': 'AmbiguityCard',
+        'text': text,
+        'source': original_msg,
+        'data': {'entity_type': entity_type, 'choices': choices},
+        'actions': actions,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Slash command pre-processor
 # ---------------------------------------------------------------------------
 
@@ -885,6 +1282,25 @@ def chat():
     intent = _classify_intent(last_msg)
     mode = INTENT_TO_MODE.get(intent, 'strategic')
     max_tokens = MODE_MAX_TOKENS.get(mode, 2000)
+
+    # CRM update intercept — parse locally, skip Claude call
+    if intent == 'crm_update':
+        parsed = _parse_crm_command(last_msg)
+        if parsed['status'] == 'ok':
+            card = _build_preview_card(parsed['ops'], last_msg)
+            _persist_chat(last_msg, card, 'crm_update', 'execution')
+            return jsonify({
+                'role': 'assistant', 'content': card['text'],
+                'card': card, 'intent': 'crm_update', 'mode': 'execution'
+            })
+        elif parsed['status'] == 'ambiguous':
+            card = _build_ambiguity_card(parsed['ambiguous'], last_msg)
+            _persist_chat(last_msg, card, 'crm_update', 'execution')
+            return jsonify({
+                'role': 'assistant', 'content': card['text'],
+                'card': card, 'intent': 'crm_update', 'mode': 'execution'
+            })
+        # 'no_entity' falls through to Claude
 
     # Page-aware context
     page_extra = ""
@@ -1092,6 +1508,15 @@ def execute_action():
             return _exec_complete_task(params)
         if action == 'export':
             return _exec_export(params)
+        if action == 'execute_batch':
+            return _exec_batch(params)
+        if action == 'resolve_ambiguity':
+            return _exec_resolve_ambiguity(params)
+        if action == 'cancel':
+            return jsonify({'success': True, 'card': {
+                'type': 'ConfirmationCard', 'text': 'Cancelled.',
+                'data': {'what': 'cancel', 'result': 'cancelled'}, 'actions': []
+            }})
 
         return jsonify({'success': False, 'card': {
             'type': 'ErrorCard', 'text': f'Unknown action: {action}',
@@ -1234,6 +1659,167 @@ def _exec_export(params):
             {'id': 'download', 'label': 'Download', 'action': 'download', 'params': {'url': url}}
         ]
     }})
+
+
+def _exec_batch(params):
+    """Execute a batch of CRM operations from a confirmed preview card."""
+    results = []
+    group_id = params.get('group_id')
+    contact_id = params.get('contact_id')
+    group_name = params.get('group_name', '')
+    contact_name = params.get('contact_name', '')
+
+    # 1) Log touchpoint (with dedup — check for same channel+date)
+    if params.get('touchpoint'):
+        tp = params['touchpoint']
+        today = tp.get('date', datetime.utcnow().strftime('%Y-%m-%d'))
+        existing = None
+        if contact_id:
+            existing = fetch_one(
+                """SELECT id FROM prospecting_touchpoints
+                   WHERE contact_id = ? AND channel = ? AND DATE(occurred_at) = ?""",
+                [contact_id, tp['channel'], today]
+            )
+        elif group_id:
+            existing = fetch_one(
+                """SELECT id FROM capital_group_touchpoints
+                   WHERE capital_group_id = ? AND type = ? AND DATE(occurred_at) = ?""",
+                [group_id, tp['channel'], today]
+            )
+        if existing:
+            results.append(f"Touchpoint already exists for today — skipped duplicate")
+        else:
+            tp_id = new_id()
+            execute(
+                """INSERT INTO prospecting_touchpoints
+                   (id, contact_id, group_id, channel, direction, subject, summary, occurred_at)
+                   VALUES (?, ?, ?, ?, 'outbound', ?, ?, CURRENT_TIMESTAMP)""",
+                [tp_id, contact_id, group_id, tp['channel'], '', tp.get('summary', '')]
+            )
+            if contact_id:
+                execute("UPDATE prospecting_contacts SET last_touch_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        [contact_id])
+            if group_id:
+                execute("UPDATE capital_groups SET last_contacted_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        [group_id])
+                tp2 = new_id()
+                execute(
+                    """INSERT INTO capital_group_touchpoints (id, capital_group_id, type, notes, outcome, occurred_at)
+                       VALUES (?, ?, ?, ?, '', CURRENT_TIMESTAMP)""",
+                    [tp2, group_id, tp['channel'], tp.get('summary', '')]
+                )
+            results.append(f"Logged {tp['channel']} touchpoint")
+
+    # 2) Stage change
+    if params.get('stage_change'):
+        sc = params['stage_change']
+        new_stage = sc['new_stage']
+        if sc.get('entity') == 'contact' and contact_id:
+            execute("UPDATE prospecting_contacts SET relationship_stage = ? WHERE id = ?",
+                    [new_stage, contact_id])
+            results.append(f"Updated {contact_name} stage to {new_stage}")
+        elif group_id:
+            execute("UPDATE capital_groups SET relationship_status = ? WHERE id = ?",
+                    [new_stage, group_id])
+            results.append(f"Updated {group_name} status to {new_stage}")
+
+    # 3) Follow-up task
+    if params.get('follow_up'):
+        fu = params['follow_up']
+        task_id = new_id()
+        execute(
+            """INSERT INTO prospecting_tasks
+               (id, capital_group_id, type, title, status, priority, due_at, created_at)
+               VALUES (?, ?, 'follow_up', ?, 'pending', 7, ?, CURRENT_TIMESTAMP)""",
+            [task_id, group_id, fu['title'], fu['due_date']]
+        )
+        results.append(f"Created follow-up due {fu['due_date']}")
+
+    summary_text = " · ".join(results) if results else "No changes made"
+    return jsonify({'success': True, 'card': {
+        'type': 'ConfirmationCard',
+        'text': f'Done! {summary_text}',
+        'data': {'what': 'batch_update', 'result': 'success',
+                 'details': results},
+        'actions': []
+    }})
+
+
+def _exec_resolve_ambiguity(params):
+    """Re-run NL parsing with the user's entity choice resolved."""
+    original_msg = params.get('original_message', '')
+    entity_type = params.get('entity_type', '')
+    entity_id = params.get('entity_id', '')
+    entity_name = params.get('entity_name', '')
+
+    if not original_msg:
+        return jsonify({'success': False, 'card': {
+            'type': 'ErrorCard', 'text': 'Missing original message for re-parse.',
+            'data': {'error': 'original_message required'}, 'actions': []
+        }}), 400
+
+    text_lower = original_msg.lower()
+    channel = _detect_channel(text_lower)
+    follow_up_date = _detect_follow_up(text_lower)
+    stage = _detect_stage_change(text_lower)
+
+    group_id = None
+    group_name = ''
+    contact_id = None
+    contact_name = ''
+
+    if entity_type == 'group':
+        group_id = entity_id
+        group_name = entity_name
+        contacts = _find_contacts_fuzzy(original_msg, group_id)
+        if len(contacts) == 1:
+            contact_id = contacts[0]['id']
+            contact_name = f"{contacts[0].get('first_name', '')} {contacts[0].get('last_name', '')}".strip()
+    elif entity_type == 'contact':
+        contact_id = entity_id
+        contact_name = entity_name
+        g_id = params.get('group_id')
+        if g_id:
+            group_id = g_id
+            group_name = params.get('group_name', '')
+        else:
+            c = fetch_one("SELECT group_id FROM prospecting_contacts WHERE id = ?", [contact_id])
+            if c and c.get('group_id'):
+                group_id = c['group_id']
+                g = fetch_one("SELECT name FROM capital_groups WHERE id = ?", [group_id])
+                group_name = g['name'] if g else ''
+
+    summary = _extract_summary(original_msg, group_name, contact_name)
+
+    ops = {
+        'group_id': group_id, 'group_name': group_name,
+        'contact_id': contact_id, 'contact_name': contact_name,
+    }
+    if channel:
+        ops['touchpoint'] = {
+            'channel': channel,
+            'summary': summary or f"{channel.title()} with {contact_name or group_name}",
+            'date': datetime.utcnow().strftime('%Y-%m-%d'),
+        }
+    if follow_up_date:
+        ops['follow_up'] = {
+            'title': f"Follow up with {group_name or contact_name}",
+            'due_date': follow_up_date,
+        }
+    if stage:
+        ops['stage_change'] = {'entity': 'group' if group_id else 'contact', 'new_stage': stage}
+    if summary:
+        ops['notes'] = summary
+
+    has_action = any(k in ops for k in ('touchpoint', 'follow_up', 'stage_change'))
+    if not has_action:
+        return jsonify({'success': False, 'card': {
+            'type': 'ErrorCard', 'text': "Couldn't parse any actions from your message. Try rephrasing.",
+            'data': {'error': 'No parseable actions'}, 'actions': []
+        }}), 400
+
+    card = _build_preview_card(ops, original_msg)
+    return jsonify({'success': True, 'card': card})
 
 
 # ---------------------------------------------------------------------------

@@ -26,7 +26,9 @@ var CARD_COLORS = {
   SignalInsightCard:      { bg: '#fefce8', border: '#fde68a', accent: '#a16207', icon: '📡' },
   PerformanceInsightCard: { bg: '#ecfdf5', border: '#6ee7b7', accent: '#059669', icon: '📊' },
   ExecutionPlanCard:      { bg: '#eff6ff', border: '#93c5fd', accent: '#1d4ed8', icon: '📋' },
-  FixCard:                { bg: '#fef2f2', border: '#fca5a5', accent: '#b91c1c', icon: '🔧' }
+  FixCard:                { bg: '#fef2f2', border: '#fca5a5', accent: '#b91c1c', icon: '🔧' },
+  CrmUpdatePreviewCard:   { bg: '#f0fdf4', border: '#86efac', accent: '#059669', icon: '📋' },
+  AmbiguityCard:          { bg: '#fefce8', border: '#fde68a', accent: '#d97706', icon: '❓' }
 };
 
 var SLASH_HINTS = [
@@ -161,6 +163,16 @@ function executeCardAction(act, messages, setMessages, setActionLoading) {
     if (tab) {
       window.dispatchEvent(new CustomEvent('btr-navigate', { detail: { tab: tab } }));
     }
+    return;
+  }
+
+  if (act.action === 'cancel') {
+    setMessages(function(prev) {
+      return prev.concat([{ role: 'assistant', card: {
+        type: 'ConfirmationCard', text: 'Cancelled — no changes made.',
+        data: { what: 'cancel', result: 'cancelled' }, actions: []
+      }}]);
+    });
     return;
   }
 
@@ -600,6 +612,79 @@ function renderFixCard(card, onAction) {
   );
 }
 
+function renderCrmUpdatePreviewCard(card, onAction) {
+  var colors = CARD_COLORS.CrmUpdatePreviewCard;
+  var d = card.data || {};
+  var items = d.items || [];
+  var tp = d.touchpoint;
+  var fu = d.follow_up;
+  var sc = d.stage_change;
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border,
+      borderRadius: '0.5rem', padding: '0.6rem', fontSize: '0.75rem' } },
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.4rem' } },
+      h('span', null, colors.icon),
+      h('span', { style: { fontWeight: 700, color: colors.accent } }, 'CRM Update Preview')
+    ),
+    h('div', { style: { fontWeight: 600, marginBottom: '0.35rem', color: '#1e293b' } },
+      (d.group_name || d.contact_name || 'Unknown')
+    ),
+    tp ? h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.3rem', marginBottom: '0.2rem',
+        padding: '0.25rem 0.4rem', background: '#ecfdf5', borderRadius: '0.25rem' } },
+      h('span', { style: { color: '#059669', fontWeight: 600 } }, 'Touchpoint:'),
+      h('span', null, tp.channel + ' — "' + tp.summary + '"')
+    ) : null,
+    sc ? h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.3rem', marginBottom: '0.2rem',
+        padding: '0.25rem 0.4rem', background: '#eff6ff', borderRadius: '0.25rem' } },
+      h('span', { style: { color: '#1d4ed8', fontWeight: 600 } }, 'Stage:'),
+      h('span', null, 'Move to ' + sc.new_stage)
+    ) : null,
+    fu ? h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.3rem', marginBottom: '0.2rem',
+        padding: '0.25rem 0.4rem', background: '#fff7ed', borderRadius: '0.25rem' } },
+      h('span', { style: { color: '#c2410c', fontWeight: 600 } }, 'Follow-up:'),
+      h('span', null, fu.title + ' (due ' + fu.due_date + ')')
+    ) : null,
+    d.notes ? h('div', { style: { fontSize: '0.7rem', color: '#475569', fontStyle: 'italic',
+        marginTop: '0.2rem' } }, 'Notes: ' + d.notes) : null,
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
+function renderAmbiguityCard(card, onAction) {
+  var colors = CARD_COLORS.AmbiguityCard;
+  var d = card.data || {};
+  var choices = d.choices || [];
+  var actions = card.actions || [];
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border,
+      borderRadius: '0.5rem', padding: '0.6rem', fontSize: '0.75rem' } },
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.4rem' } },
+      h('span', null, colors.icon),
+      h('span', { style: { fontWeight: 700, color: colors.accent } },
+        d.entity_type === 'group' ? 'Which company?' : 'Which contact?')
+    ),
+    h('div', { style: { fontSize: '0.72rem', color: '#475569', marginBottom: '0.4rem' } },
+      card.text || 'Multiple matches found. Pick one:'),
+    h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
+      actions.map(function(act, i) {
+        return h('button', {
+          key: i,
+          onClick: function() { onAction(act); },
+          style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+            padding: '0.4rem 0.6rem', background: '#fff', border: '1px solid #e5e7eb',
+            borderRadius: '0.4rem', cursor: 'pointer', transition: 'all 0.15s',
+            textAlign: 'left', width: '100%', fontSize: '0.72rem' },
+          onMouseOver: function(e) { e.currentTarget.style.borderColor = '#d97706'; e.currentTarget.style.background = '#fffbeb'; },
+          onMouseOut: function(e) { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.background = '#fff'; }
+        },
+          h('span', { style: { fontWeight: 600, color: '#1e293b' } }, act.label),
+          act.sublabel ? h('span', { style: { fontSize: '0.65rem', color: '#6b7280' } }, act.sublabel) : null
+        );
+      })
+    )
+  );
+}
+
 function renderActionButtons(actions, onAction, draftData) {
   if (!actions || actions.length === 0) return null;
 
@@ -657,6 +742,8 @@ function renderCard(card, onAction) {
     case 'PerformanceInsightCard': return renderPerformanceInsightCard(card, onAction);
     case 'ExecutionPlanCard': return renderExecutionPlanCard(card, onAction);
     case 'FixCard': return renderFixCard(card, onAction);
+    case 'CrmUpdatePreviewCard': return renderCrmUpdatePreviewCard(card, onAction);
+    case 'AmbiguityCard': return renderAmbiguityCard(card, onAction);
     default: return null;
   }
 }
