@@ -338,6 +338,15 @@ def init_db():
             matched_ids TEXT
         )
     ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS assistant_chat_log (
+            id TEXT PRIMARY KEY,
+            user_message TEXT,
+            card_type TEXT,
+            card_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     # --- Auth & CRM Tables ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS workspaces (
