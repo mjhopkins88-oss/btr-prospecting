@@ -99,6 +99,9 @@ def _classify_intent(text):
             '/export': 'export_report', '/signal': 'analyze_company',
             '/sprint': 'recommend_action', '/fix': 'troubleshoot',
             '/plan': 'brainstorm',
+            '/queue': 'recommend_action', '/approve': 'recommend_action',
+            '/probability': 'analyze_company', '/followups': 'recommend_action',
+            '/signals': 'analyze_company',
         }
         return slash_map.get(cmd, 'recommend_action')
 
@@ -249,6 +252,10 @@ DailyPlanCard: data: {"plan":[{"priority":"critical|high|medium|low","action":".
 SprintCard: data: {"tasks":[{"step":N,"title":"...","target":"...","reason":"...","est_minutes":N,"status":"pending|current|done"}],"total_minutes":N,"completed":N,"total":N}
 InsightCard: data: {"insights":[{"category":"risk|momentum|opportunity|pipeline|execution","title":"...","detail":"...","impact":N}]}
 ErrorCard: data: {"error":"...","suggestion":"..."}
+QueueCard: data: {"items":[{"rank":N,"action":"...","target":"...","reason":"...","priority_score":N,"probability":{"score":N,"label":"High|Medium|Low","reason":"..."},"expected_outcome":"...","urgency":"critical|high|medium|low"}],"count":N}
+BatchDraftCard: data: {"drafts":[{"rank":N,"target":"...","contact_name":"...","channel":"email","subject":"...","body":"...","signal_ref":"...","probability":{"score":N,"label":"...","reason":"..."},"status":"pending"}],"count":N}
+ApprovalQueueCard: data: {"items":[{"id":"...","action":"...","target":"...","status":"pending|approved|skipped","probability":{"score":N,"label":"..."},"priority_score":N}],"count":N}
+ProbabilityCard: data: {"company":"...","company_id":"...","score":N,"label":"High|Medium|Low","reason":"...","stage":"...","warmth":N}
 
 ═══════════════════════════════
 RULES
@@ -268,6 +275,7 @@ RULES
 SLASH COMMANDS
 ═══════════════════════════════
 /draft [contact] — Draft outreach
+/draft top N — Batch draft top N follow-ups
 /log [note] — Log a touchpoint
 /next — Top priority action
 /brief — Daily briefing with performance
@@ -275,7 +283,13 @@ SLASH COMMANDS
 /signal [company] — Signal analysis
 /sprint — Prioritized work sprint
 /plan [topic] — Strategic planning
-/fix [issue] — Diagnose and fix"""
+/fix [issue] — Diagnose and fix
+/queue — View execution queue with ranked actions
+/approve — View approval queue
+/approve all — Execute all pending approvals
+/probability [company] — Deal probability score
+/followups — Pending follow-ups
+/signals — Recent signal intelligence"""
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +377,132 @@ def _score_opportunity(group, signal=None, contact=None, overdue_task=None):
     score += stage_scores.get(stage, 1)
 
     return round(min(score, 100), 1)
+
+
+def _deal_probability(group):
+    """
+    Score deal probability 0-100 with High/Medium/Low label.
+    Inputs: touchpoint recency/count, signal freshness, engagement,
+    follow-up status, relationship stage.
+    """
+    score = 0.0
+    reasons = []
+
+    # 1. Touchpoint recency (0-20)
+    days_silent = _days_since(group.get('last_contacted_at'))
+    if days_silent <= 3:
+        score += 20
+    elif days_silent <= 7:
+        score += 15
+    elif days_silent <= 14:
+        score += 10
+    elif days_silent <= 30:
+        score += 5
+    else:
+        reasons.append(f'{days_silent}d since last contact')
+
+    # 2. Touchpoint count / engagement depth (0-20)
+    try:
+        tp_row = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE group_id = ?",
+            [group['id']]
+        )
+        tp_count = tp_row['cnt'] if tp_row else 0
+    except Exception:
+        tp_count = 0
+    if tp_count >= 10:
+        score += 20
+        reasons.append(f'{tp_count} touchpoints — deep engagement')
+    elif tp_count >= 5:
+        score += 14
+        reasons.append(f'{tp_count} touchpoints — moderate engagement')
+    elif tp_count >= 2:
+        score += 8
+    elif tp_count >= 1:
+        score += 4
+    else:
+        reasons.append('no touchpoints yet')
+
+    # 3. Signal freshness (0-20)
+    try:
+        sig = fetch_one(
+            "SELECT detected_at, importance FROM prospecting_signals WHERE group_id = ? ORDER BY detected_at DESC LIMIT 1",
+            [group['id']]
+        )
+    except Exception:
+        sig = None
+    if sig:
+        sig_age = _days_since(sig.get('detected_at'))
+        imp = sig.get('importance') or 5
+        if sig_age <= 3:
+            score += min(imp / 10.0, 1.0) * 20
+            reasons.append('fresh signal detected')
+        elif sig_age <= 7:
+            score += min(imp / 10.0, 1.0) * 14
+        elif sig_age <= 14:
+            score += min(imp / 10.0, 1.0) * 8
+
+    # 4. Reply/engagement level — warmth as proxy (0-15)
+    warmth = group.get('warmth_score') or 0
+    score += min(warmth / 10.0, 1.0) * 15
+    if warmth >= 7:
+        reasons.append(f'warmth {warmth}/10 — strong engagement')
+    elif warmth >= 4:
+        reasons.append(f'warmth {warmth}/10 — moderate')
+
+    # 5. Follow-up status (0-10)
+    try:
+        pending_fu = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE capital_group_id = ? AND status = 'pending'",
+            [group['id']]
+        )
+        overdue_fu = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE capital_group_id = ? AND status = 'pending' AND due_at < ?",
+            [group['id'], datetime.utcnow().strftime('%Y-%m-%d')]
+        )
+        has_pending = pending_fu['cnt'] if pending_fu else 0
+        has_overdue = overdue_fu['cnt'] if overdue_fu else 0
+    except Exception:
+        has_pending = 0
+        has_overdue = 0
+    if has_overdue > 0:
+        score += 3
+        reasons.append(f'{has_overdue} overdue follow-ups')
+    elif has_pending > 0:
+        score += 10
+        reasons.append('follow-ups on track')
+    else:
+        score += 2
+
+    # 6. Relationship stage momentum (0-15)
+    stage = (group.get('relationship_status') or '').lower()
+    stage_scores = {
+        'closing': 15, 'engaged': 12, 'active': 10, 'warm': 8,
+        'qualified': 6, 'contacted': 4, 'new': 2, 'cold': 0,
+        'dormant': 0, 'lost': 0,
+    }
+    stage_pts = stage_scores.get(stage, 3)
+    score += stage_pts
+    if stage in ('closing', 'engaged', 'active'):
+        reasons.append(f'{stage} stage — high momentum')
+
+    score = round(min(score, 100), 1)
+
+    if score >= 70:
+        label = 'High'
+    elif score >= 40:
+        label = 'Medium'
+    else:
+        label = 'Low'
+
+    if not reasons:
+        reasons.append('limited data available')
+
+    return {
+        'score': score,
+        'label': label,
+        'reason': '; '.join(reasons[:3]),
+    }
 
 
 def _get_ranked_opportunities(limit=10):
@@ -804,6 +944,276 @@ def _generate_sprint_tasks(count=5):
             'signal_id': item.get('signal_id'),
         })
     return tasks
+
+
+# ---------------------------------------------------------------------------
+# V6: Execution queue generator — top actions with probability scores
+# ---------------------------------------------------------------------------
+
+_approval_queue = {}
+
+
+def _generate_execution_queue(limit=10):
+    """
+    Build a prioritized execution queue: top actions ranked by deal probability,
+    urgency, signal freshness, inactivity risk.
+    Sources: SignalStack, follow-ups, stale contacts, touchpoints, performance, prospecting.
+    """
+    items = []
+    seen_ids = set()
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+
+    # 1. Overdue tasks
+    try:
+        overdue = fetch_all(
+            """SELECT t.id, t.title, t.due_at, t.type, g.name as group_name, g.id as group_id
+               FROM prospecting_tasks t
+               LEFT JOIN capital_groups g ON t.capital_group_id = g.id
+               WHERE t.status = 'pending' AND t.due_at < ?
+               ORDER BY t.due_at ASC LIMIT 5""",
+            [today]
+        )
+        for t in (overdue or []):
+            gid = t.get('group_id', '')
+            if gid in seen_ids:
+                continue
+            seen_ids.add(gid)
+            g = fetch_one("SELECT * FROM capital_groups WHERE id = ?", [gid]) if gid else None
+            prob = _deal_probability(g) if g else {'score': 30, 'label': 'Low', 'reason': 'overdue task'}
+            days_late = _days_since(t.get('due_at'))
+            items.append({
+                'id': f"q_{t['id'][:8]}",
+                'action_type': 'follow_up',
+                'action': t['title'],
+                'target': t.get('group_name', ''),
+                'target_id': gid,
+                'reason': f"Overdue by {days_late}d",
+                'priority_score': min(95, prob['score'] + 20),
+                'probability': prob,
+                'expected_outcome': 'Keep deal momentum — prevent relationship decay',
+                'urgency': 'critical',
+            })
+    except Exception:
+        pass
+
+    # 2. High-warmth going cold
+    try:
+        cooling = fetch_all(
+            """SELECT id, name, warmth_score, last_contacted_at, relationship_status
+               FROM capital_groups
+               WHERE warmth_score >= 6
+                 AND (last_contacted_at IS NULL OR last_contacted_at < ?)
+                 AND relationship_status NOT IN ('dormant', 'lost', 'dead')
+               ORDER BY warmth_score DESC LIMIT 5""",
+            [(datetime.utcnow() - timedelta(days=10)).isoformat()]
+        )
+        for g in (cooling or []):
+            if g['id'] in seen_ids:
+                continue
+            seen_ids.add(g['id'])
+            prob = _deal_probability(g)
+            days_cold = _days_since(g.get('last_contacted_at'))
+            items.append({
+                'id': f"q_{g['id'][:8]}",
+                'action_type': 'outreach',
+                'action': f"Re-engage {g['name']}",
+                'target': g['name'],
+                'target_id': g['id'],
+                'reason': f"Warmth {g['warmth_score']}/10, {days_cold}d silent",
+                'priority_score': prob['score'],
+                'probability': prob,
+                'expected_outcome': 'Prevent warm relationship from going cold',
+                'urgency': 'high',
+            })
+    except Exception:
+        pass
+
+    # 3. Fresh unactioned signals
+    try:
+        week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        unactioned = fetch_all(
+            """SELECT s.id, s.title, s.group_id, s.importance, s.detected_at,
+                      g.name as group_name
+               FROM prospecting_signals s
+               LEFT JOIN capital_groups g ON s.group_id = g.id
+               WHERE s.detected_at > ?
+                 AND NOT EXISTS (
+                   SELECT 1 FROM prospecting_touchpoints t
+                   WHERE t.group_id = s.group_id AND t.occurred_at > s.detected_at
+                 )
+               ORDER BY s.importance DESC NULLS LAST LIMIT 5""",
+            [week_ago]
+        )
+        for s in (unactioned or []):
+            gid = s.get('group_id', '')
+            if gid in seen_ids:
+                continue
+            seen_ids.add(gid)
+            g = fetch_one("SELECT * FROM capital_groups WHERE id = ?", [gid]) if gid else None
+            prob = _deal_probability(g) if g else {'score': 40, 'label': 'Medium', 'reason': 'new signal'}
+            sig_age = _days_since(s.get('detected_at'))
+            items.append({
+                'id': f"q_{s['id'][:8]}",
+                'action_type': 'signal_response',
+                'action': f"Act on signal: {s['title'][:60]}",
+                'target': s.get('group_name', ''),
+                'target_id': gid,
+                'reason': f"Importance {s.get('importance', '?')}/10, {sig_age}d old",
+                'priority_score': prob['score'] + min((s.get('importance') or 5), 10),
+                'probability': prob,
+                'expected_outcome': 'Capitalize on timing window before signal expires',
+                'urgency': 'high' if (s.get('importance') or 5) >= 7 else 'medium',
+            })
+    except Exception:
+        pass
+
+    # 4. Follow-ups due today/tomorrow
+    try:
+        tomorrow = (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d')
+        due_soon = fetch_all(
+            """SELECT t.id, t.title, t.due_at, g.name as group_name, g.id as group_id
+               FROM prospecting_tasks t
+               LEFT JOIN capital_groups g ON t.capital_group_id = g.id
+               WHERE t.status = 'pending' AND t.due_at >= ? AND t.due_at <= ?
+               ORDER BY t.due_at ASC LIMIT 5""",
+            [today, tomorrow]
+        )
+        for t in (due_soon or []):
+            gid = t.get('group_id', '')
+            if gid in seen_ids:
+                continue
+            seen_ids.add(gid)
+            g = fetch_one("SELECT * FROM capital_groups WHERE id = ?", [gid]) if gid else None
+            prob = _deal_probability(g) if g else {'score': 35, 'label': 'Low', 'reason': 'scheduled'}
+            is_today = str(t.get('due_at', ''))[:10] == today
+            items.append({
+                'id': f"q_{t['id'][:8]}",
+                'action_type': 'follow_up',
+                'action': t['title'],
+                'target': t.get('group_name', ''),
+                'target_id': gid,
+                'reason': f"Due {'today' if is_today else 'tomorrow'}",
+                'priority_score': prob['score'],
+                'probability': prob,
+                'expected_outcome': 'Stay on schedule with committed follow-ups',
+                'urgency': 'medium',
+            })
+    except Exception:
+        pass
+
+    # 5. Top-scored opportunities for outreach
+    if len(items) < limit:
+        ranked = _get_ranked_opportunities(limit=limit - len(items))
+        for opp in ranked:
+            gid = opp['group']['id']
+            if gid in seen_ids:
+                continue
+            seen_ids.add(gid)
+            prob = _deal_probability(opp['group'])
+            items.append({
+                'id': f"q_{gid[:8]}",
+                'action_type': 'outreach',
+                'action': f"Reach out to {opp['group']['name']}",
+                'target': opp['group']['name'],
+                'target_id': gid,
+                'reason': opp['reason'],
+                'priority_score': prob['score'],
+                'probability': prob,
+                'expected_outcome': 'Advance pipeline — move to next stage',
+                'urgency': 'medium' if prob['score'] >= 50 else 'low',
+            })
+
+    items.sort(key=lambda x: x.get('priority_score', 0), reverse=True)
+    items = items[:limit]
+
+    for i, item in enumerate(items):
+        item['rank'] = i + 1
+        if i == 0 and len(items) > 1:
+            runner_up = items[1].get('priority_score', 0)
+            item['rank_reason'] = (
+                f"Highest combined score ({item['priority_score']}) — "
+                f"{item['reason']}"
+            )
+
+    return items
+
+
+def _generate_batch_drafts(count=5):
+    """
+    Identify top N contacts needing outreach and prepare draft cards.
+    Returns list of draft items for the approval queue.
+    """
+    queue = _generate_execution_queue(limit=count)
+    drafts = []
+    for item in queue:
+        gid = item.get('target_id', '')
+        contact = None
+        if gid:
+            contact = fetch_one(
+                """SELECT c.*, g.name as group_name FROM prospecting_contacts c
+                   LEFT JOIN capital_groups g ON c.group_id = g.id
+                   WHERE c.group_id = ? ORDER BY c.last_touch_at DESC NULLS LAST LIMIT 1""",
+                [gid]
+            )
+        signal = None
+        if gid:
+            signal = fetch_one(
+                "SELECT title, summary FROM prospecting_signals WHERE group_id = ? ORDER BY detected_at DESC LIMIT 1",
+                [gid]
+            )
+
+        contact_name = ''
+        if contact:
+            contact_name = f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip()
+
+        signal_ref = ''
+        if signal:
+            signal_ref = signal.get('title', '')
+
+        draft_id = f"draft_{item['id']}"
+        draft = {
+            'id': draft_id,
+            'rank': item['rank'],
+            'target': item['target'],
+            'target_id': gid,
+            'contact_name': contact_name or item['target'],
+            'contact_id': contact['id'] if contact else '',
+            'channel': 'email',
+            'reason': item['reason'],
+            'probability': item['probability'],
+            'priority_score': item['priority_score'],
+            'signal_ref': signal_ref,
+            'subject': f"Following up — {item['target']}",
+            'body': (
+                f"Hi {contact_name.split()[0] if contact_name else 'there'},\n\n"
+                f"I wanted to follow up regarding {item['target']}. "
+                + (f"I noticed {signal_ref.lower()} — " if signal_ref else '')
+                + "I'd love to find a time to connect and discuss how we might work together.\n\n"
+                f"Would you have 15 minutes this week?\n\nBest regards"
+            ),
+            'status': 'pending',
+        }
+        drafts.append(draft)
+
+        _approval_queue[draft_id] = {
+            'id': draft_id,
+            'type': 'draft',
+            'action': f"Send outreach to {contact_name or item['target']}",
+            'target': item['target'],
+            'target_id': gid,
+            'contact_id': contact['id'] if contact else '',
+            'contact_name': contact_name,
+            'channel': 'email',
+            'subject': draft['subject'],
+            'body': draft['body'],
+            'signal_ref': signal_ref,
+            'probability': item['probability'],
+            'priority_score': item['priority_score'],
+            'status': 'pending',
+            'created_at': datetime.utcnow().isoformat(),
+        }
+
+    return drafts
 
 
 # ---------------------------------------------------------------------------
@@ -1739,6 +2149,60 @@ def _preprocess_slash(text):
             return f"Diagnose and suggest a fix for: {arg}. Use a FixCard.", extra_ctx
         return "Is anything broken or suboptimal in my workflow? Use a FixCard.", extra_ctx
 
+    if cmd == '/queue':
+        return '__v6_queue__', extra_ctx
+
+    if cmd == '/approve':
+        if arg.lower() == 'all':
+            return '__v6_approve_all__', extra_ctx
+        return '__v6_approve_queue__', extra_ctx
+
+    if cmd == '/probability':
+        if arg:
+            return f'__v6_probability__{arg}', extra_ctx
+        return "Which company should I score? Use /probability [company name].", extra_ctx
+
+    if cmd == '/followups':
+        try:
+            fups = fetch_all(
+                """SELECT t.title, t.due_at, g.name as group_name
+                   FROM prospecting_tasks t
+                   LEFT JOIN capital_groups g ON t.capital_group_id = g.id
+                   WHERE t.status = 'pending' AND t.type = 'follow_up'
+                   ORDER BY t.due_at ASC LIMIT 10""", []
+            )
+            if fups:
+                extra_ctx = "PENDING FOLLOW-UPS:\n" + "\n".join(
+                    f"- {f['title']} ({f.get('group_name', '?')}) due {str(f.get('due_at', ''))[:10]}"
+                    for f in fups
+                )
+        except Exception:
+            pass
+        return "Show my pending follow-ups ranked by urgency. Use a NextActionCard.", extra_ctx
+
+    if cmd == '/signals':
+        try:
+            sigs = fetch_all(
+                """SELECT s.title, s.importance, s.detected_at, g.name as group_name
+                   FROM prospecting_signals s
+                   LEFT JOIN capital_groups g ON s.group_id = g.id
+                   ORDER BY s.detected_at DESC LIMIT 10""", []
+            )
+            if sigs:
+                extra_ctx = "RECENT SIGNALS:\n" + "\n".join(
+                    f"- {s['title']} ({s.get('group_name', '?')}) importance={s.get('importance', '?')} detected={str(s.get('detected_at', ''))[:10]}"
+                    for s in sigs
+                )
+        except Exception:
+            pass
+        return "Show recent signals from SignalStack. Use a SignalInsightCard.", extra_ctx
+
+    if cmd == '/draft' and arg:
+        m = re.match(r'^top\s+(\d+)', arg.strip(), re.IGNORECASE)
+        if m:
+            count = int(m.group(1))
+            return f'__v6_batch_draft__{count}', extra_ctx
+
     return text, extra_ctx
 
 
@@ -1921,6 +2385,177 @@ def start_sprint():
 
 
 # ---------------------------------------------------------------------------
+# API: V6 — Execution queue
+# ---------------------------------------------------------------------------
+
+@assistant_bp.route('/queue', methods=['GET'])
+def get_execution_queue():
+    """Return ranked execution queue with deal probability scores."""
+    limit = request.args.get('limit', 10, type=int)
+    items = _generate_execution_queue(limit=min(limit, 20))
+    return jsonify({'queue': items, 'count': len(items)})
+
+
+# ---------------------------------------------------------------------------
+# API: V6 — Batch drafting
+# ---------------------------------------------------------------------------
+
+@assistant_bp.route('/batch-draft', methods=['POST'])
+def batch_draft():
+    """Generate batch drafts for top N contacts."""
+    data = request.get_json(silent=True) or {}
+    count = data.get('count', 5)
+    count = min(max(count, 1), 10)
+    drafts = _generate_batch_drafts(count=count)
+    return jsonify({'drafts': drafts, 'count': len(drafts)})
+
+
+# ---------------------------------------------------------------------------
+# API: V6 — Approval queue
+# ---------------------------------------------------------------------------
+
+@assistant_bp.route('/approval-queue', methods=['GET'])
+def get_approval_queue():
+    """Return current approval queue items."""
+    pending = [v for v in _approval_queue.values() if v.get('status') == 'pending']
+    pending.sort(key=lambda x: x.get('priority_score', 0), reverse=True)
+    return jsonify({'items': pending, 'count': len(pending)})
+
+
+@assistant_bp.route('/approval-queue/action', methods=['POST'])
+def approval_queue_action():
+    """Handle approve/skip/delete/execute on queue items."""
+    data = request.get_json(silent=True) or {}
+    item_id = data.get('item_id')
+    action = data.get('action')
+
+    if not item_id or not action:
+        return jsonify({'success': False, 'error': 'item_id and action required'}), 400
+
+    if action == 'approve_all':
+        executed = []
+        for qid, item in list(_approval_queue.items()):
+            if item.get('status') == 'pending':
+                result = _execute_queue_item(item)
+                item['status'] = 'executed'
+                executed.append(result)
+        return jsonify({'success': True, 'executed': len(executed),
+                        'card': {'type': 'ConfirmationCard',
+                                 'text': f'Executed {len(executed)} queued actions.',
+                                 'data': {'what': 'batch_approve', 'result': 'success'},
+                                 'actions': []}})
+
+    item = _approval_queue.get(item_id)
+    if not item:
+        return jsonify({'success': False, 'error': 'Item not found'}), 404
+
+    if action == 'approve' or action == 'execute':
+        result = _execute_queue_item(item)
+        item['status'] = 'executed'
+        return jsonify({'success': True, 'card': result})
+
+    if action == 'skip':
+        item['status'] = 'skipped'
+        return jsonify({'success': True, 'card': {
+            'type': 'ConfirmationCard', 'text': f'Skipped: {item.get("action", "")}',
+            'data': {'what': 'skip', 'result': 'skipped'}, 'actions': []
+        }})
+
+    if action == 'delete':
+        _approval_queue.pop(item_id, None)
+        return jsonify({'success': True, 'card': {
+            'type': 'ConfirmationCard', 'text': 'Removed from queue.',
+            'data': {'what': 'delete', 'result': 'deleted'}, 'actions': []
+        }})
+
+    if action == 'edit':
+        if data.get('body'):
+            item['body'] = data['body']
+        if data.get('subject'):
+            item['subject'] = data['subject']
+        if data.get('channel'):
+            item['channel'] = data['channel']
+        return jsonify({'success': True, 'card': {
+            'type': 'ConfirmationCard', 'text': 'Draft updated.',
+            'data': {'what': 'edit', 'result': 'updated'}, 'actions': []
+        }})
+
+    return jsonify({'success': False, 'error': f'Unknown action: {action}'}), 400
+
+
+def _execute_queue_item(item):
+    """Execute a single approved queue item."""
+    item_type = item.get('type', '')
+    group_id = item.get('target_id', '')
+    contact_id = item.get('contact_id', '')
+
+    if item_type == 'draft' and (contact_id or group_id):
+        tp_id = new_id()
+        try:
+            existing = None
+            today = datetime.utcnow().strftime('%Y-%m-%d')
+            if contact_id:
+                existing = fetch_one(
+                    "SELECT id FROM prospecting_touchpoints WHERE contact_id = ? AND channel = ? AND DATE(occurred_at) = ?",
+                    [contact_id, item.get('channel', 'email'), today]
+                )
+            if not existing:
+                execute(
+                    """INSERT INTO prospecting_touchpoints
+                       (id, contact_id, group_id, channel, direction, subject, summary, occurred_at)
+                       VALUES (?, ?, ?, ?, 'outbound', ?, ?, CURRENT_TIMESTAMP)""",
+                    [tp_id, contact_id or None, group_id or None,
+                     item.get('channel', 'email'),
+                     item.get('subject', ''),
+                     f"Outreach to {item.get('contact_name', item.get('target', ''))}"]
+                )
+                if contact_id:
+                    execute("UPDATE prospecting_contacts SET last_touch_at = CURRENT_TIMESTAMP WHERE id = ?",
+                            [contact_id])
+                if group_id:
+                    execute("UPDATE capital_groups SET last_contacted_at = CURRENT_TIMESTAMP WHERE id = ?",
+                            [group_id])
+            return {
+                'type': 'ConfirmationCard',
+                'text': f"Logged outreach to {item.get('contact_name', item.get('target', ''))}.",
+                'data': {'what': 'queue_execute', 'result': 'success', 'entity_id': tp_id},
+                'actions': []
+            }
+        except Exception as e:
+            return {
+                'type': 'ErrorCard', 'text': f'Failed to execute: {str(e)}',
+                'data': {'error': str(e)}, 'actions': []
+            }
+
+    return {
+        'type': 'ConfirmationCard',
+        'text': f"Approved: {item.get('action', 'action')}",
+        'data': {'what': 'queue_execute', 'result': 'approved'},
+        'actions': []
+    }
+
+
+# ---------------------------------------------------------------------------
+# API: V6 — Deal probability for a company
+# ---------------------------------------------------------------------------
+
+@assistant_bp.route('/probability/<company_query>', methods=['GET'])
+def get_probability(company_query):
+    """Return deal probability score for a company."""
+    group = _find_group(company_query)
+    if not group:
+        return jsonify({'error': f'No company found matching "{company_query}"'}), 404
+    prob = _deal_probability(group)
+    return jsonify({
+        'company': group['name'],
+        'company_id': group['id'],
+        'probability': prob,
+        'stage': group.get('relationship_status', ''),
+        'warmth': group.get('warmth_score', 0),
+    })
+
+
+# ---------------------------------------------------------------------------
 # Reply text sanitizer — strip all internal/backend syntax from user-facing text
 # ---------------------------------------------------------------------------
 
@@ -1974,6 +2609,94 @@ def chat():
 
     last_msg = messages[-1].get('content', '') if messages else ''
     processed_msg, extra_ctx = _preprocess_slash(last_msg)
+
+    # V6 intercepts — handle execution queue commands locally
+    if processed_msg == '__v6_queue__':
+        items = _generate_execution_queue(limit=10)
+        card = {
+            'type': 'QueueCard', 'text': f"**Execution Queue** — {len(items)} actions ranked by priority",
+            'source': None,
+            'data': {'items': items, 'count': len(items)},
+            'actions': [
+                {'id': 'approve_all_q', 'label': 'Approve All', 'action': 'approve_all_queue', 'params': {}},
+            ]
+        }
+        _persist_chat(last_msg, card, 'queue', 'execution')
+        return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'queue', 'mode': 'execution'})
+
+    if processed_msg == '__v6_approve_all__':
+        result_cards = []
+        for qid, item in list(_approval_queue.items()):
+            if item.get('status') == 'pending':
+                _execute_queue_item(item)
+                item['status'] = 'executed'
+                result_cards.append(item.get('action', ''))
+        text = f"Executed {len(result_cards)} queued actions." if result_cards else "No pending items in the approval queue."
+        card = {'type': 'ConfirmationCard', 'text': text, 'data': {'what': 'approve_all', 'result': 'success'}, 'actions': []}
+        _persist_chat(last_msg, card, 'approve', 'execution')
+        return jsonify({'role': 'assistant', 'content': text, 'card': card, 'intent': 'approve', 'mode': 'execution'})
+
+    if processed_msg == '__v6_approve_queue__':
+        pending = [v for v in _approval_queue.values() if v.get('status') == 'pending']
+        pending.sort(key=lambda x: x.get('priority_score', 0), reverse=True)
+        if not pending:
+            card = {'type': 'TextCard', 'text': 'No pending items in the approval queue. Use **/draft top 5** to generate drafts first.', 'data': {}, 'actions': []}
+        else:
+            card = {
+                'type': 'ApprovalQueueCard', 'text': f"{len(pending)} items awaiting approval",
+                'source': None,
+                'data': {'items': pending, 'count': len(pending)},
+                'actions': [
+                    {'id': 'approve_all_aq', 'label': 'Approve All', 'action': 'approve_all_queue', 'params': {}},
+                ]
+            }
+        _persist_chat(last_msg, card, 'approve', 'execution')
+        return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'approve', 'mode': 'execution'})
+
+    if processed_msg.startswith('__v6_probability__'):
+        company_name = processed_msg.replace('__v6_probability__', '')
+        group = _find_group(company_name)
+        if not group:
+            card = {'type': 'ErrorCard', 'text': f'No company found matching "{company_name}".',
+                    'data': {'error': 'not found', 'suggestion': 'Check the company name and try again.'}, 'actions': []}
+        else:
+            prob = _deal_probability(group)
+            card = {
+                'type': 'ProbabilityCard', 'text': f"**{group['name']}** — Deal Probability: **{prob['label']}** ({prob['score']}/100)",
+                'source': None,
+                'data': {
+                    'company': group['name'], 'company_id': group['id'],
+                    'score': prob['score'], 'label': prob['label'],
+                    'reason': prob['reason'],
+                    'stage': group.get('relationship_status', ''),
+                    'warmth': group.get('warmth_score', 0),
+                },
+                'actions': [
+                    {'id': 'push_prob', 'label': 'Push Forward', 'action': 'push_forward_company',
+                     'params': {'group_name': group['name']}},
+                    {'id': 'draft_prob', 'label': 'Draft Outreach', 'action': 'draft_outreach',
+                     'params': {'target_name': group['name'], 'group_id': group['id'], 'channel': 'email'}},
+                ]
+            }
+        _persist_chat(last_msg, card, 'probability', 'analyst')
+        return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'probability', 'mode': 'analyst'})
+
+    if processed_msg.startswith('__v6_batch_draft__'):
+        count = int(processed_msg.replace('__v6_batch_draft__', ''))
+        drafts = _generate_batch_drafts(count=count)
+        if not drafts:
+            card = {'type': 'TextCard', 'text': 'No contacts found for drafting. Add contacts to your pipeline first.', 'data': {}, 'actions': []}
+        else:
+            card = {
+                'type': 'BatchDraftCard', 'text': f"**{len(drafts)} drafts prepared** — review and approve each one",
+                'source': None,
+                'data': {'drafts': drafts, 'count': len(drafts)},
+                'actions': [
+                    {'id': 'approve_all_bd', 'label': 'Approve All', 'action': 'approve_all_queue', 'params': {}},
+                ]
+            }
+        _persist_chat(last_msg, card, 'batch_draft', 'execution')
+        return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'batch_draft', 'mode': 'execution'})
 
     intent = _classify_intent(last_msg)
     mode = INTENT_TO_MODE.get(intent, 'strategic')
@@ -2240,6 +2963,55 @@ def execute_action():
             return _exec_batch(params)
         if action == 'resolve_ambiguity':
             return _exec_resolve_ambiguity(params)
+        if action == 'approve_all_queue':
+            executed = []
+            for qid, item in list(_approval_queue.items()):
+                if item.get('status') == 'pending':
+                    _execute_queue_item(item)
+                    item['status'] = 'executed'
+                    executed.append(item.get('action', ''))
+            text = f"Executed {len(executed)} queued actions." if executed else "No pending items."
+            return jsonify({'success': True, 'card': {
+                'type': 'ConfirmationCard', 'text': text,
+                'data': {'what': 'approve_all', 'result': 'success'}, 'actions': []
+            }})
+        if action == 'approve_queue_item':
+            item_id = params.get('item_id', '')
+            item = _approval_queue.get(item_id)
+            if item and item.get('status') == 'pending':
+                result = _execute_queue_item(item)
+                item['status'] = 'executed'
+                return jsonify({'success': True, 'card': result})
+            return jsonify({'success': False, 'card': {
+                'type': 'ErrorCard', 'text': 'Queue item not found or already processed.',
+                'data': {'error': 'not found'}, 'actions': []
+            }})
+        if action == 'skip_queue_item':
+            item_id = params.get('item_id', '')
+            item = _approval_queue.get(item_id)
+            if item:
+                item['status'] = 'skipped'
+            return jsonify({'success': True, 'card': {
+                'type': 'ConfirmationCard', 'text': 'Skipped.',
+                'data': {'what': 'skip', 'result': 'skipped'}, 'actions': []
+            }})
+        if action == 'delete_queue_item':
+            item_id = params.get('item_id', '')
+            _approval_queue.pop(item_id, None)
+            return jsonify({'success': True, 'card': {
+                'type': 'ConfirmationCard', 'text': 'Removed from queue.',
+                'data': {'what': 'delete', 'result': 'deleted'}, 'actions': []
+            }})
+        if action == 'push_forward_company':
+            group_name = params.get('group_name', '')
+            if group_name:
+                card = _build_push_forward_chain(group_name)
+                if card:
+                    return jsonify({'success': True, 'card': card})
+            return jsonify({'success': False, 'card': {
+                'type': 'ErrorCard', 'text': 'Could not build push forward plan.',
+                'data': {'error': 'Company not found'}, 'actions': []
+            }})
         if action == 'cancel':
             return jsonify({'success': True, 'card': {
                 'type': 'ConfirmationCard', 'text': 'Cancelled.',
