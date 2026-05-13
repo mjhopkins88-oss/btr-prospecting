@@ -1,9 +1,8 @@
 """
-API Routes: AI Assistant — Operator Intelligence System.
+API Routes: AI Assistant — Proactive Operator Intelligence System (V4).
 
-Core intelligence layer: strategic advisor, CRM operator, analyst,
-system optimizer. Multi-mode intent routing, proactive insights,
-interaction tracking, structured cards, and session memory.
+Core intelligence layer: daily plans, prioritized execution, proactive insights,
+sprint mode, behavior learning, multi-step action chains, signal intelligence.
 """
 from flask import Blueprint, request, jsonify
 from shared.database import fetch_all, fetch_one, execute, new_id
@@ -12,6 +11,7 @@ import os
 import anthropic
 import json
 import re
+import math
 
 try:
     from services.proactive_suggestions import get_proactive_suggestions
@@ -51,6 +51,9 @@ INTENT_KEYWORDS = {
                          'action item', 'send deck', 'add note to', 'had a meeting',
                          'sent an email', 'reached out', 'connected with', 'set up',
                          'scheduled', 'move them to', 'change to', 'update to'],
+    'push_forward':     ['push forward', 'advance', 'move forward', 'progress',
+                         'accelerate', 'fast track', 'close the loop', 'drive forward',
+                         'push them', 'push this', 'take to next level'],
     'export_report':    ['export', 'download', 'csv', 'report', 'spreadsheet', 'pull data'],
     'troubleshoot':     ['error', 'broken', 'not working', 'bug', 'issue', 'wrong',
                          'fix', 'help with app', 'problem'],
@@ -70,6 +73,7 @@ INTENT_TO_MODE = {
     'recommend_action': 'execution',
     'log_update_crm':   'execution',
     'crm_update':       'execution',
+    'push_forward':     'execution',
     'export_report':    'execution',
     'troubleshoot':     'execution',
     'coach':            'coach',
@@ -112,9 +116,10 @@ def _classify_intent(text):
 # System prompt — Operator Intelligence
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """You are BTR Command Operator — the core intelligence layer of a commercial real estate prospecting platform.
+SYSTEM_PROMPT = """You are Leo — the AI operator powering a commercial real estate prospecting platform.
 
 You are NOT a chatbot. You are the system's brain: strategist, operator, analyst, and optimizer.
+Your name is Leo. Users know you as Leo.
 
 INTERNAL PROCESS (never expose this):
 For every message, silently: classify intent → gather context → select mode → reason → output refined answer.
@@ -163,7 +168,7 @@ PRODUCT AWARENESS
 - Performance = behavior engine (daily execution metrics, streaks, habits)
 - Prospecting = relationship engine (contacts, companies, touchpoints)
 - Command Center = execution layer (this chat, action cards, CRM operations)
-- Operator Mode = this chat interface
+- Leo = this AI operator chat interface
 
 Use these names naturally. They are the product language.
 
@@ -185,17 +190,38 @@ For improvement questions (e.g., "how can I improve X?"):
 5. Risks / what not to do
 
 ═══════════════════════════════
-PROACTIVE INSIGHTS
+PROACTIVE INTELLIGENCE
 ═══════════════════════════════
-When context data reveals patterns, surface them naturally in your response:
-- Under-following high-value contacts
-- Signals detected but not acted on
-- Activity trending down vs prior week
-- Contacts going cold that were previously warm
-- Stage bottlenecks (too many stuck at same stage)
-- Overdue tasks piling up
+When context data reveals patterns, surface them with specificity:
+- Under-following high-value contacts → name them, say how long
+- Signals detected but not acted on → cite signal, timing window
+- Activity trending down vs prior week → give % and numbers
+- Contacts going cold that were previously warm → days silent
+- Stage bottlenecks → show ratio
+- Overdue tasks → list top ones
 
-Weave these into your answer like a smart colleague would. Not as alerts — as observations.
+Be the operator who notices what the user missed.
+Weave into answers naturally — not as alerts but as intelligence.
+
+═══════════════════════════════
+SIGNAL INTELLIGENCE
+═══════════════════════════════
+When referencing signals, always include:
+1. Why it matters (what's the opportunity)
+2. Timing window (how long before advantage expires)
+3. Recommended action (specific next step)
+
+Example:
+"This signal matters because [company] just deployed $50M in Q4 —
+they're likely raising again. Timing window: ~2-3 weeks before
+they finalize allocations. Reach out NOW with a deal angle."
+
+═══════════════════════════════
+DAILY PLAN AWARENESS
+═══════════════════════════════
+The system generates daily plans and sprint tasks.
+When user asks for priorities, reference specific plan items.
+When user completes actions, acknowledge progress toward daily goals.
 
 ═══════════════════════════════
 CARD TYPES
@@ -219,6 +245,9 @@ ExportCard: data: {"export_type":"contacts|capital_partners|underwriting|prospec
 ConfirmationCard: data: {"what":"...","result":"...","entity_id":"..."}
 CrmUpdatePreviewCard: data: {"items":["..."],"group_name":"...","contact_name":"...","touchpoint":{"channel":"...","summary":"...","date":"..."}|null,"follow_up":{"title":"...","due_date":"..."}|null,"stage_change":{"entity":"group|contact","new_stage":"..."}|null,"notes":"..."}
 AmbiguityCard: data: {"entity_type":"group|contact","choices":[{"id":"...","label":"...","sublabel":"..."}]}
+DailyPlanCard: data: {"plan":[{"priority":"critical|high|medium|low","action":"...","target":"...","reason":"...","est_minutes":N,"type":"..."}],"total_minutes":N,"date":"..."}
+SprintCard: data: {"tasks":[{"step":N,"title":"...","target":"...","reason":"...","est_minutes":N,"status":"pending|current|done"}],"total_minutes":N,"completed":N,"total":N}
+InsightCard: data: {"insights":[{"category":"risk|momentum|opportunity|pipeline|execution","title":"...","detail":"...","impact":N}]}
 ErrorCard: data: {"error":"...","suggestion":"..."}
 
 ═══════════════════════════════
@@ -250,12 +279,311 @@ SLASH COMMANDS
 
 
 # ---------------------------------------------------------------------------
-# Proactive insight generator — data-driven pattern detection
+# Opportunity scoring engine — composite scoring for prioritization
 # ---------------------------------------------------------------------------
 
-def _generate_proactive_insights():
-    """Analyze CRM data for actionable patterns. Returns list of insight strings."""
-    insights = []
+def _days_since(date_str):
+    """Return days between now and a date string, or 999 if missing."""
+    if not date_str:
+        return 999
+    try:
+        dt = datetime.fromisoformat(str(date_str).replace('Z', ''))
+        return max(0, (datetime.utcnow() - dt).days)
+    except Exception:
+        return 999
+
+
+def _score_opportunity(group, signal=None, contact=None, overdue_task=None):
+    """
+    Score an opportunity (0-100) based on multiple factors.
+    Higher = more urgent / higher leverage.
+
+    Factors:
+      - warmth_score (0-10 from CRM)           → 0-25 pts
+      - recency of touch (recent = lower score) → 0-20 pts (inactivity risk)
+      - signal freshness (recent signal)        → 0-20 pts
+      - engagement level (touchpoint count)     → 0-15 pts
+      - overdue task attached                   → 0-10 pts
+      - deal stage momentum                     → 0-10 pts
+    """
+    score = 0.0
+
+    # Warmth (0-25)
+    warmth = group.get('warmth_score') or 0
+    score += min(warmth / 10.0, 1.0) * 25
+
+    # Inactivity risk (0-20): longer silence on warm contacts = higher urgency
+    days_silent = _days_since(group.get('last_contacted_at'))
+    if warmth >= 5:
+        if days_silent > 30:
+            score += 20
+        elif days_silent > 14:
+            score += 15
+        elif days_silent > 7:
+            score += 10
+        elif days_silent > 3:
+            score += 5
+
+    # Signal freshness (0-20)
+    if signal:
+        sig_age = _days_since(signal.get('detected_at'))
+        importance = signal.get('importance') or 5
+        if sig_age <= 3:
+            score += min(importance / 10.0, 1.0) * 20
+        elif sig_age <= 7:
+            score += min(importance / 10.0, 1.0) * 14
+        elif sig_age <= 14:
+            score += min(importance / 10.0, 1.0) * 8
+
+    # Engagement level (0-15): more touchpoints = more invested
+    if contact:
+        tp_count = contact.get('touchpoint_count', 0)
+        score += min(tp_count / 10.0, 1.0) * 15
+    else:
+        try:
+            tp_row = fetch_one(
+                "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE group_id = ?",
+                [group['id']]
+            )
+            tp_count = tp_row['cnt'] if tp_row else 0
+            score += min(tp_count / 10.0, 1.0) * 15
+        except Exception:
+            pass
+
+    # Overdue task (0-10)
+    if overdue_task:
+        score += 10
+
+    # Deal stage momentum (0-10)
+    stage = group.get('relationship_status', '').lower()
+    stage_scores = {
+        'closing': 10, 'active': 8, 'warm': 6, 'engaged': 7,
+        'qualified': 5, 'contacted': 3, 'new': 2, 'cold': 0
+    }
+    score += stage_scores.get(stage, 1)
+
+    return round(min(score, 100), 1)
+
+
+def _get_ranked_opportunities(limit=10):
+    """Return scored + ranked opportunities with context."""
+    groups = fetch_all(
+        """SELECT id, name, type, relationship_status, warmth_score,
+                  last_contacted_at, opportunity_stage, opportunity_value, notes
+           FROM capital_groups
+           WHERE relationship_status NOT IN ('dormant', 'lost', 'dead')
+              OR relationship_status IS NULL
+           ORDER BY warmth_score DESC NULLS LAST LIMIT 50""", []
+    )
+    if not groups:
+        return []
+
+    scored = []
+    for g in groups:
+        signal = fetch_one(
+            "SELECT * FROM prospecting_signals WHERE group_id = ? ORDER BY detected_at DESC LIMIT 1",
+            [g['id']]
+        )
+        overdue = fetch_one(
+            """SELECT * FROM prospecting_tasks
+               WHERE capital_group_id = ? AND status = 'pending' AND due_at < ?
+               ORDER BY due_at ASC LIMIT 1""",
+            [g['id'], datetime.utcnow().strftime('%Y-%m-%d')]
+        )
+        sc = _score_opportunity(g, signal=signal, overdue_task=overdue)
+        days_silent = _days_since(g.get('last_contacted_at'))
+
+        reason_parts = []
+        if (g.get('warmth_score') or 0) >= 7:
+            reason_parts.append('high warmth')
+        if signal and _days_since(signal.get('detected_at')) <= 7:
+            reason_parts.append('fresh signal')
+        if days_silent > 14 and (g.get('warmth_score') or 0) >= 5:
+            reason_parts.append(f'{days_silent}d silent')
+        if overdue:
+            reason_parts.append('overdue task')
+        stage = g.get('relationship_status', '')
+        if stage in ('active', 'closing', 'engaged'):
+            reason_parts.append(f'{stage} stage')
+
+        scored.append({
+            'group': g,
+            'score': sc,
+            'signal': signal,
+            'overdue_task': overdue,
+            'days_silent': days_silent,
+            'reason': ' + '.join(reason_parts) if reason_parts else 'in pipeline',
+        })
+
+    scored.sort(key=lambda x: x['score'], reverse=True)
+    return scored[:limit]
+
+
+# ---------------------------------------------------------------------------
+# Daily gameplan generator
+# ---------------------------------------------------------------------------
+
+def _generate_daily_plan():
+    """
+    Generate today's prioritized action plan.
+    Returns list of plan items sorted by priority.
+
+    Priority order:
+    1. Overdue tasks
+    2. High-warmth groups going cold
+    3. Unactioned fresh signals
+    4. Scheduled follow-ups due today/tomorrow
+    5. Top-scored opportunities for outreach
+    """
+    plan = []
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    tomorrow = (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d')
+
+    # 1. Overdue tasks (highest priority)
+    try:
+        overdue = fetch_all(
+            """SELECT t.id, t.title, t.due_at, t.type, g.name as group_name, g.id as group_id
+               FROM prospecting_tasks t
+               LEFT JOIN capital_groups g ON t.capital_group_id = g.id
+               WHERE t.status = 'pending' AND t.due_at < ?
+               ORDER BY t.due_at ASC LIMIT 3""",
+            [today]
+        )
+        for t in (overdue or []):
+            days_late = _days_since(t.get('due_at'))
+            plan.append({
+                'priority': 'critical',
+                'action': t['title'],
+                'target': t.get('group_name', ''),
+                'target_id': t.get('group_id', ''),
+                'reason': f"Overdue by {days_late}d",
+                'est_minutes': 10,
+                'task_id': t['id'],
+                'type': 'overdue_task',
+            })
+    except Exception:
+        pass
+
+    # 2. High-warmth groups going cold
+    try:
+        cooling = fetch_all(
+            """SELECT id, name, warmth_score, last_contacted_at, relationship_status
+               FROM capital_groups
+               WHERE warmth_score >= 6
+                 AND (last_contacted_at IS NULL OR last_contacted_at < ?)
+                 AND relationship_status NOT IN ('dormant', 'lost', 'dead')
+               ORDER BY warmth_score DESC LIMIT 3""",
+            [(datetime.utcnow() - timedelta(days=10)).isoformat()]
+        )
+        for g in (cooling or []):
+            days_cold = _days_since(g.get('last_contacted_at'))
+            plan.append({
+                'priority': 'high',
+                'action': f"Re-engage {g['name']}",
+                'target': g['name'],
+                'target_id': g['id'],
+                'reason': f"Warmth {g['warmth_score']}/10, {days_cold}d silent — at risk of going cold",
+                'est_minutes': 15,
+                'type': 'cooling_contact',
+            })
+    except Exception:
+        pass
+
+    # 3. Unactioned fresh signals
+    try:
+        week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        unactioned = fetch_all(
+            """SELECT s.id, s.title, s.group_id, s.importance, s.detected_at,
+                      g.name as group_name
+               FROM prospecting_signals s
+               LEFT JOIN capital_groups g ON s.group_id = g.id
+               WHERE s.detected_at > ?
+                 AND NOT EXISTS (
+                   SELECT 1 FROM prospecting_touchpoints t
+                   WHERE t.group_id = s.group_id AND t.occurred_at > s.detected_at
+                 )
+               ORDER BY s.importance DESC NULLS LAST LIMIT 3""",
+            [week_ago]
+        )
+        for s in (unactioned or []):
+            sig_age = _days_since(s.get('detected_at'))
+            plan.append({
+                'priority': 'high' if (s.get('importance') or 5) >= 7 else 'medium',
+                'action': f"Act on signal: {s['title'][:60]}",
+                'target': s.get('group_name', ''),
+                'target_id': s.get('group_id', ''),
+                'reason': f"Importance {s.get('importance', '?')}/10, {sig_age}d old — timing window closing",
+                'est_minutes': 15,
+                'signal_id': s['id'],
+                'type': 'unactioned_signal',
+            })
+    except Exception:
+        pass
+
+    # 4. Follow-ups due today/tomorrow
+    try:
+        due_soon = fetch_all(
+            """SELECT t.id, t.title, t.due_at, g.name as group_name, g.id as group_id
+               FROM prospecting_tasks t
+               LEFT JOIN capital_groups g ON t.capital_group_id = g.id
+               WHERE t.status = 'pending' AND t.due_at >= ? AND t.due_at <= ?
+               ORDER BY t.due_at ASC LIMIT 3""",
+            [today, tomorrow]
+        )
+        for t in (due_soon or []):
+            plan.append({
+                'priority': 'medium',
+                'action': t['title'],
+                'target': t.get('group_name', ''),
+                'target_id': t.get('group_id', ''),
+                'reason': f"Due {'today' if str(t.get('due_at', ''))[:10] == today else 'tomorrow'}",
+                'est_minutes': 10,
+                'task_id': t['id'],
+                'type': 'scheduled_followup',
+            })
+    except Exception:
+        pass
+
+    # 5. Top opportunities for outreach
+    if len(plan) < 5:
+        existing_ids = {p.get('target_id') for p in plan if p.get('target_id')}
+        ranked = _get_ranked_opportunities(limit=5)
+        for opp in ranked:
+            if opp['group']['id'] in existing_ids:
+                continue
+            if opp['score'] < 30:
+                continue
+            plan.append({
+                'priority': 'medium' if opp['score'] >= 50 else 'low',
+                'action': f"Reach out to {opp['group']['name']}",
+                'target': opp['group']['name'],
+                'target_id': opp['group']['id'],
+                'reason': opp['reason'],
+                'est_minutes': 15,
+                'type': 'opportunity',
+                'score': opp['score'],
+            })
+            if len(plan) >= 7:
+                break
+
+    prio_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
+    plan.sort(key=lambda x: prio_order.get(x['priority'], 4))
+
+    total_minutes = sum(p.get('est_minutes', 10) for p in plan)
+    return plan, total_minutes
+
+
+# ---------------------------------------------------------------------------
+# Proactive insight generator — scored, ranked, limited
+# ---------------------------------------------------------------------------
+
+def _generate_proactive_insights(as_objects=False):
+    """
+    Analyze CRM data for actionable patterns.
+    Returns list of insight dicts (scored) or strings.
+    Scored insights are ranked by impact and limited to top 4.
+    """
+    raw_insights = []
 
     # 1. High-warmth contacts not recently touched
     try:
@@ -269,14 +597,20 @@ def _generate_proactive_insights():
         )
         if undertouched:
             names = ', '.join(g['name'] for g in undertouched)
-            insights.append(
-                f"UNDER-FOLLOWED: {len(undertouched)} high-warmth groups "
-                f"({names}) haven't been touched in 14+ days"
-            )
+            max_warmth = max(g.get('warmth_score', 0) for g in undertouched)
+            raw_insights.append({
+                'category': 'risk',
+                'impact': 85 + max_warmth,
+                'title': f"{len(undertouched)} high-value partners untouched 14+ days",
+                'detail': f"{names} — warmth is high but engagement is dropping",
+                'action_label': 'Draft Outreach',
+                'action_type': 'draft_all',
+                'action_targets': [g['name'] for g in undertouched],
+            })
     except Exception:
         pass
 
-    # 2. Activity trend (this week vs last week)
+    # 2. Activity trend
     try:
         week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
         two_weeks = (datetime.utcnow() - timedelta(days=14)).isoformat()
@@ -292,19 +626,26 @@ def _generate_proactive_insights():
         lw = last_week['cnt'] if last_week else 0
         if lw > 0 and tw < lw * 0.6:
             pct = int((1 - tw / max(lw, 1)) * 100)
-            insights.append(
-                f"ACTIVITY DROP: Touchpoints down {pct}% this week ({tw}) "
-                f"vs last week ({lw})"
-            )
+            raw_insights.append({
+                'category': 'momentum',
+                'impact': 70 + pct // 5,
+                'title': f"Activity down {pct}% this week",
+                'detail': f"{tw} touchpoints vs {lw} last week — momentum dropping",
+                'action_label': 'Start Sprint',
+                'action_type': 'start_sprint',
+            })
         elif lw > 0 and tw > lw * 1.3:
             pct = int((tw / max(lw, 1) - 1) * 100)
-            insights.append(
-                f"MOMENTUM: Activity up {pct}% this week ({tw} vs {lw}) — keep pushing"
-            )
+            raw_insights.append({
+                'category': 'momentum',
+                'impact': 30,
+                'title': f"Activity up {pct}% this week",
+                'detail': f"{tw} vs {lw} touchpoints — strong momentum, keep pushing",
+            })
     except Exception:
         pass
 
-    # 3. Signals detected but not followed up
+    # 3. Unactioned signals
     try:
         week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
         sig_total = fetch_one(
@@ -321,11 +662,17 @@ def _generate_proactive_insights():
         )
         total = sig_total['cnt'] if sig_total else 0
         acted = sig_acted['cnt'] if sig_acted else 0
-        if total > 0 and acted < total * 0.3:
-            insights.append(
-                f"SIGNAL GAP: {total} signals this week, only {acted} followed up on. "
-                f"SignalStack is finding opportunities but they're not being actioned."
-            )
+        unactioned = total - acted
+        if total > 0 and acted < total * 0.4:
+            raw_insights.append({
+                'category': 'opportunity',
+                'impact': 75 + unactioned * 2,
+                'title': f"Opened {total} signals, acted on {acted}",
+                'detail': f"{unactioned} signals unanswered — timing windows closing",
+                'action_label': 'Review Signals',
+                'action_type': 'navigate',
+                'action_params': {'tab': 'signals'},
+            })
     except Exception:
         pass
 
@@ -337,73 +684,283 @@ def _generate_proactive_insights():
                WHERE relationship_status IS NOT NULL
                GROUP BY relationship_status ORDER BY cnt DESC""", []
         )
-        total = sum(s['cnt'] for s in stages) if stages else 0
-        if stages and total > 5:
+        total_g = sum(s['cnt'] for s in stages) if stages else 0
+        if stages and total_g > 5:
             top = stages[0]
-            pct = int(top['cnt'] / max(total, 1) * 100)
+            pct = int(top['cnt'] / max(total_g, 1) * 100)
             if pct > 55:
-                insights.append(
-                    f"BOTTLENECK: {pct}% of capital groups ({top['cnt']}/{total}) are at "
-                    f"'{top['relationship_status']}' — review pipeline progression"
-                )
+                raw_insights.append({
+                    'category': 'pipeline',
+                    'impact': 60,
+                    'title': f"{pct}% of pipeline stuck at '{top['relationship_status']}'",
+                    'detail': f"{top['cnt']}/{total_g} groups — pipeline isn't flowing",
+                    'action_label': 'Diagnose',
+                    'action_type': 'navigate',
+                    'action_params': {'tab': 'prospecting'},
+                })
     except Exception:
         pass
 
     # 5. Overdue tasks
     try:
-        overdue = fetch_one(
-            "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE status = 'pending' AND due_at < ?",
+        overdue = fetch_all(
+            """SELECT t.title, g.name as group_name
+               FROM prospecting_tasks t
+               LEFT JOIN capital_groups g ON t.capital_group_id = g.id
+               WHERE t.status = 'pending' AND t.due_at < ?
+               ORDER BY t.due_at ASC LIMIT 5""",
             [datetime.utcnow().strftime('%Y-%m-%d')]
         )
-        if overdue and overdue['cnt'] > 2:
-            insights.append(
-                f"OVERDUE: {overdue['cnt']} tasks past due — address or reschedule"
-            )
+        if overdue and len(overdue) > 0:
+            raw_insights.append({
+                'category': 'execution',
+                'impact': 80 + len(overdue) * 3,
+                'title': f"{len(overdue)} tasks overdue",
+                'detail': '; '.join(f"{t['title']}" + (f" ({t['group_name']})" if t.get('group_name') else '') for t in overdue[:3]),
+                'action_label': 'View Tasks',
+                'action_type': 'navigate',
+                'action_params': {'tab': 'prospecting'},
+            })
     except Exception:
         pass
 
-    # 6. Contacts going cold from warm status
+    # 6. Contacts going cold
     try:
         going_cold = fetch_all(
-            """SELECT COUNT(*) as cnt FROM capital_groups
+            """SELECT name, last_contacted_at, warmth_score
+               FROM capital_groups
                WHERE last_contacted_at IS NOT NULL
                  AND last_contacted_at < ?
-                 AND relationship_status IN ('warm', 'active', 'engaged')""",
+                 AND relationship_status IN ('warm', 'active', 'engaged')
+               ORDER BY warmth_score DESC LIMIT 3""",
             [(datetime.utcnow() - timedelta(days=21)).isoformat()]
         )
-        if going_cold and going_cold[0]['cnt'] > 0:
-            cnt = going_cold[0]['cnt']
-            insights.append(
-                f"COOLING: {cnt} previously warm/active groups haven't been "
-                f"touched in 21+ days"
-            )
+        if going_cold:
+            names = ', '.join(g['name'] for g in going_cold)
+            raw_insights.append({
+                'category': 'risk',
+                'impact': 70,
+                'title': f"{len(going_cold)} warm contacts going cold",
+                'detail': f"{names} — 21+ days silent, relationship at risk",
+                'action_label': 'Re-engage',
+                'action_type': 'draft_all',
+                'action_targets': [g['name'] for g in going_cold],
+            })
     except Exception:
         pass
 
-    return insights
+    # 7. Weekly target proximity
+    try:
+        week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        tw = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE occurred_at > ?",
+            [week_ago]
+        )
+        tp_count = tw['cnt'] if tw else 0
+        weekly_target = 15
+        remaining = max(0, weekly_target - tp_count)
+        if 0 < remaining <= 5:
+            raw_insights.append({
+                'category': 'momentum',
+                'impact': 55,
+                'title': f"{remaining} actions from weekly target",
+                'detail': f"{tp_count}/{weekly_target} touchpoints this week — close to goal",
+                'action_label': 'Start Sprint',
+                'action_type': 'start_sprint',
+            })
+    except Exception:
+        pass
+
+    # Sort by impact, take top 4
+    raw_insights.sort(key=lambda x: x.get('impact', 0), reverse=True)
+    top = raw_insights[:4]
+
+    if as_objects:
+        return top
+
+    return [f"{ins['title']}: {ins['detail']}" for ins in top]
 
 
 # ---------------------------------------------------------------------------
-# Interaction pattern analysis (self-improvement loop)
+# Sprint task generator
+# ---------------------------------------------------------------------------
+
+def _generate_sprint_tasks(count=5):
+    """Generate prioritized sprint tasks from the daily plan."""
+    plan, _ = _generate_daily_plan()
+    tasks = []
+    for i, item in enumerate(plan[:count]):
+        tasks.append({
+            'id': f"sprint_{i}",
+            'step': i + 1,
+            'title': item['action'],
+            'target': item.get('target', ''),
+            'target_id': item.get('target_id', ''),
+            'reason': item.get('reason', ''),
+            'est_minutes': item.get('est_minutes', 10),
+            'status': 'pending',
+            'type': item.get('type', 'general'),
+            'task_id': item.get('task_id'),
+            'signal_id': item.get('signal_id'),
+        })
+    return tasks
+
+
+# ---------------------------------------------------------------------------
+# Multi-step action chain builder (push forward)
+# ---------------------------------------------------------------------------
+
+def _build_push_forward_chain(group_name_query):
+    """Build an ExecutionPlanCard for pushing a group forward."""
+    group = _find_group(group_name_query)
+    if not group:
+        return None
+
+    signal = fetch_one(
+        "SELECT * FROM prospecting_signals WHERE group_id = ? ORDER BY detected_at DESC LIMIT 1",
+        [group['id']]
+    )
+    contact = fetch_one(
+        """SELECT c.*, g.name as group_name FROM prospecting_contacts c
+           LEFT JOIN capital_groups g ON c.group_id = g.id
+           WHERE c.group_id = ? ORDER BY c.last_touch_at DESC NULLS LAST LIMIT 1""",
+        [group['id']]
+    )
+    last_touch = fetch_one(
+        "SELECT * FROM prospecting_touchpoints WHERE group_id = ? ORDER BY occurred_at DESC LIMIT 1",
+        [group['id']]
+    )
+
+    steps = []
+    step_num = 1
+    contact_name = ''
+    if contact:
+        contact_name = f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip()
+
+    # Step 1: Review last interaction
+    if last_touch:
+        days_ago = _days_since(last_touch.get('occurred_at'))
+        steps.append({
+            'step': step_num, 'status': 'done',
+            'title': 'Last interaction',
+            'detail': f"{last_touch.get('channel', 'touch')} {days_ago}d ago: {str(last_touch.get('summary', ''))[:80]}",
+        })
+        step_num += 1
+    else:
+        steps.append({
+            'step': step_num, 'status': 'done',
+            'title': 'No prior touchpoints',
+            'detail': 'First outreach needed',
+        })
+        step_num += 1
+
+    # Step 2: Signal check
+    if signal:
+        sig_age = _days_since(signal.get('detected_at'))
+        steps.append({
+            'step': step_num, 'status': 'done',
+            'title': f"Signal detected ({sig_age}d ago)",
+            'detail': f"{signal.get('title', '')[:60]} — importance {signal.get('importance', '?')}/10",
+        })
+        step_num += 1
+
+    # Step 3: Draft outreach
+    steps.append({
+        'step': step_num, 'status': 'current',
+        'title': f"Draft outreach to {contact_name or group['name']}",
+        'detail': 'Personalized message referencing ' + (
+            f"signal: {signal['title'][:40]}" if signal else 'recent activity'
+        ),
+    })
+    step_num += 1
+
+    # Step 4: Stage advancement
+    current_stage = group.get('relationship_status', 'new')
+    next_stage_map = {
+        'new': 'contacted', 'cold': 'contacted', 'contacted': 'warm',
+        'warm': 'active', 'active': 'engaged', 'engaged': 'closing',
+    }
+    next_stage = next_stage_map.get(current_stage, 'active')
+    steps.append({
+        'step': step_num, 'status': 'pending',
+        'title': f"Advance stage: {current_stage} → {next_stage}",
+        'detail': f"Update {group['name']} relationship status",
+    })
+    step_num += 1
+
+    # Step 5: Follow-up
+    steps.append({
+        'step': step_num, 'status': 'pending',
+        'title': 'Schedule follow-up',
+        'detail': f"Set reminder in 5-7 days to check response",
+    })
+
+    actions = [
+        {'id': 'draft_push', 'label': 'Draft Outreach', 'action': 'draft_outreach', 'params': {
+            'target_name': contact_name or group['name'],
+            'target_id': contact['id'] if contact else '',
+            'group_id': group['id'],
+            'channel': 'email',
+        }},
+        {'id': 'advance_stage', 'label': f'Move to {next_stage.title()}', 'action': 'update_stage', 'params': {
+            'group_id': group['id'],
+            'new_stage': next_stage,
+        }},
+        {'id': 'followup_push', 'label': 'Set Follow-up', 'action': 'create_followup', 'params': {
+            'group_id': group['id'],
+            'title': f"Follow up with {group['name']}",
+            'due_date': (datetime.utcnow() + timedelta(days=5)).strftime('%Y-%m-%d'),
+        }},
+    ]
+
+    return {
+        'type': 'ExecutionPlanCard',
+        'text': f"**Push {group['name']} forward** — {len(steps)}-step plan",
+        'source': None,
+        'data': {
+            'plan_title': f"Push {group['name']} Forward",
+            'steps': steps,
+            'estimated_time': f"{len(steps) * 5} min",
+            'next_step_action': 'Draft outreach',
+        },
+        'actions': actions,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Interaction pattern analysis + behavior learning
 # ---------------------------------------------------------------------------
 
 def _get_interaction_patterns():
-    """Analyze recent chat logs to understand user behavior patterns."""
+    """
+    Analyze recent chat logs to understand user behavior patterns.
+    Detects preferences: response length, card types, action patterns, timing.
+    """
     try:
         rows = fetch_all(
-            """SELECT card_type, user_message, created_at
+            """SELECT card_type, user_message, card_json, created_at
                FROM assistant_chat_log
-               ORDER BY created_at DESC LIMIT 30""", []
+               ORDER BY created_at DESC LIMIT 50""", []
         )
         if not rows or len(rows) < 3:
             return ""
 
-        # Count intents/modes from card_type field (format: CardType|intent|mode)
         intent_counts = {}
         mode_counts = {}
         card_counts = {}
+        action_counts = {}
+        clicked_cards = set()
+        ignored_cards = set()
+        msg_lengths = []
+
         for r in rows:
-            parts = r.get('card_type', '').split('|')
+            ct = r.get('card_type', '')
+            if ct.startswith('ACTION:'):
+                action_type = ct.replace('ACTION:', '')
+                action_counts[action_type] = action_counts.get(action_type, 0) + 1
+                continue
+
+            parts = ct.split('|')
             card_type = parts[0] if parts else 'TextCard'
             intent = parts[1] if len(parts) > 1 else 'unknown'
             mode = parts[2] if len(parts) > 2 else 'unknown'
@@ -411,33 +968,63 @@ def _get_interaction_patterns():
             mode_counts[mode] = mode_counts.get(mode, 0) + 1
             card_counts[card_type] = card_counts.get(card_type, 0) + 1
 
-        # Track actions executed
-        action_rows = fetch_all(
-            """SELECT card_type FROM assistant_chat_log
-               WHERE card_type LIKE 'ACTION:%'
-               ORDER BY created_at DESC LIMIT 20""", []
-        )
-        action_counts = {}
-        for a in (action_rows or []):
-            action_type = a['card_type'].replace('ACTION:', '')
-            action_counts[action_type] = action_counts.get(action_type, 0) + 1
+            if r.get('user_message'):
+                msg_lengths.append(len(r['user_message']))
 
-        parts = ["INTERACTION PATTERNS (last 30 exchanges):"]
+        # Detect action patterns for clicked vs ignored
+        action_row_types = set(action_counts.keys())
+        for ct, count in card_counts.items():
+            if ct in ('TextCard', 'ErrorCard', 'ConfirmationCard'):
+                continue
+            if any(ct.replace('Card', '').lower() in a.lower() for a in action_row_types):
+                clicked_cards.add(ct)
+            elif count >= 3:
+                ignored_cards.add(ct)
+
+        # Build behavior summary
+        output = ["BEHAVIOR PATTERNS (last 50 interactions):"]
+
         top_intents = sorted(intent_counts.items(), key=lambda x: x[1], reverse=True)[:4]
         if top_intents:
-            parts.append("  Most asked: " + ", ".join(
+            output.append("  Most frequent: " + ", ".join(
                 f"{k} ({v}x)" for k, v in top_intents if k != 'unknown'
             ))
-        top_cards = sorted(card_counts.items(), key=lambda x: x[1], reverse=True)[:4]
-        if top_cards:
-            parts.append("  Card types received: " + ", ".join(
-                f"{k} ({v}x)" for k, v in top_cards
-            ))
+
         if action_counts:
-            parts.append("  Actions executed: " + ", ".join(
-                f"{k} ({v}x)" for k, v in sorted(action_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+            output.append("  Actions taken: " + ", ".join(
+                f"{k} ({v}x)" for k, v in sorted(action_counts.items(), key=lambda x: x[1], reverse=True)[:4]
             ))
-        return "\n".join(parts)
+
+        # Preference detection
+        preferences = []
+        if msg_lengths:
+            avg_len = sum(msg_lengths) / len(msg_lengths)
+            if avg_len < 30:
+                preferences.append("prefers brief commands")
+            elif avg_len > 100:
+                preferences.append("writes detailed requests")
+
+        if action_counts:
+            total_actions = sum(action_counts.values())
+            total_chats = len([r for r in rows if not r.get('card_type', '').startswith('ACTION:')])
+            if total_chats > 5:
+                action_rate = total_actions / max(total_chats, 1)
+                if action_rate > 0.6:
+                    preferences.append("high action taker — prefers executable cards")
+                elif action_rate < 0.2:
+                    preferences.append("tends to read/plan — prefers analytical responses")
+
+        exec_count = mode_counts.get('execution', 0)
+        strat_count = mode_counts.get('strategic', 0)
+        if exec_count > strat_count * 2:
+            preferences.append("execution-focused user")
+        elif strat_count > exec_count * 2:
+            preferences.append("strategy-focused user")
+
+        if preferences:
+            output.append("  User style: " + "; ".join(preferences))
+
+        return "\n".join(output)
     except Exception:
         return ""
 
@@ -1251,6 +1838,115 @@ def _format_contact_detail(contact, signal=None):
 
 
 # ---------------------------------------------------------------------------
+# API: Proactive insights
+# ---------------------------------------------------------------------------
+
+@assistant_bp.route('/insights', methods=['GET'])
+def get_insights():
+    """Return scored, ranked proactive insights for the frontend."""
+    insights = _generate_proactive_insights(as_objects=True)
+    return jsonify({'insights': insights})
+
+
+# ---------------------------------------------------------------------------
+# API: Daily gameplan
+# ---------------------------------------------------------------------------
+
+@assistant_bp.route('/gameplan', methods=['GET'])
+def get_gameplan():
+    """Generate today's prioritized action plan."""
+    plan, total_minutes = _generate_daily_plan()
+    ranked = _get_ranked_opportunities(limit=5)
+
+    top_opps = []
+    for opp in ranked[:5]:
+        g = opp['group']
+        top_opps.append({
+            'name': g['name'],
+            'id': g['id'],
+            'score': opp['score'],
+            'reason': opp['reason'],
+            'days_silent': opp['days_silent'],
+            'status': g.get('relationship_status', ''),
+            'warmth': g.get('warmth_score', 0),
+        })
+
+    return jsonify({
+        'plan': plan,
+        'total_minutes': total_minutes,
+        'opportunities': top_opps,
+        'date': datetime.utcnow().strftime('%A, %B %d'),
+    })
+
+
+# ---------------------------------------------------------------------------
+# API: Sprint mode
+# ---------------------------------------------------------------------------
+
+@assistant_bp.route('/sprint', methods=['POST'])
+def start_sprint():
+    """Generate or return sprint tasks."""
+    data = request.get_json(silent=True) or {}
+    action = data.get('action', 'start')
+
+    if action == 'start':
+        tasks = _generate_sprint_tasks(count=5)
+        total_min = sum(t.get('est_minutes', 10) for t in tasks)
+        _track_interaction('sprint_started', 'sprint', {'task_count': len(tasks)})
+        return jsonify({
+            'sprint': {
+                'tasks': tasks,
+                'total_minutes': total_min,
+                'started_at': datetime.utcnow().isoformat(),
+                'completed': 0,
+                'total': len(tasks),
+            }
+        })
+
+    if action == 'complete_task':
+        task_id = data.get('task_id')
+        original_task_id = data.get('original_task_id')
+        if original_task_id:
+            try:
+                execute(
+                    "UPDATE prospecting_tasks SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    [original_task_id]
+                )
+            except Exception:
+                pass
+        _track_interaction('sprint_task_completed', task_id or 'unknown', data)
+        return jsonify({'success': True})
+
+    return jsonify({'error': 'Unknown sprint action'}), 400
+
+
+# ---------------------------------------------------------------------------
+# Reply text sanitizer — strip all internal/backend syntax from user-facing text
+# ---------------------------------------------------------------------------
+
+def _sanitize_reply_text(text):
+    """Remove card tags, action tags, JSON blocks, and internal syntax."""
+    if not text:
+        return ''
+    clean = text
+    # Strip <card ...>...</card> (with or without attributes)
+    clean = re.sub(r'<card[^>]*>[\s\S]*?</card>', '', clean, flags=re.IGNORECASE)
+    # Strip orphan <card> or </card> tags
+    clean = re.sub(r'</?card[^>]*>', '', clean, flags=re.IGNORECASE)
+    # Strip <action>...</action>
+    clean = re.sub(r'<action[^>]*>[\s\S]*?</action>', '', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'</?action[^>]*>', '', clean, flags=re.IGNORECASE)
+    # Strip standalone JSON blocks (lines that are just {...})
+    clean = re.sub(r'^\s*\{[^}]{20,}\}\s*$', '', clean, flags=re.MULTILINE)
+    # Strip common internal prefixes
+    clean = re.sub(r'^\s*```json\s*', '', clean)
+    clean = re.sub(r'\s*```\s*$', '', clean)
+    # Clean up whitespace
+    clean = re.sub(r'\n{3,}', '\n\n', clean)
+    return clean.strip()
+
+
+# ---------------------------------------------------------------------------
 # Chat endpoint
 # ---------------------------------------------------------------------------
 
@@ -1301,6 +1997,21 @@ def chat():
                 'card': card, 'intent': 'crm_update', 'mode': 'execution'
             })
         # 'no_entity' falls through to Claude
+
+    # Push forward intercept — build multi-step chain locally
+    if intent == 'push_forward':
+        target = re.sub(
+            r'\b(push forward|advance|move forward|progress|accelerate|fast track|push)\b',
+            '', last_msg, flags=re.IGNORECASE
+        ).strip(' .,!?')
+        if target:
+            card = _build_push_forward_chain(target)
+            if card:
+                _persist_chat(last_msg, card, 'push_forward', 'execution')
+                return jsonify({
+                    'role': 'assistant', 'content': card['text'],
+                    'card': card, 'intent': 'push_forward', 'mode': 'execution'
+                })
 
     # Page-aware context
     page_extra = ""
@@ -1356,12 +2067,27 @@ def chat():
         reply = resp.content[0].text if resp.content else ''
 
         card = None
+        # Try <card>JSON</card> format
         if '<card>' in reply and '</card>' in reply:
             try:
                 card_str = reply.split('<card>')[1].split('</card>')[0].strip()
                 card = json.loads(card_str)
             except (json.JSONDecodeError, IndexError):
                 pass
+
+        # Try <card ...attributes>...</card> format
+        if not card:
+            attr_match = re.search(
+                r'<card\s+[^>]*?type=["\'](\w+)["\'][^>]*>',
+                reply, re.IGNORECASE
+            )
+            if attr_match:
+                try:
+                    json_match = re.search(r'\{[\s\S]*\}', reply)
+                    if json_match:
+                        card = json.loads(json_match.group())
+                except (json.JSONDecodeError, ValueError):
+                    pass
 
         action = None
         if not card and '<action>' in reply and '</action>' in reply:
@@ -1373,12 +2099,14 @@ def chat():
                 pass
 
         if not card:
-            clean = re.sub(r'<card>[\s\S]*?</card>', '', reply).strip()
-            clean = re.sub(r'<action>[\s\S]*?</action>', '', clean).strip()
+            clean = _sanitize_reply_text(reply)
             card = {
-                'type': 'TextCard', 'text': clean or reply,
+                'type': 'TextCard', 'text': clean or 'I processed your request.',
                 'source': None, 'data': {}, 'actions': []
             }
+        else:
+            if card.get('text'):
+                card['text'] = _sanitize_reply_text(card['text'])
 
         _persist_chat(messages[-1].get('content', ''), card, intent, mode)
 
