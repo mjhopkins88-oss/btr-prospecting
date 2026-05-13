@@ -314,6 +314,39 @@ def init_db():
             items_found INTEGER DEFAULT 0
         )
     ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS serpapi_daily_budget (
+            date_str TEXT PRIMARY KEY,
+            api_calls INTEGER DEFAULT 0,
+            cache_hits INTEGER DEFAULT 0,
+            skipped INTEGER DEFAULT 0,
+            updated_at TIMESTAMP
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS signal_pool (
+            url TEXT PRIMARY KEY,
+            title TEXT,
+            snippet TEXT,
+            source TEXT,
+            published_date TEXT,
+            query TEXT,
+            feature TEXT,
+            city TEXT,
+            state TEXT,
+            fetched_at TIMESTAMP,
+            matched_ids TEXT
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS assistant_chat_log (
+            id TEXT PRIMARY KEY,
+            user_message TEXT,
+            card_type TEXT,
+            card_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     # --- Auth & CRM Tables ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS workspaces (
@@ -4088,7 +4121,8 @@ def search_btr_prospects(city="Texas", limit=10):
             for query in queries:
                 try:
                     results = cached_serpapi_search(
-                        query, num=5, feature='prospect', city=city, state=''
+                        query, num=5, feature='prospect', city=city, state='',
+                        manual=True
                     )
                     for r in results:
                         link = r.get('link', '')
@@ -8922,15 +8956,14 @@ _GOV_SIGNAL_QUERIES = {
 def refresh_government_signals():
     """
     Background job: populate government_signals from public data.
-    Searches for gov-related signals per configured city using existing search cache / SerpAPI.
-    Rate-limited, deduplicates by source_url, caps at 50 items per city per signal_type.
-    Runs daily. Stubbed sources that fail return 0 without crashing.
+    Uses cached_serpapi_search with budget controls instead of direct API calls.
+    Deduplicates by source_url, caps at 50 items per city per signal_type.
     """
-    import time as _time
-    import requests as _req
+    from serpapi_client import cached_serpapi_search, SerpAPIError, clear_run_dedup
     from datetime import date
 
     app.logger.info('[gov-signals] Starting refresh_government_signals()')
+    clear_run_dedup()
     total_inserted = 0
     total_skipped = 0
     city_stats = {}
@@ -8945,29 +8978,16 @@ def refresh_government_signals():
             try:
                 query = query_tmpl.format(city=city, state=state)
 
-                # Use SerpAPI if available, otherwise skip
-                serpapi_key = os.getenv('SERPAPI_API_KEY', '')
-                if not serpapi_key:
-                    app.logger.debug(f'[gov-signals] No SERPAPI_API_KEY, skipping {sig_type} for {city_key}')
+                try:
+                    organic = cached_serpapi_search(
+                        query, num=10, feature='gov_signals', city=city, state=state
+                    )
+                except SerpAPIError as e:
+                    app.logger.warning(f'[gov-signals] SerpAPI error for {sig_type}/{city_key}: {e}')
                     continue
 
-                # Rate limit: 1 second between SerpAPI calls
-                _time.sleep(1.0)
-
-                resp = _req.get('https://serpapi.com/search.json', params={
-                    'api_key': serpapi_key,
-                    'engine': 'google',
-                    'q': query,
-                    'num': 10,
-                    'tbs': 'qdr:m',  # past month
-                }, timeout=15)
-
-                if resp.status_code != 200:
-                    app.logger.warning(f'[gov-signals] SerpAPI {resp.status_code} for {sig_type}/{city_key}')
+                if not organic:
                     continue
-
-                data = resp.json()
-                organic = data.get('organic_results', [])
 
                 conn = _get_db_conn()
                 c = conn.cursor()
@@ -9127,6 +9147,15 @@ def api_government_signals():
     except Exception as e:
         app.logger.error(f'[gov-signals-api] Error: {e}')
         return jsonify({'ok': False, 'error': 'Failed to query government signals', 'details': str(e)}), 500
+
+
+@app.route('/api/admin/serpapi-stats', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_serpapi_stats():
+    """Return today's SerpAPI usage stats for admin visibility."""
+    from serpapi_client import get_serpapi_stats
+    return jsonify({'ok': True, 'data': get_serpapi_stats()})
 
 
 def _normalize_name(name):

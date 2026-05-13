@@ -24,9 +24,18 @@ from db import get_db as _get_db_central
 
 # DB_PATH removed — all DB access via db.get_db()
 
-# Legacy news query patterns per city
+# Legacy per-city query (used as fallback when city-specific results are needed)
 DISCOVERY_QUERIES = [
     '("build to rent" OR BTR OR multifamily) "{city} {state}" (acquires OR acquisition OR sells OR sale OR groundbreaking OR permit OR rezoning OR entitlement OR "under construction")',
+]
+
+# Broad market queries — searched once, results shared across all cities
+BROAD_MARKET_QUERIES = [
+    'build to rent market news institutional capital investment',
+    'single family rental community development groundbreaking',
+    'real estate capital markets BTR SFR acquisition',
+    'housing development financing multifamily construction news',
+    'private capital real estate investment rental community',
 ]
 
 
@@ -123,22 +132,50 @@ def fetch_city_signals(city, state):
 
 
 def _fetch_city_signals_serpapi(city, state):
-    """Fetch signals via SerpAPI."""
-    from serpapi_client import cached_serpapi_search, SerpAPIError
+    """Fetch signals via SerpAPI using broad market queries + signal pool.
+
+    Strategy: run broad market queries (shared across all cities, 72h cache),
+    then match results to the requested city/state. Only falls back to a
+    city-specific query if zero matches are found and budget allows.
+    """
+    from serpapi_client import (cached_serpapi_search, SerpAPIError,
+                                get_signal_pool)
 
     all_items = []
     seen_links = set()
 
-    for query_template in DISCOVERY_QUERIES:
-        query = query_template.replace('{city}', city).replace('{state}', state)
+    # 1) Check signal pool for recent results mentioning this city
+    pool = get_signal_pool(feature='market', city=None, hours=72)
+    city_lower = city.lower()
+    state_lower = state.lower()
+    for p in pool:
+        text = (p.get('title', '') + ' ' + p.get('snippet', '')).lower()
+        if city_lower in text or state_lower in text:
+            url = p.get('url', '')
+            if url and url not in seen_links:
+                seen_links.add(url)
+                all_items.append({
+                    'title': p.get('title', ''),
+                    'url': url,
+                    'snippet': p.get('snippet', ''),
+                    'published_at': p.get('published_date', ''),
+                    'source_name': p.get('source', ''),
+                    'city': city,
+                    'state': state,
+                })
 
+    # 2) Run broad market queries (heavily cached, shared across cities)
+    for query in BROAD_MARKET_QUERIES:
         try:
             results = cached_serpapi_search(
-                query, num=10, feature='discovery', city=city, state=state
+                query, num=10, feature='market', city='', state=''
             )
             for r in results:
                 link = r.get('link', '')
-                if link and link not in seen_links:
+                if not link or link in seen_links:
+                    continue
+                text = (r.get('title', '') + ' ' + r.get('snippet', '')).lower()
+                if city_lower in text or state_lower in text:
                     seen_links.add(link)
                     all_items.append({
                         'title': r.get('title', ''),
@@ -150,9 +187,35 @@ def _fetch_city_signals_serpapi(city, state):
                         'state': state,
                     })
         except SerpAPIError as e:
-            print(f"[Discovery] SerpAPI error for {city}, {state}: {e}")
+            print(f"[Discovery] SerpAPI error for broad query: {e}")
         except Exception as e:
-            print(f"[Discovery] Fetch error for {city}, {state}: {e}")
+            print(f"[Discovery] Fetch error for broad query: {e}")
+
+    # 3) Fallback: city-specific query only if no broad results matched
+    if not all_items:
+        for query_template in DISCOVERY_QUERIES:
+            query = query_template.replace('{city}', city).replace('{state}', state)
+            try:
+                results = cached_serpapi_search(
+                    query, num=10, feature='discovery', city=city, state=state
+                )
+                for r in results:
+                    link = r.get('link', '')
+                    if link and link not in seen_links:
+                        seen_links.add(link)
+                        all_items.append({
+                            'title': r.get('title', ''),
+                            'url': link,
+                            'snippet': r.get('snippet', ''),
+                            'published_at': r.get('date', ''),
+                            'source_name': r.get('source', ''),
+                            'city': city,
+                            'state': state,
+                        })
+            except SerpAPIError as e:
+                print(f"[Discovery] SerpAPI error for {city}, {state}: {e}")
+            except Exception as e:
+                print(f"[Discovery] Fetch error for {city}, {state}: {e}")
 
     return all_items
 

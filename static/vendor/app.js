@@ -1411,7 +1411,7 @@ function App({
     onSaved: () => {
       loadCrmStatuses(prospects);
     }
-  }), React.createElement(AssistantChat, { user: user }));
+  }), React.createElement(window.BTRAssistantChat || AssistantChat, { user: user, activeTab: activeTab }));
 }
 
 // ===================================================================
