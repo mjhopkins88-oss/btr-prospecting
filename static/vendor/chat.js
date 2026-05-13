@@ -1,5 +1,5 @@
 /* BTR Command — AI Chat Component (chat.js)
-   Structured response cards, action buttons, slash commands, CRM-aware */
+   ChatGPT-style reasoning + operator layer with structured cards */
 (function() {
 'use strict';
 var h = React.createElement;
@@ -7,19 +7,24 @@ var useState = React.useState;
 var useEffect = React.useEffect;
 var useRef = React.useRef;
 
-// --- Styles ---
+// --- Card color/icon definitions ---
 var CARD_COLORS = {
-  DraftCard:          { bg: '#f0fdf4', border: '#bbf7d0', accent: '#15803d', icon: '✉️' },
-  NextActionCard:     { bg: '#eff6ff', border: '#bfdbfe', accent: '#1d4ed8', icon: '🎯' },
-  SignalCard:         { bg: '#fefce8', border: '#fde68a', accent: '#a16207', icon: '⚡' },
-  ContactSummaryCard: { bg: '#f0f9ff', border: '#bae6fd', accent: '#0369a1', icon: '👤' },
-  CompanySummaryCard: { bg: '#faf5ff', border: '#e9d5ff', accent: '#7c3aed', icon: '🏢' },
-  TouchpointLogCard:  { bg: '#ecfdf5', border: '#a7f3d0', accent: '#059669', icon: '📝' },
-  FollowUpCard:       { bg: '#fff7ed', border: '#fed7aa', accent: '#c2410c', icon: '📅' },
-  ExportCard:         { bg: '#f8fafc', border: '#e2e8f0', accent: '#475569', icon: '⬇️' },
-  ConfirmationCard:   { bg: '#f0fdf4', border: '#86efac', accent: '#16a34a', icon: '✅' },
-  ErrorCard:          { bg: '#fef2f2', border: '#fecaca', accent: '#dc2626', icon: '⚠️' },
-  TextCard:           { bg: '#f8fafc', border: '#e2e8f0', accent: '#64748b', icon: '💬' }
+  DraftCard:              { bg: '#f0fdf4', border: '#bbf7d0', accent: '#15803d', icon: '✉️' },
+  NextActionCard:         { bg: '#eff6ff', border: '#bfdbfe', accent: '#1d4ed8', icon: '🎯' },
+  SignalCard:             { bg: '#fefce8', border: '#fde68a', accent: '#a16207', icon: '⚡' },
+  ContactSummaryCard:     { bg: '#f0f9ff', border: '#bae6fd', accent: '#0369a1', icon: '👤' },
+  CompanySummaryCard:     { bg: '#faf5ff', border: '#e9d5ff', accent: '#7c3aed', icon: '🏢' },
+  TouchpointLogCard:      { bg: '#ecfdf5', border: '#a7f3d0', accent: '#059669', icon: '📝' },
+  FollowUpCard:           { bg: '#fff7ed', border: '#fed7aa', accent: '#c2410c', icon: '📅' },
+  ExportCard:             { bg: '#f8fafc', border: '#e2e8f0', accent: '#475569', icon: '⬇️' },
+  ConfirmationCard:       { bg: '#f0fdf4', border: '#86efac', accent: '#16a34a', icon: '✅' },
+  ErrorCard:              { bg: '#fef2f2', border: '#fecaca', accent: '#dc2626', icon: '⚠️' },
+  TextCard:               { bg: '#f8fafc', border: '#e2e8f0', accent: '#64748b', icon: '💬' },
+  StrategyCard:           { bg: '#faf5ff', border: '#d8b4fe', accent: '#7c3aed', icon: '🧠' },
+  ClaudePromptCard:       { bg: '#f0f9ff', border: '#7dd3fc', accent: '#0284c7', icon: '🔧' },
+  ContactInsightCard:     { bg: '#f0f9ff', border: '#bae6fd', accent: '#0369a1', icon: '🔍' },
+  SignalInsightCard:      { bg: '#fefce8', border: '#fde68a', accent: '#a16207', icon: '📡' },
+  PerformanceInsightCard: { bg: '#ecfdf5', border: '#6ee7b7', accent: '#059669', icon: '📊' }
 };
 
 var SLASH_HINTS = [
@@ -28,9 +33,91 @@ var SLASH_HINTS = [
   { cmd: '/next', desc: 'Top action', ex: '/next' },
   { cmd: '/brief', desc: 'Daily briefing', ex: '/brief' },
   { cmd: '/export', desc: 'Export data', ex: '/export contacts' },
-  { cmd: '/signal', desc: 'Latest signals', ex: '/signal Acme Corp' },
+  { cmd: '/signal', desc: 'Signal analysis', ex: '/signal Acme Corp' },
   { cmd: '/sprint', desc: 'Work sprint', ex: '/sprint' }
 ];
+
+var MODE_LABELS = {
+  strategic_advisor: 'Strategy',
+  execution: 'Execute',
+  drafting: 'Draft',
+  data_analyst: 'Analysis',
+  crm_operator: 'CRM',
+  troubleshooting: 'Debug'
+};
+
+var MODE_COLORS = {
+  strategic_advisor: '#7c3aed',
+  execution: '#16a34a',
+  drafting: '#15803d',
+  data_analyst: '#0369a1',
+  crm_operator: '#1d4ed8',
+  troubleshooting: '#dc2626'
+};
+
+// --- Simple markdown renderer for rich text ---
+function renderMarkdownText(text) {
+  if (!text) return null;
+  var lines = text.split('\n');
+  var elements = [];
+  var inList = false;
+  var listItems = [];
+
+  function flushList() {
+    if (listItems.length > 0) {
+      elements.push(h('ul', { key: 'ul' + elements.length, style: { margin: '0.3rem 0', paddingLeft: '1.1rem', listStyleType: 'disc' } },
+        listItems.map(function(li, j) { return h('li', { key: j, style: { marginBottom: '0.15rem' } }, li); })
+      ));
+      listItems = [];
+    }
+    inList = false;
+  }
+
+  lines.forEach(function(line, i) {
+    var trimmed = line.trim();
+    if (!trimmed) {
+      flushList();
+      elements.push(h('div', { key: 'sp' + i, style: { height: '0.35rem' } }));
+      return;
+    }
+
+    if (trimmed.match(/^[-*]\s/)) {
+      inList = true;
+      listItems.push(renderInlineMarkdown(trimmed.replace(/^[-*]\s+/, ''), i));
+      return;
+    }
+
+    if (trimmed.match(/^\d+\.\s/)) {
+      inList = true;
+      listItems.push(renderInlineMarkdown(trimmed.replace(/^\d+\.\s+/, ''), i));
+      return;
+    }
+
+    flushList();
+    elements.push(h('div', { key: 'p' + i, style: { marginBottom: '0.15rem' } }, renderInlineMarkdown(trimmed, i)));
+  });
+  flushList();
+  return elements;
+}
+
+function renderInlineMarkdown(text, key) {
+  var parts = [];
+  var regex = /\*\*(.+?)\*\*/g;
+  var lastIdx = 0;
+  var match;
+  var partKey = 0;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIdx) {
+      parts.push(text.substring(lastIdx, match.index));
+    }
+    parts.push(h('strong', { key: 'b' + key + '_' + partKey, style: { fontWeight: 700, color: '#0f172a' } }, match[1]));
+    partKey++;
+    lastIdx = regex.lastIndex;
+  }
+  if (lastIdx < text.length) parts.push(text.substring(lastIdx));
+  return parts.length > 0 ? parts : text;
+}
+
 
 // --- Action button handler ---
 function executeCardAction(act, messages, setMessages, setActionLoading) {
@@ -110,8 +197,9 @@ function renderDraftCard(card, onAction) {
       d.target_name ? h('span', { style: { fontWeight: 400, color: '#4b5563', textTransform: 'none' } }, ' — ' + d.target_name) : null
     ),
     d.subject ? h('div', { style: { fontWeight: 600, color: '#1e293b', marginBottom: '0.25rem', fontSize: '0.74rem' } }, d.subject) : null,
-    h('div', { style: { color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.5, fontSize: '0.72rem', maxHeight: '180px', overflowY: 'auto', background: '#ffffff', borderRadius: '0.35rem', padding: '0.5rem', border: '1px solid ' + colors.border } }, d.body || ''),
-    card.source ? h('div', { style: { marginTop: '0.3rem', fontSize: '0.63rem', color: '#6b7280', fontStyle: 'italic' } }, card.source) : null,
+    h('div', { style: { color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.5, fontSize: '0.72rem', maxHeight: '220px', overflowY: 'auto', background: '#ffffff', borderRadius: '0.35rem', padding: '0.5rem', border: '1px solid ' + colors.border } }, d.body || ''),
+    d.signal_ref ? h('div', { style: { marginTop: '0.25rem', fontSize: '0.63rem', color: '#6b7280', fontStyle: 'italic' } }, '⚡ ' + d.signal_ref) : null,
+    card.source ? h('div', { style: { marginTop: '0.2rem', fontSize: '0.63rem', color: '#6b7280', fontStyle: 'italic' } }, card.source) : null,
     renderActionButtons(card.actions, onAction, d)
   );
 }
@@ -152,7 +240,7 @@ function renderSignalCard(card, onAction) {
       signals.map(function(s, i) {
         return h('div', { key: i, style: { padding: '0.3rem 0.4rem', background: '#ffffff', borderRadius: '0.35rem', border: '1px solid #fde68a' } },
           h('div', { style: { fontSize: '0.74rem', fontWeight: 600, color: '#1e293b' } }, s.title || 'Signal'),
-          s.summary ? h('div', { style: { fontSize: '0.65rem', color: '#64748b', marginTop: '0.15rem' } }, s.summary.substring(0, 120)) : null,
+          s.summary ? h('div', { style: { fontSize: '0.65rem', color: '#64748b', marginTop: '0.15rem' } }, s.summary.substring(0, 150)) : null,
           s.source_url ? h('a', { href: s.source_url, target: '_blank', rel: 'noopener', style: { fontSize: '0.6rem', color: '#2563eb', textDecoration: 'none' } }, 'View source →') : null
         );
       })
@@ -161,7 +249,7 @@ function renderSignalCard(card, onAction) {
   );
 }
 
-function renderSummaryCard(card, onAction, icon, accentColor) {
+function renderSummaryCard(card, onAction) {
   var d = card.data || {};
   var colors = CARD_COLORS[card.type] || CARD_COLORS.TextCard;
 
@@ -206,7 +294,7 @@ function renderTouchpointCard(card, onAction) {
     h('div', { style: { fontSize: '0.74rem', color: '#1e293b', marginBottom: '0.2rem' } },
       (d.channel || 'Note') + ' with ' + (d.contact_name || 'contact')
     ),
-    d.summary ? h('div', { style: { fontSize: '0.7rem', color: '#64748b', fontStyle: 'italic' } }, '"' + d.summary + '"') : null,
+    d.summary ? h('div', { style: { fontSize: '0.7rem', color: '#64748b', fontStyle: 'italic' } }, '“' + d.summary + '”') : null,
     renderActionButtons(card.actions, onAction)
   );
 }
@@ -250,6 +338,192 @@ function renderErrorCard(card) {
     d.suggestion ? h('div', { style: { fontSize: '0.65rem', color: '#6b7280', marginTop: '0.2rem' } }, d.suggestion) : null
   );
 }
+
+// --- New card renderers ---
+
+function renderStrategyCard(card, onAction) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.StrategyCard;
+  var recs = d.recommendations || [];
+  var steps = d.implementation_order || [];
+  var risks = d.risks || [];
+  var effortColors = { low: '#16a34a', medium: '#f59e0b', high: '#dc2626' };
+  var impactColors = { low: '#94a3b8', medium: '#3b82f6', high: '#7c3aed' };
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.4rem' } }, colors.icon + ' Strategic Analysis'),
+
+    d.diagnosis ? h('div', { style: { marginBottom: '0.4rem' } },
+      h('div', { style: { fontSize: '0.63rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '0.15rem' } }, 'Diagnosis'),
+      h('div', { style: { fontSize: '0.72rem', color: '#1e293b', lineHeight: 1.5, padding: '0.3rem 0.4rem', background: '#ffffff', borderRadius: '0.35rem', border: '1px solid ' + colors.border } }, renderMarkdownText(d.diagnosis))
+    ) : null,
+
+    recs.length > 0 ? h('div', { style: { marginBottom: '0.4rem' } },
+      h('div', { style: { fontSize: '0.63rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '0.15rem' } }, 'Recommendations'),
+      h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem' } },
+        recs.map(function(r, i) {
+          return h('div', { key: i, style: { padding: '0.35rem 0.4rem', background: '#ffffff', borderRadius: '0.35rem', border: '1px solid #e9d5ff' } },
+            h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+              h('div', { style: { fontSize: '0.74rem', fontWeight: 600, color: '#1e293b' } }, (i + 1) + '. ' + (r.title || '')),
+              h('div', { style: { display: 'flex', gap: '0.3rem' } },
+                r.effort ? h('span', { style: { fontSize: '0.58rem', padding: '0.1rem 0.3rem', borderRadius: '0.2rem', background: (effortColors[r.effort] || '#94a3b8') + '18', color: effortColors[r.effort] || '#94a3b8', fontWeight: 600 } }, r.effort + ' effort') : null,
+                r.impact ? h('span', { style: { fontSize: '0.58rem', padding: '0.1rem 0.3rem', borderRadius: '0.2rem', background: (impactColors[r.impact] || '#94a3b8') + '18', color: impactColors[r.impact] || '#94a3b8', fontWeight: 600 } }, r.impact + ' impact') : null
+              )
+            ),
+            r.detail ? h('div', { style: { fontSize: '0.68rem', color: '#475569', marginTop: '0.15rem', lineHeight: 1.4 } }, renderMarkdownText(r.detail)) : null
+          );
+        })
+      )
+    ) : null,
+
+    steps.length > 0 ? h('div', { style: { marginBottom: '0.4rem' } },
+      h('div', { style: { fontSize: '0.63rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '0.15rem' } }, 'Implementation Order'),
+      h('ol', { style: { margin: 0, paddingLeft: '1.2rem', fontSize: '0.7rem', color: '#374151', lineHeight: 1.5 } },
+        steps.map(function(s, i) {
+          return h('li', { key: i, style: { marginBottom: '0.1rem' } }, s);
+        })
+      )
+    ) : null,
+
+    risks.length > 0 ? h('div', { style: { marginBottom: '0.3rem' } },
+      h('div', { style: { fontSize: '0.63rem', fontWeight: 700, color: '#dc2626', textTransform: 'uppercase', marginBottom: '0.15rem' } }, '⚠️ Risks'),
+      h('ul', { style: { margin: 0, paddingLeft: '1.1rem', fontSize: '0.68rem', color: '#991b1b', lineHeight: 1.4, listStyleType: 'disc' } },
+        risks.map(function(r, i) {
+          return h('li', { key: i }, r);
+        })
+      )
+    ) : null,
+
+    d.claude_prompt ? h('div', { style: { marginBottom: '0.3rem' } },
+      h('div', { style: { fontSize: '0.63rem', fontWeight: 700, color: '#0284c7', textTransform: 'uppercase', marginBottom: '0.15rem' } }, '🔧 Follow-up Prompt'),
+      h('div', { style: { fontSize: '0.68rem', color: '#1e293b', background: '#f0f9ff', borderRadius: '0.35rem', padding: '0.4rem', border: '1px solid #bae6fd', fontFamily: "'JetBrains Mono', monospace", whiteSpace: 'pre-wrap', lineHeight: 1.4, maxHeight: '100px', overflowY: 'auto' } }, d.claude_prompt)
+    ) : null,
+
+    card.source ? h('div', { style: { fontSize: '0.63rem', color: '#6b7280', fontStyle: 'italic' } }, card.source) : null,
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
+function renderClaudePromptCard(card, onAction) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.ClaudePromptCard;
+  var constraints = d.constraints || [];
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.35rem' } }, colors.icon + ' Claude Prompt'),
+    d.prompt_title ? h('div', { style: { fontSize: '0.78rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.3rem' } }, d.prompt_title) : null,
+    d.prompt_body ? h('div', { style: { fontSize: '0.7rem', color: '#1e293b', background: '#ffffff', borderRadius: '0.35rem', padding: '0.5rem', border: '1px solid ' + colors.border, fontFamily: "'JetBrains Mono', monospace", whiteSpace: 'pre-wrap', lineHeight: 1.45, maxHeight: '200px', overflowY: 'auto', marginBottom: '0.3rem' } }, d.prompt_body) : null,
+    constraints.length > 0 ? h('div', { style: { marginBottom: '0.3rem' } },
+      h('div', { style: { fontSize: '0.63rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '0.1rem' } }, 'Constraints'),
+      h('ul', { style: { margin: 0, paddingLeft: '1.1rem', fontSize: '0.68rem', color: '#475569', lineHeight: 1.4 } },
+        constraints.map(function(c, i) { return h('li', { key: i }, c); })
+      )
+    ) : null,
+    d.output_format ? h('div', { style: { fontSize: '0.63rem', color: '#6b7280' } },
+      h('span', { style: { fontWeight: 600 } }, 'Output: '), d.output_format
+    ) : null,
+    renderActionButtons(card.actions || [{ id: 'copy_prompt', label: 'Copy Prompt', action: 'copy_text', params: {} }], onAction, { body: d.prompt_body || '' })
+  );
+}
+
+function renderContactInsightCard(card, onAction) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.ContactInsightCard;
+  var insights = d.key_insights || [];
+  var trendColors = { rising: '#16a34a', stable: '#3b82f6', declining: '#dc2626' };
+  var trendIcons = { rising: '↑', stable: '→', declining: '↓' };
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' } },
+      h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em' } }, colors.icon + ' Contact Insight'),
+      d.engagement_trend ? h('span', { style: { fontSize: '0.63rem', fontWeight: 600, color: trendColors[d.engagement_trend] || '#64748b', background: (trendColors[d.engagement_trend] || '#64748b') + '14', padding: '0.1rem 0.4rem', borderRadius: '0.2rem' } },
+        (trendIcons[d.engagement_trend] || '') + ' ' + d.engagement_trend
+      ) : null
+    ),
+    h('div', { style: { display: 'grid', gridTemplateColumns: '0.4fr 1fr', gap: '0.12rem 0.4rem', fontSize: '0.72rem', marginBottom: '0.35rem' } },
+      d.name ? [h('span', { key: 'nl', style: { color: '#94a3b8', fontWeight: 500 } }, 'Name'), h('span', { key: 'nv', style: { color: '#0f172a', fontWeight: 600 } }, d.name)] : null,
+      d.company ? [h('span', { key: 'cl', style: { color: '#94a3b8', fontWeight: 500 } }, 'Company'), h('span', { key: 'cv', style: { color: '#1e293b' } }, d.company)] : null,
+      d.title ? [h('span', { key: 'tl', style: { color: '#94a3b8', fontWeight: 500 } }, 'Title'), h('span', { key: 'tv', style: { color: '#1e293b' } }, d.title)] : null,
+      d.stage ? [h('span', { key: 'sl', style: { color: '#94a3b8', fontWeight: 500 } }, 'Stage'), h('span', { key: 'sv', style: { color: '#1e293b' } }, d.stage)] : null,
+      d.last_touch ? [h('span', { key: 'ltl', style: { color: '#94a3b8', fontWeight: 500 } }, 'Last Touch'), h('span', { key: 'ltv', style: { color: '#1e293b' } }, d.last_touch)] : null,
+      d.touchpoint_count !== undefined ? [h('span', { key: 'tcl', style: { color: '#94a3b8', fontWeight: 500 } }, 'Touchpoints'), h('span', { key: 'tcv', style: { color: '#1e293b' } }, String(d.touchpoint_count))] : null
+    ),
+    insights.length > 0 ? h('div', { style: { marginBottom: '0.3rem' } },
+      h('div', { style: { fontSize: '0.63rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '0.1rem' } }, 'Key Insights'),
+      h('ul', { style: { margin: 0, paddingLeft: '1.1rem', fontSize: '0.68rem', color: '#475569', lineHeight: 1.5, listStyleType: 'disc' } },
+        insights.map(function(ins, i) { return h('li', { key: i }, ins); })
+      )
+    ) : null,
+    d.next_move ? h('div', { style: { fontSize: '0.72rem', color: '#0f172a', fontWeight: 600, padding: '0.3rem 0.4rem', background: '#dbeafe', borderRadius: '0.3rem', marginBottom: '0.2rem' } }, '🎯 Next: ' + d.next_move) : null,
+    card.source ? h('div', { style: { fontSize: '0.63rem', color: '#6b7280', fontStyle: 'italic' } }, card.source) : null,
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
+function renderSignalInsightCard(card, onAction) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.SignalInsightCard;
+  var signals = d.signals || [];
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.35rem' } },
+      colors.icon + ' Signal Analysis' + (d.company_name ? ' — ' + d.company_name : '')
+    ),
+    signals.length > 0 ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem', marginBottom: '0.35rem' } },
+      signals.map(function(s, i) {
+        var impColor = (s.importance || 0) >= 7 ? '#dc2626' : (s.importance || 0) >= 4 ? '#f59e0b' : '#6b7280';
+        return h('div', { key: i, style: { padding: '0.35rem 0.4rem', background: '#ffffff', borderRadius: '0.35rem', border: '1px solid #fde68a' } },
+          h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+            h('div', { style: { fontSize: '0.74rem', fontWeight: 600, color: '#1e293b', flex: 1 } }, s.title || 'Signal'),
+            s.importance ? h('span', { style: { fontSize: '0.58rem', fontWeight: 700, color: impColor, background: impColor + '14', padding: '0.08rem 0.3rem', borderRadius: '0.2rem' } }, s.importance + '/10') : null
+          ),
+          s.summary ? h('div', { style: { fontSize: '0.65rem', color: '#64748b', marginTop: '0.15rem' } }, s.summary.substring(0, 150)) : null,
+          s.action_implication ? h('div', { style: { fontSize: '0.63rem', color: '#0369a1', marginTop: '0.1rem', fontWeight: 500 } }, '→ ' + s.action_implication) : null,
+          s.source_url ? h('a', { href: s.source_url, target: '_blank', rel: 'noopener', style: { fontSize: '0.6rem', color: '#2563eb', textDecoration: 'none' } }, 'Source →') : null
+        );
+      })
+    ) : null,
+    d.overall_assessment ? h('div', { style: { fontSize: '0.72rem', color: '#1e293b', lineHeight: 1.5, padding: '0.35rem 0.4rem', background: '#ffffff', borderRadius: '0.35rem', border: '1px solid #fde68a', marginBottom: '0.25rem' } }, renderMarkdownText(d.overall_assessment)) : null,
+    d.recommended_action ? h('div', { style: { fontSize: '0.72rem', color: '#0f172a', fontWeight: 600, padding: '0.3rem 0.4rem', background: '#fef9c3', borderRadius: '0.3rem' } }, '🎯 ' + d.recommended_action) : null,
+    card.source ? h('div', { style: { marginTop: '0.2rem', fontSize: '0.63rem', color: '#6b7280', fontStyle: 'italic' } }, card.source) : null,
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
+function renderPerformanceInsightCard(card, onAction) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.PerformanceInsightCard;
+  var metrics = d.metrics || [];
+  var insights = d.insights || [];
+  var trendIcons = { up: '↑', down: '↓', flat: '→' };
+  var trendColors = { up: '#16a34a', down: '#dc2626', flat: '#94a3b8' };
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' } },
+      h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em' } }, colors.icon + ' Performance'),
+      d.period ? h('span', { style: { fontSize: '0.63rem', color: '#64748b', fontWeight: 500 } }, d.period) : null
+    ),
+    metrics.length > 0 ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginBottom: '0.35rem' } },
+      metrics.map(function(m, i) {
+        return h('div', { key: i, style: { flex: '1 1 auto', minWidth: '80px', padding: '0.35rem 0.5rem', background: '#ffffff', borderRadius: '0.35rem', border: '1px solid #d1fae5', textAlign: 'center' } },
+          h('div', { style: { fontSize: '1rem', fontWeight: 800, color: '#0f172a', lineHeight: 1.2 } }, m.value || '0'),
+          h('div', { style: { fontSize: '0.6rem', color: '#64748b', marginTop: '0.1rem' } }, m.label || ''),
+          m.trend ? h('span', { style: { fontSize: '0.58rem', fontWeight: 600, color: trendColors[m.trend] || '#94a3b8' } }, trendIcons[m.trend] || '') : null
+        );
+      })
+    ) : null,
+    insights.length > 0 ? h('div', { style: { marginBottom: '0.3rem' } },
+      h('div', { style: { fontSize: '0.63rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '0.1rem' } }, 'Insights'),
+      h('ul', { style: { margin: 0, paddingLeft: '1.1rem', fontSize: '0.68rem', color: '#475569', lineHeight: 1.5, listStyleType: 'disc' } },
+        insights.map(function(ins, i) { return h('li', { key: i }, ins); })
+      )
+    ) : null,
+    d.focus_recommendation ? h('div', { style: { fontSize: '0.72rem', color: '#0f172a', fontWeight: 600, padding: '0.3rem 0.4rem', background: '#d1fae5', borderRadius: '0.3rem' } }, '🎯 Focus: ' + d.focus_recommendation) : null,
+    card.source ? h('div', { style: { marginTop: '0.2rem', fontSize: '0.63rem', color: '#6b7280', fontStyle: 'italic' } }, card.source) : null,
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
 
 function renderActionButtons(actions, onAction, draftData) {
   if (!actions || actions.length === 0) return null;
@@ -301,6 +575,11 @@ function renderCard(card, onAction) {
     case 'ExportCard': return renderExportCard(card, onAction);
     case 'ConfirmationCard': return renderConfirmationCard(card);
     case 'ErrorCard': return renderErrorCard(card);
+    case 'StrategyCard': return renderStrategyCard(card, onAction);
+    case 'ClaudePromptCard': return renderClaudePromptCard(card, onAction);
+    case 'ContactInsightCard': return renderContactInsightCard(card, onAction);
+    case 'SignalInsightCard': return renderSignalInsightCard(card, onAction);
+    case 'PerformanceInsightCard': return renderPerformanceInsightCard(card, onAction);
     default: return null;
   }
 }
@@ -316,6 +595,7 @@ function BTRAssistantChat(props) {
   var _l = useState(false); var loading = _l[0]; var setLoading = _l[1];
   var _a = useState(false); var actionLoading = _a[0]; var setActionLoading = _a[1];
   var _sh = useState(false); var showSlash = _sh[0]; var setShowSlash = _sh[1];
+  var _md = useState(null); var lastMode = _md[0]; var setLastMode = _md[1];
   var scrollRef = useRef(null);
   var inputRef = useRef(null);
 
@@ -353,8 +633,9 @@ function BTRAssistantChat(props) {
         var card = d.card || null;
         var text = card ? (card.text || '') : (d.content || '');
         setMessages(function(prev) {
-          return prev.concat([{ role: 'assistant', content: text, card: card }]);
+          return prev.concat([{ role: 'assistant', content: text, card: card, mode: d.mode, intent: d.intent }]);
         });
+        if (d.mode) setLastMode(d.mode);
         setLoading(false);
       })
       .catch(function() {
@@ -409,7 +690,7 @@ function BTRAssistantChat(props) {
   return h('div', {
     style: {
       position: 'fixed', bottom: '1.5rem', right: '1.5rem', zIndex: 9990,
-      width: '400px', height: '560px', maxHeight: 'calc(100vh - 4rem)',
+      width: '420px', height: '600px', maxHeight: 'calc(100vh - 4rem)',
       background: '#FFFFFF', border: '1px solid #e2e8f0',
       borderRadius: '0.75rem', boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
       display: 'flex', flexDirection: 'column', overflow: 'hidden',
@@ -432,11 +713,12 @@ function BTRAssistantChat(props) {
         h('span', {
           style: { fontFamily: "'Orbitron', sans-serif", fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.05em' }
         }, 'BTR COMMAND'),
-        h('span', { style: { fontSize: '0.58rem', color: '#94a3b8', fontWeight: 400, marginLeft: '0.3rem' } }, 'AI')
+        h('span', { style: { fontSize: '0.55rem', color: '#94a3b8', fontWeight: 400, marginLeft: '0.2rem' } }, 'Operator'),
+        lastMode ? h('span', { style: { fontSize: '0.5rem', color: MODE_COLORS[lastMode] || '#94a3b8', background: (MODE_COLORS[lastMode] || '#94a3b8') + '22', padding: '0.08rem 0.3rem', borderRadius: '0.2rem', fontWeight: 600, marginLeft: '0.3rem' } }, MODE_LABELS[lastMode] || lastMode) : null
       ),
       h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.3rem' } },
         h('button', {
-          onClick: function() { setMessages([]); },
+          onClick: function() { setMessages([]); setLastMode(null); },
           title: 'Clear chat',
           style: {
             background: 'none', border: 'none', color: '#64748b', fontSize: '0.7rem',
@@ -463,20 +745,21 @@ function BTRAssistantChat(props) {
     },
       // Empty state
       messages.length === 0 && h('div', {
-        style: { textAlign: 'center', padding: '1.5rem 0.75rem', color: '#94a3b8' }
+        style: { textAlign: 'center', padding: '1.2rem 0.75rem', color: '#94a3b8' }
       },
         h('div', { style: { fontSize: '1.3rem', marginBottom: '0.4rem', opacity: 0.25 } }, '✨'),
-        h('div', { style: { fontSize: '0.8rem', fontWeight: 500, marginBottom: '0.25rem', color: '#475569' } }, 'How can I help?'),
-        h('div', { style: { fontSize: '0.68rem', lineHeight: 1.5, marginBottom: '0.6rem' } },
-          'Draft outreach, log touchpoints, get next actions, or ask about your CRM data.'
+        h('div', { style: { fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.25rem', color: '#475569' } }, 'BTR Command Operator'),
+        h('div', { style: { fontSize: '0.68rem', lineHeight: 1.5, marginBottom: '0.5rem', color: '#94a3b8' } },
+          'Strategic advisor · CRM operator · Outreach drafter · Signal analyst'
         ),
-        h('div', { style: { fontSize: '0.62rem', color: '#94a3b8', marginBottom: '0.5rem' } }, 'Try a slash command: /draft, /next, /brief, /sprint'),
+        h('div', { style: { fontSize: '0.62rem', color: '#94a3b8', marginBottom: '0.5rem' } }, 'Type / for commands or ask anything'),
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem' } },
           [
-            'Who needs a follow-up?',
+            'How can I improve my outreach strategy?',
+            'Who needs a follow-up this week?',
             '/draft my warmest contact',
-            '/next',
-            '/sprint'
+            '/sprint',
+            '/brief'
           ].map(function(q) {
             return h('button', {
               key: q,
@@ -514,12 +797,18 @@ function BTRAssistantChat(props) {
         }
 
         // Assistant message
-        return h('div', { key: i, style: { display: 'flex', justifyContent: 'flex-start', maxWidth: '92%' } },
+        var modeLabel = m.mode && MODE_LABELS[m.mode];
+        var modeColor = m.mode && MODE_COLORS[m.mode];
+
+        return h('div', { key: i, style: { display: 'flex', justifyContent: 'flex-start', maxWidth: '95%' } },
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem', width: '100%' } },
+            // Mode badge
+            modeLabel ? h('div', { style: { fontSize: '0.55rem', fontWeight: 600, color: modeColor || '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '-0.1rem' } }, modeLabel + ' mode') : null,
+
             // Card rendering
             m.card ? renderCard(m.card, handleAction) : null,
 
-            // Text fallback (only if no card or TextCard with content)
+            // Text fallback (only if no card)
             (!m.card && m.content) ? h('div', {
               style: {
                 background: '#f8fafc', border: '1px solid #e2e8f0',
@@ -530,21 +819,21 @@ function BTRAssistantChat(props) {
               }
             }, m.content) : null,
 
-            // TextCard shows text in bubble style
+            // TextCard shows rich text
             (m.card && m.card.type === 'TextCard' && m.card.text) ? h('div', {
               style: {
                 background: '#f8fafc', border: '1px solid #e2e8f0',
                 borderRadius: '0.55rem 0.55rem 0.55rem 0.1rem',
-                padding: '0.45rem 0.65rem',
-                fontSize: '0.76rem', lineHeight: 1.5, color: '#1e293b',
-                whiteSpace: 'pre-wrap', wordBreak: 'break-word'
+                padding: '0.55rem 0.7rem',
+                fontSize: '0.76rem', lineHeight: 1.55, color: '#1e293b',
+                wordBreak: 'break-word'
               }
-            }, m.card.text) : null,
+            }, renderMarkdownText(m.card.text)) : null,
 
             // Non-TextCard shows text above the card
             (m.card && m.card.type !== 'TextCard' && m.card.text) ? h('div', {
-              style: { fontSize: '0.74rem', color: '#475569', marginBottom: '0.1rem' }
-            }, m.card.text) : null
+              style: { fontSize: '0.74rem', color: '#475569', marginBottom: '0.1rem', lineHeight: 1.5 }
+            }, renderMarkdownText(m.card.text)) : null
           )
         );
       }),

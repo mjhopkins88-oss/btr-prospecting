@@ -1,8 +1,8 @@
 """
-API Routes: AI Assistant — Intelligent operator layer.
+API Routes: AI Assistant — ChatGPT-style reasoning + operator layer.
 
-Intent-aware chat with structured response cards, CRM context,
-action execution, slash commands, and chat persistence.
+Multi-mode intent routing, structured response cards, CRM context,
+action execution, slash commands, session memory, and chat persistence.
 """
 from flask import Blueprint, request, jsonify
 from shared.database import fetch_all, fetch_one, execute, new_id
@@ -21,65 +21,208 @@ except ImportError:
 assistant_bp = Blueprint('assistant', __name__, url_prefix='/api/assistant')
 
 # ---------------------------------------------------------------------------
-# System prompt — instructs Claude to return structured card JSON
+# Intent classification
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """You are BTR Command — a concise, action-first AI operator embedded inside a commercial real estate prospecting application.
+INTENT_KEYWORDS = {
+    'brainstorm':         ['idea', 'brainstorm', 'strategy', 'approach', 'think about', 'what if', 'how could', 'improve', 'optimize', 'better', 'creative', 'explore', 'options'],
+    'build_prompt':       ['build prompt', 'write prompt', 'create prompt', 'prompt for', 'claude prompt', 'ai prompt'],
+    'draft_outreach':     ['draft', 'write email', 'outreach', 'message to', 'reach out', 'cold email', 'linkedin message', 'write to'],
+    'explain_metrics':    ['explain', 'what does', 'what is', 'how does', 'why is', 'mean by', 'metric', 'score', 'warmth', 'define'],
+    'analyze_contact':    ['about this contact', 'tell me about', 'who is', 'contact info', 'relationship with', 'history with', 'brief me on'],
+    'analyze_company':    ['company', 'capital group', 'firm', 'fund', 'partner', 'organization', 'group analysis'],
+    'recommend_action':   ['what should', 'next step', 'priority', 'recommend', 'suggest', 'what now', 'top action', 'focus on', 'do next'],
+    'log_update_crm':     ['log', 'record', 'update stage', 'mark as', 'change status', 'touchpoint', 'note that'],
+    'export_report':      ['export', 'download', 'csv', 'report', 'spreadsheet', 'pull data'],
+    'troubleshoot':       ['error', 'broken', 'not working', 'bug', 'issue', 'wrong', 'fix', 'help with app', 'problem'],
+}
 
-RESPONSE FORMAT:
-Always return a JSON object inside <card>...</card> tags with this structure:
+INTENT_TO_MODE = {
+    'brainstorm':       'strategic_advisor',
+    'build_prompt':     'strategic_advisor',
+    'draft_outreach':   'drafting',
+    'explain_metrics':  'data_analyst',
+    'analyze_contact':  'data_analyst',
+    'analyze_company':  'data_analyst',
+    'recommend_action': 'crm_operator',
+    'log_update_crm':   'execution',
+    'export_report':    'execution',
+    'troubleshoot':     'troubleshooting',
+}
+
+MODE_MAX_TOKENS = {
+    'strategic_advisor': 3000,
+    'execution':         1200,
+    'drafting':          2000,
+    'data_analyst':      2000,
+    'crm_operator':      1800,
+    'troubleshooting':   1500,
+}
+
+
+def _classify_intent(text):
+    text_lower = text.lower()
+
+    if text_lower.startswith('/'):
+        cmd = text_lower.split()[0]
+        slash_map = {
+            '/draft': 'draft_outreach', '/log': 'log_update_crm',
+            '/next': 'recommend_action', '/brief': 'recommend_action',
+            '/export': 'export_report', '/signal': 'analyze_company',
+            '/sprint': 'recommend_action',
+        }
+        return slash_map.get(cmd, 'recommend_action')
+
+    best_intent = 'brainstorm'
+    best_score = 0
+    for intent, keywords in INTENT_KEYWORDS.items():
+        score = sum(1 for kw in keywords if kw in text_lower)
+        if score > best_score:
+            best_score = score
+            best_intent = intent
+    return best_intent
+
+
+# ---------------------------------------------------------------------------
+# System prompt — multi-mode reasoning + operator
+# ---------------------------------------------------------------------------
+
+SYSTEM_PROMPT = """You are BTR Command — an elite AI operator for a commercial real estate prospecting platform called BTR Command / SignalStack.
+
+You are NOT a generic chatbot. You are a strategic co-pilot embedded inside the user's CRM.
+The user is a CRE professional who tracks capital groups, contacts, touchpoints, signals, and deal flow.
+
+PRODUCT NAMES (use these consistently):
+- BTR Command: the overall platform
+- SignalStack: the signal/news intelligence layer
+- Performance: the daily tracking dashboard
+- Operator Mode: this chat interface
+
+═══════════════════════════════════════════════════
+RESPONSE MODES (auto-selected based on intent):
+═══════════════════════════════════════════════════
+
+STRATEGIC ADVISOR MODE — for brainstorming, strategy, improvement questions
+- Give DEPTH. Think step by step.
+- Structure: diagnosis → highest-ROI improvements → implementation order → risks
+- Include specific recommendations with real names from the CRM context
+- Explain tradeoffs. Prioritize by effort vs impact.
+- If relevant, include an exact Claude prompt the user could use for follow-up
+- Use the StrategyCard type
+
+EXECUTION MODE — for logging, updating, exporting
+- Be concise. 1-2 sentences max.
+- Return the appropriate action card immediately
+- Never explain what you're about to do — just do it
+
+DRAFTING MODE — for outreach, emails, messages
+- Write the COMPLETE message. No placeholders.
+- Write AS the user (first person, professional tone)
+- Reference real signals, touchpoints, and context from their CRM
+- Use DraftCard
+
+DATA ANALYST MODE — for explaining metrics, analyzing contacts/companies
+- Pull ALL relevant data from context
+- Present it structured: key stats → timeline → insights → recommended action
+- Use ContactInsightCard or SignalInsightCard when analyzing specific entities
+- Use PerformanceInsightCard for performance questions
+
+CRM OPERATOR MODE — for next actions, priorities, sprint planning
+- Be opinionated. Pick THE answer, not a menu.
+- Rank by: urgency (going cold, overdue) > opportunity size > relationship warmth
+- Use NextActionCard
+
+TROUBLESHOOTING MODE — for app issues, errors, confusion
+- Diagnose the issue from context
+- Give a clear fix or workaround
+- Use TextCard
+
+═══════════════════════════════════════════════════
+RESPONSE FORMAT
+═══════════════════════════════════════════════════
+
+Always return a JSON object inside <card>...</card> tags:
 {
-  "type": "DraftCard|NextActionCard|SignalCard|ContactSummaryCard|CompanySummaryCard|TouchpointLogCard|FollowUpCard|ExportCard|ConfirmationCard|ErrorCard|TextCard",
-  "text": "Brief message to the user (1-3 sentences max)",
+  "type": "<CardType>",
+  "text": "Your main response text. Can be multiple paragraphs for strategic mode. Use **bold** for emphasis and - for bullet points.",
   "source": "Based on..." or null,
-  "data": { ... card-specific data ... },
+  "data": { ... card-specific fields ... },
   "actions": [
-    {"id": "action_id", "label": "Button Label", "action": "action_type", "params": {...}}
+    {"id": "unique_id", "label": "Button Text", "action": "action_type", "params": {...}}
   ]
 }
 
-CARD TYPES AND DATA:
+═══════════════════════════════════════════════════
+CARD TYPES
+═══════════════════════════════════════════════════
 
-TextCard: Simple text response. data: {}
-DraftCard: data: {"channel":"email|linkedin|call","target_name":"...","target_id":"...","subject":"...","body":"...","signal_ref":"..."}
-NextActionCard: data: {"recommendations": [{"priority":"high|medium|low","action":"...","target":"...","reason":"..."}]}
-SignalCard: data: {"signals": [{"title":"...","summary":"...","source_url":"...","importance":1-10}]}
-ContactSummaryCard: data: {"name":"...","id":"...","title":"...","company":"...","stage":"...","last_touch":"...","touchpoint_count":N,"notes":"..."}
+TextCard: General response. data: {}
+
+StrategyCard: Deep strategic analysis.
+  data: {"diagnosis": "...", "recommendations": [{"title": "...", "detail": "...", "effort": "low|medium|high", "impact": "low|medium|high"}], "implementation_order": ["Step 1...", "Step 2..."], "risks": ["Risk 1...", "Risk 2..."], "claude_prompt": "..." or null}
+
+ClaudePromptCard: A ready-to-use Claude prompt.
+  data: {"prompt_title": "...", "prompt_body": "...", "constraints": ["..."], "output_format": "..."}
+
+DraftCard: Outreach draft.
+  data: {"channel": "email|linkedin|call", "target_name": "...", "target_id": "...", "subject": "...", "body": "...", "signal_ref": "..."}
+
+NextActionCard: Prioritized actions.
+  data: {"recommendations": [{"priority": "high|medium|low", "action": "...", "target": "...", "reason": "..."}]}
+
+ContactInsightCard: Deep contact analysis.
+  data: {"name": "...", "id": "...", "title": "...", "company": "...", "stage": "...", "warmth": N, "last_touch": "...", "touchpoint_count": N, "engagement_trend": "rising|stable|declining", "key_insights": ["..."], "next_move": "..."}
+
+SignalInsightCard: Signal analysis for a company.
+  data: {"company_name": "...", "company_id": "...", "signals": [{"title": "...", "summary": "...", "source_url": "...", "importance": 1-10, "action_implication": "..."}], "overall_assessment": "...", "recommended_action": "..."}
+
+PerformanceInsightCard: Performance/metrics analysis.
+  data: {"period": "today|week|month", "metrics": [{"label": "...", "value": "...", "trend": "up|down|flat"}], "insights": ["..."], "focus_recommendation": "..."}
+
 CompanySummaryCard: data: {"name":"...","id":"...","status":"...","warmth":N,"last_contact":"...","contacts":N,"opp_stage":"...","opp_value":"..."}
+ContactSummaryCard: data: {"name":"...","id":"...","title":"...","company":"...","stage":"...","last_touch":"...","touchpoint_count":N,"notes":"..."}
 TouchpointLogCard: data: {"contact_name":"...","contact_id":"...","group_id":"...","channel":"email|call|meeting|linkedin|note","summary":"...","direction":"outbound|inbound"}
 FollowUpCard: data: {"contact_name":"...","contact_id":"...","due_date":"YYYY-MM-DD","task_type":"follow_up|call|meeting","title":"..."}
 ExportCard: data: {"export_type":"contacts|capital_partners|underwriting|prospects","url":"...","filename":"..."}
 ConfirmationCard: data: {"what":"...","result":"...","entity_id":"..."}
 ErrorCard: data: {"error":"...","suggestion":"..."}
 
-CRITICAL RULES:
-1. ALWAYS return exactly ONE <card>...</card> block. No extra text outside the card.
-2. For drafts: write the COMPLETE message in data.body. Write AS the user, first person, professional.
-3. For actions: only include actions the user can execute. Never pretend an action was completed.
-4. Use real data from the CONTEXT below — never fabricate names, IDs, or stats.
-5. If data is missing, say so clearly in the "text" field.
-6. Keep "text" to 1-3 sentences. Be direct.
-7. "source" field should say where your info came from, e.g. "Based on 3 recent touchpoints with Acme Corp" or null if general knowledge.
-8. For /sprint: return a NextActionCard with today's prioritized work items.
-9. For /brief: return a CompanySummaryCard or NextActionCard summarizing the day.
-10. For /next: return the single highest-priority NextActionCard.
+═══════════════════════════════════════════════════
+QUALITY RULES
+═══════════════════════════════════════════════════
 
-SLASH COMMANDS (pre-processed, you receive them as regular messages with context):
-/draft [contact] — Draft outreach for this contact
+1. ALWAYS return exactly ONE <card>...</card> block. No text outside it.
+2. Use REAL data from context. Never fabricate names, IDs, or stats.
+3. If data is missing, say so — don't guess.
+4. For strategic questions: give the FULL answer in "text". Multiple paragraphs OK. Use **bold** and bullet points.
+5. For actions: never pretend something was completed. Only offer executable actions.
+6. Be specific. "Call Ethan Park about the Q3 allocation" not "Follow up with contacts."
+7. Explain tradeoffs when relevant. "This is high-impact but requires X."
+8. When asked "how can we improve X": diagnosis → highest ROI improvements → implementation order → exact Claude prompt → risks
+9. When asked "build prompt": return a ClaudePromptCard with narrow scope, constraints, output format, safety rules
+10. Proactively suggest next moves at the end of strategic responses.
+11. Remember the product: BTR Command, SignalStack, Performance, Operator Mode.
+12. Don't repeat ideas from prior messages unless improving them.
+13. Keep tone: direct, sharp, operator-focused. No filler.
+
+═══════════════════════════════════════════════════
+SLASH COMMANDS
+═══════════════════════════════════════════════════
+/draft [contact] — Draft outreach
 /log [note] — Log a touchpoint
-/next — Recommend top next action
+/next — Top priority action
 /brief — Daily briefing
-/export contacts — Trigger contacts export
-/signal [company] — Show latest signals for company
-/sprint — Start a focused work sprint with prioritized items"""
+/export [type] — Export data
+/signal [company] — Signal analysis
+/sprint — Prioritized work sprint"""
 
 
 # ---------------------------------------------------------------------------
 # Context builder — gathers CRM state for the assistant
 # ---------------------------------------------------------------------------
 
-def _build_context(extra_context=None):
-    """Gather current app state for the assistant."""
+def _build_context(extra_context=None, include_history=True):
+    """Gather current app state including CRM data, performance, and chat history."""
     ctx_parts = []
 
     # Capital groups
@@ -97,6 +240,8 @@ def _build_context(extra_context=None):
                 line += f" last_contact={str(g['last_contacted_at'])[:10]}"
             if g.get('opportunity_stage'):
                 line += f" opp_stage={g['opportunity_stage']} opp_value={g.get('opportunity_value', '')}"
+            if g.get('notes'):
+                line += f" notes={str(g['notes'])[:80]}"
             ctx_parts.append(line)
 
     # Contacts with details
@@ -122,6 +267,8 @@ def _build_context(extra_context=None):
                 line += f" last_touch={str(c['last_touch_at'])[:10]}"
             if c.get('email'):
                 line += f" email={c['email']}"
+            if c.get('phone'):
+                line += f" phone={c['phone']}"
             ctx_parts.append(line)
 
     # Recent signals
@@ -140,6 +287,8 @@ def _build_context(extra_context=None):
                 line += f" type={s['signal_type']}"
             if s.get('importance'):
                 line += f" importance={s['importance']}"
+            if s.get('summary'):
+                line += f" | {str(s['summary'])[:80]}"
             if s.get('source_url'):
                 line += f" url={s['source_url'][:60]}"
             ctx_parts.append(line)
@@ -151,7 +300,7 @@ def _build_context(extra_context=None):
            FROM prospecting_touchpoints t
            LEFT JOIN prospecting_contacts c ON t.contact_id = c.id
            LEFT JOIN capital_groups g ON t.group_id = g.id
-           ORDER BY t.occurred_at DESC LIMIT 8""", []
+           ORDER BY t.occurred_at DESC LIMIT 10""", []
     )
     if touchpoints:
         ctx_parts.append("\nRECENT TOUCHPOINTS:")
@@ -161,7 +310,9 @@ def _build_context(extra_context=None):
                 who = t['group_name']
             line = f"- {t.get('channel', 'note')} with {who or 'unknown'}"
             if t.get('subject'):
-                line += f": {t['subject'][:50]}"
+                line += f": {t['subject'][:60]}"
+            elif t.get('summary'):
+                line += f": {str(t['summary'])[:60]}"
             if t.get('occurred_at'):
                 line += f" ({str(t['occurred_at'])[:10]})"
             ctx_parts.append(line)
@@ -185,7 +336,7 @@ def _build_context(extra_context=None):
                 )).days
             except Exception:
                 days = '?'
-            ctx_parts.append(f"- [{r['id'][:8]}] {r['name']} — {days}d silent")
+            ctx_parts.append(f"- [{r['id'][:8]}] {r['name']} — {days}d silent (status={r['relationship_status']})")
 
     # Pending tasks / follow-ups
     tasks = fetch_all(
@@ -204,26 +355,95 @@ def _build_context(extra_context=None):
                 line += f" ({t['group_name']})"
             if t.get('due_at'):
                 line += f" due={str(t['due_at'])[:10]}"
+            if t.get('priority'):
+                line += f" priority={t['priority']}"
             ctx_parts.append(line)
 
-    # Stats
+    # Weekly performance metrics
     today = datetime.utcnow().strftime('%Y-%m-%d')
+    week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+
     tp_today = fetch_one(
         "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE DATE(occurred_at) = ?",
         [today]
     )
+    tp_week = fetch_one(
+        "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE occurred_at > ?",
+        [week_ago]
+    )
     total_contacts = fetch_one("SELECT COUNT(*) as cnt FROM prospecting_contacts")
     total_groups = fetch_one("SELECT COUNT(*) as cnt FROM capital_groups")
+    total_signals = fetch_one(
+        "SELECT COUNT(*) as cnt FROM prospecting_signals WHERE detected_at > ?",
+        [week_ago]
+    )
+    tasks_completed_week = fetch_one(
+        "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE status = 'completed' AND completed_at > ?",
+        [week_ago]
+    )
+    tasks_pending = fetch_one(
+        "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE status = 'pending'"
+    )
+    overdue_tasks = fetch_all(
+        """SELECT t.title, t.due_at, g.name as group_name
+           FROM prospecting_tasks t
+           LEFT JOIN capital_groups g ON t.capital_group_id = g.id
+           WHERE t.status = 'pending' AND t.due_at < ?
+           ORDER BY t.due_at ASC LIMIT 5""",
+        [today]
+    )
 
-    ctx_parts.append(f"\nSTATS: {total_contacts['cnt'] if total_contacts else 0} contacts, "
-                     f"{total_groups['cnt'] if total_groups else 0} capital groups, "
-                     f"{tp_today['cnt'] if tp_today else 0} touchpoints today")
-    ctx_parts.append(f"TODAY: {datetime.utcnow().strftime('%A, %B %d, %Y')}")
+    ctx_parts.append(f"\nPERFORMANCE STATS:")
+    ctx_parts.append(f"  Total: {total_contacts['cnt'] if total_contacts else 0} contacts, "
+                     f"{total_groups['cnt'] if total_groups else 0} capital groups")
+    ctx_parts.append(f"  Today: {tp_today['cnt'] if tp_today else 0} touchpoints")
+    ctx_parts.append(f"  This week: {tp_week['cnt'] if tp_week else 0} touchpoints, "
+                     f"{total_signals['cnt'] if total_signals else 0} new signals, "
+                     f"{tasks_completed_week['cnt'] if tasks_completed_week else 0} tasks completed")
+    ctx_parts.append(f"  Pending: {tasks_pending['cnt'] if tasks_pending else 0} tasks")
+    if overdue_tasks:
+        ctx_parts.append(f"  OVERDUE ({len(overdue_tasks)}):")
+        for ot in overdue_tasks:
+            ctx_parts.append(f"    - {ot['title']}"
+                             f"{' (' + ot['group_name'] + ')' if ot.get('group_name') else ''}"
+                             f" due={str(ot['due_at'])[:10]}")
+
+    ctx_parts.append(f"\nTODAY: {datetime.utcnow().strftime('%A, %B %d, %Y')}")
+
+    # Prior chat thread (session memory)
+    if include_history:
+        recent_chat = _get_recent_chat_summary()
+        if recent_chat:
+            ctx_parts.append(f"\nPRIOR CHAT THREAD (recent topics discussed):\n{recent_chat}")
 
     if extra_context:
         ctx_parts.append(f"\nADDITIONAL CONTEXT:\n{extra_context}")
 
     return "\n".join(ctx_parts)
+
+
+def _get_recent_chat_summary():
+    """Load recent chat exchanges for session memory."""
+    try:
+        rows = fetch_all(
+            """SELECT user_message, card_type, card_json, created_at
+               FROM assistant_chat_log
+               ORDER BY created_at DESC LIMIT 6""", []
+        )
+        if not rows:
+            return ""
+        rows.reverse()
+        parts = []
+        for r in rows:
+            parts.append(f"User: {r['user_message'][:100]}")
+            try:
+                card = json.loads(r['card_json'])
+                parts.append(f"Assistant ({r['card_type']}): {card.get('text', '')[:120]}")
+            except Exception:
+                parts.append(f"Assistant ({r['card_type']}): [response]")
+        return "\n".join(parts)
+    except Exception:
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -255,10 +475,11 @@ def _preprocess_slash(text):
         return f"Log a touchpoint: {arg}" if arg else "Help me log a touchpoint.", extra_ctx
 
     if cmd == '/next':
-        return "What is the single most important thing I should do right now?", extra_ctx
+        return "What is the single most important thing I should do right now? Be specific with names and companies.", extra_ctx
 
     if cmd == '/brief':
-        return "Give me a daily briefing: key stats, overdue items, and top priorities for today.", extra_ctx
+        return ("Give me a daily briefing. Include: today's stats, overdue items, "
+                "going-cold contacts, top 3 priorities. Use a PerformanceInsightCard."), extra_ctx
 
     if cmd == '/export':
         return f"Export {arg or 'contacts'} data.", extra_ctx
@@ -269,12 +490,14 @@ def _preprocess_slash(text):
             if signals:
                 extra_ctx = "MATCHING SIGNALS:\n" + "\n".join(
                     f"- {s['title']} (importance={s.get('importance', '?')}) url={s.get('source_url', 'N/A')}"
+                    f" summary={str(s.get('summary', ''))[:80]}"
                     for s in signals[:5]
                 )
-        return f"Show me the latest signals for {arg or 'all companies'}.", extra_ctx
+        return f"Analyze the latest signals for {arg or 'all companies'}. Use a SignalInsightCard.", extra_ctx
 
     if cmd == '/sprint':
-        return "Start a focused work sprint. Give me my top 5 prioritized actions for today.", extra_ctx
+        return ("Start a focused work sprint. Give me my top 5 prioritized actions for today. "
+                "Rank by urgency: overdue tasks > going cold contacts > high-warmth follow-ups > new signals."), extra_ctx
 
     return text, extra_ctx
 
@@ -284,7 +507,6 @@ def _preprocess_slash(text):
 # ---------------------------------------------------------------------------
 
 def _find_contact(name_query):
-    """Find a contact by partial name match."""
     q = f"%{name_query.strip().lower()}%"
     return fetch_one(
         """SELECT c.*, g.name as group_name
@@ -299,7 +521,6 @@ def _find_contact(name_query):
 
 
 def _find_group(name_query):
-    """Find a capital group by partial name match."""
     q = f"%{name_query.strip().lower()}%"
     return fetch_one(
         "SELECT * FROM capital_groups WHERE LOWER(name) LIKE ? ORDER BY warmth_score DESC LIMIT 1",
@@ -308,7 +529,6 @@ def _find_group(name_query):
 
 
 def _latest_signal_for(group_id=None, contact_id=None):
-    """Get latest signal for a group or contact."""
     if group_id:
         return fetch_one(
             "SELECT * FROM prospecting_signals WHERE group_id = ? ORDER BY detected_at DESC LIMIT 1",
@@ -323,7 +543,6 @@ def _latest_signal_for(group_id=None, contact_id=None):
 
 
 def _find_signals_for(name_query):
-    """Find signals matching a company or contact name."""
     group = _find_group(name_query)
     if group:
         return fetch_all(
@@ -336,7 +555,6 @@ def _find_signals_for(name_query):
 
 
 def _format_contact_detail(contact, signal=None):
-    """Format a contact's detail for extra context injection."""
     if not contact:
         return ""
     name = f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip()
@@ -348,26 +566,27 @@ def _format_contact_detail(contact, signal=None):
         lines.append(f"  company={contact['group_name']}")
     if contact.get('email'):
         lines.append(f"  email={contact['email']}")
+    if contact.get('phone'):
+        lines.append(f"  phone={contact['phone']}")
     lines.append(f"  stage={contact.get('relationship_stage', 'cold')}")
     if contact.get('last_touch_at'):
         lines.append(f"  last_touch={str(contact['last_touch_at'])[:10]}")
     if contact.get('notes'):
         lines.append(f"  notes={contact['notes'][:200]}")
 
-    # Recent touchpoints for this contact
     tps = fetch_all(
         """SELECT channel, subject, summary, occurred_at
            FROM prospecting_touchpoints WHERE contact_id = ?
-           ORDER BY occurred_at DESC LIMIT 3""",
+           ORDER BY occurred_at DESC LIMIT 5""",
         [contact['id']]
     )
     if tps:
         lines.append("  RECENT TOUCHPOINTS:")
         for t in tps:
-            lines.append(f"    - {t.get('channel', 'note')}: {t.get('subject') or t.get('summary', '')[:60]} ({str(t.get('occurred_at', ''))[:10]})")
+            lines.append(f"    - {t.get('channel', 'note')}: {t.get('subject') or str(t.get('summary', ''))[:60]} ({str(t.get('occurred_at', ''))[:10]})")
 
     if signal:
-        lines.append(f"  LATEST SIGNAL: {signal.get('title', '')} — {signal.get('summary', '')[:100]}")
+        lines.append(f"  LATEST SIGNAL: {signal.get('title', '')} — {str(signal.get('summary', ''))[:100]}")
         if signal.get('source_url'):
             lines.append(f"    url={signal['source_url']}")
 
@@ -403,6 +622,11 @@ def chat():
     last_msg = messages[-1].get('content', '') if messages else ''
     processed_msg, extra_ctx = _preprocess_slash(last_msg)
 
+    # Classify intent and select response mode
+    intent = _classify_intent(last_msg)
+    mode = INTENT_TO_MODE.get(intent, 'strategic_advisor')
+    max_tokens = MODE_MAX_TOKENS.get(mode, 2000)
+
     # Build page-aware context
     page_extra = ""
     if page_context.get('active_tab'):
@@ -423,6 +647,11 @@ def chat():
             page_extra += f"\nSelected company: {group['name']} (id={group['id'][:8]}, status={group.get('relationship_status')}, warmth={group.get('warmth_score')})"
 
     combined_extra = (extra_ctx or '') + page_extra
+
+    # Add mode instruction
+    mode_hint = f"\n\nACTIVE MODE: {mode.upper().replace('_', ' ')}\nINTENT: {intent}"
+    combined_extra = (combined_extra or '') + mode_hint
+
     context = _build_context(combined_extra if combined_extra.strip() else None)
     system = SYSTEM_PROMPT + "\n\n--- CURRENT DATA CONTEXT ---\n" + context
 
@@ -442,7 +671,7 @@ def chat():
         client = anthropic.Anthropic(api_key=api_key)
         resp = client.messages.create(
             model='claude-sonnet-4-20250514',
-            max_tokens=1500,
+            max_tokens=max_tokens,
             system=system,
             messages=api_messages
         )
@@ -479,13 +708,15 @@ def chat():
                 'actions': []
             }
 
-        _persist_chat(messages[-1].get('content', ''), card)
+        _persist_chat(messages[-1].get('content', ''), card, intent, mode)
 
         return jsonify({
             'role': 'assistant',
             'content': card.get('text', ''),
             'card': card,
-            'action': action
+            'action': action,
+            'intent': intent,
+            'mode': mode
         })
     except anthropic.APIError as e:
         return jsonify({
@@ -512,7 +743,6 @@ def chat():
 
 
 def _action_to_card(action, full_reply):
-    """Convert legacy <action> JSON to a card structure."""
     a_type = action.get('action', '')
     clean = re.sub(r'<action>[\s\S]*?</action>', '', full_reply).strip()
 
@@ -585,7 +815,6 @@ def _action_to_card(action, full_reply):
 
 @assistant_bp.route('/execute-action', methods=['POST'])
 def execute_action():
-    """Execute a parsed action from the assistant."""
     data = request.get_json(silent=True) or {}
     action = data.get('action')
     params = data.get('params', {})
@@ -761,16 +990,17 @@ def _exec_export(params):
 
 
 # ---------------------------------------------------------------------------
-# Chat persistence (lightweight)
+# Chat persistence with intent/mode tracking
 # ---------------------------------------------------------------------------
 
-def _persist_chat(user_msg, card):
-    """Log chat exchanges for continuity."""
+def _persist_chat(user_msg, card, intent='unknown', mode='unknown'):
     try:
         execute(
             """INSERT INTO assistant_chat_log (id, user_message, card_type, card_json, created_at)
                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)""",
-            [new_id(), user_msg[:500], card.get('type', 'TextCard'), json.dumps(card)[:2000]]
+            [new_id(), user_msg[:500],
+             f"{card.get('type', 'TextCard')}|{intent}|{mode}",
+             json.dumps(card)[:4000]]
         )
     except Exception:
         pass
@@ -778,7 +1008,6 @@ def _persist_chat(user_msg, card):
 
 @assistant_bp.route('/history', methods=['GET'])
 def chat_history():
-    """Return recent chat history."""
     rows = fetch_all(
         """SELECT user_message, card_type, card_json, created_at
            FROM assistant_chat_log
