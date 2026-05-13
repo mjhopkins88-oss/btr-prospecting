@@ -1,5 +1,5 @@
-/* BTR Command — AI Chat Component (chat.js)
-   ChatGPT-style reasoning + operator layer with structured cards */
+/* Leo — Operator AI Chat Component (chat.js)
+   Proactive intelligence layer with structured cards */
 (function() {
 'use strict';
 var _apiBase = (typeof API_BASE !== 'undefined') ? API_BASE : (window.location.hostname === 'localhost' ? 'http://localhost:5000' : window.location.origin);
@@ -129,6 +129,66 @@ function renderInlineMarkdown(text, key) {
   return parts.length > 0 ? parts : text;
 }
 
+
+// --- Text sanitizer: strip all internal/backend syntax from display ---
+function sanitizeDisplayText(text) {
+  if (!text) return '';
+  var s = text;
+  // Strip <card ...>...</card> with or without attributes
+  s = s.replace(/<card[^>]*>[\s\S]*?<\/card>/gi, '');
+  // Strip orphan <card> or </card> tags
+  s = s.replace(/<\/?card[^>]*>/gi, '');
+  // Strip <action>...</action>
+  s = s.replace(/<action[^>]*>[\s\S]*?<\/action>/gi, '');
+  s = s.replace(/<\/?action[^>]*>/gi, '');
+  // Strip standalone JSON blocks (lines that look like raw JSON)
+  s = s.replace(/^\s*\{[^}]{20,}\}\s*$/gm, '');
+  // Strip ```json ... ```
+  s = s.replace(/```json\s*/g, '');
+  s = s.replace(/```\s*/g, '');
+  // Clean up excess whitespace
+  s = s.replace(/\n{3,}/g, '\n\n');
+  return s.trim();
+}
+
+// --- Typing effect component ---
+function TypingText(props) {
+  var fullText = props.text || '';
+  var _tv = useState('');
+  var displayed = _tv[0];
+  var setDisplayed = _tv[1];
+  var _td = useState(false);
+  var done = _td[0];
+  var setDone = _td[1];
+
+  useEffect(function() {
+    if (!fullText) { setDone(true); return; }
+    var idx = 0;
+    var speed = Math.max(8, Math.min(25, 800 / fullText.length));
+    var timer = setInterval(function() {
+      idx += 1;
+      // Advance by chunks (word boundaries) for smoother feel
+      var next = fullText.indexOf(' ', idx);
+      if (next === -1 || next <= idx) next = idx;
+      setDisplayed(fullText.substring(0, next));
+      if (next >= fullText.length) {
+        setDisplayed(fullText);
+        setDone(true);
+        clearInterval(timer);
+      }
+      idx = next;
+    }, speed);
+    return function() { clearInterval(timer); };
+  }, [fullText]);
+
+  if (done) return renderMarkdownText(fullText);
+  var els = renderMarkdownText(displayed);
+  // Append blinking cursor
+  if (Array.isArray(els)) {
+    els = els.concat([h('span', { key: 'cursor', style: { color: '#94a3b8', animation: 'pulse 1s infinite' } }, '|')]);
+  }
+  return els;
+}
 
 // --- Interaction tracking (self-improvement loop) ---
 function trackInteraction(event, cardType, actionId) {
@@ -1046,7 +1106,11 @@ function BTRAssistantChat(props) {
       .then(function(r) { return r.json(); })
       .then(function(d) {
         var card = d.card || null;
-        var text = card ? (card.text || '') : (d.content || '');
+        // Sanitize card text on receipt — never display raw backend syntax
+        if (card && card.text) {
+          card.text = sanitizeDisplayText(card.text);
+        }
+        var text = card ? (card.text || '') : sanitizeDisplayText(d.content || '');
         setMessages(function(prev) {
           return prev.concat([{ role: 'assistant', content: text, card: card, mode: d.mode, intent: d.intent }]);
         });
@@ -1134,11 +1198,11 @@ function BTRAssistantChat(props) {
       }
     },
       h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } },
-        h('span', { style: { fontSize: '0.85rem' } }, '✨'),
+        h('span', { style: { fontSize: '0.78rem', fontWeight: 700, background: 'linear-gradient(135deg, #14b8a6, #3b82f6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' } }, 'L'),
         h('span', {
           style: { fontFamily: "'Orbitron', sans-serif", fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.05em' }
-        }, 'BTR COMMAND'),
-        h('span', { style: { fontSize: '0.55rem', color: '#94a3b8', fontWeight: 400, marginLeft: '0.2rem' } }, 'Operator'),
+        }, 'LEO'),
+        h('span', { style: { fontSize: '0.55rem', color: '#94a3b8', fontWeight: 400, marginLeft: '0.2rem' } }, 'Operator AI'),
         lastMode ? h('span', { style: { fontSize: '0.5rem', color: MODE_COLORS[lastMode] || '#94a3b8', background: (MODE_COLORS[lastMode] || '#94a3b8') + '22', padding: '0.08rem 0.3rem', borderRadius: '0.2rem', fontWeight: 600, marginLeft: '0.3rem' } }, MODE_LABELS[lastMode] || lastMode) : null
       ),
       h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.3rem' } },
@@ -1172,10 +1236,10 @@ function BTRAssistantChat(props) {
       messages.length === 0 && h('div', {
         style: { textAlign: 'center', padding: '1.2rem 0.75rem', color: '#94a3b8' }
       },
-        h('div', { style: { fontSize: '1.3rem', marginBottom: '0.4rem', opacity: 0.25 } }, '✨'),
-        h('div', { style: { fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.25rem', color: '#475569' } }, 'Operator Intelligence'),
+        h('div', { style: { fontSize: '1.3rem', marginBottom: '0.4rem', opacity: 0.3, fontWeight: 900, fontFamily: "'Orbitron', sans-serif", background: 'linear-gradient(135deg, #14b8a6, #3b82f6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' } }, 'L'),
+        h('div', { style: { fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.25rem', color: '#475569' } }, 'Leo — Operator AI'),
         h('div', { style: { fontSize: '0.68rem', lineHeight: 1.5, marginBottom: '0.5rem', color: '#94a3b8' } },
-          'Strategist · Operator · Analyst · Coach · Builder'
+          'Your AI operator — strategy, execution, insights'
         ),
         h('div', { style: { fontSize: '0.62rem', color: '#94a3b8', marginBottom: '0.5rem' } }, 'Type / for commands or ask anything'),
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem' } },
@@ -1224,28 +1288,22 @@ function BTRAssistantChat(props) {
         // Assistant message
         var modeLabel = m.mode && MODE_LABELS[m.mode];
         var modeColor = m.mode && MODE_COLORS[m.mode];
+        var hasCard = m.card && m.card.type && m.card.type !== 'TextCard';
+        var isTextCard = m.card && m.card.type === 'TextCard';
+        var isLastMsg = i === messages.length - 1;
+        var cardText = m.card && m.card.text ? sanitizeDisplayText(m.card.text) : '';
+        var contentText = m.content ? sanitizeDisplayText(m.content) : '';
 
         return h('div', { key: i, style: { display: 'flex', justifyContent: 'flex-start', maxWidth: '95%' } },
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem', width: '100%' } },
             // Mode badge
             modeLabel ? h('div', { style: { fontSize: '0.55rem', fontWeight: 600, color: modeColor || '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '-0.1rem' } }, modeLabel + ' mode') : null,
 
-            // Card rendering
-            m.card ? renderCard(m.card, handleAction) : null,
+            // Structured card (non-TextCard): render the card widget
+            hasCard ? renderCard(m.card, handleAction) : null,
 
-            // Text fallback (only if no card)
-            (!m.card && m.content) ? h('div', {
-              style: {
-                background: '#f8fafc', border: '1px solid #e2e8f0',
-                borderRadius: '0.55rem 0.55rem 0.55rem 0.1rem',
-                padding: '0.45rem 0.65rem',
-                fontSize: '0.76rem', lineHeight: 1.5, color: '#1e293b',
-                whiteSpace: 'pre-wrap', wordBreak: 'break-word'
-              }
-            }, m.content) : null,
-
-            // TextCard shows rich text
-            (m.card && m.card.type === 'TextCard' && m.card.text) ? h('div', {
+            // TextCard: show rich text with typing effect for newest message
+            isTextCard && cardText ? h('div', {
               style: {
                 background: '#f8fafc', border: '1px solid #e2e8f0',
                 borderRadius: '0.55rem 0.55rem 0.55rem 0.1rem',
@@ -1253,12 +1311,18 @@ function BTRAssistantChat(props) {
                 fontSize: '0.76rem', lineHeight: 1.55, color: '#1e293b',
                 wordBreak: 'break-word'
               }
-            }, renderMarkdownText(m.card.text)) : null,
+            }, isLastMsg && !loading ? h(TypingText, { text: cardText }) : renderMarkdownText(cardText)) : null,
 
-            // Non-TextCard shows text above the card
-            (m.card && m.card.type !== 'TextCard' && m.card.text) ? h('div', {
-              style: { fontSize: '0.74rem', color: '#475569', marginBottom: '0.1rem', lineHeight: 1.5 }
-            }, renderMarkdownText(m.card.text)) : null
+            // Plain text fallback (no card at all): show sanitized text
+            (!m.card && contentText) ? h('div', {
+              style: {
+                background: '#f8fafc', border: '1px solid #e2e8f0',
+                borderRadius: '0.55rem 0.55rem 0.55rem 0.1rem',
+                padding: '0.45rem 0.65rem',
+                fontSize: '0.76rem', lineHeight: 1.5, color: '#1e293b',
+                wordBreak: 'break-word'
+              }
+            }, isLastMsg && !loading ? h(TypingText, { text: contentText }) : renderMarkdownText(contentText)) : null
           )
         );
       }),
@@ -1271,7 +1335,14 @@ function BTRAssistantChat(props) {
             borderRadius: '0.55rem 0.55rem 0.55rem 0.1rem',
             padding: '0.45rem 0.65rem', fontSize: '0.76rem', color: '#94a3b8'
           }
-        }, 'Thinking…')
+        },
+          h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '0.3rem' } },
+            h('span', { style: { animation: 'pulse 1.2s ease-in-out infinite' } }, 'Leo is thinking'),
+            h('span', { style: { animation: 'pulse 1.2s ease-in-out infinite 0.2s' } }, '.'),
+            h('span', { style: { animation: 'pulse 1.2s ease-in-out infinite 0.4s' } }, '.'),
+            h('span', { style: { animation: 'pulse 1.2s ease-in-out infinite 0.6s' } }, '.')
+          )
+        )
       )
     ),
 
@@ -1317,7 +1388,7 @@ function BTRAssistantChat(props) {
         value: input,
         onChange: handleInputChange,
         onKeyDown: handleKeyDown,
-        placeholder: 'Ask anything or type / for commands…',
+        placeholder: 'Ask Leo anything or type / for commands…',
         rows: 1,
         style: {
           flex: 1, resize: 'none', border: '1px solid #e2e8f0',

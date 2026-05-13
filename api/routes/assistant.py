@@ -116,9 +116,10 @@ def _classify_intent(text):
 # System prompt — Operator Intelligence
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """You are BTR Command Operator — the core intelligence layer of a commercial real estate prospecting platform.
+SYSTEM_PROMPT = """You are Leo — the AI operator powering a commercial real estate prospecting platform.
 
 You are NOT a chatbot. You are the system's brain: strategist, operator, analyst, and optimizer.
+Your name is Leo. Users know you as Leo.
 
 INTERNAL PROCESS (never expose this):
 For every message, silently: classify intent → gather context → select mode → reason → output refined answer.
@@ -167,7 +168,7 @@ PRODUCT AWARENESS
 - Performance = behavior engine (daily execution metrics, streaks, habits)
 - Prospecting = relationship engine (contacts, companies, touchpoints)
 - Command Center = execution layer (this chat, action cards, CRM operations)
-- Operator Mode = this chat interface
+- Leo = this AI operator chat interface
 
 Use these names naturally. They are the product language.
 
@@ -1920,6 +1921,32 @@ def start_sprint():
 
 
 # ---------------------------------------------------------------------------
+# Reply text sanitizer — strip all internal/backend syntax from user-facing text
+# ---------------------------------------------------------------------------
+
+def _sanitize_reply_text(text):
+    """Remove card tags, action tags, JSON blocks, and internal syntax."""
+    if not text:
+        return ''
+    clean = text
+    # Strip <card ...>...</card> (with or without attributes)
+    clean = re.sub(r'<card[^>]*>[\s\S]*?</card>', '', clean, flags=re.IGNORECASE)
+    # Strip orphan <card> or </card> tags
+    clean = re.sub(r'</?card[^>]*>', '', clean, flags=re.IGNORECASE)
+    # Strip <action>...</action>
+    clean = re.sub(r'<action[^>]*>[\s\S]*?</action>', '', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'</?action[^>]*>', '', clean, flags=re.IGNORECASE)
+    # Strip standalone JSON blocks (lines that are just {...})
+    clean = re.sub(r'^\s*\{[^}]{20,}\}\s*$', '', clean, flags=re.MULTILINE)
+    # Strip common internal prefixes
+    clean = re.sub(r'^\s*```json\s*', '', clean)
+    clean = re.sub(r'\s*```\s*$', '', clean)
+    # Clean up whitespace
+    clean = re.sub(r'\n{3,}', '\n\n', clean)
+    return clean.strip()
+
+
+# ---------------------------------------------------------------------------
 # Chat endpoint
 # ---------------------------------------------------------------------------
 
@@ -2040,12 +2067,27 @@ def chat():
         reply = resp.content[0].text if resp.content else ''
 
         card = None
+        # Try <card>JSON</card> format
         if '<card>' in reply and '</card>' in reply:
             try:
                 card_str = reply.split('<card>')[1].split('</card>')[0].strip()
                 card = json.loads(card_str)
             except (json.JSONDecodeError, IndexError):
                 pass
+
+        # Try <card ...attributes>...</card> format
+        if not card:
+            attr_match = re.search(
+                r'<card\s+[^>]*?type=["\'](\w+)["\'][^>]*>',
+                reply, re.IGNORECASE
+            )
+            if attr_match:
+                try:
+                    json_match = re.search(r'\{[\s\S]*\}', reply)
+                    if json_match:
+                        card = json.loads(json_match.group())
+                except (json.JSONDecodeError, ValueError):
+                    pass
 
         action = None
         if not card and '<action>' in reply and '</action>' in reply:
@@ -2057,12 +2099,14 @@ def chat():
                 pass
 
         if not card:
-            clean = re.sub(r'<card>[\s\S]*?</card>', '', reply).strip()
-            clean = re.sub(r'<action>[\s\S]*?</action>', '', clean).strip()
+            clean = _sanitize_reply_text(reply)
             card = {
-                'type': 'TextCard', 'text': clean or reply,
+                'type': 'TextCard', 'text': clean or 'I processed your request.',
                 'source': None, 'data': {}, 'actions': []
             }
+        else:
+            if card.get('text'):
+                card['text'] = _sanitize_reply_text(card['text'])
 
         _persist_chat(messages[-1].get('content', ''), card, intent, mode)
 
