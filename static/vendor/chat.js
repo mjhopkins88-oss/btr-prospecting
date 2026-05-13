@@ -35,7 +35,11 @@ var CARD_COLORS = {
   AmbiguityCard:          { bg: '#fefce8', border: '#fde68a', accent: '#d97706', icon: '❓' },
   DailyPlanCard:          { bg: '#f8fafc', border: '#e2e8f0', accent: '#0f172a', icon: '📅' },
   SprintCard:             { bg: '#eff6ff', border: '#bfdbfe', accent: '#1d4ed8', icon: '⚡' },
-  InsightCard:            { bg: '#fffbeb', border: '#fde68a', accent: '#92400e', icon: '💡' }
+  InsightCard:            { bg: '#fffbeb', border: '#fde68a', accent: '#92400e', icon: '💡' },
+  QueueCard:              { bg: '#f0f9ff', border: '#93c5fd', accent: '#1e40af', icon: '📋' },
+  BatchDraftCard:         { bg: '#f0fdf4', border: '#86efac', accent: '#15803d', icon: '✉️' },
+  ApprovalQueueCard:      { bg: '#fefce8', border: '#fde68a', accent: '#a16207', icon: '✅' },
+  ProbabilityCard:        { bg: '#faf5ff', border: '#d8b4fe', accent: '#7c3aed', icon: '🎲' }
 };
 
 var SLASH_HINTS = [
@@ -47,7 +51,12 @@ var SLASH_HINTS = [
   { cmd: '/signal', desc: 'Signal analysis', ex: '/signal Acme Corp' },
   { cmd: '/sprint', desc: 'Work sprint', ex: '/sprint' },
   { cmd: '/plan', desc: 'Strategic plan', ex: '/plan outreach strategy' },
-  { cmd: '/fix', desc: 'Diagnose issue', ex: '/fix low response rate' }
+  { cmd: '/fix', desc: 'Diagnose issue', ex: '/fix low response rate' },
+  { cmd: '/queue', desc: 'Execution queue', ex: '/queue' },
+  { cmd: '/approve', desc: 'Approval queue', ex: '/approve all' },
+  { cmd: '/probability', desc: 'Deal score', ex: '/probability Acme' },
+  { cmd: '/followups', desc: 'Follow-ups', ex: '/followups' },
+  { cmd: '/signals', desc: 'Signal intel', ex: '/signals' }
 ];
 
 var MODE_LABELS = {
@@ -843,6 +852,170 @@ function renderInsightCard(card, onAction) {
   );
 }
 
+function renderQueueCard(card, onAction) {
+  var d = card.data || {};
+  var items = d.items || [];
+  var colors = CARD_COLORS.QueueCard;
+  var urgColors = { critical: '#dc2626', high: '#f59e0b', medium: '#3b82f6', low: '#94a3b8' };
+  var probColors = { High: '#16a34a', Medium: '#f59e0b', Low: '#dc2626' };
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.6rem 0.7rem' } },
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' } },
+      h('div', { style: { fontSize: '0.72rem', fontWeight: 700, color: colors.accent } }, colors.icon + ' Execution Queue'),
+      h('span', { style: { fontSize: '0.6rem', color: '#64748b', background: '#f1f5f9', padding: '0.1rem 0.4rem', borderRadius: '0.2rem' } }, items.length + ' actions')
+    ),
+    items.length > 0 ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
+      items.map(function(item, i) {
+        var uc = urgColors[item.urgency] || '#94a3b8';
+        var prob = item.probability || {};
+        var pc = probColors[prob.label] || '#94a3b8';
+        return h('div', { key: i, style: { display: 'flex', gap: '0.4rem', padding: '0.4rem 0.45rem', background: '#ffffff', borderRadius: '0.35rem', border: '1px solid #e2e8f0', borderLeft: '3px solid ' + uc } },
+          h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: '22px' } },
+            h('span', { style: { fontSize: '0.85rem', fontWeight: 800, color: colors.accent } }, '#' + item.rank)
+          ),
+          h('div', { style: { flex: 1 } },
+            h('div', { style: { fontSize: '0.72rem', fontWeight: 600, color: '#1e293b' } }, item.action),
+            item.target ? h('div', { style: { fontSize: '0.63rem', color: '#64748b' } }, item.target) : null,
+            h('div', { style: { display: 'flex', gap: '0.3rem', marginTop: '0.2rem', flexWrap: 'wrap' } },
+              h('span', { style: { fontSize: '0.55rem', fontWeight: 600, color: pc, background: pc + '14', padding: '0.08rem 0.3rem', borderRadius: '0.2rem' } }, prob.label + ' ' + (prob.score || 0)),
+              item.reason ? h('span', { style: { fontSize: '0.55rem', color: '#94a3b8', fontStyle: 'italic' } }, item.reason) : null
+            ),
+            item.expected_outcome ? h('div', { style: { fontSize: '0.58rem', color: '#6b7280', marginTop: '0.15rem' } }, '→ ' + item.expected_outcome) : null
+          ),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.2rem', flexShrink: 0 } },
+            h('button', {
+              onClick: function() { onAction({ action: 'draft_outreach', params: { target_name: item.target, group_id: item.target_id, channel: 'email' } }); },
+              style: { fontSize: '0.55rem', padding: '0.15rem 0.3rem', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '0.2rem', cursor: 'pointer', color: '#1d4ed8', fontWeight: 600 }
+            }, 'Draft')
+          )
+        );
+      })
+    ) : h('div', { style: { fontSize: '0.72rem', color: '#64748b', textAlign: 'center', padding: '0.5rem' } }, 'Queue is empty — great work!'),
+    items.length > 0 && items[0].rank_reason ? h('div', { style: { marginTop: '0.3rem', fontSize: '0.6rem', color: '#1e40af', background: '#dbeafe', padding: '0.25rem 0.4rem', borderRadius: '0.25rem' } }, '💡 Why #1: ' + items[0].rank_reason) : null,
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
+function renderBatchDraftCard(card, onAction) {
+  var d = card.data || {};
+  var drafts = d.drafts || [];
+  var colors = CARD_COLORS.BatchDraftCard;
+  var probColors = { High: '#16a34a', Medium: '#f59e0b', Low: '#dc2626' };
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.6rem 0.7rem' } },
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' } },
+      h('div', { style: { fontSize: '0.72rem', fontWeight: 700, color: colors.accent } }, colors.icon + ' Batch Drafts'),
+      h('span', { style: { fontSize: '0.6rem', color: '#64748b', background: '#f1f5f9', padding: '0.1rem 0.4rem', borderRadius: '0.2rem' } }, drafts.length + ' drafts')
+    ),
+    drafts.length > 0 ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.35rem' } },
+      drafts.map(function(draft, i) {
+        var prob = draft.probability || {};
+        var pc = probColors[prob.label] || '#94a3b8';
+        return h('div', { key: i, style: { padding: '0.4rem 0.5rem', background: '#ffffff', borderRadius: '0.35rem', border: '1px solid ' + colors.border } },
+          h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' } },
+            h('div', { style: { fontSize: '0.72rem', fontWeight: 600, color: '#1e293b' } }, '#' + draft.rank + ' ' + (draft.contact_name || draft.target)),
+            h('span', { style: { fontSize: '0.55rem', fontWeight: 600, color: pc, background: pc + '14', padding: '0.08rem 0.3rem', borderRadius: '0.2rem' } }, prob.label + ' ' + (prob.score || 0))
+          ),
+          draft.reason ? h('div', { style: { fontSize: '0.6rem', color: '#64748b', marginBottom: '0.2rem', fontStyle: 'italic' } }, draft.reason) : null,
+          draft.subject ? h('div', { style: { fontSize: '0.68rem', fontWeight: 600, color: '#374151', marginBottom: '0.15rem' } }, draft.subject) : null,
+          h('div', { style: { fontSize: '0.65rem', color: '#475569', whiteSpace: 'pre-wrap', lineHeight: 1.45, maxHeight: '80px', overflowY: 'auto', background: '#f8fafc', borderRadius: '0.25rem', padding: '0.3rem 0.4rem', border: '1px solid #e2e8f0' } }, draft.body || ''),
+          draft.signal_ref ? h('div', { style: { fontSize: '0.55rem', color: '#6b7280', marginTop: '0.15rem' } }, '⚡ ' + draft.signal_ref) : null,
+          h('div', { style: { display: 'flex', gap: '0.25rem', marginTop: '0.3rem' } },
+            h('button', {
+              onClick: function() { onAction({ action: 'approve_queue_item', params: { item_id: draft.id } }); },
+              style: { fontSize: '0.6rem', padding: '0.2rem 0.45rem', background: '#15803d', border: 'none', borderRadius: '0.25rem', cursor: 'pointer', color: '#fff', fontWeight: 600 }
+            }, 'Approve'),
+            h('button', {
+              onClick: function() {
+                var text = (draft.subject ? 'Subject: ' + draft.subject + '\n\n' : '') + (draft.body || '');
+                if (navigator.clipboard) navigator.clipboard.writeText(text);
+              },
+              style: { fontSize: '0.6rem', padding: '0.2rem 0.45rem', background: 'transparent', border: '1px solid #d1d5db', borderRadius: '0.25rem', cursor: 'pointer', color: '#374151', fontWeight: 600 }
+            }, 'Copy'),
+            h('button', {
+              onClick: function() { onAction({ action: 'skip_queue_item', params: { item_id: draft.id } }); },
+              style: { fontSize: '0.6rem', padding: '0.2rem 0.45rem', background: 'transparent', border: '1px solid #d1d5db', borderRadius: '0.25rem', cursor: 'pointer', color: '#94a3b8', fontWeight: 600 }
+            }, 'Skip')
+          )
+        );
+      })
+    ) : h('div', { style: { fontSize: '0.72rem', color: '#64748b', textAlign: 'center', padding: '0.5rem' } }, 'No drafts to show.'),
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
+function renderApprovalQueueCard(card, onAction) {
+  var d = card.data || {};
+  var items = d.items || [];
+  var colors = CARD_COLORS.ApprovalQueueCard;
+  var probColors = { High: '#16a34a', Medium: '#f59e0b', Low: '#dc2626' };
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.6rem 0.7rem' } },
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' } },
+      h('div', { style: { fontSize: '0.72rem', fontWeight: 700, color: colors.accent } }, colors.icon + ' Approval Queue'),
+      h('span', { style: { fontSize: '0.6rem', color: '#64748b', background: '#f1f5f9', padding: '0.1rem 0.4rem', borderRadius: '0.2rem' } }, items.length + ' pending')
+    ),
+    items.length > 0 ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
+      items.map(function(item, i) {
+        var prob = item.probability || {};
+        var pc = probColors[prob.label] || '#94a3b8';
+        return h('div', { key: i, style: { display: 'flex', gap: '0.4rem', padding: '0.35rem 0.45rem', background: '#ffffff', borderRadius: '0.35rem', border: '1px solid #e2e8f0' } },
+          h('div', { style: { flex: 1 } },
+            h('div', { style: { fontSize: '0.72rem', fontWeight: 600, color: '#1e293b' } }, item.action || ''),
+            h('div', { style: { fontSize: '0.63rem', color: '#64748b' } }, item.target || ''),
+            h('div', { style: { display: 'flex', gap: '0.3rem', marginTop: '0.15rem' } },
+              h('span', { style: { fontSize: '0.55rem', fontWeight: 600, color: pc, background: pc + '14', padding: '0.08rem 0.3rem', borderRadius: '0.2rem' } }, prob.label + ' ' + (prob.score || 0))
+            )
+          ),
+          h('div', { style: { display: 'flex', gap: '0.2rem', alignItems: 'center', flexShrink: 0 } },
+            h('button', {
+              onClick: function() { onAction({ action: 'approve_queue_item', params: { item_id: item.id } }); },
+              style: { fontSize: '0.58rem', padding: '0.18rem 0.35rem', background: '#16a34a', border: 'none', borderRadius: '0.2rem', cursor: 'pointer', color: '#fff', fontWeight: 600 }
+            }, '✓'),
+            h('button', {
+              onClick: function() { onAction({ action: 'skip_queue_item', params: { item_id: item.id } }); },
+              style: { fontSize: '0.58rem', padding: '0.18rem 0.35rem', background: 'transparent', border: '1px solid #d1d5db', borderRadius: '0.2rem', cursor: 'pointer', color: '#94a3b8', fontWeight: 600 }
+            }, '✕'),
+            h('button', {
+              onClick: function() { onAction({ action: 'delete_queue_item', params: { item_id: item.id } }); },
+              style: { fontSize: '0.58rem', padding: '0.18rem 0.35rem', background: 'transparent', border: '1px solid #fca5a5', borderRadius: '0.2rem', cursor: 'pointer', color: '#dc2626', fontWeight: 600 }
+            }, '🗑')
+          )
+        );
+      })
+    ) : h('div', { style: { fontSize: '0.72rem', color: '#64748b', textAlign: 'center', padding: '0.5rem' } }, 'No pending approvals.'),
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
+function renderProbabilityCard(card, onAction) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.ProbabilityCard;
+  var probColors = { High: '#16a34a', Medium: '#f59e0b', Low: '#dc2626' };
+  var pc = probColors[d.label] || '#94a3b8';
+  var pct = d.score || 0;
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.35rem' } }, colors.icon + ' Deal Probability'),
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' } },
+      h('div', { style: { fontSize: '1.1rem', fontWeight: 800, color: pc } }, pct),
+      h('div', { style: { flex: 1 } },
+        h('div', { style: { fontSize: '0.82rem', fontWeight: 700, color: '#1e293b' } }, d.company || ''),
+        h('div', { style: { display: 'flex', gap: '0.3rem', marginTop: '0.1rem' } },
+          h('span', { style: { fontSize: '0.6rem', fontWeight: 700, color: pc, background: pc + '14', padding: '0.1rem 0.4rem', borderRadius: '0.2rem' } }, d.label),
+          d.stage ? h('span', { style: { fontSize: '0.6rem', color: '#64748b', background: '#f1f5f9', padding: '0.1rem 0.4rem', borderRadius: '0.2rem' } }, d.stage) : null,
+          d.warmth !== undefined ? h('span', { style: { fontSize: '0.6rem', color: '#64748b', background: '#f1f5f9', padding: '0.1rem 0.4rem', borderRadius: '0.2rem' } }, 'Warmth ' + d.warmth + '/10') : null
+        )
+      )
+    ),
+    h('div', { style: { background: '#e2e8f0', borderRadius: '4px', height: '6px', marginBottom: '0.35rem', overflow: 'hidden' } },
+      h('div', { style: { background: pc, height: '100%', width: pct + '%', borderRadius: '4px', transition: 'width 0.5s ease' } })
+    ),
+    d.reason ? h('div', { style: { fontSize: '0.68rem', color: '#475569', lineHeight: 1.5, padding: '0.3rem 0.4rem', background: '#ffffff', borderRadius: '0.35rem', border: '1px solid ' + colors.border } }, d.reason) : null,
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
 function renderActionButtons(actions, onAction, draftData) {
   if (!actions || actions.length === 0) return null;
 
@@ -905,6 +1078,10 @@ function renderCard(card, onAction) {
     case 'DailyPlanCard': return renderDailyPlanCard(card, onAction);
     case 'SprintCard': return renderSprintCard(card, onAction);
     case 'InsightCard': return renderInsightCard(card, onAction);
+    case 'QueueCard': return renderQueueCard(card, onAction);
+    case 'BatchDraftCard': return renderBatchDraftCard(card, onAction);
+    case 'ApprovalQueueCard': return renderApprovalQueueCard(card, onAction);
+    case 'ProbabilityCard': return renderProbabilityCard(card, onAction);
     default: return null;
   }
 }
@@ -1244,10 +1421,10 @@ function BTRAssistantChat(props) {
         h('div', { style: { fontSize: '0.62rem', color: '#94a3b8', marginBottom: '0.5rem' } }, 'Type / for commands or ask anything'),
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem' } },
           [
-            'Why am I not closing deals?',
-            'How can I improve my outreach strategy?',
+            '/queue',
+            '/draft top 5',
+            '/probability',
             '/sprint',
-            '/brief',
             '/plan pipeline optimization'
           ].map(function(q) {
             return h('button', {
