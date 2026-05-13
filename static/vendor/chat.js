@@ -2,6 +2,10 @@
    ChatGPT-style reasoning + operator layer with structured cards */
 (function() {
 'use strict';
+var _apiBase = (typeof API_BASE !== 'undefined') ? API_BASE : (window.location.hostname === 'localhost' ? 'http://localhost:5000' : window.location.origin);
+// Use _apiBase internally; also check the global each call in case it loaded later
+function getApiBase() { return (typeof API_BASE !== 'undefined') ? API_BASE : _apiBase; }
+
 var h = React.createElement;
 var useState = React.useState;
 var useEffect = React.useEffect;
@@ -28,7 +32,10 @@ var CARD_COLORS = {
   ExecutionPlanCard:      { bg: '#eff6ff', border: '#93c5fd', accent: '#1d4ed8', icon: '📋' },
   FixCard:                { bg: '#fef2f2', border: '#fca5a5', accent: '#b91c1c', icon: '🔧' },
   CrmUpdatePreviewCard:   { bg: '#f0fdf4', border: '#86efac', accent: '#059669', icon: '📋' },
-  AmbiguityCard:          { bg: '#fefce8', border: '#fde68a', accent: '#d97706', icon: '❓' }
+  AmbiguityCard:          { bg: '#fefce8', border: '#fde68a', accent: '#d97706', icon: '❓' },
+  DailyPlanCard:          { bg: '#f8fafc', border: '#e2e8f0', accent: '#0f172a', icon: '📅' },
+  SprintCard:             { bg: '#eff6ff', border: '#bfdbfe', accent: '#1d4ed8', icon: '⚡' },
+  InsightCard:            { bg: '#fffbeb', border: '#fde68a', accent: '#92400e', icon: '💡' }
 };
 
 var SLASH_HINTS = [
@@ -126,7 +133,7 @@ function renderInlineMarkdown(text, key) {
 // --- Interaction tracking (self-improvement loop) ---
 function trackInteraction(event, cardType, actionId) {
   try {
-    fetch(API_BASE + '/api/assistant/track', {
+    fetch(getApiBase() + '/api/assistant/track', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ event: event, card_type: cardType || '', action_id: actionId || '' })
@@ -177,7 +184,7 @@ function executeCardAction(act, messages, setMessages, setActionLoading) {
   }
 
   setActionLoading(act.id || true);
-  fetch(API_BASE + '/api/assistant/execute-action', {
+  fetch(getApiBase() + '/api/assistant/execute-action', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: act.action, params: act.params || {} })
@@ -685,6 +692,97 @@ function renderAmbiguityCard(card, onAction) {
   );
 }
 
+function renderDailyPlanCard(card, onAction) {
+  var d = card.data || {};
+  var plan = d.plan || [];
+  var prioColors = { critical: '#dc2626', high: '#f59e0b', medium: '#3b82f6', low: '#94a3b8' };
+  var prioLabels = { critical: 'OVERDUE', high: 'HIGH', medium: 'MED', low: 'LOW' };
+  var typeIcons = { overdue_task: '!', cooling_contact: '~', unactioned_signal: '*', scheduled_followup: '#', opportunity: '+' };
+
+  return h('div', { style: { background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '0.5rem', padding: '0.6rem 0.7rem' } },
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' } },
+      h('div', { style: { fontSize: '0.72rem', fontWeight: 700, color: '#0f172a' } }, "Today's Plan"),
+      d.total_minutes ? h('span', { style: { fontSize: '0.6rem', color: '#64748b', background: '#f1f5f9', padding: '0.1rem 0.4rem', borderRadius: '0.2rem' } }, '~' + d.total_minutes + ' min') : null
+    ),
+    plan.length > 0 ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
+      plan.map(function(item, i) {
+        var pColor = prioColors[item.priority] || '#94a3b8';
+        return h('div', { key: i, style: { display: 'flex', gap: '0.4rem', padding: '0.35rem 0.45rem', background: '#ffffff', borderRadius: '0.35rem', border: '1px solid #e2e8f0', borderLeft: '3px solid ' + pColor } },
+          h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: '18px' } },
+            h('span', { style: { fontSize: '0.58rem', fontWeight: 700, color: pColor } }, prioLabels[item.priority] || ''),
+            h('span', { style: { fontSize: '0.75rem', color: '#94a3b8' } }, typeIcons[item.type] || (i + 1))
+          ),
+          h('div', { style: { flex: 1 } },
+            h('div', { style: { fontSize: '0.72rem', fontWeight: 600, color: '#1e293b' } }, item.action),
+            item.target ? h('div', { style: { fontSize: '0.63rem', color: '#64748b' } }, item.target) : null,
+            item.reason ? h('div', { style: { fontSize: '0.6rem', color: '#94a3b8', fontStyle: 'italic' } }, item.reason) : null
+          ),
+          item.est_minutes ? h('span', { style: { fontSize: '0.58rem', color: '#94a3b8', whiteSpace: 'nowrap' } }, item.est_minutes + 'm') : null
+        );
+      })
+    ) : h('div', { style: { fontSize: '0.72rem', color: '#64748b', textAlign: 'center', padding: '0.5rem' } }, 'No urgent actions today.'),
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
+function renderSprintCard(card, onAction) {
+  var d = card.data || {};
+  var tasks = d.tasks || [];
+  var completed = d.completed || 0;
+  var total = d.total || tasks.length;
+  var pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+  return h('div', { style: { background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '0.5rem', padding: '0.6rem 0.7rem' } },
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' } },
+      h('div', { style: { fontSize: '0.72rem', fontWeight: 700, color: '#1d4ed8' } }, 'Sprint Mode'),
+      h('span', { style: { fontSize: '0.65rem', fontWeight: 600, color: pct >= 100 ? '#16a34a' : '#1d4ed8' } }, pct + '% complete')
+    ),
+    h('div', { style: { background: '#e2e8f0', borderRadius: '4px', height: '4px', marginBottom: '0.4rem', overflow: 'hidden' } },
+      h('div', { style: { background: pct >= 100 ? '#16a34a' : '#3b82f6', height: '100%', width: pct + '%', borderRadius: '4px', transition: 'width 0.3s ease' } })
+    ),
+    tasks.length > 0 ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem' } },
+      tasks.map(function(t, i) {
+        var isDone = t.status === 'done';
+        var isCurrent = t.status === 'current';
+        return h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.3rem 0.4rem', background: isDone ? '#f0fdf4' : (isCurrent ? '#eff6ff' : '#ffffff'), borderRadius: '0.3rem', border: '1px solid ' + (isDone ? '#bbf7d0' : (isCurrent ? '#93c5fd' : '#e2e8f0')), opacity: isDone ? 0.7 : 1 } },
+          h('span', { style: { fontSize: '0.7rem', width: '18px', textAlign: 'center', flexShrink: 0 } }, isDone ? '+' : (isCurrent ? '>' : t.step)),
+          h('div', { style: { flex: 1 } },
+            h('div', { style: { fontSize: '0.7rem', fontWeight: isDone ? 400 : 600, color: isDone ? '#64748b' : '#1e293b', textDecoration: isDone ? 'line-through' : 'none' } }, t.title),
+            t.reason && !isDone ? h('div', { style: { fontSize: '0.58rem', color: '#94a3b8' } }, t.reason) : null
+          ),
+          t.est_minutes ? h('span', { style: { fontSize: '0.55rem', color: '#94a3b8' } }, t.est_minutes + 'm') : null
+        );
+      })
+    ) : null,
+    d.total_minutes ? h('div', { style: { fontSize: '0.6rem', color: '#64748b', marginTop: '0.3rem', textAlign: 'right' } }, 'Est. ' + d.total_minutes + ' min total') : null,
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
+function renderInsightCard(card, onAction) {
+  var d = card.data || {};
+  var insights = d.insights || [];
+  var catColors = { risk: '#dc2626', momentum: '#f59e0b', opportunity: '#16a34a', pipeline: '#7c3aed', execution: '#0369a1' };
+  var catIcons = { risk: '!', momentum: '^', opportunity: '*', pipeline: '|', execution: '>' };
+
+  return h('div', { style: { background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '0.5rem', padding: '0.5rem 0.65rem' } },
+    h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: '#92400e', marginBottom: '0.3rem' } }, 'System Intelligence'),
+    insights.length > 0 ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem' } },
+      insights.map(function(ins, i) {
+        var cc = catColors[ins.category] || '#64748b';
+        return h('div', { key: i, style: { display: 'flex', gap: '0.35rem', padding: '0.3rem 0.4rem', background: '#ffffff', borderRadius: '0.3rem', border: '1px solid #fde68a' } },
+          h('span', { style: { fontSize: '0.68rem', color: cc, fontWeight: 700, minWidth: '14px' } }, catIcons[ins.category] || '-'),
+          h('div', { style: { flex: 1 } },
+            h('div', { style: { fontSize: '0.7rem', fontWeight: 600, color: '#1e293b' } }, ins.title),
+            ins.detail ? h('div', { style: { fontSize: '0.6rem', color: '#64748b' } }, ins.detail) : null
+          )
+        );
+      })
+    ) : h('div', { style: { fontSize: '0.72rem', color: '#64748b' } }, 'All clear.'),
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
 function renderActionButtons(actions, onAction, draftData) {
   if (!actions || actions.length === 0) return null;
 
@@ -744,6 +842,9 @@ function renderCard(card, onAction) {
     case 'FixCard': return renderFixCard(card, onAction);
     case 'CrmUpdatePreviewCard': return renderCrmUpdatePreviewCard(card, onAction);
     case 'AmbiguityCard': return renderAmbiguityCard(card, onAction);
+    case 'DailyPlanCard': return renderDailyPlanCard(card, onAction);
+    case 'SprintCard': return renderSprintCard(card, onAction);
+    case 'InsightCard': return renderInsightCard(card, onAction);
     default: return null;
   }
 }
@@ -760,6 +861,9 @@ function BTRAssistantChat(props) {
   var _a = useState(false); var actionLoading = _a[0]; var setActionLoading = _a[1];
   var _sh = useState(false); var showSlash = _sh[0]; var setShowSlash = _sh[1];
   var _md = useState(null); var lastMode = _md[0]; var setLastMode = _md[1];
+  var _sp = useState(null); var sprint = _sp[0]; var setSprint = _sp[1];
+  var _pf = useState(false); var proactiveFetched = _pf[0]; var setProactiveFetched = _pf[1];
+  var _ib = useState(0); var insightBadge = _ib[0]; var setInsightBadge = _ib[1];
   var scrollRef = useRef(null);
   var inputRef = useRef(null);
 
@@ -771,7 +875,154 @@ function BTRAssistantChat(props) {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, loading]);
 
+  // Proactive: fetch insights + gameplan on first open
+  useEffect(function() {
+    if (!open || proactiveFetched) return;
+    setProactiveFetched(true);
+
+    // Fetch insights
+    fetch(getApiBase() + '/api/assistant/insights')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        var insights = d.insights || [];
+        if (insights.length > 0) {
+          var insightCard = {
+            type: 'InsightCard',
+            text: '',
+            data: { insights: insights },
+            actions: []
+          };
+          // Add a start sprint button if any high-impact insight suggests it
+          var hasSprint = insights.some(function(ins) { return ins.action_type === 'start_sprint'; });
+          if (hasSprint) {
+            insightCard.actions.push({ id: 'start_sprint_insight', label: 'Start Sprint', action: 'start_sprint', params: {} });
+          }
+          setMessages(function(prev) {
+            return prev.concat([{ role: 'assistant', card: insightCard, mode: 'analyst' }]);
+          });
+        }
+      })
+      .catch(function() {});
+
+    // Fetch daily gameplan
+    fetch(getApiBase() + '/api/assistant/gameplan')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        var plan = d.plan || [];
+        if (plan.length > 0) {
+          var planCard = {
+            type: 'DailyPlanCard',
+            text: '',
+            data: { plan: plan, total_minutes: d.total_minutes, date: d.date },
+            actions: [
+              { id: 'start_sprint_plan', label: 'Start Sprint', action: 'start_sprint', params: {} },
+              { id: 'view_opps', label: 'Top Opportunities', action: 'show_opportunities', params: { opportunities: d.opportunities || [] } }
+            ]
+          };
+          setMessages(function(prev) {
+            return prev.concat([{ role: 'assistant', card: planCard, mode: 'execution' }]);
+          });
+        }
+      })
+      .catch(function() {});
+  }, [open, proactiveFetched]);
+
+  // Proactive: initial badge check on mount + periodic polling
+  useEffect(function() {
+    fetch(getApiBase() + '/api/assistant/insights')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        var highImpact = (d.insights || []).filter(function(ins) { return ins.impact >= 80; });
+        setInsightBadge(highImpact.length);
+      })
+      .catch(function() {});
+
+    var interval = setInterval(function() {
+      fetch(getApiBase() + '/api/assistant/insights')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          var highImpact = (d.insights || []).filter(function(ins) { return ins.impact >= 80; });
+          setInsightBadge(highImpact.length);
+        })
+        .catch(function() {});
+    }, 5 * 60 * 1000);
+    return function() { clearInterval(interval); };
+  }, []);
+
   var handleAction = function(act) {
+    // Sprint start intercept
+    if (act.action === 'start_sprint') {
+      fetch(getApiBase() + '/api/assistant/sprint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'start' })
+      })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (d.sprint) {
+            var sp = d.sprint;
+            if (sp.tasks.length > 0) sp.tasks[0].status = 'current';
+            setSprint(sp);
+            var sprintCard = {
+              type: 'SprintCard',
+              text: 'Sprint started! Focus on these ' + sp.tasks.length + ' tasks.',
+              data: sp,
+              actions: []
+            };
+            setMessages(function(prev) {
+              return prev.concat([{ role: 'assistant', card: sprintCard, mode: 'execution' }]);
+            });
+          }
+        })
+        .catch(function() {});
+      return;
+    }
+
+    // Sprint task completion
+    if (act.action === 'complete_sprint_task' && sprint) {
+      var taskId = act.params && act.params.task_id;
+      var updatedTasks = sprint.tasks.map(function(t) {
+        if (t.id === taskId) return Object.assign({}, t, { status: 'done' });
+        return t;
+      });
+      var doneCount = updatedTasks.filter(function(t) { return t.status === 'done'; }).length;
+      var nextPending = updatedTasks.find(function(t) { return t.status === 'pending'; });
+      if (nextPending) nextPending.status = 'current';
+      var updatedSprint = Object.assign({}, sprint, { tasks: updatedTasks, completed: doneCount });
+      setSprint(updatedSprint);
+
+      fetch(getApiBase() + '/api/assistant/sprint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'complete_task', task_id: taskId, original_task_id: act.params && act.params.original_task_id })
+      }).catch(function() {});
+
+      var progressCard = {
+        type: 'SprintCard',
+        text: doneCount >= updatedSprint.total ? 'Sprint complete!' : 'Task done! ' + (updatedSprint.total - doneCount) + ' remaining.',
+        data: updatedSprint,
+        actions: []
+      };
+      setMessages(function(prev) {
+        return prev.concat([{ role: 'assistant', card: progressCard, mode: 'execution' }]);
+      });
+      return;
+    }
+
+    // Show opportunities card
+    if (act.action === 'show_opportunities') {
+      var opps = (act.params && act.params.opportunities) || [];
+      if (opps.length > 0) {
+        var recs = opps.map(function(o) {
+          return { priority: o.score >= 70 ? 'high' : (o.score >= 40 ? 'medium' : 'low'), action: 'Engage ' + o.name, target: o.name + ' (score: ' + o.score + ')', reason: o.reason };
+        });
+        setMessages(function(prev) {
+          return prev.concat([{ role: 'assistant', card: { type: 'NextActionCard', text: 'Top Opportunities — ranked by composite score', data: { recommendations: recs }, actions: [] }, mode: 'analyst' }]);
+        });
+      }
+      return;
+    }
+
     executeCardAction(act, messages, setMessages, setActionLoading);
   };
 
@@ -787,7 +1038,7 @@ function BTRAssistantChat(props) {
 
     var pageCtx = { active_tab: activeTab };
 
-    fetch(API_BASE + '/api/assistant/chat', {
+    fetch(getApiBase() + '/api/assistant/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages: newMsgs, page_context: pageCtx })
@@ -833,21 +1084,31 @@ function BTRAssistantChat(props) {
 
   // --- Closed state (FAB) ---
   if (!open) {
-    return h('button', {
-      onClick: function() { setOpen(true); },
-      style: {
-        position: 'fixed', bottom: '1.5rem', right: '1.5rem', zIndex: 9990,
-        width: '48px', height: '48px', borderRadius: '50%',
-        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-        border: '2px solid #334155',
-        color: '#f8fafc', fontSize: '1.2rem', cursor: 'pointer',
-        boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'transform 0.15s, box-shadow 0.15s'
-      },
-      onMouseEnter: function(e) { e.currentTarget.style.transform = 'scale(1.08)'; },
-      onMouseLeave: function(e) { e.currentTarget.style.transform = 'scale(1)'; }
-    }, '✨');
+    return h('div', { style: { position: 'fixed', bottom: '1.5rem', right: '1.5rem', zIndex: 9990 } },
+      h('button', {
+        onClick: function() { setOpen(true); },
+        style: {
+          width: '48px', height: '48px', borderRadius: '50%',
+          background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+          border: '2px solid #334155',
+          color: '#f8fafc', fontSize: '1.2rem', cursor: 'pointer',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transition: 'transform 0.15s, box-shadow 0.15s'
+        },
+        onMouseEnter: function(e) { e.currentTarget.style.transform = 'scale(1.08)'; },
+        onMouseLeave: function(e) { e.currentTarget.style.transform = 'scale(1)'; }
+      }, '✨'),
+      insightBadge > 0 ? h('span', {
+        style: {
+          position: 'absolute', top: '-4px', right: '-4px',
+          background: '#dc2626', color: '#fff', fontSize: '0.55rem', fontWeight: 700,
+          width: '18px', height: '18px', borderRadius: '50%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          border: '2px solid #fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+        }
+      }, insightBadge) : null
+    );
   }
 
   // --- Open state ---
