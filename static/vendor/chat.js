@@ -60,6 +60,7 @@ var SLASH_HINTS = [
 ];
 
 var MODE_LABELS = {
+  conversational: '',
   strategic: 'Strategy',
   execution: 'Execute',
   analyst: 'Analyst',
@@ -68,6 +69,7 @@ var MODE_LABELS = {
 };
 
 var MODE_COLORS = {
+  conversational: '#64748b',
   strategic: '#7c3aed',
   execution: '#16a34a',
   analyst: '#0369a1',
@@ -1419,16 +1421,16 @@ function BTRAssistantChat(props) {
         h('div', { style: { fontSize: '1.3rem', marginBottom: '0.4rem', opacity: 0.3, fontWeight: 900, fontFamily: "'Orbitron', sans-serif", background: 'linear-gradient(135deg, #14b8a6, #3b82f6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' } }, 'L'),
         h('div', { style: { fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.25rem', color: '#475569' } }, 'Leo — Operator AI'),
         h('div', { style: { fontSize: '0.68rem', lineHeight: 1.5, marginBottom: '0.5rem', color: '#94a3b8' } },
-          'Your AI operator — strategy, execution, insights'
+          'Ask me anything — strategy, outreach, data, or actions'
         ),
-        h('div', { style: { fontSize: '0.62rem', color: '#94a3b8', marginBottom: '0.5rem' } }, 'Type / for commands or ask anything'),
+        h('div', { style: { fontSize: '0.62rem', color: '#94a3b8', marginBottom: '0.5rem' } }, 'Type / for commands or just ask a question'),
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem' } },
           [
+            'How should I approach my top prospects?',
+            'Who should I follow up with this week?',
+            "What's the best outreach strategy right now?",
             '/queue',
-            '/draft top 5',
-            '/probability',
-            '/sprint',
-            '/plan pipeline optimization'
+            '/draft top 5'
           ].map(function(q) {
             return h('button', {
               key: q,
