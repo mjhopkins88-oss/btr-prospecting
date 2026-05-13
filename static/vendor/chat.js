@@ -24,7 +24,9 @@ var CARD_COLORS = {
   ClaudePromptCard:       { bg: '#f0f9ff', border: '#7dd3fc', accent: '#0284c7', icon: '🔧' },
   ContactInsightCard:     { bg: '#f0f9ff', border: '#bae6fd', accent: '#0369a1', icon: '🔍' },
   SignalInsightCard:      { bg: '#fefce8', border: '#fde68a', accent: '#a16207', icon: '📡' },
-  PerformanceInsightCard: { bg: '#ecfdf5', border: '#6ee7b7', accent: '#059669', icon: '📊' }
+  PerformanceInsightCard: { bg: '#ecfdf5', border: '#6ee7b7', accent: '#059669', icon: '📊' },
+  ExecutionPlanCard:      { bg: '#eff6ff', border: '#93c5fd', accent: '#1d4ed8', icon: '📋' },
+  FixCard:                { bg: '#fef2f2', border: '#fca5a5', accent: '#b91c1c', icon: '🔧' }
 };
 
 var SLASH_HINTS = [
@@ -34,25 +36,25 @@ var SLASH_HINTS = [
   { cmd: '/brief', desc: 'Daily briefing', ex: '/brief' },
   { cmd: '/export', desc: 'Export data', ex: '/export contacts' },
   { cmd: '/signal', desc: 'Signal analysis', ex: '/signal Acme Corp' },
-  { cmd: '/sprint', desc: 'Work sprint', ex: '/sprint' }
+  { cmd: '/sprint', desc: 'Work sprint', ex: '/sprint' },
+  { cmd: '/plan', desc: 'Strategic plan', ex: '/plan outreach strategy' },
+  { cmd: '/fix', desc: 'Diagnose issue', ex: '/fix low response rate' }
 ];
 
 var MODE_LABELS = {
-  strategic_advisor: 'Strategy',
+  strategic: 'Strategy',
   execution: 'Execute',
-  drafting: 'Draft',
-  data_analyst: 'Analysis',
-  crm_operator: 'CRM',
-  troubleshooting: 'Debug'
+  analyst: 'Analyst',
+  builder: 'Builder',
+  coach: 'Coach'
 };
 
 var MODE_COLORS = {
-  strategic_advisor: '#7c3aed',
+  strategic: '#7c3aed',
   execution: '#16a34a',
-  drafting: '#15803d',
-  data_analyst: '#0369a1',
-  crm_operator: '#1d4ed8',
-  troubleshooting: '#dc2626'
+  analyst: '#0369a1',
+  builder: '#0284c7',
+  coach: '#f59e0b'
 };
 
 // --- Simple markdown renderer for rich text ---
@@ -119,9 +121,21 @@ function renderInlineMarkdown(text, key) {
 }
 
 
+// --- Interaction tracking (self-improvement loop) ---
+function trackInteraction(event, cardType, actionId) {
+  try {
+    fetch(API_BASE + '/api/assistant/track', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: event, card_type: cardType || '', action_id: actionId || '' })
+    }).catch(function() {});
+  } catch(e) {}
+}
+
 // --- Action button handler ---
 function executeCardAction(act, messages, setMessages, setActionLoading) {
   if (!act) return;
+  trackInteraction('action_clicked', act.action, act.id);
 
   if (act.action === 'copy_text' || act.action === 'copy_draft') {
     return;
@@ -525,6 +539,67 @@ function renderPerformanceInsightCard(card, onAction) {
 }
 
 
+function renderExecutionPlanCard(card, onAction) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.ExecutionPlanCard;
+  var steps = d.steps || [];
+  var statusIcons = { done: '✅', current: '▶️', pending: '○' };
+  var statusColors = { done: '#16a34a', current: '#1d4ed8', pending: '#94a3b8' };
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.35rem' } },
+      colors.icon + ' Execution Plan' + (d.plan_title ? ' — ' + d.plan_title : '')
+    ),
+    steps.length > 0 ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.2rem', marginBottom: '0.3rem' } },
+      steps.map(function(s, i) {
+        var st = s.status || 'pending';
+        var isCurrent = st === 'current';
+        return h('div', { key: i, style: { display: 'flex', alignItems: 'flex-start', gap: '0.4rem', padding: '0.35rem 0.4rem', background: isCurrent ? '#dbeafe' : '#ffffff', borderRadius: '0.35rem', border: '1px solid ' + (isCurrent ? '#93c5fd' : '#e2e8f0') } },
+          h('span', { style: { fontSize: '0.7rem', flexShrink: 0, marginTop: '0.05rem' } }, statusIcons[st] || '○'),
+          h('div', { style: { flex: 1 } },
+            h('div', { style: { fontSize: '0.74rem', fontWeight: isCurrent ? 700 : 500, color: statusColors[st] || '#1e293b' } }, (s.step ? s.step + '. ' : '') + (s.title || '')),
+            s.detail ? h('div', { style: { fontSize: '0.65rem', color: '#64748b', marginTop: '0.1rem' } }, s.detail) : null
+          )
+        );
+      })
+    ) : null,
+    d.estimated_time ? h('div', { style: { fontSize: '0.63rem', color: '#64748b', marginBottom: '0.2rem' } }, '⏱ Est: ' + d.estimated_time) : null,
+    d.next_step_action ? h('div', { style: { fontSize: '0.72rem', color: '#0f172a', fontWeight: 600, padding: '0.3rem 0.4rem', background: '#dbeafe', borderRadius: '0.3rem', marginBottom: '0.2rem' } }, '→ Next: ' + d.next_step_action) : null,
+    card.source ? h('div', { style: { fontSize: '0.63rem', color: '#6b7280', fontStyle: 'italic' } }, card.source) : null,
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
+function renderFixCard(card, onAction) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.FixCard;
+  var steps = d.steps || [];
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.35rem' } }, colors.icon + ' Diagnosis & Fix'),
+    d.diagnosis ? h('div', { style: { marginBottom: '0.3rem' } },
+      h('div', { style: { fontSize: '0.63rem', fontWeight: 700, color: '#991b1b', textTransform: 'uppercase', marginBottom: '0.1rem' } }, 'Problem'),
+      h('div', { style: { fontSize: '0.72rem', color: '#1e293b', padding: '0.3rem 0.4rem', background: '#ffffff', borderRadius: '0.35rem', border: '1px solid #fecaca', lineHeight: 1.5 } }, renderMarkdownText(d.diagnosis))
+    ) : null,
+    d.cause ? h('div', { style: { marginBottom: '0.3rem' } },
+      h('div', { style: { fontSize: '0.63rem', fontWeight: 700, color: '#92400e', textTransform: 'uppercase', marginBottom: '0.1rem' } }, 'Root Cause'),
+      h('div', { style: { fontSize: '0.72rem', color: '#475569', padding: '0.3rem 0.4rem', background: '#ffffff', borderRadius: '0.35rem', border: '1px solid #fecaca', lineHeight: 1.5 } }, renderMarkdownText(d.cause))
+    ) : null,
+    d.solution ? h('div', { style: { marginBottom: '0.3rem' } },
+      h('div', { style: { fontSize: '0.63rem', fontWeight: 700, color: '#16a34a', textTransform: 'uppercase', marginBottom: '0.1rem' } }, 'Solution'),
+      h('div', { style: { fontSize: '0.72rem', color: '#1e293b', padding: '0.3rem 0.4rem', background: '#f0fdf4', borderRadius: '0.35rem', border: '1px solid #86efac', lineHeight: 1.5 } }, renderMarkdownText(d.solution))
+    ) : null,
+    steps.length > 0 ? h('div', { style: { marginBottom: '0.2rem' } },
+      h('div', { style: { fontSize: '0.63rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '0.1rem' } }, 'Steps to Fix'),
+      h('ol', { style: { margin: 0, paddingLeft: '1.2rem', fontSize: '0.7rem', color: '#374151', lineHeight: 1.5 } },
+        steps.map(function(s, i) { return h('li', { key: i, style: { marginBottom: '0.1rem' } }, s); })
+      )
+    ) : null,
+    card.source ? h('div', { style: { fontSize: '0.63rem', color: '#6b7280', fontStyle: 'italic' } }, card.source) : null,
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
 function renderActionButtons(actions, onAction, draftData) {
   if (!actions || actions.length === 0) return null;
 
@@ -580,6 +655,8 @@ function renderCard(card, onAction) {
     case 'ContactInsightCard': return renderContactInsightCard(card, onAction);
     case 'SignalInsightCard': return renderSignalInsightCard(card, onAction);
     case 'PerformanceInsightCard': return renderPerformanceInsightCard(card, onAction);
+    case 'ExecutionPlanCard': return renderExecutionPlanCard(card, onAction);
+    case 'FixCard': return renderFixCard(card, onAction);
     default: return null;
   }
 }
@@ -748,18 +825,18 @@ function BTRAssistantChat(props) {
         style: { textAlign: 'center', padding: '1.2rem 0.75rem', color: '#94a3b8' }
       },
         h('div', { style: { fontSize: '1.3rem', marginBottom: '0.4rem', opacity: 0.25 } }, '✨'),
-        h('div', { style: { fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.25rem', color: '#475569' } }, 'BTR Command Operator'),
+        h('div', { style: { fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.25rem', color: '#475569' } }, 'Operator Intelligence'),
         h('div', { style: { fontSize: '0.68rem', lineHeight: 1.5, marginBottom: '0.5rem', color: '#94a3b8' } },
-          'Strategic advisor · CRM operator · Outreach drafter · Signal analyst'
+          'Strategist · Operator · Analyst · Coach · Builder'
         ),
         h('div', { style: { fontSize: '0.62rem', color: '#94a3b8', marginBottom: '0.5rem' } }, 'Type / for commands or ask anything'),
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem' } },
           [
+            'Why am I not closing deals?',
             'How can I improve my outreach strategy?',
-            'Who needs a follow-up this week?',
-            '/draft my warmest contact',
             '/sprint',
-            '/brief'
+            '/brief',
+            '/plan pipeline optimization'
           ].map(function(q) {
             return h('button', {
               key: q,
