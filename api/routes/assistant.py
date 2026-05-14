@@ -5037,9 +5037,10 @@ def chat():
                 'action_items': brief['action_items'][:3],
                 'daily_targets': brief['daily_targets'][:3],
                 'download_url': '/api/brief/download',
+                'fileName': f"BTR_Brief_{brief['date']}.pdf",
             },
             'actions': [
-                {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download', 'params': {'url': '/api/brief/download'}},
+                {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download', 'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{brief['date']}.pdf"}},
             ]
         }
         _persist_chat(last_msg, card, 'brief_pdf', 'execution')
@@ -5662,13 +5663,14 @@ def _exec_export(params):
         'prospects': '/api/export',
     }
     url = urls.get(export_type, urls['contacts'])
+    file_name = f"{export_type}_{datetime.utcnow().strftime('%Y-%m-%d')}.csv"
     return jsonify({'success': True, 'card': {
         'type': 'ExportCard',
         'text': f'Your {export_type} export is ready.',
         'data': {'export_type': export_type, 'url': url,
-                 'filename': f"{export_type}_{datetime.utcnow().strftime('%Y-%m-%d')}"},
+                 'fileName': file_name, 'filename': file_name},
         'actions': [
-            {'id': 'download', 'label': 'Download', 'action': 'download', 'params': {'url': url}}
+            {'id': 'download', 'label': 'Download', 'action': 'download', 'params': {'url': url, 'fileName': file_name}}
         ]
     }})
 

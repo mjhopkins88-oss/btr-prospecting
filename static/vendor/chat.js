@@ -233,9 +233,22 @@ function executeCardAction(act, messages, setMessages, setActionLoading) {
   }
 
   if (act.action === 'download') {
+    var rawUrl = (act.params && act.params.url) || '';
+    var dlUrl = rawUrl;
+    if (rawUrl && rawUrl.charAt(0) === '/') {
+      dlUrl = getApiBase() + rawUrl;
+    }
+    if (!dlUrl) {
+      setMessages(function(prev) {
+        return prev.concat([{ role: 'assistant', card: {
+          type: 'ErrorCard', text: 'Download failed — no file URL available.', data: { error: 'No download URL provided' }, actions: []
+        }}]);
+      });
+      return;
+    }
     var a = document.createElement('a');
-    a.href = (act.params && act.params.url) || '';
-    a.download = '';
+    a.href = dlUrl;
+    a.download = (act.params && act.params.fileName) || '';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -430,10 +443,20 @@ function renderFollowUpCard(card, onAction) {
 function renderExportCard(card, onAction) {
   var d = card.data || {};
   var colors = CARD_COLORS.ExportCard;
+  var fileUrl = d.url || d.fileUrl || '';
+  var fileName = d.fileName || d.filename || '';
+  var exportType = d.export_type || 'Data';
 
-  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.6rem 0.7rem' } },
-    h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.25rem' } }, colors.icon + ' Export Ready'),
-    h('div', { style: { fontSize: '0.74rem', color: '#1e293b' } }, d.export_type || 'Data'),
+  if (!fileUrl && (!card.actions || card.actions.length === 0)) {
+    return null;
+  }
+
+  var displayName = fileName || (exportType + ' export');
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.3rem' } }, colors.icon + ' Export Ready'),
+    h('div', { style: { fontSize: '0.78rem', fontWeight: 600, color: '#1e293b', marginBottom: '0.15rem' } }, exportType.charAt(0).toUpperCase() + exportType.slice(1).replace(/_/g, ' ')),
+    fileName ? h('div', { style: { fontSize: '0.65rem', color: '#64748b', marginBottom: '0.3rem' } }, '📄 ' + displayName) : null,
     renderActionButtons(card.actions, onAction)
   );
 }
