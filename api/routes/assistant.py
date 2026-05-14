@@ -585,6 +585,38 @@ Pushback triggers:
 - Over-researching instead of acting
 
 ═══════════════════════════════
+EXECUTION-FIRST TASK RULE
+═══════════════════════════════
+
+When generating tasks, plans, sprints, queues, or any list of recommended actions:
+
+EVERY task must result in a concrete outcome that moves a deal or relationship forward.
+
+VALID task verbs: send, follow up, call, schedule, log, close, move forward, draft, reach out, re-engage, complete, submit, book, update, connect.
+
+INVALID task verbs (never generate these unless the user explicitly asks): research, analyze, explore, review, look into, investigate, examine, assess, audit, study, evaluate, consider, think about, brainstorm.
+
+If you would generate a passive task, CONVERT it:
+- "Research this company" → "Send a targeted intro to [contact] at [company]"
+- "Analyze signals" → "Act on top signal by drafting outreach to [company]"
+- "Review pipeline" → "Follow up with the 3 most stale high-warmth contacts"
+- "Look into this opportunity" → "Schedule a call with [contact] to discuss [topic]"
+- "Explore partnership options" → "Reach out to [contact] with a specific proposal"
+
+Daily plan composition:
+- 100% execution tasks when possible
+- Max 20% light planning ONLY if truly necessary
+- 0% pure research tasks — always convert to an action
+
+Prioritization:
+1. Revenue-generating actions (close, pitch, schedule)
+2. Relationship progression (follow up, re-engage, connect)
+3. Time-sensitive items (overdue tasks, expiring signals)
+4. CRM hygiene (log touchpoint, update stage)
+
+This rule does NOT apply when the user explicitly asks for analysis, strategy advice, or information. It only governs task generation and action recommendations.
+
+═══════════════════════════════
 PATTERN ABSTRACTION
 ═══════════════════════════════
 
@@ -922,6 +954,55 @@ def _get_ranked_opportunities(limit=10):
 
 
 # ---------------------------------------------------------------------------
+# Execution-first task filter — convert research tasks to actions
+# ---------------------------------------------------------------------------
+
+_RESEARCH_VERBS = re.compile(
+    r'^(research|analyze|review|explore|look into|investigate|examine|assess|'
+    r'audit|study|evaluate|consider|think about|brainstorm)\b',
+    re.IGNORECASE
+)
+
+_RESEARCH_CONVERSIONS = {
+    'research': 'Reach out to',
+    'analyze': 'Act on top signal for',
+    'review': 'Follow up with',
+    'explore': 'Connect with a contact at',
+    'look into': 'Draft outreach for',
+    'investigate': 'Schedule a call with',
+    'examine': 'Send a follow-up to',
+    'assess': 'Re-engage',
+    'audit': 'Update CRM for',
+    'study': 'Reach out to',
+    'evaluate': 'Follow up with',
+    'consider': 'Draft outreach for',
+    'think about': 'Schedule time with',
+    'brainstorm': 'Draft a pitch for',
+}
+
+
+def _convert_research_task(action_text):
+    """Convert a research-type task into an execution action. Returns converted text or original."""
+    m = _RESEARCH_VERBS.match(action_text.strip())
+    if not m:
+        return action_text
+    verb = m.group(1).lower()
+    remainder = action_text[m.end():].strip().lstrip('- :')
+    replacement = _RESEARCH_CONVERSIONS.get(verb, 'Follow up with')
+    return f"{replacement} {remainder}" if remainder else action_text
+
+
+def _filter_plan_tasks(plan):
+    """Filter and convert research tasks in a daily plan or sprint task list."""
+    for item in plan:
+        action = item.get('action', '')
+        converted = _convert_research_task(action)
+        if converted != action:
+            item['action'] = converted
+    return plan
+
+
+# ---------------------------------------------------------------------------
 # Daily gameplan generator
 # ---------------------------------------------------------------------------
 
@@ -1070,6 +1151,7 @@ def _generate_daily_plan():
 
     prio_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
     plan.sort(key=lambda x: prio_order.get(x['priority'], 4))
+    plan = _filter_plan_tasks(plan)
 
     total_minutes = sum(p.get('est_minutes', 10) for p in plan)
     return plan, total_minutes
@@ -1171,7 +1253,7 @@ def _generate_proactive_insights(as_objects=False):
                 'impact': 75 + unactioned * 2,
                 'title': f"Opened {total} signals, acted on {acted}",
                 'detail': f"{unactioned} signals unanswered — timing windows closing",
-                'action_label': 'Review Signals',
+                'action_label': 'Act on Signals',
                 'action_type': 'navigate',
                 'action_params': {'tab': 'signals'},
             })
@@ -1940,7 +2022,7 @@ def _detect_automation_opportunities():
         if sig_count >= 5:
             patterns.append({
                 'type': 'signal_volume',
-                'detail': f'{sig_count} signals this week — batch review recommended',
+                'detail': f'{sig_count} signals this week — act on top signals with outreach',
                 'frequency': sig_count,
             })
             suggestions.append({
@@ -2139,6 +2221,7 @@ def _generate_execution_queue(limit=10):
 
     items.sort(key=lambda x: x.get('priority_score', 0), reverse=True)
     items = items[:limit]
+    _filter_plan_tasks(items)
 
     for i, item in enumerate(items):
         item['rank'] = i + 1
@@ -4876,7 +4959,7 @@ def _generate_fallback_response(user_msg, intent, mode, context_str):
                 parts.append(f"- **{item['action']}** ({item['target']}) — {item['reason']}")
             parts.append("\nAsk me anything more specific and I'll dig deeper.")
         else:
-            parts.append("Your pipeline looks clear right now. What are you working on? I can help you think through strategy, draft outreach, or review your opportunities.")
+            parts.append("Your pipeline looks clear right now. What are you working on? I can draft outreach, schedule meetings, or help you re-engage stale contacts.")
         return "\n".join(parts)
 
     if intent in ('recommend_action', 'brainstorm', 'coach'):
@@ -4886,7 +4969,7 @@ def _generate_fallback_response(user_msg, intent, mode, context_str):
             for item in plan[:3]:
                 parts.append(f"- **{item['action']}** ({item['target']}) — {item['reason']}")
         else:
-            parts.append("Nothing urgent on the board. Good time to do proactive outreach or review your pipeline.")
+            parts.append("Nothing urgent on the board. Good time to do proactive outreach or re-engage your warmest contacts.")
 
     elif intent in ('analyze_contact', 'analyze_company'):
         ranked = _get_ranked_opportunities(limit=3)
