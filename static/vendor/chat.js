@@ -45,7 +45,8 @@ var CARD_COLORS = {
   PredictionCard:         { bg: '#ecfdf5', border: '#a7f3d0', accent: '#059669', icon: '🔮' },
   AutomationCard:         { bg: '#fffbeb', border: '#fde68a', accent: '#92400e', icon: '⚙️' },
   BriefCard:              { bg: '#f0f9ff', border: '#bae6fd', accent: '#0c4a6e', icon: '📰' },
-  MeetingCard:            { bg: '#f0fdf4', border: '#bbf7d0', accent: '#15803d', icon: '📅' }
+  MeetingCard:            { bg: '#f0fdf4', border: '#bbf7d0', accent: '#15803d', icon: '📅' },
+  LeoActionPreviewCard:   { bg: '#fffbeb', border: '#fde68a', accent: '#92400e', icon: '🧠' }
 };
 
 var SLASH_HINTS = [
@@ -70,7 +71,11 @@ var SLASH_HINTS = [
   { cmd: '/brief-pdf', desc: 'Daily brief PDF', ex: '/brief-pdf' },
   { cmd: '/patterns', desc: 'Pipeline patterns', ex: '/patterns' },
   { cmd: '/meeting', desc: 'Schedule meeting', ex: '/meeting John Smith' },
-  { cmd: '/calendar', desc: 'Open calendar', ex: '/calendar' }
+  { cmd: '/calendar', desc: 'Open calendar', ex: '/calendar' },
+  { cmd: '/squats', desc: 'Log squats', ex: '/squats 50' },
+  { cmd: '/workout', desc: 'Mark workout done', ex: '/workout' },
+  { cmd: '/focus', desc: 'Set daily focus', ex: '/focus follow-ups' },
+  { cmd: '/perf', desc: 'Performance update', ex: '/perf update revenue to 15000' }
 ];
 
 var MODE_LABELS = {
@@ -254,6 +259,11 @@ function ensureCardActions(card) {
   if (card.type === 'MeetingCard' && card.actions.length === 0) {
     card.actions = [
       { id: 'nav_cal', label: 'Open Calendar', action: 'navigate', params: { tab: 'calendar' } }
+    ];
+  }
+  if (card.type === 'LeoActionPreviewCard' && card.actions.length === 0) {
+    card.actions = [
+      { id: 'cancel_leo_action', label: 'Cancel', action: 'cancel', params: {} }
     ];
   }
   return card;
@@ -1417,6 +1427,34 @@ function renderMeetingCard(card, onAction) {
   );
 }
 
+function renderLeoActionPreviewCard(card, onAction) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.LeoActionPreviewCard;
+  var changes = d.changes || [];
+  var areaLabels = { calendar: 'Calendar', performance: 'Performance', crm_touchpoint: 'CRM', crm_stage: 'CRM', crm_followup: 'CRM' };
+  var areaLabel = areaLabels[d.target_area] || d.target_area || 'Action';
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.3rem' } },
+      h('span', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em' } }, colors.icon + ' Leo Action — ' + areaLabel),
+      h('span', { style: { fontSize: '0.58rem', padding: '0.08rem 0.35rem', borderRadius: '1rem', background: '#fef3c7', color: '#92400e', fontWeight: 600 } }, 'Needs Confirmation')
+    ),
+    h('div', { style: { fontSize: '0.8rem', fontWeight: 600, color: '#0f172a', marginBottom: '0.3rem' } }, d.description || 'Action'),
+    d.affected_record ? h('div', { style: { fontSize: '0.68rem', color: '#64748b', marginBottom: '0.3rem' } }, 'Affects: ' + d.affected_record) : null,
+    changes.length > 0 ? h('div', { style: { background: '#fff', borderRadius: '0.35rem', border: '1px solid #fde68a', padding: '0.4rem 0.5rem', marginBottom: '0.35rem' } },
+      changes.map(function(c, i) {
+        return h('div', { key: 'ch' + i, style: { display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.15rem 0', fontSize: '0.72rem' } },
+          h('span', { style: { fontWeight: 600, color: '#475569', minWidth: '80px' } }, c.field + ':'),
+          c.old_value ? h('span', { style: { color: '#94a3b8', textDecoration: 'line-through', fontSize: '0.68rem' } }, c.old_value) : null,
+          h('span', { style: { color: '#0f172a' } }, ' → '),
+          h('span', { style: { fontWeight: 600, color: '#15803d' } }, c.new_value)
+        );
+      })
+    ) : null,
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
 // --- Card dispatcher ---
 function renderCard(card, onAction) {
   if (!card) return null;
@@ -1455,6 +1493,7 @@ function renderCard(card, onAction) {
     case 'AutomationCard': return renderAutomationCard(card, onAction);
     case 'BriefCard': return renderBriefCard(card, onAction);
     case 'MeetingCard': return renderMeetingCard(card, onAction);
+    case 'LeoActionPreviewCard': return renderLeoActionPreviewCard(card, onAction);
     default: return null;
   }
 }
