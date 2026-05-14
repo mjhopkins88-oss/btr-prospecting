@@ -176,6 +176,89 @@ function sanitizeDisplayText(text) {
   return s.trim();
 }
 
+// --- Frontend card recovery: catch any card-like text that slipped through parsing ---
+function tryRecoverCard(text) {
+  if (!text) return null;
+
+  // Try to find <card>{...}</card> in the text
+  var cardTagMatch = text.match(/<card[^>]*>([\s\S]*?)<\/card>/i);
+  if (cardTagMatch) {
+    try {
+      var braceMatch = cardTagMatch[1].match(/\{[\s\S]*\}/);
+      if (braceMatch) {
+        var obj = JSON.parse(braceMatch[0]);
+        if (obj.type) return ensureCardActions(obj);
+      }
+    } catch (e) {}
+  }
+
+  // Try to find raw JSON with a "type":"...Card" in text
+  var jsonMatch = text.match(/\{[^{}]*"type"\s*:\s*"(\w+Card)"[^{}]*\}/);
+  if (jsonMatch) {
+    try {
+      var parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.type) return ensureCardActions(parsed);
+    } catch (e) {}
+  }
+
+  // Detect card type names rendered as raw text: <ExportCard>, <DraftCard>, etc.
+  var rawTagMatch = text.match(/<(Export|Draft|Brief|Meeting|FollowUp|Touchpoint|Signal|NextAction)Card\s*\/?>/i);
+  if (rawTagMatch) {
+    var cardType = rawTagMatch[1] + 'Card';
+    var fallback = { type: cardType, text: sanitizeDisplayText(text), data: {}, actions: [] };
+    return ensureCardActions(fallback);
+  }
+
+  return null;
+}
+
+function ensureCardActions(card) {
+  if (!card || !card.type) return card;
+  if (!card.data) card.data = {};
+  if (!card.actions) card.actions = [];
+  var d = card.data;
+
+  if (card.type === 'DraftCard' && card.actions.length === 0) {
+    card.actions = [
+      { id: 'copy_draft', label: 'Copy', action: 'copy_draft', params: { body: d.body || '' } }
+    ];
+  }
+  if (card.type === 'ExportCard') {
+    var url = d.url || d.fileUrl || '';
+    if (url && card.actions.length === 0) {
+      card.actions = [
+        { id: 'download', label: 'Download', action: 'download', params: { url: url, fileName: d.fileName || d.filename || '' } }
+      ];
+    }
+    if (!url && card.actions.length === 0) {
+      card.type = 'ErrorCard';
+      card.text = 'Export not available — no download URL.';
+      card.data = { error: 'No file URL' };
+    }
+  }
+  if (card.type === 'BriefCard' && card.actions.length === 0) {
+    card.actions = [
+      { id: 'download_brief', label: 'Download PDF', action: 'download', params: { url: '/api/brief/download', fileName: 'BTR_Brief.pdf' } }
+    ];
+  }
+  if (card.type === 'TouchpointLogCard' && card.actions.length === 0) {
+    card.actions = [
+      { id: 'log_tp', label: 'Log Touchpoint', action: 'log_touchpoint', params: { contact_id: d.contact_id || '', group_id: d.group_id || '', channel: d.channel || 'note', summary: d.summary || '' } }
+    ];
+  }
+  if (card.type === 'FollowUpCard' && card.actions.length === 0) {
+    card.actions = [
+      { id: 'create_fu', label: 'Create Follow-Up', action: 'create_followup', params: { contact_id: d.contact_id || '', title: d.title || '', due_date: d.due_date || '' } }
+    ];
+  }
+  if (card.type === 'MeetingCard' && card.actions.length === 0) {
+    card.actions = [
+      { id: 'nav_cal', label: 'Open Calendar', action: 'navigate', params: { tab: 'calendar' } }
+    ];
+  }
+  return card;
+}
+
 // --- Typing effect component ---
 function TypingText(props) {
   var fullText = props.text || '';
@@ -232,6 +315,15 @@ function executeCardAction(act, messages, setMessages, setActionLoading) {
   trackInteraction('action_clicked', act.action, act.id);
 
   if (act.action === 'copy_text' || act.action === 'copy_draft') {
+    if (act.params && act.params.body && navigator.clipboard) {
+      var copyText = (act.params.subject ? 'Subject: ' + act.params.subject + '\n\n' : '') + act.params.body;
+      navigator.clipboard.writeText(copyText);
+    }
+    setMessages(function(prev) {
+      return prev.concat([{ role: 'assistant', card: {
+        type: 'ConfirmationCard', text: 'Copied to clipboard.', data: {}, actions: []
+      }}]);
+    });
     return;
   }
 
@@ -322,6 +414,10 @@ function renderDraftCard(card, onAction) {
   var colors = CARD_COLORS.DraftCard;
   var channelLabel = { email: 'Email', linkedin: 'LinkedIn', call: 'Call Script' }[d.channel] || d.channel || 'Draft';
 
+  var draftActions = card.actions && card.actions.length > 0 ? card.actions : [
+    { id: 'copy_draft', label: 'Copy', action: 'copy_draft', params: { body: d.body || '', subject: d.subject || '' } }
+  ];
+
   return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.6rem 0.7rem' } },
     h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.3rem', marginBottom: '0.3rem', fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em' } },
       colors.icon, ' ', channelLabel, ' Draft',
@@ -331,7 +427,7 @@ function renderDraftCard(card, onAction) {
     h('div', { style: { color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.5, fontSize: '0.72rem', maxHeight: '220px', overflowY: 'auto', background: '#ffffff', borderRadius: '0.35rem', padding: '0.5rem', border: '1px solid ' + colors.border } }, d.body || ''),
     d.signal_ref ? h('div', { style: { marginTop: '0.25rem', fontSize: '0.63rem', color: '#6b7280', fontStyle: 'italic' } }, '⚡ ' + d.signal_ref) : null,
     card.source ? h('div', { style: { marginTop: '0.2rem', fontSize: '0.63rem', color: '#6b7280', fontStyle: 'italic' } }, card.source) : null,
-    renderActionButtons(card.actions, onAction, d)
+    renderActionButtons(draftActions, onAction, d)
   );
 }
 
@@ -1560,6 +1656,13 @@ function BTRAssistantChat(props) {
       .then(function(r) { return r.json(); })
       .then(function(d) {
         var card = d.card || null;
+
+        // Frontend safety net: if card is TextCard but content has card-like markers, try to recover
+        if ((!card || card.type === 'TextCard') && d.content) {
+          var recovered = tryRecoverCard(d.content);
+          if (recovered) card = recovered;
+        }
+
         // Sanitize card text on receipt — never display raw backend syntax
         if (card && card.text) {
           card.text = sanitizeDisplayText(card.text);

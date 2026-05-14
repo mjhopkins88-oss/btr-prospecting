@@ -4731,6 +4731,68 @@ def get_automation():
 # Reply text sanitizer — strip all internal/backend syntax from user-facing text
 # ---------------------------------------------------------------------------
 
+def _ensure_card_actions(card):
+    """Auto-inject missing actions into known card types so buttons always render."""
+    if not card or not isinstance(card, dict):
+        return card
+    card_type = card.get('type', '')
+    if 'data' not in card:
+        card['data'] = {}
+    if 'actions' not in card:
+        card['actions'] = []
+
+    d = card['data']
+
+    if card_type == 'DraftCard' and not card['actions']:
+        card['actions'] = [
+            {'id': 'copy_draft', 'label': 'Copy', 'action': 'copy_draft', 'params': {'body': d.get('body', '')}},
+        ]
+
+    if card_type == 'ExportCard':
+        url = d.get('url') or d.get('fileUrl') or ''
+        file_name = d.get('fileName') or d.get('filename') or ''
+        if url and not card['actions']:
+            card['actions'] = [
+                {'id': 'download', 'label': 'Download', 'action': 'download', 'params': {'url': url, 'fileName': file_name}}
+            ]
+        if not url:
+            card['type'] = 'ErrorCard'
+            card['text'] = card.get('text', 'Export failed — no download URL available.')
+            card['data'] = {'error': 'No file URL', 'suggestion': 'Try the export again.'}
+            card['actions'] = []
+
+    if card_type == 'BriefCard' and not card['actions']:
+        brief_date = d.get('date', datetime.utcnow().strftime('%Y-%m-%d'))
+        card['actions'] = [
+            {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download',
+             'params': {'url': '/api/brief/download', 'fileName': f'BTR_Brief_{brief_date}.pdf'}}
+        ]
+
+    if card_type == 'MeetingCard' and not card['actions']:
+        card['actions'] = [
+            {'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}}
+        ]
+
+    if card_type == 'TouchpointLogCard' and not card['actions']:
+        card['actions'] = [
+            {'id': 'log_tp', 'label': 'Log Touchpoint', 'action': 'log_touchpoint', 'params': {
+                'contact_id': d.get('contact_id', ''), 'group_id': d.get('group_id', ''),
+                'channel': d.get('channel', 'note'), 'summary': d.get('summary', ''),
+                'direction': d.get('direction', 'outbound')
+            }}
+        ]
+
+    if card_type == 'FollowUpCard' and not card['actions']:
+        card['actions'] = [
+            {'id': 'create_fu', 'label': 'Create Follow-Up', 'action': 'create_followup', 'params': {
+                'contact_id': d.get('contact_id', ''), 'title': d.get('title', ''),
+                'due_date': d.get('due_date', '')
+            }}
+        ]
+
+    return card
+
+
 def _sanitize_reply_text(text):
     """Remove card tags, action tags, JSON blocks, and internal syntax."""
     if not text:
@@ -5256,7 +5318,7 @@ def chat():
         text_outside_card = ''
 
         # Try <card>JSON</card> format — use regex for robustness
-        card_match = re.search(r'<card>([\s\S]*?)</card>', reply, re.IGNORECASE)
+        card_match = re.search(r'<card\s*>([\s\S]*?)</card\s*>', reply, re.IGNORECASE)
         if card_match:
             try:
                 card = json.loads(card_match.group(1).strip())
@@ -5275,7 +5337,7 @@ def chat():
         # Try <card type="..." ...>...</card> attribute format
         if not card:
             attr_match = re.search(
-                r'<card\s+[^>]*?type=["\'](\w+)["\'][^>]*>([\s\S]*?)</card>',
+                r'<card\s+[^>]*?type=["\'](\w+)["\'][^>]*>([\s\S]*?)</card\s*>',
                 reply, re.IGNORECASE
             )
             if attr_match:
@@ -5296,7 +5358,7 @@ def chat():
         # Try <action>JSON</action> format
         action = None
         if not card:
-            action_match = re.search(r'<action>([\s\S]*?)</action>', reply, re.IGNORECASE)
+            action_match = re.search(r'<action\s*>([\s\S]*?)</action\s*>', reply, re.IGNORECASE)
             if action_match:
                 try:
                     action = json.loads(action_match.group(1).strip())
@@ -5305,8 +5367,32 @@ def chat():
                 except json.JSONDecodeError:
                     pass
 
-        # Build final response
+        # Last resort: try to find a JSON object with a "type" key in the raw reply
+        if not card:
+            json_match = re.search(r'\{[^{}]*"type"\s*:\s*"(\w+Card)"[^{}]*\}', reply)
+            if not json_match:
+                json_match = re.search(r'\{[\s\S]*?"type"\s*:\s*"(\w+Card)"[\s\S]*?\}', reply)
+            if json_match:
+                try:
+                    candidate = json_match.group()
+                    brace_start = json_match.start()
+                    depth = 0
+                    end = brace_start
+                    for ci, ch in enumerate(reply[brace_start:]):
+                        if ch == '{': depth += 1
+                        elif ch == '}': depth -= 1
+                        if depth == 0:
+                            end = brace_start + ci + 1
+                            break
+                    card = json.loads(reply[brace_start:end])
+                    text_outside_card = reply[:brace_start] + reply[end:]
+                    logger.info(f"[Leo] Recovered card from raw JSON: type={card.get('type')}")
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+        # Ensure card has required structure and auto-inject missing actions
         if card:
+            card = _ensure_card_actions(card)
             extra_text = _sanitize_reply_text(text_outside_card).strip()
             if card.get('text'):
                 card['text'] = _sanitize_reply_text(card['text'])
