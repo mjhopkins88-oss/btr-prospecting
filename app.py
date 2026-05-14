@@ -382,6 +382,18 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS leo_suggestions (
+            id TEXT PRIMARY KEY,
+            suggestion_type TEXT NOT NULL,
+            target_entity TEXT,
+            target_id TEXT,
+            suggestion TEXT NOT NULL,
+            outcome TEXT,
+            outcome_detected_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     # --- Auth & CRM Tables ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS workspaces (
