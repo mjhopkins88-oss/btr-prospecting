@@ -1604,14 +1604,14 @@ function BTRAssistantChat(props) {
         h('div', { style: { fontSize: '0.68rem', lineHeight: 1.5, marginBottom: '0.5rem', color: '#94a3b8' } },
           'Ask me anything — strategy, outreach, data, or actions'
         ),
-        h('div', { style: { fontSize: '0.62rem', color: '#94a3b8', marginBottom: '0.5rem' } }, 'Type / for commands or just ask a question'),
+        h('div', { style: { fontSize: '0.62rem', color: '#94a3b8', marginBottom: '0.5rem' } }, 'Ask me anything, or type / for commands'),
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem' } },
           [
             'How should I approach my top prospects?',
-            'Who should I follow up with this week?',
-            "What's the best outreach strategy right now?",
+            "I talked to Material Capital but don't want to bother them",
+            "What's working in my outreach right now?",
             '/queue',
-            '/draft top 5'
+            '/funnel'
           ].map(function(q) {
             return h('button', {
               key: q,
