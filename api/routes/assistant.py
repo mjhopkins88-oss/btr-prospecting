@@ -4816,6 +4816,12 @@ def _ensure_card_actions(card):
             {'id': 'cancel_leo_action', 'label': 'Cancel', 'action': 'cancel', 'params': {}}
         ]
 
+    if card_type == 'CalendarConfirmCard' and not card['actions']:
+        card['actions'] = [
+            {'id': 'edit_cal_events', 'label': 'Edit', 'action': 'navigate', 'params': {'tab': 'calendar'}},
+            {'id': 'cancel_cal_events', 'label': 'Cancel', 'action': 'cancel', 'params': {}},
+        ]
+
     return card
 
 
@@ -5206,6 +5212,13 @@ def chat():
         card = data.get('card', {})
         _persist_chat(last_msg, card, 'schedule_meeting', 'execution')
         return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'schedule_meeting', 'mode': 'execution'})
+
+    # Multi-event schedule intercept — try parsing before permission guard
+    multi_events = _parse_schedule_events(last_msg)
+    if multi_events and len(multi_events) >= 1:
+        card = _build_calendar_confirm_card(multi_events)
+        _persist_chat(last_msg, card, 'schedule_meeting', 'execution')
+        return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'schedule_meeting', 'mode': 'execution'})
 
     # Permission guard — block people-management requests early
     allowed, block_reason = _leo_permission_check('_check_text', {'_raw_text': last_msg})
@@ -5732,6 +5745,24 @@ def execute_action():
                     }})
                 return jsonify({'success': False, 'card': {
                     'type': 'ErrorCard', 'text': result.get('message', 'Action failed.'),
+                    'data': {'error': exec_action}, 'actions': []
+                }})
+            if exec_action == 'cal_create_events':
+                result = _exec_create_calendar_events(exec_params)
+                if result.get('success'):
+                    created = result.get('created', [])
+                    skipped = result.get('skipped', [])
+                    confirm_data = {'what': exec_action, 'result': 'success',
+                                    'created_count': len(created), 'skipped_count': len(skipped)}
+                    if skipped:
+                        confirm_data['skipped'] = skipped
+                    return jsonify({'success': True, 'card': {
+                        'type': 'ConfirmationCard', 'text': result['message'],
+                        'data': confirm_data,
+                        'actions': [{'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}}]
+                    }})
+                return jsonify({'success': False, 'card': {
+                    'type': 'ErrorCard', 'text': result.get('message', 'Failed to create events.'),
                     'data': {'error': exec_action}, 'actions': []
                 }})
             if exec_action.startswith('cal_'):
@@ -6357,6 +6388,291 @@ def _exec_schedule_meeting(params):
             {'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}},
         ]
     }})
+
+
+def _parse_schedule_events(text):
+    """Parse natural language for one or more calendar events.
+    Returns list of event dicts or None if not a scheduling request.
+    Handles: 'schedule 3 meetings Monday: 9am intro with Smith, 2pm pitch with Jones, 4pm call with Adams'
+             'create my schedule for tomorrow: 9am Smith, 11am Jones, 2pm Adams'
+             'set up meetings: Monday 9am intro Smith, Tuesday 2pm pitch Jones'
+    """
+    lower = text.lower()
+
+    schedule_triggers = [
+        r'(?:create|build|set up|plan|make)\s+(?:my\s+)?(?:schedule|meetings|calendar)',
+        r'schedule\s+(?:\d+\s+)?(?:meetings|calls|events)',
+        r'(?:add|put|block)\s+(?:these\s+)?(?:meetings|events|calls)\s+(?:to|on|in)',
+        r'schedule\s+(?:a\s+)?(?:meeting|call).*(?:and|,)\s*(?:a\s+)?(?:meeting|call)',
+    ]
+    is_multi = any(re.search(t, lower) for t in schedule_triggers)
+
+    event_pattern = re.compile(
+        r'(\d{1,2}(?::\d{2})?\s*(?:am|pm|a|p))'
+        r'(?:\s+(\d+)\s*min(?:utes?)?)?'
+        r'(?:\s+(intro(?:duction)?|pitch|follow[- ]?up|review|call|meeting|general))?'
+        r'(?:\s+(?:with\s+)?)'
+        r'([A-Za-z][A-Za-z\s\.\-]+?)(?:\s*(?:,|;|and\s|$|\n))',
+        re.IGNORECASE
+    )
+
+    date_context_pattern = re.compile(
+        r'(?:for|on)\s+(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|'
+        r'next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|week)|'
+        r'\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}(?:/\d{2,4})?)',
+        re.IGNORECASE
+    )
+
+    date_inline_pattern = re.compile(
+        r'(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|'
+        r'next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|week)|'
+        r'\d{4}-\d{2}-\d{2})\s*[:\-]?\s*'
+        r'(\d{1,2}(?::\d{2})?\s*(?:am|pm|a|p))',
+        re.IGNORECASE
+    )
+
+    base_date_m = date_context_pattern.search(text)
+    base_date = _parse_relative_date(base_date_m.group(1)) if base_date_m else None
+
+    events = []
+    seen_positions = set()
+
+    for m in date_inline_pattern.finditer(text):
+        date_str = _parse_relative_date(m.group(1))
+        if date_str and m.start() not in seen_positions:
+            seen_positions.add(m.start())
+
+    for m in event_pattern.finditer(text):
+        time_raw = m.group(1).strip()
+        duration_raw = m.group(2)
+        type_raw = m.group(3)
+        contact_raw = m.group(4).strip().rstrip('.')
+
+        time_str = _normalize_time(time_raw)
+        duration = int(duration_raw) if duration_raw else 30
+
+        meeting_type = 'general'
+        if type_raw:
+            t = type_raw.lower().strip()
+            if 'intro' in t: meeting_type = 'intro'
+            elif 'pitch' in t: meeting_type = 'pitch'
+            elif 'follow' in t: meeting_type = 'follow_up'
+            elif 'review' in t: meeting_type = 'review'
+            elif 'call' in t: meeting_type = 'call'
+
+        event_date = base_date
+        before_event = text[:m.start()]
+        date_check = re.search(
+            r'(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|'
+            r'next\s+\w+|\d{4}-\d{2}-\d{2})\s*[:\-]?\s*$',
+            before_event, re.IGNORECASE
+        )
+        if date_check:
+            parsed_d = _parse_relative_date(date_check.group(1))
+            if parsed_d:
+                event_date = parsed_d
+
+        if not event_date:
+            event_date = (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d')
+
+        events.append({
+            'date': event_date,
+            'start_time': time_str,
+            'duration_min': duration,
+            'meeting_type': meeting_type,
+            'contact_name': contact_raw,
+            'title': '',
+            'description': '',
+            'priority': 'normal',
+        })
+
+    if not events and is_multi:
+        simple_pattern = re.compile(
+            r'(\d{1,2}(?::\d{2})?\s*(?:am|pm|a|p))\s+'
+            r'(?:with\s+)?([A-Za-z][A-Za-z\s\.\-]+?)(?:\s*(?:,|;|and\s|$|\n))',
+            re.IGNORECASE
+        )
+        for m in simple_pattern.finditer(text):
+            time_str = _normalize_time(m.group(1).strip())
+            contact_raw = m.group(2).strip().rstrip('.')
+            event_date = base_date or (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d')
+            events.append({
+                'date': event_date,
+                'start_time': time_str,
+                'duration_min': 30,
+                'meeting_type': 'general',
+                'contact_name': contact_raw,
+                'title': '',
+                'description': '',
+                'priority': 'normal',
+            })
+
+    if not events:
+        return None
+
+    for ev in events:
+        contact = _resolve_contact(ev['contact_name'])
+        if contact:
+            ev['contact_id'] = contact['id']
+            ev['group_id'] = contact.get('group_id')
+            ev['company_name'] = contact.get('company_name', '')
+            full_name = f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip()
+            ev['resolved_name'] = full_name
+            if not ev['title']:
+                ev['title'] = f"{ev['meeting_type'].replace('_', ' ').title()} with {full_name}"
+        else:
+            ev['contact_id'] = None
+            ev['group_id'] = None
+            ev['company_name'] = ''
+            ev['resolved_name'] = ev['contact_name']
+            if not ev['title']:
+                ev['title'] = f"Meeting with {ev['contact_name']}"
+
+    return events
+
+
+def _normalize_time(raw):
+    """Convert '9am', '2:30pm', '14:00' to HH:MM 24h format."""
+    raw = raw.strip().lower().replace(' ', '')
+    m = re.match(r'^(\d{1,2})(?::(\d{2}))?\s*(am|pm|a|p)?$', raw)
+    if not m:
+        return '09:00'
+    hour = int(m.group(1))
+    minute = int(m.group(2) or 0)
+    ampm = (m.group(3) or '').lower()
+    if ampm.startswith('p') and hour < 12:
+        hour += 12
+    elif ampm.startswith('a') and hour == 12:
+        hour = 0
+    return f'{hour:02d}:{minute:02d}'
+
+
+def _resolve_contact(name):
+    """Fuzzy-match a contact name from CRM. Returns contact dict or None."""
+    parts = name.strip().split()
+    if not parts:
+        return None
+    if len(parts) >= 2:
+        contact = fetch_one(
+            "SELECT c.id, c.first_name, c.last_name, c.group_id, g.name as company_name "
+            "FROM prospecting_contacts c LEFT JOIN capital_groups g ON g.id = c.group_id "
+            "WHERE LOWER(c.first_name) LIKE ? AND LOWER(c.last_name) LIKE ? LIMIT 1",
+            [f"%{parts[0].lower()}%", f"%{parts[-1].lower()}%"]
+        )
+        if contact:
+            return contact
+    like = f"%{parts[0]}%"
+    return fetch_one(
+        "SELECT c.id, c.first_name, c.last_name, c.group_id, g.name as company_name "
+        "FROM prospecting_contacts c LEFT JOIN capital_groups g ON g.id = c.group_id "
+        "WHERE c.first_name LIKE ? OR c.last_name LIKE ? LIMIT 1",
+        [like, like]
+    )
+
+
+def _build_calendar_confirm_card(events):
+    """Build a CalendarConfirmCard for user to review before saving events."""
+    event_summaries = []
+    for ev in events:
+        contact_label = ev.get('resolved_name') or ev.get('contact_name', 'Unknown')
+        if ev.get('company_name'):
+            contact_label += f" ({ev['company_name']})"
+        event_summaries.append({
+            'date': ev['date'],
+            'start_time': ev['start_time'],
+            'duration_min': ev.get('duration_min', 30),
+            'meeting_type': ev.get('meeting_type', 'general'),
+            'title': ev.get('title', ''),
+            'contact_name': contact_label,
+            'contact_id': ev.get('contact_id'),
+            'group_id': ev.get('group_id'),
+            'description': ev.get('description', ''),
+            'priority': ev.get('priority', 'normal'),
+            'contact_matched': ev.get('contact_id') is not None,
+        })
+
+    desc = f"Schedule {len(events)} meeting{'s' if len(events) != 1 else ''}"
+    return {
+        'type': 'CalendarConfirmCard',
+        'text': f"**{desc}**\n\nReview the events below and confirm to add them all to your calendar.",
+        'data': {
+            'event_count': len(events),
+            'events': event_summaries,
+            'description': desc,
+        },
+        'actions': [
+            {'id': 'confirm_cal_events', 'label': 'Add All', 'action': 'leo_execute',
+             'params': {'exec_action': 'cal_create_events', 'exec_params': {'events': event_summaries}}},
+            {'id': 'edit_cal_events', 'label': 'Edit', 'action': 'navigate',
+             'params': {'tab': 'calendar'}},
+            {'id': 'cancel_cal_events', 'label': 'Cancel', 'action': 'cancel', 'params': {}},
+        ]
+    }
+
+
+def _exec_create_calendar_events(params):
+    """Execute confirmed batch calendar event creation. Returns success/failure dict."""
+    events = params.get('events', [])
+    if not events:
+        return {'success': False, 'message': 'No events to create.'}
+
+    now = datetime.utcnow().isoformat()
+    created = []
+    skipped = []
+
+    for ev in events:
+        contact_id = ev.get('contact_id')
+        group_id = ev.get('group_id')
+        meeting_date = ev.get('date', '')
+        meeting_time = ev.get('start_time', '09:00')
+        duration_min = ev.get('duration_min', 30)
+        meeting_type = ev.get('meeting_type', 'general')
+        title = ev.get('title', 'Meeting')
+        description = ev.get('description', '')
+        contact_name = ev.get('contact_name', '')
+
+        if not contact_id and contact_name:
+            clean_name = re.sub(r'\s*\(.*\)$', '', contact_name).strip()
+            contact = _resolve_contact(clean_name)
+            if contact:
+                contact_id = contact['id']
+                group_id = contact.get('group_id')
+
+        if contact_id:
+            existing = fetch_one(
+                "SELECT id FROM calendar_meetings WHERE contact_id = ? AND meeting_date = ? "
+                "AND meeting_time = ? AND status != 'cancelled'",
+                [contact_id, meeting_date, meeting_time]
+            )
+            if existing:
+                skipped.append(f"{title} ({meeting_date} {meeting_time}) — already exists")
+                continue
+
+        mid = str(uuid.uuid4())
+        execute(
+            "INSERT INTO calendar_meetings (id, contact_id, group_id, meeting_date, meeting_time, "
+            "duration_min, meeting_type, title, notes, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?)",
+            [mid, contact_id, group_id, meeting_date, meeting_time,
+             duration_min, meeting_type, title, description, now, now]
+        )
+        created.append({'id': mid, 'title': title, 'date': meeting_date, 'time': meeting_time})
+
+    _log_leo_action('cal_create_events', 'calendar',
+                    f'Created {len(created)} calendar events ({len(skipped)} skipped)',
+                    {'events': [e['title'] for e in created], 'skipped': skipped},
+                    {'created_count': len(created), 'skipped_count': len(skipped)})
+
+    parts = []
+    if created:
+        parts.append(f"{len(created)} meeting{'s' if len(created) != 1 else ''} added to calendar")
+    if skipped:
+        parts.append(f"{len(skipped)} skipped (duplicates)")
+
+    if not created and skipped:
+        return {'success': False, 'message': 'All events already exist in calendar — nothing to add. ' + '; '.join(skipped)}
+
+    return {'success': True, 'message': '. '.join(parts) + '.', 'created': created, 'skipped': skipped}
 
 
 def _exec_export(params):

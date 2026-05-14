@@ -46,7 +46,8 @@ var CARD_COLORS = {
   AutomationCard:         { bg: '#fffbeb', border: '#fde68a', accent: '#92400e', icon: '⚙️' },
   BriefCard:              { bg: '#f0f9ff', border: '#bae6fd', accent: '#0c4a6e', icon: '📰' },
   MeetingCard:            { bg: '#f0fdf4', border: '#bbf7d0', accent: '#15803d', icon: '📅' },
-  LeoActionPreviewCard:   { bg: '#fffbeb', border: '#fde68a', accent: '#92400e', icon: '🧠' }
+  LeoActionPreviewCard:   { bg: '#fffbeb', border: '#fde68a', accent: '#92400e', icon: '🧠' },
+  CalendarConfirmCard:    { bg: '#f0fdf4', border: '#86efac', accent: '#15803d', icon: '📅' }
 };
 
 var SLASH_HINTS = [
@@ -264,6 +265,12 @@ function ensureCardActions(card) {
   if (card.type === 'LeoActionPreviewCard' && card.actions.length === 0) {
     card.actions = [
       { id: 'cancel_leo_action', label: 'Cancel', action: 'cancel', params: {} }
+    ];
+  }
+  if (card.type === 'CalendarConfirmCard' && card.actions.length === 0) {
+    card.actions = [
+      { id: 'edit_cal_events', label: 'Edit', action: 'navigate', params: { tab: 'calendar' } },
+      { id: 'cancel_cal_events', label: 'Cancel', action: 'cancel', params: {} }
     ];
   }
   return card;
@@ -1455,6 +1462,61 @@ function renderLeoActionPreviewCard(card, onAction) {
   );
 }
 
+function renderCalendarConfirmCard(card, onAction) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.CalendarConfirmCard;
+  var events = d.events || [];
+  var typeLabels = { general: 'Meeting', intro: 'Introduction', follow_up: 'Follow-up', pitch: 'Pitch', review: 'Review', call: 'Call' };
+  var typeIcons = { general: '\u{1F4CB}', intro: '\u{1F91D}', follow_up: '\u{1F504}', pitch: '\u{1F3AF}', review: '\u{1F50D}', call: '\u{1F4DE}' };
+  var typeColors = { intro: '#8b5cf6', pitch: '#f59e0b', follow_up: '#06b6d4', review: '#ec4899', call: '#10b981', general: '#6366f1' };
+
+  var formatTime = function(t) {
+    if (!t) return '';
+    var parts = t.split(':');
+    var h = parseInt(parts[0], 10);
+    var m = parts[1] || '00';
+    var ampm = h >= 12 ? 'pm' : 'am';
+    var hr = h > 12 ? h - 12 : (h === 0 ? 12 : h);
+    return m === '00' ? hr + ampm : hr + ':' + m + ampm;
+  };
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.6rem', padding: '0.85rem', overflow: 'hidden' } },
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' } },
+      h('span', { style: { fontSize: '0.7rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em' } }, colors.icon + ' Schedule ' + events.length + ' Meeting' + (events.length !== 1 ? 's' : '')),
+      h('span', { style: { fontSize: '0.58rem', padding: '0.08rem 0.4rem', borderRadius: '1rem', background: '#dcfce7', color: '#16a34a', fontWeight: 600 } }, 'Needs Confirmation')
+    ),
+    h('div', { style: { fontSize: '0.72rem', color: '#64748b', marginBottom: '0.5rem' } }, d.description || 'Review the events below and confirm to add them all.'),
+    h('div', { style: { background: '#fff', borderRadius: '0.4rem', border: '1px solid ' + colors.border, marginBottom: '0.5rem', overflow: 'hidden' } },
+      events.map(function(ev, i) {
+        var tc = typeColors[ev.meeting_type] || '#6366f1';
+        var icon = typeIcons[ev.meeting_type] || '\u{1F4CB}';
+        return h('div', { key: 'ev' + i, style: { display: 'flex', alignItems: 'flex-start', gap: '0.5rem', padding: '0.5rem 0.6rem', borderBottom: i < events.length - 1 ? '1px solid #f1f5f9' : 'none', borderLeft: '3px solid ' + tc } },
+          h('div', { style: { minWidth: '52px', textAlign: 'center' } },
+            h('div', { style: { fontSize: '0.78rem', fontWeight: 700, color: '#0f172a' } }, formatTime(ev.start_time)),
+            h('div', { style: { fontSize: '0.55rem', color: '#94a3b8' } }, (ev.duration_min || 30) + 'min')
+          ),
+          h('div', { style: { flex: 1, minWidth: 0 } },
+            h('div', { style: { fontSize: '0.75rem', fontWeight: 600, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, ev.title || ev.contact_name || 'Meeting'),
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.1rem' } },
+              ev.contact_matched ?
+                h('span', { style: { fontSize: '0.55rem', padding: '0.06rem 0.3rem', borderRadius: '1rem', background: '#dcfce7', color: '#16a34a', fontWeight: 600 } }, '✓ CRM') :
+                h('span', { style: { fontSize: '0.55rem', padding: '0.06rem 0.3rem', borderRadius: '1rem', background: '#fef3c7', color: '#92400e', fontWeight: 600 } }, 'No Match'),
+              h('span', { style: { fontSize: '0.58rem', padding: '0.06rem 0.3rem', borderRadius: '1rem', background: tc + '15', color: tc, fontWeight: 600 } }, icon + ' ' + (typeLabels[ev.meeting_type] || ev.meeting_type || 'Meeting'))
+            ),
+            ev.contact_name ? h('div', { style: { fontSize: '0.62rem', color: '#64748b', marginTop: '0.1rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, '\u{1F464} ' + ev.contact_name) : null
+          ),
+          h('div', { style: { fontSize: '0.62rem', color: '#94a3b8', whiteSpace: 'nowrap', flexShrink: 0 } }, ev.date || '')
+        );
+      })
+    ),
+    events.some(function(e) { return !e.contact_matched; }) ?
+      h('div', { style: { fontSize: '0.6rem', color: '#92400e', background: '#fef3c7', padding: '0.3rem 0.5rem', borderRadius: '0.3rem', marginBottom: '0.4rem' } },
+        '\u{26A0}\u{FE0F} Some contacts could not be matched to CRM records. Meetings will be created without a CRM link.'
+      ) : null,
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
 // --- Card dispatcher ---
 function renderCard(card, onAction) {
   if (!card) return null;
@@ -1494,6 +1556,7 @@ function renderCard(card, onAction) {
     case 'BriefCard': return renderBriefCard(card, onAction);
     case 'MeetingCard': return renderMeetingCard(card, onAction);
     case 'LeoActionPreviewCard': return renderLeoActionPreviewCard(card, onAction);
+    case 'CalendarConfirmCard': return renderCalendarConfirmCard(card, onAction);
     default: return null;
   }
 }
