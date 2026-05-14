@@ -39,7 +39,11 @@ var CARD_COLORS = {
   QueueCard:              { bg: '#f0f9ff', border: '#93c5fd', accent: '#1e40af', icon: '📋' },
   BatchDraftCard:         { bg: '#f0fdf4', border: '#86efac', accent: '#15803d', icon: '✉️' },
   ApprovalQueueCard:      { bg: '#fefce8', border: '#fde68a', accent: '#a16207', icon: '✅' },
-  ProbabilityCard:        { bg: '#faf5ff', border: '#d8b4fe', accent: '#7c3aed', icon: '🎲' }
+  ProbabilityCard:        { bg: '#faf5ff', border: '#d8b4fe', accent: '#7c3aed', icon: '🎲' },
+  RelationshipCard:       { bg: '#fdf2f8', border: '#fbcfe8', accent: '#be185d', icon: '🤝' },
+  FunnelCard:             { bg: '#f0f9ff', border: '#bae6fd', accent: '#0369a1', icon: '📊' },
+  PredictionCard:         { bg: '#ecfdf5', border: '#a7f3d0', accent: '#059669', icon: '🔮' },
+  AutomationCard:         { bg: '#fffbeb', border: '#fde68a', accent: '#92400e', icon: '⚙️' }
 };
 
 var SLASH_HINTS = [
@@ -56,10 +60,15 @@ var SLASH_HINTS = [
   { cmd: '/approve', desc: 'Approval queue', ex: '/approve all' },
   { cmd: '/probability', desc: 'Deal score', ex: '/probability Acme' },
   { cmd: '/followups', desc: 'Follow-ups', ex: '/followups' },
-  { cmd: '/signals', desc: 'Signal intel', ex: '/signals' }
+  { cmd: '/signals', desc: 'Signal intel', ex: '/signals' },
+  { cmd: '/relationship', desc: 'Relationship intel', ex: '/relationship Acme' },
+  { cmd: '/funnel', desc: 'Conversion funnel', ex: '/funnel' },
+  { cmd: '/predict', desc: 'Outcome prediction', ex: '/predict Acme' },
+  { cmd: '/automate', desc: 'Automation scan', ex: '/automate' }
 ];
 
 var MODE_LABELS = {
+  conversational: '',
   strategic: 'Strategy',
   execution: 'Execute',
   analyst: 'Analyst',
@@ -68,6 +77,7 @@ var MODE_LABELS = {
 };
 
 var MODE_COLORS = {
+  conversational: '#64748b',
   strategic: '#7c3aed',
   execution: '#16a34a',
   analyst: '#0369a1',
@@ -1016,6 +1026,175 @@ function renderProbabilityCard(card, onAction) {
   );
 }
 
+function renderRelationshipCard(card, onAction) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.RelationshipCard;
+  var labelColors = { hot: '#dc2626', warm: '#f59e0b', cooling: '#3b82f6', cold: '#94a3b8' };
+  var lc = labelColors[d.label] || '#94a3b8';
+  var pct = d.relationship_score || 0;
+  var resp = d.responsiveness || {};
+  var style = d.communication_style || {};
+  var breakdown = style.channel_breakdown || {};
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.35rem' } }, colors.icon + ' Relationship Intelligence'),
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' } },
+      h('div', { style: { fontSize: '1.1rem', fontWeight: 800, color: lc } }, pct),
+      h('div', { style: { flex: 1 } },
+        h('div', { style: { fontSize: '0.82rem', fontWeight: 700, color: '#1e293b' } }, d.company || ''),
+        h('div', { style: { display: 'flex', gap: '0.3rem', marginTop: '0.1rem' } },
+          h('span', { style: { fontSize: '0.6rem', fontWeight: 700, color: lc, background: lc + '14', padding: '0.1rem 0.4rem', borderRadius: '0.2rem', textTransform: 'uppercase' } }, d.label),
+          style.preferred_channel ? h('span', { style: { fontSize: '0.6rem', color: '#64748b', background: '#f1f5f9', padding: '0.1rem 0.4rem', borderRadius: '0.2rem' } }, 'Prefers ' + style.preferred_channel) : null,
+          d.days_silent !== undefined ? h('span', { style: { fontSize: '0.6rem', color: '#64748b', background: '#f1f5f9', padding: '0.1rem 0.4rem', borderRadius: '0.2rem' } }, d.days_silent + 'd silent') : null
+        )
+      )
+    ),
+    h('div', { style: { background: '#e2e8f0', borderRadius: '4px', height: '6px', marginBottom: '0.35rem', overflow: 'hidden' } },
+      h('div', { style: { background: lc, height: '100%', width: pct + '%', borderRadius: '4px', transition: 'width 0.5s ease' } })
+    ),
+    h('div', { style: { display: 'flex', gap: '0.5rem', marginBottom: '0.3rem' } },
+      h('div', { style: { flex: 1, background: '#ffffff', borderRadius: '0.35rem', border: '1px solid ' + colors.border, padding: '0.3rem 0.4rem' } },
+        h('div', { style: { fontSize: '0.58rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.15rem' } }, 'Responsiveness'),
+        h('div', { style: { fontSize: '0.72rem', fontWeight: 700, color: '#334155' } }, (resp.label || 'Unknown').replace('_', ' ')),
+        resp.avg_days !== null && resp.avg_days !== undefined ? h('div', { style: { fontSize: '0.6rem', color: '#64748b' } }, 'Avg ' + resp.avg_days + 'd reply') : null
+      ),
+      h('div', { style: { flex: 1, background: '#ffffff', borderRadius: '0.35rem', border: '1px solid ' + colors.border, padding: '0.3rem 0.4rem' } },
+        h('div', { style: { fontSize: '0.58rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.15rem' } }, 'Channels'),
+        Object.keys(breakdown).length > 0 ? h('div', { style: { fontSize: '0.65rem', color: '#334155' } },
+          Object.keys(breakdown).map(function(ch) { return ch + ': ' + breakdown[ch]; }).join(', ')
+        ) : h('div', { style: { fontSize: '0.65rem', color: '#94a3b8' } }, 'No data')
+      )
+    ),
+    (d.factors && d.factors.length > 0) ? h('div', { style: { background: '#ffffff', borderRadius: '0.35rem', border: '1px solid ' + colors.border, padding: '0.3rem 0.4rem' } },
+      d.factors.map(function(f, i) {
+        return h('div', { key: i, style: { fontSize: '0.65rem', color: '#475569', padding: '0.1rem 0' } }, '• ' + f);
+      })
+    ) : null,
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
+function renderFunnelCard(card, onAction) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.FunnelCard;
+  var funnel = d.funnel || [];
+  var rates = d.rates || {};
+  var bottlenecks = d.bottlenecks || [];
+  var maxCount = Math.max.apply(null, funnel.map(function(f) { return f.count; }).concat([1]));
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.35rem' } }, colors.icon + ' Conversion Funnel'),
+    h('div', { style: { display: 'flex', gap: '0.5rem', marginBottom: '0.4rem', flexWrap: 'wrap' } },
+      h('div', { style: { fontSize: '0.6rem', color: '#64748b', background: '#f1f5f9', padding: '0.15rem 0.4rem', borderRadius: '0.2rem' } }, 'Reply: ' + (rates.outreach_to_reply || 0) + '%'),
+      h('div', { style: { fontSize: '0.6rem', color: '#64748b', background: '#f1f5f9', padding: '0.15rem 0.4rem', borderRadius: '0.2rem' } }, 'Meeting: ' + (rates.reply_to_meeting || 0) + '%'),
+      h('div', { style: { fontSize: '0.6rem', color: '#64748b', background: '#f1f5f9', padding: '0.15rem 0.4rem', borderRadius: '0.2rem' } }, 'Conversion: ' + (rates.overall_conversion || 0) + '%')
+    ),
+    funnel.length > 0 ? h('div', { style: { marginBottom: '0.4rem' } },
+      funnel.filter(function(f) { return f.count > 0; }).map(function(f, i) {
+        var widthPct = Math.max(Math.round(f.count / maxCount * 100), 8);
+        return h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: '0.3rem', marginBottom: '0.15rem' } },
+          h('div', { style: { fontSize: '0.6rem', color: '#64748b', width: '4rem', textAlign: 'right', flexShrink: 0 } }, f.stage),
+          h('div', { style: { flex: 1, background: '#e2e8f0', borderRadius: '3px', height: '14px', overflow: 'hidden' } },
+            h('div', { style: { background: colors.accent, height: '100%', width: widthPct + '%', borderRadius: '3px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: '0.25rem' } },
+              h('span', { style: { fontSize: '0.55rem', color: '#fff', fontWeight: 700 } }, f.count)
+            )
+          )
+        );
+      })
+    ) : null,
+    bottlenecks.length > 0 ? h('div', { style: { background: '#ffffff', borderRadius: '0.35rem', border: '1px solid ' + colors.border, padding: '0.3rem 0.4rem' } },
+      h('div', { style: { fontSize: '0.58rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.15rem' } }, 'Bottlenecks'),
+      bottlenecks.map(function(b, i) {
+        var sevColors = { high: '#dc2626', medium: '#f59e0b', low: '#22c55e' };
+        return h('div', { key: i, style: { fontSize: '0.65rem', color: '#475569', padding: '0.15rem 0', borderBottom: i < bottlenecks.length - 1 ? '1px solid #f1f5f9' : 'none' } },
+          h('span', { style: { color: sevColors[b.severity] || '#94a3b8', fontWeight: 700 } }, '● '),
+          b.suggestion
+        );
+      })
+    ) : null,
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
+function renderPredictionCard(card, onAction) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.PredictionCard;
+  var reply = d.reply_likelihood || {};
+  var meeting = d.meeting_likelihood || {};
+  var rel = d.relationship || {};
+  var labelColors = { High: '#16a34a', Medium: '#f59e0b', Low: '#dc2626' };
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.35rem' } }, colors.icon + ' Outcome Prediction'),
+    d.company ? h('div', { style: { fontSize: '0.82rem', fontWeight: 700, color: '#1e293b', marginBottom: '0.35rem' } }, d.company) : null,
+    h('div', { style: { display: 'flex', gap: '0.5rem', marginBottom: '0.35rem' } },
+      h('div', { style: { flex: 1, background: '#ffffff', borderRadius: '0.35rem', border: '1px solid ' + colors.border, padding: '0.4rem', textAlign: 'center' } },
+        h('div', { style: { fontSize: '0.58rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.15rem' } }, 'Reply Likelihood'),
+        h('div', { style: { fontSize: '1.1rem', fontWeight: 800, color: labelColors[reply.label] || '#94a3b8' } }, reply.score || 0),
+        h('div', { style: { fontSize: '0.6rem', fontWeight: 700, color: labelColors[reply.label] || '#94a3b8' } }, reply.label || '?'),
+        h('div', { style: { background: '#e2e8f0', borderRadius: '3px', height: '4px', marginTop: '0.2rem', overflow: 'hidden' } },
+          h('div', { style: { background: labelColors[reply.label] || '#94a3b8', height: '100%', width: (reply.score || 0) + '%', borderRadius: '3px' } })
+        )
+      ),
+      h('div', { style: { flex: 1, background: '#ffffff', borderRadius: '0.35rem', border: '1px solid ' + colors.border, padding: '0.4rem', textAlign: 'center' } },
+        h('div', { style: { fontSize: '0.58rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.15rem' } }, 'Meeting Likelihood'),
+        h('div', { style: { fontSize: '1.1rem', fontWeight: 800, color: labelColors[meeting.label] || '#94a3b8' } }, meeting.score || 0),
+        h('div', { style: { fontSize: '0.6rem', fontWeight: 700, color: labelColors[meeting.label] || '#94a3b8' } }, meeting.label || '?'),
+        h('div', { style: { background: '#e2e8f0', borderRadius: '3px', height: '4px', marginTop: '0.2rem', overflow: 'hidden' } },
+          h('div', { style: { background: labelColors[meeting.label] || '#94a3b8', height: '100%', width: (meeting.score || 0) + '%', borderRadius: '3px' } })
+        )
+      )
+    ),
+    h('div', { style: { display: 'flex', gap: '0.3rem', marginBottom: '0.3rem', flexWrap: 'wrap' } },
+      d.recommended_channel ? h('span', { style: { fontSize: '0.6rem', color: '#64748b', background: '#f1f5f9', padding: '0.15rem 0.4rem', borderRadius: '0.2rem' } }, 'Best channel: ' + d.recommended_channel) : null,
+      d.best_timing ? h('span', { style: { fontSize: '0.6rem', color: '#64748b', background: '#f1f5f9', padding: '0.15rem 0.4rem', borderRadius: '0.2rem' } }, 'Timing: ' + d.best_timing) : null,
+      rel.label ? h('span', { style: { fontSize: '0.6rem', color: '#64748b', background: '#f1f5f9', padding: '0.15rem 0.4rem', borderRadius: '0.2rem' } }, 'Relationship: ' + rel.label) : null
+    ),
+    (reply.factors && reply.factors.length > 0) ? h('div', { style: { background: '#ffffff', borderRadius: '0.35rem', border: '1px solid ' + colors.border, padding: '0.3rem 0.4rem' } },
+      h('div', { style: { fontSize: '0.58rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.15rem' } }, 'Key Factors'),
+      reply.factors.map(function(f, i) {
+        return h('div', { key: i, style: { fontSize: '0.65rem', color: '#475569', padding: '0.1rem 0' } }, '• ' + f);
+      })
+    ) : null,
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
+function renderAutomationCard(card, onAction) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.AutomationCard;
+  var patterns = d.patterns || [];
+  var suggestions = d.suggestions || [];
+  var impactColors = { high: '#dc2626', medium: '#f59e0b', low: '#22c55e' };
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' } },
+      h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em' } }, colors.icon + ' Automation Scan'),
+      d.time_savings_est > 0 ? h('div', { style: { fontSize: '0.6rem', fontWeight: 700, color: '#16a34a', background: '#f0fdf4', padding: '0.15rem 0.4rem', borderRadius: '0.2rem' } }, '~' + d.time_savings_est + ' min savings') : null
+    ),
+    patterns.length > 0 ? h('div', { style: { marginBottom: '0.35rem' } },
+      h('div', { style: { fontSize: '0.58rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.15rem' } }, 'Patterns Detected'),
+      patterns.map(function(p, i) {
+        return h('div', { key: 'p' + i, style: { fontSize: '0.65rem', color: '#475569', padding: '0.15rem 0', borderBottom: i < patterns.length - 1 ? '1px solid #fef3c7' : 'none' } },
+          '• ' + p.detail
+        );
+      })
+    ) : null,
+    suggestions.length > 0 ? h('div', { style: { background: '#ffffff', borderRadius: '0.35rem', border: '1px solid ' + colors.border, padding: '0.3rem 0.4rem' } },
+      h('div', { style: { fontSize: '0.58rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.15rem' } }, 'Suggestions'),
+      suggestions.map(function(s, i) {
+        return h('div', { key: 's' + i, style: { display: 'flex', alignItems: 'flex-start', gap: '0.3rem', padding: '0.2rem 0', borderBottom: i < suggestions.length - 1 ? '1px solid #f1f5f9' : 'none' } },
+          h('span', { style: { fontSize: '0.55rem', fontWeight: 700, color: impactColors[s.impact] || '#94a3b8', background: (impactColors[s.impact] || '#94a3b8') + '14', padding: '0.05rem 0.3rem', borderRadius: '0.15rem', flexShrink: 0 } }, s.impact),
+          h('div', { style: { fontSize: '0.65rem', color: '#334155' } }, s.action,
+            s.time_saved_min > 0 ? h('span', { style: { fontSize: '0.55rem', color: '#16a34a', marginLeft: '0.3rem' } }, '(~' + s.time_saved_min + ' min)') : null
+          )
+        );
+      })
+    ) : null,
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
 function renderActionButtons(actions, onAction, draftData) {
   if (!actions || actions.length === 0) return null;
 
@@ -1082,6 +1261,10 @@ function renderCard(card, onAction) {
     case 'BatchDraftCard': return renderBatchDraftCard(card, onAction);
     case 'ApprovalQueueCard': return renderApprovalQueueCard(card, onAction);
     case 'ProbabilityCard': return renderProbabilityCard(card, onAction);
+    case 'RelationshipCard': return renderRelationshipCard(card, onAction);
+    case 'FunnelCard': return renderFunnelCard(card, onAction);
+    case 'PredictionCard': return renderPredictionCard(card, onAction);
+    case 'AutomationCard': return renderAutomationCard(card, onAction);
     default: return null;
   }
 }
@@ -1419,16 +1602,16 @@ function BTRAssistantChat(props) {
         h('div', { style: { fontSize: '1.3rem', marginBottom: '0.4rem', opacity: 0.3, fontWeight: 900, fontFamily: "'Orbitron', sans-serif", background: 'linear-gradient(135deg, #14b8a6, #3b82f6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' } }, 'L'),
         h('div', { style: { fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.25rem', color: '#475569' } }, 'Leo — Operator AI'),
         h('div', { style: { fontSize: '0.68rem', lineHeight: 1.5, marginBottom: '0.5rem', color: '#94a3b8' } },
-          'Your AI operator — strategy, execution, insights'
+          'Ask me anything — strategy, outreach, data, or actions'
         ),
-        h('div', { style: { fontSize: '0.62rem', color: '#94a3b8', marginBottom: '0.5rem' } }, 'Type / for commands or ask anything'),
+        h('div', { style: { fontSize: '0.62rem', color: '#94a3b8', marginBottom: '0.5rem' } }, 'Type / for commands or just ask a question'),
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem' } },
           [
+            'How should I approach my top prospects?',
+            'Who should I follow up with this week?',
+            "What's the best outreach strategy right now?",
             '/queue',
-            '/draft top 5',
-            '/probability',
-            '/sprint',
-            '/plan pipeline optimization'
+            '/draft top 5'
           ].map(function(q) {
             return h('button', {
               key: q,

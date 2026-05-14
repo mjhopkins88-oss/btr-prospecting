@@ -63,6 +63,7 @@ INTENT_KEYWORDS = {
 }
 
 INTENT_TO_MODE = {
+    'normal_chat':      'conversational',
     'brainstorm':       'strategic',
     'diagnose':         'analyst',
     'build_prompt':     'builder',
@@ -80,6 +81,7 @@ INTENT_TO_MODE = {
 }
 
 MODE_MAX_TOKENS = {
+    'conversational': 2000,
     'strategic': 3000,
     'execution': 1500,
     'analyst':   2500,
@@ -102,16 +104,22 @@ def _classify_intent(text):
             '/queue': 'recommend_action', '/approve': 'recommend_action',
             '/probability': 'analyze_company', '/followups': 'recommend_action',
             '/signals': 'analyze_company',
+            '/relationship': 'analyze_company', '/funnel': 'diagnose',
+            '/predict': 'analyze_company', '/automate': 'recommend_action',
         }
         return slash_map.get(cmd, 'recommend_action')
 
-    best_intent = 'brainstorm'
+    best_intent = 'normal_chat'
     best_score = 0
     for intent, keywords in INTENT_KEYWORDS.items():
         score = sum(1 for kw in keywords if kw in text_lower)
         if score > best_score:
             best_score = score
             best_intent = intent
+
+    if best_score < 2:
+        return 'normal_chat'
+
     return best_intent
 
 
@@ -119,115 +127,85 @@ def _classify_intent(text):
 # System prompt — Operator Intelligence
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """You are Leo — the AI operator powering a commercial real estate prospecting platform.
+SYSTEM_PROMPT = """You are Leo — an AI assistant for a commercial real estate prospecting platform.
 
-You are NOT a chatbot. You are the system's brain: strategist, operator, analyst, and optimizer.
-Your name is Leo. Users know you as Leo.
-
-INTERNAL PROCESS (never expose this):
-For every message, silently: classify intent → gather context → select mode → reason → output refined answer.
-Never show chain-of-thought. Only output polished, actionable responses.
+Your name is Leo. You are conversational, sharp, and helpful — like talking to a smart colleague who also has full access to the user's CRM data.
 
 ═══════════════════════════════
-RESPONSE STRUCTURE (every response)
-═══════════════════════════════
-1. Direct answer (1-2 lines — what they need NOW)
-2. Insight (what's really going on beneath the surface)
-3. Recommendation (specific, with names from CRM)
-4. Action options (cards/buttons when executable)
-
-Keep it tight. No walls of text. No filler.
-
-═══════════════════════════════
-RESPONSE MODES (auto-selected)
+HOW TO RESPOND
 ═══════════════════════════════
 
-STRATEGIC — ideas, optimization, product decisions
-→ diagnosis, leverage points, prioritized actions, tradeoffs
-→ Use StrategyCard
+FIRST: Answer the question directly and conversationally. Write like a person, not a system.
+THEN (only if relevant): reference app data, suggest actions, or offer to execute something.
 
-EXECUTION — doing things (logging, drafting, exporting, next actions)
-→ action cards, minimal text, clear buttons
-→ Use DraftCard, TouchpointLogCard, ExportCard, NextActionCard, ConfirmationCard
+For most messages, a clear text answer is the right response. Not everything needs a card or action.
 
-ANALYST — interpreting CRM data, analyzing contacts/companies, diagnosing problems
-→ patterns, inefficiencies, opportunities
-→ Multi-step for "why" questions: check data → identify bottleneck → recommend fix → offer to execute
-→ Use ContactInsightCard, SignalInsightCard, PerformanceInsightCard
+WHEN TO USE PLAIN TEXT (most of the time):
+- strategy questions ("how should I approach…")
+- opinion questions ("what do you think about…")
+- general advice ("best way to structure follow-ups?")
+- clarification ("what does warmth score mean?")
+- business reasoning ("why is my pipeline stuck?")
 
-BUILDER — Claude prompts, system design, workflow architecture
-→ exact prompts, constraints, output format, safety rules
-→ Use ClaudePromptCard
+WHEN TO USE STRUCTURED CARDS (only when needed):
+- executing CRM actions (logging, drafting, exporting)
+- showing ranked data (priorities, opportunities, signals)
+- presenting actionable plans (sprint, execution queue)
+- displaying contact/company analysis with structured fields
 
-COACH — performance, behavior, momentum, recovery
-→ what to do now, how to recover, cadence guidance
-→ Reference Performance dashboard and weekly patterns
-→ Use PerformanceInsightCard or NextActionCard
-
-═══════════════════════════════
-PRODUCT AWARENESS
-═══════════════════════════════
-- SignalStack = timing intelligence (when to act on market signals)
-- Performance = behavior engine (daily execution metrics, streaks, habits)
-- Prospecting = relationship engine (contacts, companies, touchpoints)
-- Command Center = execution layer (this chat, action cards, CRM operations)
-- Leo = this AI operator chat interface
-
-Use these names naturally. They are the product language.
+KNOWLEDGE BOUNDARY:
+Your knowledge comes from: app/CRM data (provided in context below), general business/CRE reasoning, and the conversation.
+If app data is missing or insufficient, say so clearly:
+"I don't have enough data in the app to answer that specifically. Here's what I'd suggest..."
+Then explain what data would help, and offer a next step.
+Never fabricate app-specific facts (contacts, scores, touchpoints, signals).
 
 ═══════════════════════════════
-MULTI-STEP REASONING
+TONE
 ═══════════════════════════════
-For "why" questions (e.g., "why am I not closing deals?"):
-1. Analyze the data (activity volume, follow-up timing, signal utilization)
-2. Identify the bottleneck (low replies? weak follow-ups? bad timing?)
-3. Recommend the fix (specific, with names)
-4. Suggest executable actions
-5. Offer to execute via action cards
-
-For improvement questions (e.g., "how can I improve X?"):
-1. Diagnosis (what's actually happening)
-2. Highest-ROI improvements (ranked by effort vs impact)
-3. Implementation order
-4. Exact Claude prompt for deeper work (if relevant)
-5. Risks / what not to do
+- Conversational and direct. Write like you're talking, not generating a report.
+- Confident but honest about data gaps.
+- Concise by default. Go deeper only when the question warrants it.
+- Use **bold** for emphasis. Use bullet points for lists. Keep paragraphs short.
+- No robotic labels like "DIAGNOSIS:" or "RECOMMENDATION:" — just say it naturally.
 
 ═══════════════════════════════
-PROACTIVE INTELLIGENCE
+RESPONSE MODES (system selects automatically — do not mention modes to the user)
 ═══════════════════════════════
-When context data reveals patterns, surface them with specificity:
-- Under-following high-value contacts → name them, say how long
-- Signals detected but not acted on → cite signal, timing window
-- Activity trending down vs prior week → give % and numbers
-- Contacts going cold that were previously warm → days silent
-- Stage bottlenecks → show ratio
-- Overdue tasks → list top ones
 
-Be the operator who notices what the user missed.
-Weave into answers naturally — not as alerts but as intelligence.
+CONVERSATIONAL — general questions, strategy, advice, opinions
+→ Just answer in plain text. No card needed. Be helpful and specific.
 
-═══════════════════════════════
-SIGNAL INTELLIGENCE
-═══════════════════════════════
-When referencing signals, always include:
-1. Why it matters (what's the opportunity)
-2. Timing window (how long before advantage expires)
-3. Recommended action (specific next step)
+STRATEGIC — deep strategy questions, optimization, planning
+→ Full answer in text. Use **bold** and bullets. StrategyCard optional for complex plans.
 
-Example:
-"This signal matters because [company] just deployed $50M in Q4 —
-they're likely raising again. Timing window: ~2-3 weeks before
-they finalize allocations. Reach out NOW with a deal angle."
+EXECUTION — CRM actions (logging, drafting, exporting)
+→ Use action cards: DraftCard, NextActionCard, ExportCard, etc.
+
+ANALYST — data analysis, contact/company deep-dives, diagnosing problems
+→ Reference specific data from context. Use insight cards when showing structured data.
+
+COACH — performance review, momentum, habits
+→ Reference activity metrics. Encourage but be specific.
 
 ═══════════════════════════════
-DAILY PLAN AWARENESS
+PRODUCT NAMES (use naturally)
 ═══════════════════════════════
-The system generates daily plans and sprint tasks.
-When user asks for priorities, reference specific plan items.
-When user completes actions, acknowledge progress toward daily goals.
+- SignalStack = market signal intelligence
+- Performance = activity metrics & streaks
+- Prospecting = contacts, companies, touchpoints
+- Leo = this AI assistant
 
 ═══════════════════════════════
-CARD TYPES
+WHEN REFERENCING APP DATA
+═══════════════════════════════
+- Be specific: "Call Ethan Park about the Q3 allocation" not "Follow up with contacts."
+- If data reveals something the user missed, mention it naturally — don't create alert sections.
+- For signals: explain why it matters, the timing window, and the recommended action.
+- For "why" questions: check the data, identify the bottleneck, recommend a fix, then offer to help execute.
+
+═══════════════════════════════
+CARD TYPES (use only when structured output is genuinely needed)
 ═══════════════════════════════
 
 TextCard: data: {}
@@ -256,21 +234,23 @@ QueueCard: data: {"items":[{"rank":N,"action":"...","target":"...","reason":"...
 BatchDraftCard: data: {"drafts":[{"rank":N,"target":"...","contact_name":"...","channel":"email","subject":"...","body":"...","signal_ref":"...","probability":{"score":N,"label":"...","reason":"..."},"status":"pending"}],"count":N}
 ApprovalQueueCard: data: {"items":[{"id":"...","action":"...","target":"...","status":"pending|approved|skipped","probability":{"score":N,"label":"..."},"priority_score":N}],"count":N}
 ProbabilityCard: data: {"company":"...","company_id":"...","score":N,"label":"High|Medium|Low","reason":"...","stage":"...","warmth":N}
+RelationshipCard: data: {"company":"...","company_id":"...","relationship_score":N,"label":"hot|warm|cooling|cold","communication_style":{"preferred_channel":"...","channel_breakdown":{}},"responsiveness":{"label":"...","avg_days":N},"factors":["..."]}
+FunnelCard: data: {"funnel":[{"stage":"...","count":N}],"rates":{"outreach_to_reply":N,"reply_to_meeting":N,"overall_conversion":N},"bottlenecks":[{"stage":"...","rate":N,"severity":"high|medium|low","suggestion":"..."}]}
+PredictionCard: data: {"company":"...","reply_likelihood":{"score":N,"label":"High|Medium|Low","factors":["..."]},"meeting_likelihood":{"score":N,"label":"High|Medium|Low","factors":["..."]},"recommended_channel":"..."}
+AutomationCard: data: {"patterns":[{"type":"...","detail":"...","frequency":N}],"suggestions":[{"action":"...","impact":"high|medium|low","time_saved_min":N}],"time_savings_est":N}
 
 ═══════════════════════════════
 RULES
 ═══════════════════════════════
-1. Return a <card>JSON</card> block when possible. You MAY also include plain text before or after the card.
-2. If you cannot format a card, respond with a direct text answer. NEVER leave the response empty.
-3. Use REAL data from context. Never fabricate.
-3. If data is missing: say exactly what's missing, suggest how to fix it.
-4. Be specific: "Call Ethan Park about the Q3 allocation" not "Follow up with contacts."
-5. Never pretend an action was completed. Only offer executable actions.
-6. For strategic: full answer in "text". Multiple paragraphs OK. Use **bold** and bullet points.
-7. Tone: direct, sharp, operator-focused. No fluff. Confident but evidence-based.
-8. Don't repeat prior chat ideas unless improving them.
-9. If user asks about app features, reference product names (SignalStack, Performance, etc.).
-10. Proactively suggest next moves.
+1. ALWAYS respond with a real answer. Never return empty or just "I processed your request."
+2. For conversational questions: respond in plain text. No card needed. Just answer well.
+3. For action requests: return a <card>JSON</card> block. You may include text before/after it.
+4. Use REAL data from context. Never fabricate app-specific facts.
+5. If data is missing: say what's missing, suggest how to get it.
+6. Never pretend an action was completed. Only offer executable actions.
+7. Don't repeat prior chat ideas unless improving them.
+8. At the end of a text answer, you may offer follow-up actions naturally:
+   "Want me to draft that email?" or "I can pull the full analysis if you want."
 
 ═══════════════════════════════
 SLASH COMMANDS
@@ -290,7 +270,11 @@ SLASH COMMANDS
 /approve all — Execute all pending approvals
 /probability [company] — Deal probability score
 /followups — Pending follow-ups
-/signals — Recent signal intelligence"""
+/signals — Recent signal intelligence
+/relationship [company] — Relationship intelligence analysis
+/funnel — Conversion funnel diagnosis
+/predict [company] — Reply & meeting likelihood prediction
+/automate — Detect automation opportunities"""
 
 
 # ---------------------------------------------------------------------------
@@ -954,6 +938,658 @@ def _generate_sprint_tasks(count=5):
 _approval_queue = {}
 
 
+# ---------------------------------------------------------------------------
+# Part 7: Relationship Intelligence
+# ---------------------------------------------------------------------------
+
+def _relationship_intelligence(group):
+    """
+    Analyze communication style, responsiveness, and relationship health for a group.
+    Returns: { relationship_score, label, communication_style, responsiveness, factors }
+    """
+    gid = group['id']
+    score = 0.0
+    factors = []
+
+    # Touchpoint history
+    try:
+        touchpoints = fetch_all(
+            """SELECT channel, direction, occurred_at, summary
+               FROM prospecting_touchpoints WHERE group_id = ?
+               ORDER BY occurred_at DESC LIMIT 30""",
+            [gid]
+        )
+    except Exception:
+        touchpoints = []
+
+    # Communication style detection
+    channel_counts = {}
+    inbound_count = 0
+    outbound_count = 0
+    for tp in touchpoints:
+        ch = tp.get('channel', 'note')
+        channel_counts[ch] = channel_counts.get(ch, 0) + 1
+        if tp.get('direction') == 'inbound':
+            inbound_count += 1
+        else:
+            outbound_count += 1
+
+    preferred_channel = max(channel_counts, key=channel_counts.get) if channel_counts else 'email'
+    comm_style = {
+        'preferred_channel': preferred_channel,
+        'channel_breakdown': channel_counts,
+        'inbound_ratio': round(inbound_count / max(inbound_count + outbound_count, 1), 2),
+    }
+
+    # Responsiveness pattern — time gaps between outbound → inbound
+    response_gaps = []
+    sorted_tps = sorted(touchpoints, key=lambda t: t.get('occurred_at', ''))
+    last_outbound_at = None
+    for tp in sorted_tps:
+        if tp.get('direction') == 'outbound':
+            last_outbound_at = tp.get('occurred_at')
+        elif tp.get('direction') == 'inbound' and last_outbound_at:
+            gap = _days_since(last_outbound_at) - _days_since(tp.get('occurred_at'))
+            if 0 <= gap <= 30:
+                response_gaps.append(gap)
+            last_outbound_at = None
+
+    avg_response_days = round(sum(response_gaps) / len(response_gaps), 1) if response_gaps else None
+    if avg_response_days is not None:
+        if avg_response_days <= 1:
+            responsiveness = 'very_responsive'
+            score += 25
+            factors.append(f'Avg response: {avg_response_days}d — very responsive')
+        elif avg_response_days <= 3:
+            responsiveness = 'responsive'
+            score += 18
+            factors.append(f'Avg response: {avg_response_days}d — responsive')
+        elif avg_response_days <= 7:
+            responsiveness = 'moderate'
+            score += 10
+            factors.append(f'Avg response: {avg_response_days}d — moderate')
+        else:
+            responsiveness = 'slow'
+            score += 4
+            factors.append(f'Avg response: {avg_response_days}d — slow responder')
+    else:
+        responsiveness = 'unknown'
+        score += 5
+
+    resp_pattern = {
+        'label': responsiveness,
+        'avg_days': avg_response_days,
+        'sample_size': len(response_gaps),
+    }
+
+    # Engagement depth (0-25)
+    tp_count = len(touchpoints)
+    if tp_count >= 15:
+        score += 25
+        factors.append(f'{tp_count} touchpoints — deep relationship')
+    elif tp_count >= 8:
+        score += 18
+        factors.append(f'{tp_count} touchpoints — established')
+    elif tp_count >= 3:
+        score += 10
+        factors.append(f'{tp_count} touchpoints — developing')
+    elif tp_count >= 1:
+        score += 5
+        factors.append(f'{tp_count} touchpoints — early')
+    else:
+        factors.append('No touchpoints yet')
+
+    # Recency (0-25)
+    days_silent = _days_since(group.get('last_contacted_at'))
+    if days_silent <= 3:
+        score += 25
+        factors.append('Recently engaged (last 3d)')
+    elif days_silent <= 7:
+        score += 20
+    elif days_silent <= 14:
+        score += 12
+    elif days_silent <= 30:
+        score += 6
+        factors.append(f'{days_silent}d since last contact — cooling')
+    else:
+        factors.append(f'{days_silent}d silent — relationship at risk')
+
+    # Warmth proxy (0-15)
+    warmth = group.get('warmth_score') or 0
+    score += min(warmth / 10.0, 1.0) * 15
+
+    # Two-way engagement bonus (0-10)
+    if inbound_count >= 2 and outbound_count >= 2:
+        score += 10
+        factors.append('Two-way engagement')
+    elif inbound_count >= 1:
+        score += 5
+
+    score = round(min(score, 100), 1)
+
+    if score >= 75:
+        label = 'hot'
+    elif score >= 50:
+        label = 'warm'
+    elif score >= 25:
+        label = 'cooling'
+    else:
+        label = 'cold'
+
+    return {
+        'relationship_score': score,
+        'label': label,
+        'communication_style': comm_style,
+        'responsiveness': resp_pattern,
+        'touchpoint_count': tp_count,
+        'days_silent': days_silent,
+        'factors': factors[:5],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Part 8: Conversion Diagnosis — funnel analysis
+# ---------------------------------------------------------------------------
+
+def _conversion_diagnosis():
+    """
+    Analyze the conversion funnel: touchpoints → replies → meetings → deals.
+    Identifies bottlenecks where conversion drops.
+    """
+    try:
+        total_groups = fetch_one("SELECT COUNT(*) as cnt FROM capital_groups")
+        total_count = total_groups['cnt'] if total_groups else 0
+    except Exception:
+        total_count = 0
+
+    stages = {}
+    try:
+        rows = fetch_all(
+            """SELECT relationship_status, COUNT(*) as cnt
+               FROM capital_groups
+               WHERE relationship_status IS NOT NULL
+               GROUP BY relationship_status""", []
+        )
+        for r in rows:
+            stages[r['relationship_status'].lower()] = r['cnt']
+    except Exception:
+        pass
+
+    # Build funnel stages
+    funnel_order = ['new', 'contacted', 'qualified', 'warm', 'active', 'engaged', 'closing', 'closed']
+    funnel = []
+    for stage in funnel_order:
+        count = stages.get(stage, 0)
+        funnel.append({'stage': stage, 'count': count})
+
+    # Touchpoint stats
+    try:
+        total_tps = fetch_one("SELECT COUNT(*) as cnt FROM prospecting_touchpoints")
+        tp_count = total_tps['cnt'] if total_tps else 0
+    except Exception:
+        tp_count = 0
+
+    try:
+        inbound_tps = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE direction = 'inbound'"
+        )
+        inbound_count = inbound_tps['cnt'] if inbound_tps else 0
+    except Exception:
+        inbound_count = 0
+
+    try:
+        meeting_tps = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE channel = 'meeting'"
+        )
+        meeting_count = meeting_tps['cnt'] if meeting_tps else 0
+    except Exception:
+        meeting_count = 0
+
+    # Conversion rates
+    outreach_count = stages.get('contacted', 0) + stages.get('qualified', 0) + stages.get('warm', 0) + stages.get('active', 0) + stages.get('engaged', 0) + stages.get('closing', 0) + stages.get('closed', 0)
+    reply_rate = round(inbound_count / max(tp_count, 1) * 100, 1)
+    meeting_rate = round(meeting_count / max(tp_count, 1) * 100, 1)
+
+    engaged_plus = stages.get('engaged', 0) + stages.get('closing', 0) + stages.get('closed', 0)
+    deal_rate = round(engaged_plus / max(total_count, 1) * 100, 1)
+
+    rates = {
+        'outreach_to_reply': reply_rate,
+        'reply_to_meeting': meeting_rate,
+        'overall_conversion': deal_rate,
+    }
+
+    # Bottleneck detection
+    bottlenecks = []
+    if reply_rate < 15 and tp_count > 10:
+        bottlenecks.append({
+            'stage': 'outreach → reply',
+            'rate': reply_rate,
+            'severity': 'high',
+            'suggestion': 'Low reply rate — improve subject lines, personalization, or channel mix',
+        })
+    if meeting_rate < 5 and inbound_count > 5:
+        bottlenecks.append({
+            'stage': 'reply → meeting',
+            'rate': meeting_rate,
+            'severity': 'medium',
+            'suggestion': 'Replies not converting to meetings — add clearer CTAs and propose specific times',
+        })
+
+    # Stage bottleneck — where are deals piling up?
+    if total_count > 5:
+        for stage_name, count in stages.items():
+            pct = count / max(total_count, 1) * 100
+            if pct > 40 and stage_name not in ('closed', 'lost', 'dormant', 'dead'):
+                bottlenecks.append({
+                    'stage': stage_name,
+                    'rate': round(pct, 1),
+                    'severity': 'high' if pct > 55 else 'medium',
+                    'suggestion': f'{round(pct)}% stuck at {stage_name} — need targeted push-forward actions',
+                })
+
+    if not bottlenecks and total_count > 0:
+        bottlenecks.append({
+            'stage': 'none',
+            'rate': 0,
+            'severity': 'low',
+            'suggestion': 'No major bottlenecks detected — pipeline flowing well',
+        })
+
+    return {
+        'funnel': funnel,
+        'total_groups': total_count,
+        'total_touchpoints': tp_count,
+        'inbound_replies': inbound_count,
+        'meetings': meeting_count,
+        'rates': rates,
+        'bottlenecks': bottlenecks,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Part 9: Message Intelligence — draft quality scoring
+# ---------------------------------------------------------------------------
+
+def _score_draft_quality(subject, body, contact_name=None, signal_ref=None):
+    """
+    Score a draft message on clarity, specificity, and personalization (0-100).
+    Returns: { score, label, breakdown, suggestions }
+    """
+    suggestions = []
+    clarity = 0
+    specificity = 0
+    personalization = 0
+
+    body_lower = (body or '').lower()
+    subject_lower = (subject or '').lower()
+    word_count = len(body.split()) if body else 0
+
+    # Clarity (0-35): sentence structure, length, readability
+    if word_count >= 30 and word_count <= 150:
+        clarity += 25
+    elif word_count >= 15 and word_count <= 200:
+        clarity += 18
+    elif word_count < 15:
+        clarity += 8
+        suggestions.append('Message is very short — add more context or value proposition')
+    else:
+        clarity += 12
+        suggestions.append('Message is long — tighten to under 150 words for better response rates')
+
+    if subject and len(subject) >= 5 and len(subject) <= 60:
+        clarity += 10
+    elif not subject:
+        suggestions.append('Add a subject line')
+    elif len(subject) > 60:
+        clarity += 5
+        suggestions.append('Subject line too long — keep under 60 characters')
+
+    # Specificity (0-35): references to concrete data, company, role, timing
+    specific_markers = ['q1', 'q2', 'q3', 'q4', 'million', 'billion', 'fund', 'portfolio',
+                        'allocation', 'strategy', 'property', 'market', 'deal', 'project',
+                        'closing', 'timeline', 'sector', 'multifamily', 'industrial', 'office',
+                        'retail', 'capital', 'equity', 'debt']
+    specificity_hits = sum(1 for m in specific_markers if m in body_lower)
+    specificity += min(specificity_hits * 5, 20)
+
+    if signal_ref and signal_ref.lower() in body_lower:
+        specificity += 10
+        # Good — references a real signal
+    elif signal_ref:
+        specificity += 3
+        suggestions.append(f'Reference the signal "{signal_ref[:40]}" directly for higher relevance')
+
+    has_cta = any(phrase in body_lower for phrase in ['would you', 'could we', 'let me know',
+                  'time to connect', '15 minutes', 'schedule', 'quick call', 'available'])
+    if has_cta:
+        specificity += 5
+    else:
+        suggestions.append('Add a clear CTA — propose a specific next step')
+
+    # Personalization (0-30)
+    if contact_name:
+        first_name = contact_name.split()[0] if contact_name else ''
+        if first_name.lower() in body_lower:
+            personalization += 10
+        else:
+            suggestions.append(f'Use {first_name}\'s name in the message')
+
+    # Check for generic vs personalized opener
+    generic_openers = ['i hope this finds you', 'i wanted to reach out', 'to whom it may concern',
+                       'dear sir', 'dear madam', 'hello there']
+    has_generic = any(g in body_lower for g in generic_openers)
+    if has_generic:
+        personalization += 2
+        suggestions.append('Replace generic opener with a personalized hook')
+    elif word_count > 10:
+        personalization += 12
+
+    # Company/role reference
+    role_markers = ['your team', 'your fund', 'your portfolio', 'your firm', 'your work',
+                    'your experience', 'your focus']
+    if any(r in body_lower for r in role_markers):
+        personalization += 8
+
+    total = clarity + specificity + personalization
+    total = min(total, 100)
+
+    if total >= 75:
+        label = 'Strong'
+    elif total >= 50:
+        label = 'Decent'
+    elif total >= 25:
+        label = 'Needs Work'
+    else:
+        label = 'Weak'
+
+    return {
+        'score': total,
+        'label': label,
+        'breakdown': {
+            'clarity': clarity,
+            'specificity': specificity,
+            'personalization': personalization,
+        },
+        'suggestions': suggestions[:4],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Part 14: Prediction Engine — reply & meeting likelihood
+# ---------------------------------------------------------------------------
+
+def _predict_outcomes(group):
+    """
+    Predict reply likelihood and meeting likelihood for a group.
+    Based on: communication history, responsiveness, warmth, stage, signals.
+    """
+    gid = group['id']
+
+    # Get relationship intelligence
+    rel = _relationship_intelligence(group)
+
+    # Reply likelihood (0-100)
+    reply_score = 0.0
+    reply_factors = []
+
+    # Responsiveness history
+    resp = rel['responsiveness']
+    if resp['label'] == 'very_responsive':
+        reply_score += 35
+        reply_factors.append('Historically very responsive')
+    elif resp['label'] == 'responsive':
+        reply_score += 25
+        reply_factors.append('Good response history')
+    elif resp['label'] == 'moderate':
+        reply_score += 15
+        reply_factors.append('Moderate responsiveness')
+    elif resp['label'] == 'slow':
+        reply_score += 5
+        reply_factors.append('Slow to respond historically')
+    else:
+        reply_score += 10
+
+    # Relationship warmth
+    warmth = group.get('warmth_score') or 0
+    reply_score += min(warmth / 10.0, 1.0) * 25
+    if warmth >= 7:
+        reply_factors.append(f'High warmth ({warmth}/10)')
+
+    # Recency
+    days_silent = _days_since(group.get('last_contacted_at'))
+    if days_silent <= 7:
+        reply_score += 20
+        reply_factors.append('Recently engaged')
+    elif days_silent <= 14:
+        reply_score += 12
+    elif days_silent <= 30:
+        reply_score += 5
+    else:
+        reply_factors.append(f'{days_silent}d silent — attention may have moved on')
+
+    # Fresh signal boost
+    try:
+        sig = fetch_one(
+            "SELECT detected_at, importance FROM prospecting_signals WHERE group_id = ? ORDER BY detected_at DESC LIMIT 1",
+            [gid]
+        )
+    except Exception:
+        sig = None
+    if sig and _days_since(sig.get('detected_at')) <= 7:
+        reply_score += 15
+        reply_factors.append('Fresh signal — timely outreach window')
+    elif sig and _days_since(sig.get('detected_at')) <= 14:
+        reply_score += 8
+
+    # Two-way engagement
+    if rel['communication_style']['inbound_ratio'] > 0.3:
+        reply_score += 5
+        reply_factors.append('Active two-way communication')
+
+    reply_score = round(min(reply_score, 100), 1)
+
+    # Meeting likelihood (0-100): derived from reply score + stage advancement signals
+    meeting_score = reply_score * 0.5
+    meeting_factors = []
+
+    stage = (group.get('relationship_status') or '').lower()
+    stage_meeting_boost = {
+        'closing': 30, 'engaged': 25, 'active': 18, 'warm': 10,
+        'qualified': 5, 'contacted': 2,
+    }
+    boost = stage_meeting_boost.get(stage, 0)
+    meeting_score += boost
+    if boost >= 15:
+        meeting_factors.append(f'{stage} stage — high meeting likelihood')
+
+    # Multi-touchpoint relationship → higher meeting odds
+    if rel['touchpoint_count'] >= 5:
+        meeting_score += 15
+        meeting_factors.append(f'{rel["touchpoint_count"]} prior touchpoints')
+    elif rel['touchpoint_count'] >= 2:
+        meeting_score += 8
+
+    # Inbound signals → they're interested
+    if rel['communication_style']['inbound_ratio'] > 0.4:
+        meeting_score += 10
+        meeting_factors.append('Strong inbound engagement')
+
+    meeting_score = round(min(meeting_score, 100), 1)
+
+    reply_label = 'High' if reply_score >= 65 else ('Medium' if reply_score >= 35 else 'Low')
+    meeting_label = 'High' if meeting_score >= 65 else ('Medium' if meeting_score >= 35 else 'Low')
+
+    return {
+        'reply_likelihood': {
+            'score': reply_score,
+            'label': reply_label,
+            'factors': reply_factors[:4],
+        },
+        'meeting_likelihood': {
+            'score': meeting_score,
+            'label': meeting_label,
+            'factors': meeting_factors[:4],
+        },
+        'relationship': {
+            'score': rel['relationship_score'],
+            'label': rel['label'],
+        },
+        'recommended_channel': rel['communication_style']['preferred_channel'],
+        'best_timing': 'morning' if days_silent > 7 else 'anytime',
+    }
+
+
+# ---------------------------------------------------------------------------
+# Part 15: Automation Detection — repetitive pattern identification
+# ---------------------------------------------------------------------------
+
+def _detect_automation_opportunities():
+    """
+    Scan user activity for repetitive patterns that could be batched or automated.
+    Returns: { patterns, suggestions, time_savings_est }
+    """
+    patterns = []
+    suggestions = []
+    time_saved_min = 0
+
+    # 1. Repetitive channel usage — same channel repeatedly
+    try:
+        channel_dist = fetch_all(
+            """SELECT channel, COUNT(*) as cnt
+               FROM prospecting_touchpoints
+               WHERE occurred_at > ?
+               GROUP BY channel ORDER BY cnt DESC""",
+            [(datetime.utcnow() - timedelta(days=14)).isoformat()]
+        )
+        if channel_dist:
+            total_recent = sum(c['cnt'] for c in channel_dist)
+            top_channel = channel_dist[0]
+            if total_recent > 5 and top_channel['cnt'] / total_recent > 0.7:
+                patterns.append({
+                    'type': 'channel_concentration',
+                    'detail': f"{round(top_channel['cnt'] / total_recent * 100)}% of outreach via {top_channel['channel']}",
+                    'frequency': top_channel['cnt'],
+                })
+                suggestions.append({
+                    'action': f"Batch your {top_channel['channel']} outreach — draft all at once",
+                    'impact': 'medium',
+                    'time_saved_min': top_channel['cnt'] * 2,
+                })
+                time_saved_min += top_channel['cnt'] * 2
+    except Exception:
+        pass
+
+    # 2. Daily follow-up patterns — check if user does follow-ups same time daily
+    try:
+        pending_tasks = fetch_all(
+            """SELECT COUNT(*) as cnt FROM prospecting_tasks
+               WHERE status = 'pending' AND type = 'follow_up'""", []
+        )
+        fu_count = pending_tasks[0]['cnt'] if pending_tasks else 0
+        if fu_count >= 5:
+            patterns.append({
+                'type': 'follow_up_backlog',
+                'detail': f'{fu_count} pending follow-ups — consider batch processing',
+                'frequency': fu_count,
+            })
+            suggestions.append({
+                'action': f'Use /draft top {min(fu_count, 5)} to batch draft all pending follow-ups',
+                'impact': 'high',
+                'time_saved_min': fu_count * 5,
+            })
+            time_saved_min += fu_count * 5
+    except Exception:
+        pass
+
+    # 3. Contacts getting same type of outreach — template opportunity
+    try:
+        recent_drafts = fetch_all(
+            """SELECT summary, channel FROM prospecting_touchpoints
+               WHERE occurred_at > ? AND direction = 'outbound'
+               ORDER BY occurred_at DESC LIMIT 20""",
+            [(datetime.utcnow() - timedelta(days=14)).isoformat()]
+        )
+        if len(recent_drafts) >= 5:
+            patterns.append({
+                'type': 'outreach_volume',
+                'detail': f'{len(recent_drafts)} outbound touches in 14 days',
+                'frequency': len(recent_drafts),
+            })
+            if len(recent_drafts) >= 10:
+                suggestions.append({
+                    'action': 'Create outreach templates for your most common message types',
+                    'impact': 'high',
+                    'time_saved_min': 30,
+                })
+                time_saved_min += 30
+    except Exception:
+        pass
+
+    # 4. Stage stagnation — groups sitting too long at same stage
+    try:
+        stale = fetch_all(
+            """SELECT relationship_status, COUNT(*) as cnt
+               FROM capital_groups
+               WHERE last_contacted_at < ?
+                 AND relationship_status NOT IN ('dormant', 'lost', 'dead', 'cold', 'closed')
+               GROUP BY relationship_status""",
+            [(datetime.utcnow() - timedelta(days=21)).isoformat()]
+        )
+        total_stale = sum(s['cnt'] for s in stale) if stale else 0
+        if total_stale >= 3:
+            patterns.append({
+                'type': 'stage_stagnation',
+                'detail': f'{total_stale} groups stale 21+ days — need batch re-engagement',
+                'frequency': total_stale,
+            })
+            suggestions.append({
+                'action': f'Batch re-engage {total_stale} stale contacts — /queue for prioritized list',
+                'impact': 'high',
+                'time_saved_min': total_stale * 5,
+            })
+            time_saved_min += total_stale * 5
+    except Exception:
+        pass
+
+    # 5. Signal response patterns
+    try:
+        week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        sig_total = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_signals WHERE detected_at > ?",
+            [week_ago]
+        )
+        sig_count = sig_total['cnt'] if sig_total else 0
+        if sig_count >= 5:
+            patterns.append({
+                'type': 'signal_volume',
+                'detail': f'{sig_count} signals this week — batch review recommended',
+                'frequency': sig_count,
+            })
+            suggestions.append({
+                'action': 'Review signals in batch — /signals shows all, /queue ranks actions',
+                'impact': 'medium',
+                'time_saved_min': sig_count * 3,
+            })
+            time_saved_min += sig_count * 3
+    except Exception:
+        pass
+
+    if not suggestions:
+        suggestions.append({
+            'action': 'No major automation opportunities detected — keep up the good work',
+            'impact': 'low',
+            'time_saved_min': 0,
+        })
+
+    return {
+        'patterns': patterns[:5],
+        'suggestions': suggestions[:5],
+        'time_savings_est': time_saved_min,
+        'pattern_count': len(patterns),
+    }
+
+
 def _generate_execution_queue(limit=10):
     """
     Build a prioritized execution queue: top actions ranked by deal probability,
@@ -1444,8 +2080,8 @@ def _get_interaction_patterns():
 # Context builder — full CRM state + insights + patterns
 # ---------------------------------------------------------------------------
 
-def _build_context(extra_context=None, include_history=True):
-    """Gather current app state including CRM data, performance, insights, and patterns."""
+def _build_context(extra_context=None, include_history=True, lightweight=False):
+    """Gather current app state. lightweight=True skips heavy analytics for conversational mode."""
     ctx_parts = []
 
     # Capital groups
@@ -1585,82 +2221,81 @@ def _build_context(extra_context=None, include_history=True):
                 line += f" priority={t['priority']}"
             ctx_parts.append(line)
 
-    # Performance metrics
-    today = datetime.utcnow().strftime('%Y-%m-%d')
-    week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
-    two_weeks = (datetime.utcnow() - timedelta(days=14)).isoformat()
-
-    tp_today = fetch_one(
-        "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE DATE(occurred_at) = ?",
-        [today]
-    )
-    tp_week = fetch_one(
-        "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE occurred_at > ?",
-        [week_ago]
-    )
-    tp_last_week = fetch_one(
-        "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE occurred_at > ? AND occurred_at < ?",
-        [two_weeks, week_ago]
-    )
-    total_contacts = fetch_one("SELECT COUNT(*) as cnt FROM prospecting_contacts")
-    total_groups = fetch_one("SELECT COUNT(*) as cnt FROM capital_groups")
-    total_signals = fetch_one(
-        "SELECT COUNT(*) as cnt FROM prospecting_signals WHERE detected_at > ?",
-        [week_ago]
-    )
-    tasks_completed = fetch_one(
-        "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE status = 'completed' AND completed_at > ?",
-        [week_ago]
-    )
-    tasks_pending = fetch_one(
-        "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE status = 'pending'"
-    )
-    overdue_tasks = fetch_all(
-        """SELECT t.title, t.due_at, g.name as group_name
-           FROM prospecting_tasks t
-           LEFT JOIN capital_groups g ON t.capital_group_id = g.id
-           WHERE t.status = 'pending' AND t.due_at < ?
-           ORDER BY t.due_at ASC LIMIT 5""",
-        [today]
-    )
-
-    tw = tp_week['cnt'] if tp_week else 0
-    lw = tp_last_week['cnt'] if tp_last_week else 0
-    trend = 'flat'
-    if lw > 0:
-        if tw > lw * 1.15:
-            trend = 'up'
-        elif tw < lw * 0.85:
-            trend = 'down'
-
-    ctx_parts.append(f"\nPERFORMANCE (Performance dashboard):")
-    ctx_parts.append(f"  Total: {total_contacts['cnt'] if total_contacts else 0} contacts, "
-                     f"{total_groups['cnt'] if total_groups else 0} capital groups")
-    ctx_parts.append(f"  Today: {tp_today['cnt'] if tp_today else 0} touchpoints")
-    ctx_parts.append(f"  This week: {tw} touchpoints (last week: {lw}, trend: {trend})")
-    ctx_parts.append(f"  Signals this week: {total_signals['cnt'] if total_signals else 0} (SignalStack)")
-    ctx_parts.append(f"  Tasks: {tasks_completed['cnt'] if tasks_completed else 0} completed, "
-                     f"{tasks_pending['cnt'] if tasks_pending else 0} pending")
-    if overdue_tasks:
-        ctx_parts.append(f"  OVERDUE ({len(overdue_tasks)}):")
-        for ot in overdue_tasks:
-            ctx_parts.append(f"    - {ot['title']}"
-                             f"{' (' + ot['group_name'] + ')' if ot.get('group_name') else ''}"
-                             f" due={str(ot['due_at'])[:10]}")
-
     ctx_parts.append(f"\nTODAY: {datetime.utcnow().strftime('%A, %B %d, %Y')}")
 
-    # Proactive insights (data-driven)
-    insights = _generate_proactive_insights()
-    if insights:
-        ctx_parts.append("\nSYSTEM INSIGHTS (computed from your data):")
-        for ins in insights:
-            ctx_parts.append(f"  ⚠ {ins}")
+    # Heavy analytics — skip for conversational mode to keep context lean
+    if not lightweight:
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        two_weeks = (datetime.utcnow() - timedelta(days=14)).isoformat()
 
-    # Interaction patterns (self-improvement)
-    patterns = _get_interaction_patterns()
-    if patterns:
-        ctx_parts.append(f"\n{patterns}")
+        tp_today = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE DATE(occurred_at) = ?",
+            [today]
+        )
+        tp_week = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE occurred_at > ?",
+            [week_ago]
+        )
+        tp_last_week = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE occurred_at > ? AND occurred_at < ?",
+            [two_weeks, week_ago]
+        )
+        total_contacts = fetch_one("SELECT COUNT(*) as cnt FROM prospecting_contacts")
+        total_groups = fetch_one("SELECT COUNT(*) as cnt FROM capital_groups")
+        total_signals = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_signals WHERE detected_at > ?",
+            [week_ago]
+        )
+        tasks_completed = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE status = 'completed' AND completed_at > ?",
+            [week_ago]
+        )
+        tasks_pending = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE status = 'pending'"
+        )
+        overdue_tasks = fetch_all(
+            """SELECT t.title, t.due_at, g.name as group_name
+               FROM prospecting_tasks t
+               LEFT JOIN capital_groups g ON t.capital_group_id = g.id
+               WHERE t.status = 'pending' AND t.due_at < ?
+               ORDER BY t.due_at ASC LIMIT 5""",
+            [today]
+        )
+
+        tw = tp_week['cnt'] if tp_week else 0
+        lw = tp_last_week['cnt'] if tp_last_week else 0
+        trend = 'flat'
+        if lw > 0:
+            if tw > lw * 1.15:
+                trend = 'up'
+            elif tw < lw * 0.85:
+                trend = 'down'
+
+        ctx_parts.append(f"\nPERFORMANCE:")
+        ctx_parts.append(f"  Total: {total_contacts['cnt'] if total_contacts else 0} contacts, "
+                         f"{total_groups['cnt'] if total_groups else 0} capital groups")
+        ctx_parts.append(f"  Today: {tp_today['cnt'] if tp_today else 0} touchpoints")
+        ctx_parts.append(f"  This week: {tw} touchpoints (last week: {lw}, trend: {trend})")
+        ctx_parts.append(f"  Signals this week: {total_signals['cnt'] if total_signals else 0}")
+        ctx_parts.append(f"  Tasks: {tasks_completed['cnt'] if tasks_completed else 0} completed, "
+                         f"{tasks_pending['cnt'] if tasks_pending else 0} pending")
+        if overdue_tasks:
+            ctx_parts.append(f"  OVERDUE ({len(overdue_tasks)}):")
+            for ot in overdue_tasks:
+                ctx_parts.append(f"    - {ot['title']}"
+                                 f"{' (' + ot['group_name'] + ')' if ot.get('group_name') else ''}"
+                                 f" due={str(ot['due_at'])[:10]}")
+
+        insights = _generate_proactive_insights()
+        if insights:
+            ctx_parts.append("\nSYSTEM INSIGHTS:")
+            for ins in insights:
+                ctx_parts.append(f"  - {ins}")
+
+        patterns = _get_interaction_patterns()
+        if patterns:
+            ctx_parts.append(f"\n{patterns}")
 
     # Chat history (session memory)
     if include_history:
@@ -2198,6 +2833,22 @@ def _preprocess_slash(text):
             pass
         return "Show recent signals from SignalStack. Use a SignalInsightCard.", extra_ctx
 
+    if cmd == '/relationship':
+        if arg:
+            return f'__v7_relationship__{arg}', extra_ctx
+        return "Which company should I analyze? Use /relationship [company name].", extra_ctx
+
+    if cmd == '/funnel':
+        return '__v7_funnel__', extra_ctx
+
+    if cmd == '/predict':
+        if arg:
+            return f'__v7_predict__{arg}', extra_ctx
+        return "Which company should I predict outcomes for? Use /predict [company name].", extra_ctx
+
+    if cmd == '/automate':
+        return '__v7_automate__', extra_ctx
+
     if cmd == '/draft' and arg:
         m = re.match(r'^top\s+(\d+)', arg.strip(), re.IGNORECASE)
         if m:
@@ -2557,6 +3208,80 @@ def get_probability(company_query):
 
 
 # ---------------------------------------------------------------------------
+# API: V7 — Relationship Intelligence
+# ---------------------------------------------------------------------------
+
+@assistant_bp.route('/relationship/<company_query>', methods=['GET'])
+def get_relationship(company_query):
+    """Return relationship intelligence for a company."""
+    group = _find_group(company_query)
+    if not group:
+        return jsonify({'error': f'No company found matching "{company_query}"'}), 404
+    rel = _relationship_intelligence(group)
+    return jsonify({
+        'company': group['name'],
+        'company_id': group['id'],
+        'relationship': rel,
+    })
+
+
+# ---------------------------------------------------------------------------
+# API: V7 — Conversion Funnel
+# ---------------------------------------------------------------------------
+
+@assistant_bp.route('/funnel', methods=['GET'])
+def get_funnel():
+    """Return conversion funnel diagnosis."""
+    diag = _conversion_diagnosis()
+    return jsonify(diag)
+
+
+# ---------------------------------------------------------------------------
+# API: V7 — Prediction Engine
+# ---------------------------------------------------------------------------
+
+@assistant_bp.route('/predict/<company_query>', methods=['GET'])
+def get_prediction(company_query):
+    """Return reply and meeting likelihood predictions."""
+    group = _find_group(company_query)
+    if not group:
+        return jsonify({'error': f'No company found matching "{company_query}"'}), 404
+    pred = _predict_outcomes(group)
+    return jsonify({
+        'company': group['name'],
+        'company_id': group['id'],
+        'predictions': pred,
+    })
+
+
+# ---------------------------------------------------------------------------
+# API: V7 — Draft Quality Scoring
+# ---------------------------------------------------------------------------
+
+@assistant_bp.route('/score-draft', methods=['POST'])
+def score_draft():
+    """Score a draft message for quality."""
+    data = request.get_json(silent=True) or {}
+    subject = data.get('subject', '')
+    body = data.get('body', '')
+    contact_name = data.get('contact_name')
+    signal_ref = data.get('signal_ref')
+    result = _score_draft_quality(subject, body, contact_name, signal_ref)
+    return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
+# API: V7 — Automation Detection
+# ---------------------------------------------------------------------------
+
+@assistant_bp.route('/automate', methods=['GET'])
+def get_automation():
+    """Detect automation opportunities."""
+    auto = _detect_automation_opportunities()
+    return jsonify(auto)
+
+
+# ---------------------------------------------------------------------------
 # Reply text sanitizer — strip all internal/backend syntax from user-facing text
 # ---------------------------------------------------------------------------
 
@@ -2591,42 +3316,50 @@ def _generate_fallback_response(user_msg, intent, mode, context_str):
     Build a best-effort response when the Claude API reply couldn't be parsed.
     Uses available context data to give a real answer, not a placeholder.
     """
-    parts = ["I wasn't able to fully process that. Here's what I can tell you based on your data:\n"]
+    parts = []
+
+    if intent == 'normal_chat':
+        parts.append("I had trouble generating a full response, but here's my best take:\n")
+        parts.append("Based on your question, I'd suggest looking at your current pipeline priorities. ")
+        plan, total_min = _generate_daily_plan()
+        if plan:
+            parts.append("Here's what's on your plate today:")
+            for item in plan[:3]:
+                parts.append(f"- **{item['action']}** ({item['target']}) — {item['reason']}")
+        parts.append("\nFeel free to rephrase or ask something more specific — I'm here to help.")
+        return "\n".join(parts)
 
     if intent in ('recommend_action', 'brainstorm', 'coach'):
         plan, total_min = _generate_daily_plan()
         if plan:
-            parts.append("**Your top priorities right now:**")
+            parts.append("Here are your top priorities right now:")
             for item in plan[:3]:
                 parts.append(f"- **{item['action']}** ({item['target']}) — {item['reason']}")
         else:
-            parts.append("No urgent actions detected. Your pipeline looks clear.")
+            parts.append("No urgent actions right now — your pipeline looks clear.")
 
     elif intent in ('analyze_contact', 'analyze_company'):
         ranked = _get_ranked_opportunities(limit=3)
         if ranked:
-            parts.append("**Top opportunities in your pipeline:**")
+            parts.append("Here are your strongest opportunities:")
             for opp in ranked:
                 parts.append(f"- **{opp['group']['name']}** (score: {opp['score']}) — {opp['reason']}")
 
     elif intent == 'draft_outreach':
-        parts.append("I couldn't generate a draft. Try **/draft [contact name]** with a specific contact.")
-
-    elif intent in ('explain_metrics', 'diagnose'):
-        parts.append("Try asking a more specific question, like:")
-        parts.append("- \"Why am I not closing deals?\"")
-        parts.append("- \"What does my warmth score mean?\"")
+        parts.append("I couldn't generate a draft automatically. Try **/draft [contact name]** with a specific person.")
 
     else:
         insights = _generate_proactive_insights()
         if insights:
-            parts.append("**Current system insights:**")
+            parts.append("Here's what I'm seeing in your data:")
             for ins in insights[:3]:
                 parts.append(f"- {ins}")
         else:
-            parts.append("Your data looks healthy. Ask me something specific — I work best with clear questions.")
+            parts.append("Everything looks good from what I can see. Ask me something specific and I'll dig in.")
 
-    parts.append("\nTry rephrasing or use a slash command like **/queue**, **/next**, or **/draft top 5**.")
+    if not parts:
+        parts.append("I couldn't fully process that. Try rephrasing, or use a command like **/queue** or **/next**.")
+
     return "\n".join(parts)
 
 
@@ -2747,6 +3480,111 @@ def chat():
         _persist_chat(last_msg, card, 'batch_draft', 'execution')
         return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'batch_draft', 'mode': 'execution'})
 
+    # V7 intercepts — relationship, funnel, prediction, automation
+    if processed_msg.startswith('__v7_relationship__'):
+        company_name = processed_msg.replace('__v7_relationship__', '')
+        group = _find_group(company_name)
+        if not group:
+            card = {'type': 'ErrorCard', 'text': f'No company found matching "{company_name}".',
+                    'data': {'error': 'not found', 'suggestion': 'Check the company name and try again.'}, 'actions': []}
+        else:
+            rel = _relationship_intelligence(group)
+            card = {
+                'type': 'RelationshipCard',
+                'text': f"**{group['name']}** — Relationship: **{rel['label'].title()}** ({rel['relationship_score']}/100)",
+                'source': None,
+                'data': {
+                    'company': group['name'], 'company_id': group['id'],
+                    'relationship_score': rel['relationship_score'],
+                    'label': rel['label'],
+                    'communication_style': rel['communication_style'],
+                    'responsiveness': rel['responsiveness'],
+                    'touchpoint_count': rel['touchpoint_count'],
+                    'days_silent': rel['days_silent'],
+                    'factors': rel['factors'],
+                },
+                'actions': [
+                    {'id': 'draft_rel', 'label': 'Draft Outreach', 'action': 'draft_outreach',
+                     'params': {'target_name': group['name'], 'group_id': group['id'], 'channel': rel['communication_style']['preferred_channel']}},
+                    {'id': 'predict_rel', 'label': 'Predict Outcomes', 'action': 'predict_outcomes',
+                     'params': {'group_name': group['name']}},
+                ]
+            }
+        _persist_chat(last_msg, card, 'relationship', 'analyst')
+        return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'relationship', 'mode': 'analyst'})
+
+    if processed_msg == '__v7_funnel__':
+        diag = _conversion_diagnosis()
+        bottleneck_summary = ''
+        if diag['bottlenecks']:
+            top_b = diag['bottlenecks'][0]
+            if top_b['stage'] != 'none':
+                bottleneck_summary = f" — Top bottleneck: **{top_b['stage']}** ({top_b['severity']})"
+        card = {
+            'type': 'FunnelCard',
+            'text': f"**Conversion Funnel** — {diag['total_groups']} groups, {diag['total_touchpoints']} touchpoints{bottleneck_summary}",
+            'source': None,
+            'data': {
+                'funnel': diag['funnel'],
+                'total_groups': diag['total_groups'],
+                'total_touchpoints': diag['total_touchpoints'],
+                'inbound_replies': diag['inbound_replies'],
+                'meetings': diag['meetings'],
+                'rates': diag['rates'],
+                'bottlenecks': diag['bottlenecks'],
+            },
+            'actions': []
+        }
+        _persist_chat(last_msg, card, 'funnel', 'analyst')
+        return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'funnel', 'mode': 'analyst'})
+
+    if processed_msg.startswith('__v7_predict__'):
+        company_name = processed_msg.replace('__v7_predict__', '')
+        group = _find_group(company_name)
+        if not group:
+            card = {'type': 'ErrorCard', 'text': f'No company found matching "{company_name}".',
+                    'data': {'error': 'not found', 'suggestion': 'Check the company name and try again.'}, 'actions': []}
+        else:
+            pred = _predict_outcomes(group)
+            card = {
+                'type': 'PredictionCard',
+                'text': f"**{group['name']}** — Reply: **{pred['reply_likelihood']['label']}** ({pred['reply_likelihood']['score']}/100) · Meeting: **{pred['meeting_likelihood']['label']}** ({pred['meeting_likelihood']['score']}/100)",
+                'source': None,
+                'data': {
+                    'company': group['name'], 'company_id': group['id'],
+                    'reply_likelihood': pred['reply_likelihood'],
+                    'meeting_likelihood': pred['meeting_likelihood'],
+                    'relationship': pred['relationship'],
+                    'recommended_channel': pred['recommended_channel'],
+                    'best_timing': pred['best_timing'],
+                },
+                'actions': [
+                    {'id': 'draft_pred', 'label': f"Draft via {pred['recommended_channel'].title()}", 'action': 'draft_outreach',
+                     'params': {'target_name': group['name'], 'group_id': group['id'], 'channel': pred['recommended_channel']}},
+                    {'id': 'push_pred', 'label': 'Push Forward', 'action': 'push_forward_company',
+                     'params': {'group_name': group['name']}},
+                ]
+            }
+        _persist_chat(last_msg, card, 'predict', 'analyst')
+        return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'predict', 'mode': 'analyst'})
+
+    if processed_msg == '__v7_automate__':
+        auto = _detect_automation_opportunities()
+        card = {
+            'type': 'AutomationCard',
+            'text': f"**Automation Scan** — {auto['pattern_count']} patterns found, ~{auto['time_savings_est']} min potential savings",
+            'source': None,
+            'data': {
+                'patterns': auto['patterns'],
+                'suggestions': auto['suggestions'],
+                'time_savings_est': auto['time_savings_est'],
+                'pattern_count': auto['pattern_count'],
+            },
+            'actions': []
+        }
+        _persist_chat(last_msg, card, 'automate', 'execution')
+        return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'automate', 'mode': 'execution'})
+
     intent = _classify_intent(last_msg)
     mode = INTENT_TO_MODE.get(intent, 'strategic')
     max_tokens = MODE_MAX_TOKENS.get(mode, 2000)
@@ -2813,10 +3651,14 @@ def chat():
             )
 
     combined_extra = (extra_ctx or '') + page_extra
-    mode_hint = f"\n\nACTIVE MODE: {mode.upper()}\nINTENT: {intent}"
-    combined_extra = (combined_extra or '') + mode_hint
 
-    context = _build_context(combined_extra if combined_extra.strip() else None)
+    if intent != 'normal_chat':
+        combined_extra = (combined_extra or '') + f"\n\nACTIVE MODE: {mode.upper()}\nINTENT: {intent}"
+
+    context = _build_context(
+        combined_extra if combined_extra.strip() else None,
+        lightweight=(intent == 'normal_chat')
+    )
     system = SYSTEM_PROMPT + "\n\n--- CURRENT DATA CONTEXT ---\n" + context
 
     api_messages = []
@@ -3104,6 +3946,28 @@ def execute_action():
                     return jsonify({'success': True, 'card': card})
             return jsonify({'success': False, 'card': {
                 'type': 'ErrorCard', 'text': 'Could not build push forward plan.',
+                'data': {'error': 'Company not found'}, 'actions': []
+            }})
+        if action == 'predict_outcomes':
+            group_name = params.get('group_name', '')
+            group = _find_group(group_name) if group_name else None
+            if group:
+                pred = _predict_outcomes(group)
+                return jsonify({'success': True, 'card': {
+                    'type': 'PredictionCard',
+                    'text': f"**{group['name']}** — Reply: **{pred['reply_likelihood']['label']}** · Meeting: **{pred['meeting_likelihood']['label']}**",
+                    'data': {
+                        'company': group['name'], 'company_id': group['id'],
+                        'reply_likelihood': pred['reply_likelihood'],
+                        'meeting_likelihood': pred['meeting_likelihood'],
+                        'relationship': pred['relationship'],
+                        'recommended_channel': pred['recommended_channel'],
+                        'best_timing': pred['best_timing'],
+                    },
+                    'actions': []
+                }})
+            return jsonify({'success': False, 'card': {
+                'type': 'ErrorCard', 'text': 'Company not found.',
                 'data': {'error': 'Company not found'}, 'actions': []
             }})
         if action == 'cancel':
