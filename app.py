@@ -347,6 +347,41 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    # --- Leo Intelligence Tables ---
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS leo_context_memory (
+            id TEXT PRIMARY KEY,
+            memory_type TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            entities TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS leo_events (
+            id TEXT PRIMARY KEY,
+            event_type TEXT NOT NULL,
+            entity_type TEXT,
+            entity_id TEXT,
+            entity_name TEXT,
+            detail TEXT,
+            acknowledged INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS leo_pattern_stats (
+            id TEXT PRIMARY KEY,
+            pattern_type TEXT NOT NULL,
+            channel TEXT,
+            stage_from TEXT,
+            stage_to TEXT,
+            outcome TEXT,
+            touchpoint_count INTEGER DEFAULT 0,
+            days_elapsed INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     # --- Auth & CRM Tables ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS workspaces (

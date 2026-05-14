@@ -66,7 +66,8 @@ var SLASH_HINTS = [
   { cmd: '/funnel', desc: 'Conversion funnel', ex: '/funnel' },
   { cmd: '/predict', desc: 'Outcome prediction', ex: '/predict Acme' },
   { cmd: '/automate', desc: 'Automation scan', ex: '/automate' },
-  { cmd: '/brief-pdf', desc: 'Daily brief PDF', ex: '/brief-pdf' }
+  { cmd: '/brief-pdf', desc: 'Daily brief PDF', ex: '/brief-pdf' },
+  { cmd: '/patterns', desc: 'Pipeline patterns', ex: '/patterns' }
 ];
 
 var MODE_LABELS = {
@@ -890,6 +891,7 @@ function renderQueueCard(card, onAction) {
             item.target ? h('div', { style: { fontSize: '0.63rem', color: '#64748b' } }, item.target) : null,
             h('div', { style: { display: 'flex', gap: '0.3rem', marginTop: '0.2rem', flexWrap: 'wrap' } },
               h('span', { style: { fontSize: '0.55rem', fontWeight: 600, color: pc, background: pc + '14', padding: '0.08rem 0.3rem', borderRadius: '0.2rem' } }, prob.label + ' ' + (prob.score || 0)),
+              item.confidence ? h('span', { style: { fontSize: '0.55rem', fontWeight: 600, color: item.confidence.level === 'High' ? '#16a34a' : item.confidence.level === 'Medium' ? '#f59e0b' : '#dc2626', background: '#f8fafc', padding: '0.08rem 0.3rem', borderRadius: '0.2rem' } }, item.confidence.level + ' conf.') : null,
               item.reason ? h('span', { style: { fontSize: '0.55rem', color: '#94a3b8', fontStyle: 'italic' } }, item.reason) : null
             ),
             item.expected_outcome ? h('div', { style: { fontSize: '0.58rem', color: '#6b7280', marginTop: '0.15rem' } }, '→ ' + item.expected_outcome) : null
@@ -1157,6 +1159,10 @@ function renderPredictionCard(card, onAction) {
       reply.factors.map(function(f, i) {
         return h('div', { key: i, style: { fontSize: '0.65rem', color: '#475569', padding: '0.1rem 0' } }, '• ' + f);
       })
+    ) : null,
+    d.confidence ? h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.25rem', padding: '0.2rem 0.4rem', background: '#f8fafc', borderRadius: '0.25rem' } },
+      h('span', { style: { fontSize: '0.58rem', fontWeight: 700, color: d.confidence.level === 'High' ? '#16a34a' : d.confidence.level === 'Medium' ? '#f59e0b' : '#dc2626' } }, 'Confidence: ' + d.confidence.level),
+      d.confidence.reasons && d.confidence.reasons[0] ? h('span', { style: { fontSize: '0.55rem', color: '#94a3b8' } }, '— ' + d.confidence.reasons[0]) : null
     ) : null,
     renderActionButtons(card.actions, onAction)
   );

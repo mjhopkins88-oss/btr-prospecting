@@ -106,7 +106,7 @@ def _classify_intent(text):
             '/signals': 'analyze_company',
             '/relationship': 'analyze_company', '/funnel': 'diagnose',
             '/predict': 'analyze_company', '/automate': 'recommend_action',
-            '/brief-pdf': 'export_report',
+            '/brief-pdf': 'export_report', '/patterns': 'coach',
         }
         return slash_map.get(cmd, 'recommend_action')
 
@@ -341,6 +341,72 @@ Within a conversation, remember what the user is working on.
 Build on prior messages. Don't repeat yourself. Reference earlier context naturally.
 
 ═══════════════════════════════
+CONTEXT PERSISTENCE
+═══════════════════════════════
+
+You have access to recent conversation history beyond the current session.
+When context memory is provided, use it naturally:
+- Reference past strategies: "Last week you were focused on..."
+- Build on decisions: "Since you decided to..."
+- Track plans: "You mentioned planning to..."
+
+Never fabricate past conversations. Only reference what appears in CONTEXT MEMORY.
+If the user asks "what did we discuss yesterday?" and there's no memory — say so.
+
+═══════════════════════════════
+REAL-TIME EVENT AWARENESS
+═══════════════════════════════
+
+The system tracks CRM events (new signals, inbound replies, stage changes, completed tasks).
+When RECENT EVENTS are provided in context:
+- Surface new events naturally: "By the way, you got a reply from..."
+- Suggest reprioritization: "Since Material Capital just replied, they should jump to the top."
+- Connect events to actions: "That new signal for Acme pairs well with your follow-up plan."
+
+Only mention events that are actually in the data. Don't invent activity.
+
+═══════════════════════════════
+ACTION COMPLETION FEEDBACK
+═══════════════════════════════
+
+When the user completes an action (logs touchpoint, updates stage, sends email):
+- Confirm what happened
+- Connect it to bigger picture: "That's 3 touchpoints this week — momentum building."
+- Adjust recommendations if needed: "Now that they're at 'active', the next move is..."
+- Offer the natural next step
+
+═══════════════════════════════
+PATTERN RECOGNITION
+═══════════════════════════════
+
+The system tracks conversion patterns over time. When PATTERN RECOGNITION data is provided:
+- Cite patterns naturally: "Contacts like this typically convert after 3-4 touchpoints."
+- Use patterns to calibrate advice: "Email has a 35% reply rate for you — worth trying LinkedIn."
+- Flag when behavior deviates from successful patterns.
+
+Only cite patterns from actual data. If no patterns are tracked yet, don't make them up.
+
+═══════════════════════════════
+CONFIDENCE IN RECOMMENDATIONS
+═══════════════════════════════
+
+Every recommendation should reflect your confidence level through tone and language:
+
+High confidence (strong data, clear signal):
+→ "You should follow up today. The signal is fresh and they've been responsive."
+
+Medium confidence (some data, reasonable inference):
+→ "I'd lean toward reaching out — the timing looks right, but we don't have much reply history."
+→ Include: "Confidence: Medium — [reason]"
+
+Low confidence (limited data, educated guess):
+→ "I don't have strong data here, but my instinct is..."
+→ Include: "Confidence: Low — [reason]"
+
+When data is truly missing, name what's missing:
+→ "I can't score this accurately — no touchpoint history. If you log a few interactions, I'll give a much better read."
+
+═══════════════════════════════
 WHEN TO USE CARDS (only when structured output is genuinely needed)
 ═══════════════════════════════
 
@@ -431,7 +497,8 @@ SLASH COMMANDS
 /funnel — Conversion funnel diagnosis
 /predict [company] — Reply & meeting likelihood prediction
 /automate — Detect automation opportunities
-/brief-pdf — Download daily BTR intelligence brief as PDF"""
+/brief-pdf — Download daily BTR intelligence brief as PDF
+/patterns — View what's working in your pipeline (conversion patterns)"""
 
 
 # ---------------------------------------------------------------------------
@@ -1922,6 +1989,14 @@ def _generate_execution_queue(limit=10):
 
     for i, item in enumerate(items):
         item['rank'] = i + 1
+        # V9: Attach confidence to each queue item
+        gid = item.get('target_id')
+        if gid:
+            g = fetch_one("SELECT * FROM capital_groups WHERE id = ?", [gid]) if gid else None
+            if g:
+                item['confidence'] = _compute_confidence(g, item.get('action_type', 'outreach'))
+        if 'confidence' not in item:
+            item['confidence'] = {'level': 'Medium', 'score': 50, 'reasons': ['Limited data']}
         if i == 0 and len(items) > 1:
             runner_up = items[1].get('priority_score', 0)
             item['rank_reason'] = (
@@ -2385,6 +2460,530 @@ def _get_active_threads():
 
 
 # ---------------------------------------------------------------------------
+# V9: Context persistence — store and retrieve conversations, strategies, decisions
+# ---------------------------------------------------------------------------
+
+def _store_context_memory(memory_type, summary, entities=None):
+    """Store a conversation memory: strategy, decision, plan, or discussion."""
+    try:
+        execute(
+            """INSERT INTO leo_context_memory (id, memory_type, summary, entities, created_at)
+               VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+            [new_id(), memory_type, summary[:500], json.dumps(entities or [])[:500]]
+        )
+    except Exception:
+        pass
+
+
+def _get_context_memory(limit=10, memory_type=None):
+    """Retrieve recent context memories for system prompt injection."""
+    try:
+        if memory_type:
+            rows = fetch_all(
+                """SELECT memory_type, summary, entities, created_at
+                   FROM leo_context_memory WHERE memory_type = ?
+                   ORDER BY created_at DESC LIMIT ?""",
+                [memory_type, limit]
+            )
+        else:
+            rows = fetch_all(
+                """SELECT memory_type, summary, entities, created_at
+                   FROM leo_context_memory
+                   ORDER BY created_at DESC LIMIT ?""",
+                [limit]
+            )
+        if not rows:
+            return ""
+        parts = ["CONTEXT MEMORY (recent conversations/decisions):"]
+        for r in rows:
+            age = _days_since(r.get('created_at'))
+            label = r.get('memory_type', 'discussion')
+            if age == 0:
+                when = "today"
+            elif age == 1:
+                when = "yesterday"
+            elif age <= 7:
+                when = f"{age}d ago"
+            else:
+                when = f"{age}d ago"
+            parts.append(f"  - [{label}] ({when}) {r['summary']}")
+        return "\n".join(parts)
+    except Exception:
+        return ""
+
+
+def _extract_memory_from_exchange(user_msg, reply_text, intent):
+    """Auto-extract memorable context from a chat exchange."""
+    memory_keywords = {
+        'strategy': ['strategy', 'plan', 'approach', 'decide', 'going to', 'let\'s',
+                      'we should', 'i\'ll', 'next step', 'priority'],
+        'decision': ['decided', 'confirmed', 'approved', 'moving forward', 'chose',
+                      'going with', 'commit', 'agreed'],
+        'plan': ['schedule', 'timeline', 'this week', 'next week', 'target',
+                 'goal', 'aim for', 'plan to'],
+    }
+    msg_lower = user_msg.lower()
+    reply_lower = (reply_text or '').lower()
+    combined = msg_lower + ' ' + reply_lower
+
+    if intent in ('normal_chat', 'explain_metrics', 'troubleshoot'):
+        if not any(kw in combined for kws in memory_keywords.values() for kw in kws):
+            return
+
+    best_type = 'discussion'
+    best_score = 0
+    for mtype, keywords in memory_keywords.items():
+        score = sum(1 for kw in keywords if kw in combined)
+        if score > best_score:
+            best_score = score
+            best_type = mtype
+
+    if best_score < 2 and intent == 'normal_chat':
+        return
+
+    entities = []
+    try:
+        groups = _find_groups_fuzzy(user_msg)
+        entities = [g['name'] for g in groups[:3]]
+    except Exception:
+        pass
+
+    summary = user_msg[:120]
+    if reply_text:
+        clean = re.sub(r'<[^>]+>[\s\S]*?</[^>]+>', '', reply_text)
+        clean = re.sub(r'\*\*', '', clean)
+        first_line = clean.strip().split('\n')[0][:120]
+        if first_line:
+            summary = f"{user_msg[:80]} → {first_line}"
+
+    _store_context_memory(best_type, summary, entities)
+
+
+# ---------------------------------------------------------------------------
+# V9: Real-time event awareness — track and surface CRM events
+# ---------------------------------------------------------------------------
+
+def _record_event(event_type, entity_type=None, entity_id=None, entity_name=None, detail=None):
+    """Record a CRM event for Leo's awareness."""
+    try:
+        execute(
+            """INSERT INTO leo_events (id, event_type, entity_type, entity_id, entity_name, detail, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+            [new_id(), event_type, entity_type, entity_id, entity_name, (detail or '')[:300]]
+        )
+    except Exception:
+        pass
+
+
+def _get_recent_events(limit=8, since_hours=24):
+    """Get recent CRM events Leo should be aware of."""
+    try:
+        cutoff = (datetime.utcnow() - timedelta(hours=since_hours)).isoformat()
+        rows = fetch_all(
+            """SELECT event_type, entity_type, entity_name, detail, acknowledged, created_at
+               FROM leo_events WHERE created_at > ?
+               ORDER BY created_at DESC LIMIT ?""",
+            [cutoff, limit]
+        )
+        if not rows:
+            return ""
+        new_count = sum(1 for r in rows if not r.get('acknowledged'))
+        parts = [f"RECENT EVENTS ({new_count} new):"]
+        for r in rows:
+            flag = "NEW" if not r.get('acknowledged') else ""
+            age_hrs = max(0, int((datetime.utcnow() - datetime.fromisoformat(
+                str(r['created_at']).replace('Z', ''))).total_seconds() / 3600))
+            if age_hrs == 0:
+                when = "just now"
+            elif age_hrs < 24:
+                when = f"{age_hrs}h ago"
+            else:
+                when = f"{age_hrs // 24}d ago"
+            line = f"  - {r['event_type']}"
+            if r.get('entity_name'):
+                line += f": {r['entity_name']}"
+            if r.get('detail'):
+                line += f" — {r['detail'][:80]}"
+            line += f" ({when})"
+            if flag:
+                line += f" [{flag}]"
+            parts.append(line)
+        return "\n".join(parts)
+    except Exception:
+        return ""
+
+
+def _acknowledge_events():
+    """Mark all events as acknowledged after Leo processes them."""
+    try:
+        execute("UPDATE leo_events SET acknowledged = 1 WHERE acknowledged = 0")
+    except Exception:
+        pass
+
+
+def _detect_new_events():
+    """Scan CRM for new events since last check — signals, replies, stage changes, completed tasks."""
+    now = datetime.utcnow()
+    since = (now - timedelta(hours=6)).isoformat()
+
+    # New signals
+    try:
+        new_sigs = fetch_all(
+            """SELECT s.id, s.title, s.importance, g.name as group_name
+               FROM prospecting_signals s
+               LEFT JOIN capital_groups g ON s.group_id = g.id
+               WHERE s.detected_at > ?
+                 AND NOT EXISTS (SELECT 1 FROM leo_events WHERE entity_id = s.id AND event_type = 'new_signal')
+               ORDER BY s.detected_at DESC LIMIT 5""",
+            [since]
+        )
+        for s in (new_sigs or []):
+            _record_event('new_signal', 'signal', s['id'],
+                          s.get('group_name', 'Unknown'),
+                          f"{s['title'][:80]} (importance {s.get('importance', '?')}/10)")
+    except Exception:
+        pass
+
+    # Inbound replies (new inbound touchpoints)
+    try:
+        new_replies = fetch_all(
+            """SELECT t.id, t.channel, t.summary, c.first_name, c.last_name, g.name as group_name
+               FROM prospecting_touchpoints t
+               LEFT JOIN prospecting_contacts c ON t.contact_id = c.id
+               LEFT JOIN capital_groups g ON t.group_id = g.id
+               WHERE t.direction = 'inbound' AND t.occurred_at > ?
+                 AND NOT EXISTS (SELECT 1 FROM leo_events WHERE entity_id = t.id AND event_type = 'inbound_reply')
+               LIMIT 5""",
+            [since]
+        )
+        for r in (new_replies or []):
+            name = f"{r.get('first_name', '')} {r.get('last_name', '')}".strip() or r.get('group_name', '')
+            _record_event('inbound_reply', 'touchpoint', r['id'], name,
+                          f"Reply via {r.get('channel', '?')}: {(r.get('summary') or '')[:60]}")
+    except Exception:
+        pass
+
+    # Completed tasks
+    try:
+        completed = fetch_all(
+            """SELECT t.id, t.title, g.name as group_name
+               FROM prospecting_tasks t
+               LEFT JOIN capital_groups g ON t.capital_group_id = g.id
+               WHERE t.status = 'completed' AND t.completed_at > ?
+                 AND NOT EXISTS (SELECT 1 FROM leo_events WHERE entity_id = t.id AND event_type = 'task_completed')
+               LIMIT 5""",
+            [since]
+        )
+        for t in (completed or []):
+            _record_event('task_completed', 'task', t['id'],
+                          t.get('group_name', ''),
+                          f"Completed: {t['title'][:80]}")
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# V9: Action completion feedback loop
+# ---------------------------------------------------------------------------
+
+def _action_feedback(action_type, entity_name, detail):
+    """
+    Generate intelligent feedback after a user action.
+    Returns a feedback string Leo includes in confirmation responses.
+    """
+    parts = []
+
+    if action_type == 'log_touchpoint':
+        _record_event('touchpoint_logged', 'touchpoint', None, entity_name, detail)
+        try:
+            momentum = _get_momentum_state()
+            if momentum['label'] == 'building':
+                parts.append("Momentum is building — keep this pace going.")
+            elif momentum['label'] == 'slipping':
+                parts.append(f"Good move — you've been slipping. {momentum['overdue']} overdue items still need attention.")
+            elif momentum['streak'] >= 3:
+                parts.append(f"{momentum['streak']}-day streak going. Nice consistency.")
+        except Exception:
+            pass
+
+    elif action_type == 'update_stage':
+        _record_event('stage_changed', 'group', None, entity_name, detail)
+        parts.append("I'll adjust my recommendations based on the new stage.")
+
+    elif action_type == 'create_followup':
+        _record_event('followup_created', 'task', None, entity_name, detail)
+        parts.append("I'll remind you when this is due.")
+
+    elif action_type == 'execute_batch':
+        _record_event('batch_executed', 'batch', None, entity_name, detail)
+
+    return " ".join(parts) if parts else ""
+
+
+# ---------------------------------------------------------------------------
+# V9: Pattern recognition — what works, what doesn't
+# ---------------------------------------------------------------------------
+
+def _record_pattern(pattern_type, channel=None, stage_from=None, stage_to=None,
+                    outcome=None, touchpoint_count=0, days_elapsed=0):
+    """Record a pattern observation for long-term learning."""
+    try:
+        execute(
+            """INSERT INTO leo_pattern_stats
+               (id, pattern_type, channel, stage_from, stage_to, outcome, touchpoint_count, days_elapsed, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+            [new_id(), pattern_type, channel, stage_from, stage_to, outcome,
+             touchpoint_count, days_elapsed]
+        )
+    except Exception:
+        pass
+
+
+def _get_pattern_insights():
+    """
+    Analyze recorded patterns to extract actionable insights.
+    Looks at: touchpoints → replies, replies → meetings, channel effectiveness, conversion speed.
+    """
+    insights = []
+
+    # Channel → reply effectiveness
+    try:
+        channel_stats = fetch_all(
+            """SELECT channel, outcome, COUNT(*) as cnt
+               FROM leo_pattern_stats
+               WHERE pattern_type = 'outreach_outcome'
+               GROUP BY channel, outcome
+               ORDER BY cnt DESC""", []
+        )
+        if channel_stats:
+            channel_totals = {}
+            channel_replies = {}
+            for r in channel_stats:
+                ch = r.get('channel', 'unknown')
+                channel_totals[ch] = channel_totals.get(ch, 0) + r['cnt']
+                if r.get('outcome') == 'reply':
+                    channel_replies[ch] = channel_replies.get(ch, 0) + r['cnt']
+            for ch, total in channel_totals.items():
+                if total >= 3:
+                    replies = channel_replies.get(ch, 0)
+                    rate = round(replies / total * 100)
+                    insights.append(f"{ch.title()} reply rate: {rate}% ({replies}/{total})")
+    except Exception:
+        pass
+
+    # Average touchpoints to reply
+    try:
+        tp_to_reply = fetch_all(
+            """SELECT touchpoint_count, COUNT(*) as cnt
+               FROM leo_pattern_stats
+               WHERE pattern_type = 'outreach_outcome' AND outcome = 'reply'
+               GROUP BY touchpoint_count ORDER BY cnt DESC LIMIT 5""", []
+        )
+        if tp_to_reply and len(tp_to_reply) >= 2:
+            avg_tp = sum(r['touchpoint_count'] * r['cnt'] for r in tp_to_reply) / sum(r['cnt'] for r in tp_to_reply)
+            insights.append(f"Contacts typically reply after {avg_tp:.1f} touchpoints")
+    except Exception:
+        pass
+
+    # Stage progression speed
+    try:
+        progressions = fetch_all(
+            """SELECT stage_from, stage_to, AVG(days_elapsed) as avg_days, COUNT(*) as cnt
+               FROM leo_pattern_stats
+               WHERE pattern_type = 'stage_progression'
+               GROUP BY stage_from, stage_to
+               HAVING COUNT(*) >= 2
+               ORDER BY cnt DESC LIMIT 5""", []
+        )
+        for p in (progressions or []):
+            insights.append(
+                f"{p['stage_from']} → {p['stage_to']}: avg {p['avg_days']:.0f} days ({p['cnt']} observed)"
+            )
+    except Exception:
+        pass
+
+    # Fallback: derive patterns from existing CRM data if no pattern_stats yet
+    if not insights:
+        try:
+            outbound = fetch_one(
+                "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE direction = 'outbound'"
+            )
+            inbound = fetch_one(
+                "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE direction = 'inbound'"
+            )
+            ob = outbound['cnt'] if outbound else 0
+            ib = inbound['cnt'] if inbound else 0
+            if ob > 5:
+                rate = round(ib / ob * 100) if ob else 0
+                insights.append(f"Overall reply rate: {rate}% ({ib} inbound / {ob} outbound)")
+
+            meeting_count = fetch_one(
+                "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE channel = 'meeting'"
+            )
+            mc = meeting_count['cnt'] if meeting_count else 0
+            if mc > 0 and ib > 0:
+                meeting_rate = round(mc / ib * 100)
+                insights.append(f"Reply → meeting conversion: {meeting_rate}%")
+
+            # Average touchpoints per engaged+ group
+            engaged = fetch_all(
+                """SELECT g.id, g.name, COUNT(t.id) as tp_count
+                   FROM capital_groups g
+                   JOIN prospecting_touchpoints t ON t.group_id = g.id
+                   WHERE g.relationship_status IN ('engaged', 'closing', 'active')
+                   GROUP BY g.id, g.name
+                   HAVING COUNT(t.id) >= 2
+                   ORDER BY tp_count DESC LIMIT 10""", []
+            )
+            if engaged and len(engaged) >= 2:
+                avg = sum(e['tp_count'] for e in engaged) / len(engaged)
+                insights.append(f"Engaged contacts avg {avg:.1f} touchpoints before advancing")
+        except Exception:
+            pass
+
+    if not insights:
+        return ""
+
+    return "PATTERN RECOGNITION:\n" + "\n".join(f"  - {i}" for i in insights[:6])
+
+
+def _scan_for_new_patterns():
+    """Background scan: detect new conversion patterns from CRM data."""
+    try:
+        # Detect groups that recently progressed stages
+        recent_tps = fetch_all(
+            """SELECT t.group_id, t.channel, COUNT(*) as cnt
+               FROM prospecting_touchpoints t
+               JOIN capital_groups g ON t.group_id = g.id
+               WHERE g.relationship_status IN ('active', 'engaged', 'closing')
+                 AND t.occurred_at > ?
+               GROUP BY t.group_id, t.channel""",
+            [(datetime.utcnow() - timedelta(days=30)).isoformat()]
+        )
+        for tp in (recent_tps or []):
+            if tp['cnt'] >= 3:
+                # Check if we already recorded this
+                existing = fetch_one(
+                    """SELECT id FROM leo_pattern_stats
+                       WHERE pattern_type = 'outreach_outcome'
+                         AND channel = ? AND touchpoint_count = ?
+                       ORDER BY created_at DESC LIMIT 1""",
+                    [tp['channel'], tp['cnt']]
+                )
+                if not existing:
+                    _record_pattern('outreach_outcome', channel=tp['channel'],
+                                    outcome='engaged', touchpoint_count=tp['cnt'])
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# V9: Confidence system — data-backed confidence for recommendations
+# ---------------------------------------------------------------------------
+
+def _compute_confidence(group=None, action_type='outreach'):
+    """
+    Compute confidence level for a recommendation.
+    Returns: { level: 'High'|'Medium'|'Low', score: 0-100, reasons: [] }
+    """
+    score = 50.0
+    reasons = []
+
+    if group:
+        # Data richness
+        try:
+            tp_count = fetch_one(
+                "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE group_id = ?",
+                [group['id']]
+            )
+            tps = tp_count['cnt'] if tp_count else 0
+        except Exception:
+            tps = 0
+
+        if tps >= 8:
+            score += 20
+            reasons.append(f"{tps} touchpoints — strong data")
+        elif tps >= 3:
+            score += 10
+            reasons.append(f"{tps} touchpoints — moderate data")
+        elif tps >= 1:
+            score += 0
+            reasons.append(f"Only {tps} touchpoint(s) — limited history")
+        else:
+            score -= 15
+            reasons.append("No interaction history — low confidence")
+
+        # Signal freshness
+        try:
+            sig = fetch_one(
+                "SELECT detected_at, importance FROM prospecting_signals WHERE group_id = ? ORDER BY detected_at DESC LIMIT 1",
+                [group['id']]
+            )
+        except Exception:
+            sig = None
+        if sig and _days_since(sig.get('detected_at')) <= 7:
+            score += 15
+            reasons.append("Fresh signal supports timing")
+        elif sig:
+            score += 5
+
+        # Warmth data
+        warmth = group.get('warmth_score') or 0
+        if warmth >= 7:
+            score += 10
+            reasons.append(f"High warmth ({warmth}/10)")
+        elif warmth >= 4:
+            score += 5
+        elif warmth == 0:
+            score -= 5
+            reasons.append("No warmth data")
+
+        # Inbound engagement
+        try:
+            inbound = fetch_one(
+                "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE group_id = ? AND direction = 'inbound'",
+                [group['id']]
+            )
+            ib = inbound['cnt'] if inbound else 0
+        except Exception:
+            ib = 0
+        if ib >= 2:
+            score += 10
+            reasons.append("Two-way engagement confirmed")
+        elif ib == 0 and tps > 3:
+            score -= 10
+            reasons.append("No inbound replies despite outreach")
+
+    # Pattern data availability
+    try:
+        pattern_count = fetch_one("SELECT COUNT(*) as cnt FROM leo_pattern_stats")
+        pc = pattern_count['cnt'] if pattern_count else 0
+    except Exception:
+        pc = 0
+    if pc >= 10:
+        score += 5
+        reasons.append("Pattern data available")
+
+    score = round(max(0, min(100, score)), 1)
+
+    if score >= 70:
+        level = 'High'
+    elif score >= 40:
+        level = 'Medium'
+    else:
+        level = 'Low'
+
+    if not reasons:
+        reasons.append("Limited data available")
+
+    return {
+        'level': level,
+        'score': score,
+        'reasons': reasons[:3],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Interaction pattern analysis + behavior learning
 # ---------------------------------------------------------------------------
 
@@ -2735,6 +3334,33 @@ def _build_context(extra_context=None, include_history=True, lightweight=False):
             memory = _get_strategic_memory()
             if memory:
                 ctx_parts.append(f"\nSTRATEGIC MEMORY:\n{memory}")
+        except Exception:
+            pass
+
+    # V9: Context persistence — recent conversations/decisions/strategies
+    try:
+        ctx_memory = _get_context_memory(limit=6)
+        if ctx_memory:
+            ctx_parts.append(f"\n{ctx_memory}")
+    except Exception:
+        pass
+
+    # V9: Real-time event awareness — scan and surface
+    try:
+        _detect_new_events()
+        events = _get_recent_events(limit=6, since_hours=24)
+        if events:
+            ctx_parts.append(f"\n{events}")
+    except Exception:
+        pass
+
+    # V9: Pattern recognition — what's working
+    if not lightweight:
+        try:
+            _scan_for_new_patterns()
+            patterns_v9 = _get_pattern_insights()
+            if patterns_v9:
+                ctx_parts.append(f"\n{patterns_v9}")
         except Exception:
             pass
 
@@ -3292,6 +3918,9 @@ def _preprocess_slash(text):
 
     if cmd == '/automate':
         return '__v7_automate__', extra_ctx
+
+    if cmd == '/patterns':
+        return '__v9_patterns__', extra_ctx
 
     if cmd == '/draft' and arg:
         m = re.match(r'^top\s+(\d+)', arg.strip(), re.IGNORECASE)
@@ -3887,8 +4516,10 @@ def chat():
                     'data': {'error': 'not found', 'suggestion': 'Check the company name and try again.'}, 'actions': []}
         else:
             prob = _deal_probability(group)
+            conf = _compute_confidence(group, 'probability')
+            conf_text = f"\nConfidence: **{conf['level']}** — {conf['reasons'][0]}" if conf['reasons'] else ""
             card = {
-                'type': 'ProbabilityCard', 'text': f"**{group['name']}** — Deal Probability: **{prob['label']}** ({prob['score']}/100)",
+                'type': 'ProbabilityCard', 'text': f"**{group['name']}** — Deal Probability: **{prob['label']}** ({prob['score']}/100){conf_text}",
                 'source': None,
                 'data': {
                     'company': group['name'], 'company_id': group['id'],
@@ -3896,6 +4527,7 @@ def chat():
                     'reason': prob['reason'],
                     'stage': group.get('relationship_status', ''),
                     'warmth': group.get('warmth_score', 0),
+                    'confidence': conf,
                 },
                 'actions': [
                     {'id': 'push_prob', 'label': 'Push Forward', 'action': 'push_forward_company',
@@ -3990,9 +4622,11 @@ def chat():
                     'data': {'error': 'not found', 'suggestion': 'Check the company name and try again.'}, 'actions': []}
         else:
             pred = _predict_outcomes(group)
+            conf = _compute_confidence(group, 'prediction')
+            conf_text = f"\n\nConfidence: **{conf['level']}** — {conf['reasons'][0]}" if conf['reasons'] else ""
             card = {
                 'type': 'PredictionCard',
-                'text': f"**{group['name']}** — Reply: **{pred['reply_likelihood']['label']}** ({pred['reply_likelihood']['score']}/100) · Meeting: **{pred['meeting_likelihood']['label']}** ({pred['meeting_likelihood']['score']}/100)",
+                'text': f"**{group['name']}** — Reply: **{pred['reply_likelihood']['label']}** ({pred['reply_likelihood']['score']}/100) · Meeting: **{pred['meeting_likelihood']['label']}** ({pred['meeting_likelihood']['score']}/100){conf_text}",
                 'source': None,
                 'data': {
                     'company': group['name'], 'company_id': group['id'],
@@ -4001,6 +4635,7 @@ def chat():
                     'relationship': pred['relationship'],
                     'recommended_channel': pred['recommended_channel'],
                     'best_timing': pred['best_timing'],
+                    'confidence': conf,
                 },
                 'actions': [
                     {'id': 'draft_pred', 'label': f"Draft via {pred['recommended_channel'].title()}", 'action': 'draft_outreach',
@@ -4051,6 +4686,31 @@ def chat():
         }
         _persist_chat(last_msg, card, 'brief_pdf', 'execution')
         return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'brief_pdf', 'mode': 'execution'})
+
+    # V9: Pattern recognition intercept
+    if processed_msg == '__v9_patterns__':
+        _scan_for_new_patterns()
+        pattern_text = _get_pattern_insights()
+        if pattern_text:
+            card = {
+                'type': 'InsightCard',
+                'text': f"**What's working in your pipeline:**\n\n{pattern_text.replace('PATTERN RECOGNITION:', '').strip()}",
+                'source': None,
+                'data': {'insights': [
+                    {'category': 'pipeline', 'title': 'Pattern Analysis',
+                     'detail': pattern_text.replace('PATTERN RECOGNITION:', '').strip(),
+                     'impact': 7}
+                ]},
+                'actions': []
+            }
+        else:
+            card = {
+                'type': 'TextCard',
+                'text': "Not enough data to identify patterns yet. As you log more touchpoints and interactions, I'll start spotting what's working and what isn't.",
+                'source': None, 'data': {}, 'actions': []
+            }
+        _persist_chat(last_msg, card, 'patterns', 'coach')
+        return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'patterns', 'mode': 'coach'})
 
     intent = _classify_intent(last_msg)
     mode = INTENT_TO_MODE.get(intent, 'strategic')
@@ -4255,6 +4915,18 @@ def chat():
             }
 
         _persist_chat(messages[-1].get('content', ''), card, intent, mode)
+
+        # V9: Extract and store conversation memory
+        try:
+            _extract_memory_from_exchange(last_msg, card.get('text', ''), intent)
+        except Exception:
+            pass
+
+        # V9: Acknowledge events after processing
+        try:
+            _acknowledge_events()
+        except Exception:
+            pass
 
         return jsonify({
             'role': 'assistant',
@@ -4514,9 +5186,15 @@ def _exec_log_touchpoint(params):
              params.get('summary', params.get('notes', '')), '']
         )
 
+    entity_name = params.get('summary', params.get('notes', ''))[:50]
+    feedback = _action_feedback('log_touchpoint', entity_name,
+                                f"{params.get('channel', 'note')} touchpoint logged")
+    confirm_text = 'Touchpoint logged successfully.'
+    if feedback:
+        confirm_text += f" {feedback}"
     return jsonify({'success': True, 'card': {
         'type': 'ConfirmationCard',
-        'text': 'Touchpoint logged successfully.',
+        'text': confirm_text,
         'data': {'what': 'touchpoint', 'result': 'logged', 'entity_id': tp_id},
         'actions': []
     }})
@@ -4532,8 +5210,12 @@ def _exec_update_stage(params):
             "UPDATE prospecting_contacts SET relationship_stage = ? WHERE id = ?",
             [new_stage, contact_id]
         )
+        feedback = _action_feedback('update_stage', '', f"Contact stage → {new_stage}")
+        text = f'Contact stage updated to {new_stage}.'
+        if feedback:
+            text += f" {feedback}"
         return jsonify({'success': True, 'card': {
-            'type': 'ConfirmationCard', 'text': f'Contact stage updated to {new_stage}.',
+            'type': 'ConfirmationCard', 'text': text,
             'data': {'what': 'stage', 'result': new_stage, 'entity_id': contact_id},
             'actions': []
         }})
@@ -4547,8 +5229,12 @@ def _exec_update_stage(params):
         "UPDATE capital_groups SET relationship_status = ? WHERE id = ?",
         [new_stage, group_id]
     )
+    feedback = _action_feedback('update_stage', '', f"Stage → {new_stage}")
+    text = f'Stage updated to {new_stage}.'
+    if feedback:
+        text += f" {feedback}"
     return jsonify({'success': True, 'card': {
-        'type': 'ConfirmationCard', 'text': f'Stage updated to {new_stage}.',
+        'type': 'ConfirmationCard', 'text': text,
         'data': {'what': 'stage', 'result': new_stage, 'entity_id': group_id},
         'actions': []
     }})
@@ -4566,9 +5252,13 @@ def _exec_create_followup(params):
            VALUES (?, ?, 'follow_up', ?, 'pending', 7, ?, CURRENT_TIMESTAMP)""",
         [task_id, params.get('group_id'), title, due_date]
     )
+    feedback = _action_feedback('create_followup', title, f"Due {due_date}")
+    confirm_text = f'Follow-up created: "{title}" due {due_date}.'
+    if feedback:
+        confirm_text += f" {feedback}"
     return jsonify({'success': True, 'card': {
         'type': 'ConfirmationCard',
-        'text': f'Follow-up created: "{title}" due {due_date}.',
+        'text': confirm_text,
         'data': {'what': 'follow_up', 'result': 'created', 'entity_id': task_id},
         'actions': []
     }})
@@ -4687,9 +5377,13 @@ def _exec_batch(params):
         results.append(f"Created follow-up due {fu['due_date']}")
 
     summary_text = " · ".join(results) if results else "No changes made"
+    feedback = _action_feedback('execute_batch', group_name or contact_name, summary_text)
+    confirm_text = f'Done! {summary_text}'
+    if feedback:
+        confirm_text += f" {feedback}"
     return jsonify({'success': True, 'card': {
         'type': 'ConfirmationCard',
-        'text': f'Done! {summary_text}',
+        'text': confirm_text,
         'data': {'what': 'batch_update', 'result': 'success',
                  'details': results},
         'actions': []
