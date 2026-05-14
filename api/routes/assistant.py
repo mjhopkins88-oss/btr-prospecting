@@ -5204,14 +5204,32 @@ def chat():
         _persist_chat(last_msg, card, 'calendar', 'execution')
         return jsonify({'role': 'assistant', 'content': summary, 'card': card, 'intent': 'calendar', 'mode': 'execution'})
 
-    # Schedule meeting intercept
+    # Schedule meeting intercept — show confirm card for user approval
     if processed_msg.startswith('__schedule_meeting__'):
         contact_name = processed_msg.replace('__schedule_meeting__', '').strip()
-        result = _exec_schedule_meeting({'contact_name': contact_name})
-        data = result.get_json() if hasattr(result, 'get_json') else {}
-        card = data.get('card', {})
+        contact = _resolve_contact(contact_name) if contact_name else None
+        meeting_date = (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d')
+        ev = {
+            'date': meeting_date, 'start_time': '09:00', 'duration_min': 30,
+            'meeting_type': 'general', 'contact_name': contact_name,
+            'title': '', 'description': '', 'priority': 'normal',
+        }
+        if contact:
+            ev['contact_id'] = contact['id']
+            ev['group_id'] = contact.get('group_id')
+            ev['company_name'] = contact.get('company_name', '')
+            full_name = f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip()
+            ev['resolved_name'] = full_name
+            ev['title'] = f"Meeting with {full_name}"
+        else:
+            ev['contact_id'] = None
+            ev['group_id'] = None
+            ev['company_name'] = ''
+            ev['resolved_name'] = contact_name
+            ev['title'] = f"Meeting with {contact_name}" if contact_name else 'Meeting'
+        card = _build_calendar_confirm_card([ev])
         _persist_chat(last_msg, card, 'schedule_meeting', 'execution')
-        return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'schedule_meeting', 'mode': 'execution'})
+        return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'schedule_meeting', 'mode': 'execution'})
 
     # Multi-event schedule intercept — try parsing before permission guard
     multi_events = _parse_schedule_events(last_msg)
@@ -5261,6 +5279,14 @@ def chat():
             )
             _persist_chat(last_msg, card, 'update_calendar', 'execution')
             return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'update_calendar', 'mode': 'execution'})
+
+    # Schedule meeting intent intercept — try NLP parse, show CalendarConfirmCard
+    if intent == 'schedule_meeting':
+        sched_events = _parse_schedule_events(last_msg)
+        if sched_events:
+            card = _build_calendar_confirm_card(sched_events)
+            _persist_chat(last_msg, card, 'schedule_meeting', 'execution')
+            return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'schedule_meeting', 'mode': 'execution'})
 
     # CRM update intercept — parse locally, skip Claude call
     if intent == 'crm_update':
@@ -6390,80 +6416,194 @@ def _exec_schedule_meeting(params):
     }})
 
 
+_DATE_WORDS = frozenset([
+    'today', 'tomorrow', 'monday', 'tuesday', 'wednesday', 'thursday',
+    'friday', 'saturday', 'sunday', 'next', 'this',
+])
+
+
+def _is_date_word(word):
+    return word.lower().strip(' .,;:!?') in _DATE_WORDS
+
+
 def _parse_schedule_events(text):
     """Parse natural language for one or more calendar events.
     Returns list of event dicts or None if not a scheduling request.
-    Handles: 'schedule 3 meetings Monday: 9am intro with Smith, 2pm pitch with Jones, 4pm call with Adams'
-             'create my schedule for tomorrow: 9am Smith, 11am Jones, 2pm Adams'
-             'set up meetings: Monday 9am intro Smith, Tuesday 2pm pitch Jones'
+
+    Handles both word orders:
+      - TIME-first:   '9am intro with Smith'
+      - CONTACT-first: 'meeting with Smith at 9am', 'Smith tomorrow at 2pm'
+      - Single events: 'schedule a meeting with Smith tomorrow at 9am'
+      - Multi events:  'schedule 3 meetings: 9am Smith, 2pm Jones, 4pm Adams'
     """
     lower = text.lower()
 
     schedule_triggers = [
-        r'(?:create|build|set up|plan|make)\s+(?:my\s+)?(?:schedule|meetings|calendar)',
-        r'schedule\s+(?:\d+\s+)?(?:meetings|calls|events)',
-        r'(?:add|put|block)\s+(?:these\s+)?(?:meetings|events|calls)\s+(?:to|on|in)',
-        r'schedule\s+(?:a\s+)?(?:meeting|call).*(?:and|,)\s*(?:a\s+)?(?:meeting|call)',
+        r'(?:create|build|set up|plan|make)\s+(?:my\s+)?(?:schedule|meetings?|calendar)',
+        r'schedule\s+(?:\d+\s+)?(?:meetings?|calls?|events?)',
+        r'(?:add|put|block)\s+(?:these?\s+)?(?:meetings?|events?|calls?)\s+(?:to|on|in)',
+        r'(?:book|set up|add)\s+(?:a\s+)?(?:meeting|call|event)',
+        r'(?:meeting|call)\s+with\s+[A-Za-z]',
     ]
-    is_multi = any(re.search(t, lower) for t in schedule_triggers)
-
-    event_pattern = re.compile(
-        r'(\d{1,2}(?::\d{2})?\s*(?:am|pm|a|p))'
-        r'(?:\s+(\d+)\s*min(?:utes?)?)?'
-        r'(?:\s+(intro(?:duction)?|pitch|follow[- ]?up|review|call|meeting|general))?'
-        r'(?:\s+(?:with\s+)?)'
-        r'([A-Za-z][A-Za-z\s\.\-]+?)(?:\s*(?:,|;|and\s|$|\n))',
-        re.IGNORECASE
-    )
+    is_schedule = any(re.search(t, lower) for t in schedule_triggers)
 
     date_context_pattern = re.compile(
-        r'(?:for|on)\s+(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|'
-        r'next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|week)|'
+        r'(?:for|on|at|,)?\s*(today|tomorrow|'
+        r'(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|'
+        r'next\s+week|'
         r'\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}(?:/\d{2,4})?)',
         re.IGNORECASE
     )
 
-    date_inline_pattern = re.compile(
-        r'(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|'
-        r'next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|week)|'
-        r'\d{4}-\d{2}-\d{2})\s*[:\-]?\s*'
-        r'(\d{1,2}(?::\d{2})?\s*(?:am|pm|a|p))',
-        re.IGNORECASE
-    )
+    time_pattern = r'\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.?m\.?|p\.?m\.?)'
+    type_words = r'intro(?:duction)?|pitch|follow[- ]?up|review|call|meeting|general'
+    name_chars = r"[A-Za-z][A-Za-z\s\.\-\']+"
 
-    base_date_m = date_context_pattern.search(text)
+    base_date_m = re.search(
+        r'(?:for|on)\s+(today|tomorrow|'
+        r'(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|'
+        r'next\s+week|\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}(?:/\d{2,4})?)',
+        text, re.IGNORECASE
+    )
     base_date = _parse_relative_date(base_date_m.group(1)) if base_date_m else None
 
     events = []
-    seen_positions = set()
 
-    for m in date_inline_pattern.finditer(text):
-        date_str = _parse_relative_date(m.group(1))
-        if date_str and m.start() not in seen_positions:
-            seen_positions.add(m.start())
+    # Pattern A: TIME [duration] [type] [with] CONTACT
+    pat_time_first = re.compile(
+        r'(' + time_pattern + r')'
+        r'(?:\s+(\d+)\s*min(?:utes?)?)?'
+        r'(?:\s+(' + type_words + r'))?'
+        r'\s+(?:with\s+)?'
+        r'(' + name_chars + r'?)(?:\s*(?:,|;|and\s|$|\n))',
+        re.IGNORECASE
+    )
 
-    for m in event_pattern.finditer(text):
-        time_raw = m.group(1).strip()
-        duration_raw = m.group(2)
-        type_raw = m.group(3)
-        contact_raw = m.group(4).strip().rstrip('.')
+    # Pattern B: [type] with CONTACT at/@ TIME [duration]
+    # Contact name must not include date/time words — use word-by-word extraction
+    pat_contact_first = re.compile(
+        r'(?:(?:' + type_words + r')\s+)?'
+        r'(?:with|for)\s+'
+        r'([A-Za-z][A-Za-z\.\-\']*(?:\s+[A-Za-z][A-Za-z\.\-\']*)*?)'
+        r'\s+(?:at|@)\s*'
+        r'(' + time_pattern + r')'
+        r'(?:\s+(\d+)\s*min(?:utes?)?)?',
+        re.IGNORECASE
+    )
+
+    # Pattern C: "schedule/book a meeting/call with CONTACT [date]" (no time specified)
+    pat_no_time = re.compile(
+        r'(?:schedule|book|set up|add|create|plan)\s+(?:a\s+)?(?:an?\s+)?'
+        r'(' + type_words + r')?\s*'
+        r'(?:with|for)\s+'
+        r'([A-Za-z][A-Za-z\.\-\']*(?:\s+[A-Za-z][A-Za-z\.\-\']*)*?)'
+        r'(?:\s+(?:for|on|at|tomorrow|today|next|this|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d)|\s*(?:,|;|$|\n))',
+        re.IGNORECASE
+    )
+
+    matched_spans = []
+
+    def _extract_date_near(pos, full_text):
+        """Look for a date word near this position in the text."""
+        after = full_text[pos:]
+        m = re.match(r'\s*(?:on\s+|for\s+|,?\s*)(today|tomorrow|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|next\s+week|\d{4}-\d{2}-\d{2})', after, re.IGNORECASE)
+        if m:
+            return _parse_relative_date(m.group(1))
+        before = full_text[:pos]
+        m2 = re.search(r'(today|tomorrow|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|next\s+week|\d{4}-\d{2}-\d{2})\s*(?:at\s*)?$', before, re.IGNORECASE)
+        if m2:
+            return _parse_relative_date(m2.group(1))
+        return None
+
+    _STOP_WORDS = frozenset([
+        'today', 'tomorrow', 'monday', 'tuesday', 'wednesday', 'thursday',
+        'friday', 'saturday', 'sunday', 'next', 'this', 'on', 'for', 'at',
+        'the', 'a', 'an', 'in', 'from', 'to', 'about',
+    ])
+
+    def _clean_contact(raw):
+        """Remove trailing date/stop words and punctuation from captured contact name."""
+        cleaned = raw.strip().rstrip('.,;:!?')
+        words = cleaned.split()
+        while words and words[-1].lower().strip('.,;:!?') in _STOP_WORDS:
+            words.pop()
+        while words and words[0].lower().strip('.,;:!?') in _STOP_WORDS:
+            words.pop(0)
+        result = ' '.join(words).strip().rstrip('.,;:!?')
+        return result if result else raw.strip().rstrip('.,;:!?')
+
+    def _detect_type(text_fragment):
+        t = text_fragment.lower().strip()
+        if 'intro' in t: return 'intro'
+        if 'pitch' in t: return 'pitch'
+        if 'follow' in t: return 'follow_up'
+        if 'review' in t: return 'review'
+        if 'call' in t: return 'call'
+        return 'general'
+
+    def _overlaps(start, end):
+        for s, e in matched_spans:
+            if start < e and end > s:
+                return True
+        return False
+
+    # Pass 1: CONTACT-first patterns ("meeting with Smith at 9am")
+    # Run first so "with X at TIME" is claimed before time-first can misparse
+    for m in pat_contact_first.finditer(text):
+        if _overlaps(m.start(), m.end()):
+            continue
+        contact_raw = _clean_contact(m.group(1))
+        time_raw = m.group(2).strip()
+        duration_raw = m.group(3)
+
+        if not contact_raw or len(contact_raw) < 2:
+            continue
 
         time_str = _normalize_time(time_raw)
         duration = int(duration_raw) if duration_raw else 30
 
-        meeting_type = 'general'
-        if type_raw:
-            t = type_raw.lower().strip()
-            if 'intro' in t: meeting_type = 'intro'
-            elif 'pitch' in t: meeting_type = 'pitch'
-            elif 'follow' in t: meeting_type = 'follow_up'
-            elif 'review' in t: meeting_type = 'review'
-            elif 'call' in t: meeting_type = 'call'
+        before = text[:m.start()]
+        type_match = re.search(r'(' + type_words + r')\s*$', before, re.IGNORECASE)
+        meeting_type = _detect_type(type_match.group(1)) if type_match else 'general'
 
-        event_date = base_date
+        event_date = _extract_date_near(m.end(), text) or base_date
+        if not event_date:
+            inline_date = re.search(
+                r'(today|tomorrow|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\d{4}-\d{2}-\d{2})',
+                text[m.start():], re.IGNORECASE
+            )
+            if inline_date:
+                event_date = _parse_relative_date(inline_date.group(1))
+        if not event_date:
+            event_date = (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d')
+
+        events.append({
+            'date': event_date, 'start_time': time_str, 'duration_min': duration,
+            'meeting_type': meeting_type, 'contact_name': contact_raw,
+            'title': '', 'description': '', 'priority': 'normal',
+        })
+        matched_spans.append((m.start(), m.end()))
+
+    # Pass 2: TIME-first patterns (multi-event lists: "9am intro with Smith, 2pm pitch with Jones")
+    for m in pat_time_first.finditer(text):
+        if _overlaps(m.start(), m.end()):
+            continue
+        time_raw = m.group(1).strip()
+        duration_raw = m.group(2)
+        type_raw = m.group(3)
+        contact_raw = _clean_contact(m.group(4))
+
+        if not contact_raw or len(contact_raw) < 2:
+            continue
+
+        time_str = _normalize_time(time_raw)
+        duration = int(duration_raw) if duration_raw else 30
+        meeting_type = _detect_type(type_raw) if type_raw else 'general'
+        event_date = _extract_date_near(m.end(), text) or base_date
+
         before_event = text[:m.start()]
         date_check = re.search(
-            r'(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|'
+            r'(today|tomorrow|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|'
             r'next\s+\w+|\d{4}-\d{2}-\d{2})\s*[:\-]?\s*$',
             before_event, re.IGNORECASE
         )
@@ -6476,35 +6616,62 @@ def _parse_schedule_events(text):
             event_date = (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d')
 
         events.append({
-            'date': event_date,
-            'start_time': time_str,
-            'duration_min': duration,
-            'meeting_type': meeting_type,
-            'contact_name': contact_raw,
-            'title': '',
-            'description': '',
-            'priority': 'normal',
+            'date': event_date, 'start_time': time_str, 'duration_min': duration,
+            'meeting_type': meeting_type, 'contact_name': contact_raw,
+            'title': '', 'description': '', 'priority': 'normal',
         })
+        matched_spans.append((m.start(), m.end()))
 
-    if not events and is_multi:
+    # Pass 3: No-time pattern ("schedule a meeting with Smith tomorrow")
+    if not events and is_schedule:
+        for m in pat_no_time.finditer(text):
+            if _overlaps(m.start(), m.end()):
+                continue
+            type_raw = m.group(1)
+            contact_raw = _clean_contact(m.group(2))
+            if not contact_raw or len(contact_raw) < 2:
+                continue
+
+            meeting_type = _detect_type(type_raw) if type_raw else 'general'
+            event_date = base_date
+            if not event_date:
+                after_text = text[m.end():]
+                date_after = re.match(
+                    r'\s*(today|tomorrow|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\d{4}-\d{2}-\d{2})',
+                    after_text, re.IGNORECASE
+                )
+                if date_after:
+                    event_date = _parse_relative_date(date_after.group(1))
+            if not event_date:
+                event_date = (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d')
+
+            time_in_text = re.search(r'(' + time_pattern + r')', text, re.IGNORECASE)
+            time_str = _normalize_time(time_in_text.group(1)) if time_in_text else '09:00'
+
+            events.append({
+                'date': event_date, 'start_time': time_str, 'duration_min': 30,
+                'meeting_type': meeting_type, 'contact_name': contact_raw,
+                'title': '', 'description': '', 'priority': 'normal',
+            })
+            matched_spans.append((m.start(), m.end()))
+
+    # Pass 4: Simple fallback for multi-event lists ("9am Smith, 11am Jones")
+    if not events and is_schedule:
         simple_pattern = re.compile(
-            r'(\d{1,2}(?::\d{2})?\s*(?:am|pm|a|p))\s+'
-            r'(?:with\s+)?([A-Za-z][A-Za-z\s\.\-]+?)(?:\s*(?:,|;|and\s|$|\n))',
+            r'(' + time_pattern + r')\s+'
+            r'(?:with\s+)?(' + name_chars + r'?)(?:\s*(?:,|;|and\s|$|\n))',
             re.IGNORECASE
         )
         for m in simple_pattern.finditer(text):
             time_str = _normalize_time(m.group(1).strip())
-            contact_raw = m.group(2).strip().rstrip('.')
+            contact_raw = _clean_contact(m.group(2))
+            if not contact_raw or len(contact_raw) < 2:
+                continue
             event_date = base_date or (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d')
             events.append({
-                'date': event_date,
-                'start_time': time_str,
-                'duration_min': 30,
-                'meeting_type': 'general',
-                'contact_name': contact_raw,
-                'title': '',
-                'description': '',
-                'priority': 'normal',
+                'date': event_date, 'start_time': time_str, 'duration_min': 30,
+                'meeting_type': 'general', 'contact_name': contact_raw,
+                'title': '', 'description': '', 'priority': 'normal',
             })
 
     if not events:
@@ -6665,7 +6832,7 @@ def _exec_create_calendar_events(params):
 
     parts = []
     if created:
-        parts.append(f"{len(created)} meeting{'s' if len(created) != 1 else ''} added to calendar")
+        parts.append(f"Added {len(created)} event{'s' if len(created) != 1 else ''} to your calendar")
     if skipped:
         parts.append(f"{len(skipped)} skipped (duplicates)")
 
