@@ -8,6 +8,7 @@ from flask import Blueprint, request, jsonify
 from shared.database import fetch_all, fetch_one, execute, new_id
 from datetime import datetime, timedelta
 import os
+import uuid
 import anthropic
 import json
 import re
@@ -54,6 +55,9 @@ INTENT_KEYWORDS = {
     'push_forward':     ['push forward', 'advance', 'move forward', 'progress',
                          'accelerate', 'fast track', 'close the loop', 'drive forward',
                          'push them', 'push this', 'take to next level'],
+    'schedule_meeting':  ['schedule meeting', 'book meeting', 'set up meeting', 'meeting with',
+                         'schedule a call', 'set meeting', 'book a call', 'calendar',
+                         'schedule time', 'block time', 'meeting request'],
     'export_report':    ['export', 'download', 'csv', 'report', 'spreadsheet', 'pull data'],
     'troubleshoot':     ['error', 'broken', 'not working', 'bug', 'issue', 'wrong',
                          'fix', 'help with app', 'problem'],
@@ -75,6 +79,7 @@ INTENT_TO_MODE = {
     'log_update_crm':   'execution',
     'crm_update':       'execution',
     'push_forward':     'execution',
+    'schedule_meeting': 'execution',
     'export_report':    'execution',
     'troubleshoot':     'execution',
     'coach':            'coach',
@@ -107,6 +112,7 @@ def _classify_intent(text):
             '/relationship': 'analyze_company', '/funnel': 'diagnose',
             '/predict': 'analyze_company', '/automate': 'recommend_action',
             '/brief-pdf': 'export_report', '/patterns': 'coach',
+            '/meeting': 'schedule_meeting', '/calendar': 'schedule_meeting',
         }
         return slash_map.get(cmd, 'recommend_action')
 
@@ -445,6 +451,7 @@ RelationshipCard: data: {"company":"...","company_id":"...","relationship_score"
 FunnelCard: data: {"funnel":[{"stage":"...","count":N}],"rates":{"outreach_to_reply":N,"reply_to_meeting":N,"overall_conversion":N},"bottlenecks":[{"stage":"...","rate":N,"severity":"high|medium|low","suggestion":"..."}]}
 PredictionCard: data: {"company":"...","reply_likelihood":{"score":N,"label":"High|Medium|Low","factors":["..."]},"meeting_likelihood":{"score":N,"label":"High|Medium|Low","factors":["..."]},"recommended_channel":"..."}
 AutomationCard: data: {"patterns":[{"type":"...","detail":"...","frequency":N}],"suggestions":[{"action":"...","impact":"high|medium|low","time_saved_min":N}],"time_savings_est":N}
+MeetingCard: data: {"contact_name":"...","contact_id":"...","group_id":"...","company_name":"...","meeting_date":"YYYY-MM-DD","meeting_time":"HH:MM","duration_min":N,"meeting_type":"general|intro|follow_up|pitch|review|call","title":"...","notes":"...","status":"scheduled"}
 
 ═══════════════════════════════
 INTERNAL THINKING (never expose)
@@ -4280,6 +4287,14 @@ def _preprocess_slash(text):
     if cmd == '/patterns':
         return '__v9_patterns__', extra_ctx
 
+    if cmd == '/calendar':
+        return '__calendar_view__', extra_ctx
+
+    if cmd == '/meeting':
+        if arg:
+            return f'__schedule_meeting__{arg}', extra_ctx
+        return "Who would you like to meet with? Use /meeting [contact name].", extra_ctx
+
     if cmd == '/draft' and arg:
         m = re.match(r'^top\s+(\d+)', arg.strip(), re.IGNORECASE)
         if m:
@@ -5037,9 +5052,10 @@ def chat():
                 'action_items': brief['action_items'][:3],
                 'daily_targets': brief['daily_targets'][:3],
                 'download_url': '/api/brief/download',
+                'fileName': f"BTR_Brief_{brief['date']}.pdf",
             },
             'actions': [
-                {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download', 'params': {'url': '/api/brief/download'}},
+                {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download', 'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{brief['date']}.pdf"}},
             ]
         }
         _persist_chat(last_msg, card, 'brief_pdf', 'execution')
@@ -5069,6 +5085,39 @@ def chat():
             }
         _persist_chat(last_msg, card, 'patterns', 'coach')
         return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'patterns', 'mode': 'coach'})
+
+    # Calendar view intercept
+    if processed_msg == '__calendar_view__':
+        pending = fetch_all(
+            "SELECT m.*, c.first_name, c.last_name, g.name as company_name FROM calendar_meetings m "
+            "LEFT JOIN prospecting_contacts c ON c.id = m.contact_id "
+            "LEFT JOIN capital_groups g ON g.id = m.group_id "
+            "WHERE m.status = 'scheduled' AND m.meeting_date >= ? ORDER BY m.meeting_date ASC, m.meeting_time ASC LIMIT 5",
+            [datetime.utcnow().strftime('%Y-%m-%d')]
+        )
+        if pending:
+            lines = []
+            for p in pending:
+                name = f"{p.get('first_name', '')} {p.get('last_name', '')}".strip()
+                lines.append(f"• {p['meeting_date']} {p.get('meeting_time', '')} — {name}" + (f" ({p.get('company_name', '')})" if p.get('company_name') else ''))
+            summary = "**Upcoming meetings:**\n\n" + "\n".join(lines)
+        else:
+            summary = "No upcoming meetings scheduled. Open the calendar to schedule one."
+        card = {
+            'type': 'TextCard', 'text': summary, 'source': None, 'data': {},
+            'actions': [{'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}}]
+        }
+        _persist_chat(last_msg, card, 'calendar', 'execution')
+        return jsonify({'role': 'assistant', 'content': summary, 'card': card, 'intent': 'calendar', 'mode': 'execution'})
+
+    # Schedule meeting intercept
+    if processed_msg.startswith('__schedule_meeting__'):
+        contact_name = processed_msg.replace('__schedule_meeting__', '').strip()
+        result = _exec_schedule_meeting({'contact_name': contact_name})
+        data = result.get_json() if hasattr(result, 'get_json') else {}
+        card = data.get('card', {})
+        _persist_chat(last_msg, card, 'schedule_meeting', 'execution')
+        return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'schedule_meeting', 'mode': 'execution'})
 
     intent = _classify_intent(last_msg)
     mode = INTENT_TO_MODE.get(intent, 'strategic')
@@ -5506,6 +5555,15 @@ def execute_action():
                 'type': 'ErrorCard', 'text': 'Company not found.',
                 'data': {'error': 'Company not found'}, 'actions': []
             }})
+        if action == 'schedule_meeting':
+            return _exec_schedule_meeting(params)
+        if action == 'view_calendar':
+            return jsonify({'success': True, 'card': {
+                'type': 'ConfirmationCard', 'text': 'Opening calendar...',
+                'data': {'what': 'navigate', 'result': 'calendar'}, 'actions': [
+                    {'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}}
+                ]
+            }})
         if action == 'cancel':
             return jsonify({'success': True, 'card': {
                 'type': 'ConfirmationCard', 'text': 'Cancelled.',
@@ -5653,6 +5711,88 @@ def _exec_complete_task(params):
     }})
 
 
+def _exec_schedule_meeting(params):
+    contact_id = params.get('contact_id')
+    contact_name = params.get('contact_name', '')
+
+    if not contact_id and contact_name:
+        parts = contact_name.strip().split()
+        if parts:
+            like = f"%{parts[0]}%"
+            contact = fetch_one(
+                "SELECT c.id, c.first_name, c.last_name, c.group_id, g.name as company_name "
+                "FROM prospecting_contacts c LEFT JOIN capital_groups g ON g.id = c.group_id "
+                "WHERE c.first_name LIKE ? OR c.last_name LIKE ? LIMIT 1",
+                [like, like]
+            )
+            if contact:
+                contact_id = contact['id']
+                contact_name = f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip()
+
+    if not contact_id:
+        return jsonify({'success': False, 'card': {
+            'type': 'ErrorCard', 'text': 'Could not find the contact. Please specify a valid contact name.',
+            'data': {'error': 'Contact not found'}, 'actions': [
+                {'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}}
+            ]
+        }})
+
+    contact = fetch_one(
+        "SELECT c.*, g.name as company_name FROM prospecting_contacts c "
+        "LEFT JOIN capital_groups g ON g.id = c.group_id WHERE c.id = ?", [contact_id])
+    if not contact:
+        return jsonify({'success': False, 'card': {
+            'type': 'ErrorCard', 'text': 'Contact not found.',
+            'data': {'error': 'Contact not found'}, 'actions': []
+        }})
+
+    meeting_date = params.get('meeting_date', (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d'))
+    meeting_time = params.get('meeting_time', '09:00')
+    meeting_type = params.get('meeting_type', 'general')
+    duration_min = params.get('duration_min', 30)
+    title = params.get('title', f"Meeting with {contact_name or contact.get('first_name', '')}".strip())
+    notes = params.get('notes', '')
+
+    existing = fetch_one(
+        "SELECT id FROM calendar_meetings WHERE contact_id = ? AND meeting_date = ? AND meeting_time = ? AND status != 'cancelled'",
+        [contact_id, meeting_date, meeting_time]
+    )
+    if existing:
+        return jsonify({'success': False, 'card': {
+            'type': 'ErrorCard', 'text': f'A meeting already exists with {contact_name} on {meeting_date} at {meeting_time}.',
+            'data': {'error': 'Duplicate meeting'}, 'actions': [
+                {'id': 'nav_cal', 'label': 'View Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}}
+            ]
+        }})
+
+    mid = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+    execute(
+        "INSERT INTO calendar_meetings (id, contact_id, group_id, meeting_date, meeting_time, "
+        "duration_min, meeting_type, title, notes, status, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?)",
+        [mid, contact_id, contact.get('group_id'), meeting_date, meeting_time,
+         duration_min, meeting_type, title, notes, now, now]
+    )
+
+    full_name = f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip()
+    company = contact.get('company_name', '')
+    return jsonify({'success': True, 'card': {
+        'type': 'MeetingCard',
+        'text': f"**Meeting scheduled** with {full_name}" + (f" ({company})" if company else '') + f" on {meeting_date} at {meeting_time}.",
+        'data': {
+            'contact_name': full_name, 'contact_id': contact_id,
+            'group_id': contact.get('group_id'), 'company_name': company,
+            'meeting_date': meeting_date, 'meeting_time': meeting_time,
+            'duration_min': duration_min, 'meeting_type': meeting_type,
+            'title': title, 'notes': notes, 'status': 'scheduled'
+        },
+        'actions': [
+            {'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}},
+        ]
+    }})
+
+
 def _exec_export(params):
     export_type = params.get('export_type', 'contacts')
     urls = {
@@ -5662,13 +5802,14 @@ def _exec_export(params):
         'prospects': '/api/export',
     }
     url = urls.get(export_type, urls['contacts'])
+    file_name = f"{export_type}_{datetime.utcnow().strftime('%Y-%m-%d')}.csv"
     return jsonify({'success': True, 'card': {
         'type': 'ExportCard',
         'text': f'Your {export_type} export is ready.',
         'data': {'export_type': export_type, 'url': url,
-                 'filename': f"{export_type}_{datetime.utcnow().strftime('%Y-%m-%d')}"},
+                 'fileName': file_name, 'filename': file_name},
         'actions': [
-            {'id': 'download', 'label': 'Download', 'action': 'download', 'params': {'url': url}}
+            {'id': 'download', 'label': 'Download', 'action': 'download', 'params': {'url': url, 'fileName': file_name}}
         ]
     }})
 

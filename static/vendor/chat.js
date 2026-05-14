@@ -44,7 +44,8 @@ var CARD_COLORS = {
   FunnelCard:             { bg: '#f0f9ff', border: '#bae6fd', accent: '#0369a1', icon: '📊' },
   PredictionCard:         { bg: '#ecfdf5', border: '#a7f3d0', accent: '#059669', icon: '🔮' },
   AutomationCard:         { bg: '#fffbeb', border: '#fde68a', accent: '#92400e', icon: '⚙️' },
-  BriefCard:              { bg: '#f0f9ff', border: '#bae6fd', accent: '#0c4a6e', icon: '📰' }
+  BriefCard:              { bg: '#f0f9ff', border: '#bae6fd', accent: '#0c4a6e', icon: '📰' },
+  MeetingCard:            { bg: '#f0fdf4', border: '#bbf7d0', accent: '#15803d', icon: '📅' }
 };
 
 var SLASH_HINTS = [
@@ -67,7 +68,9 @@ var SLASH_HINTS = [
   { cmd: '/predict', desc: 'Outcome prediction', ex: '/predict Acme' },
   { cmd: '/automate', desc: 'Automation scan', ex: '/automate' },
   { cmd: '/brief-pdf', desc: 'Daily brief PDF', ex: '/brief-pdf' },
-  { cmd: '/patterns', desc: 'Pipeline patterns', ex: '/patterns' }
+  { cmd: '/patterns', desc: 'Pipeline patterns', ex: '/patterns' },
+  { cmd: '/meeting', desc: 'Schedule meeting', ex: '/meeting John Smith' },
+  { cmd: '/calendar', desc: 'Open calendar', ex: '/calendar' }
 ];
 
 var MODE_LABELS = {
@@ -233,9 +236,22 @@ function executeCardAction(act, messages, setMessages, setActionLoading) {
   }
 
   if (act.action === 'download') {
+    var rawUrl = (act.params && act.params.url) || '';
+    var dlUrl = rawUrl;
+    if (rawUrl && rawUrl.charAt(0) === '/') {
+      dlUrl = getApiBase() + rawUrl;
+    }
+    if (!dlUrl) {
+      setMessages(function(prev) {
+        return prev.concat([{ role: 'assistant', card: {
+          type: 'ErrorCard', text: 'Download failed — no file URL available.', data: { error: 'No download URL provided' }, actions: []
+        }}]);
+      });
+      return;
+    }
     var a = document.createElement('a');
-    a.href = (act.params && act.params.url) || '';
-    a.download = '';
+    a.href = dlUrl;
+    a.download = (act.params && act.params.fileName) || '';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -430,10 +446,20 @@ function renderFollowUpCard(card, onAction) {
 function renderExportCard(card, onAction) {
   var d = card.data || {};
   var colors = CARD_COLORS.ExportCard;
+  var fileUrl = d.url || d.fileUrl || '';
+  var fileName = d.fileName || d.filename || '';
+  var exportType = d.export_type || 'Data';
 
-  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.6rem 0.7rem' } },
-    h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.25rem' } }, colors.icon + ' Export Ready'),
-    h('div', { style: { fontSize: '0.74rem', color: '#1e293b' } }, d.export_type || 'Data'),
+  if (!fileUrl && (!card.actions || card.actions.length === 0)) {
+    return null;
+  }
+
+  var displayName = fileName || (exportType + ' export');
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.3rem' } }, colors.icon + ' Export Ready'),
+    h('div', { style: { fontSize: '0.78rem', fontWeight: 600, color: '#1e293b', marginBottom: '0.15rem' } }, exportType.charAt(0).toUpperCase() + exportType.slice(1).replace(/_/g, ' ')),
+    fileName ? h('div', { style: { fontSize: '0.65rem', color: '#64748b', marginBottom: '0.3rem' } }, '📄 ' + displayName) : null,
     renderActionButtons(card.actions, onAction)
   );
 }
@@ -1273,6 +1299,28 @@ function renderActionButtons(actions, onAction, draftData) {
   );
 }
 
+function renderMeetingCard(card, onAction) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.MeetingCard;
+  var statusColor = d.status === 'completed' ? '#16a34a' : d.status === 'cancelled' ? '#94a3b8' : '#3b82f6';
+  var typeLabels = { general: 'Meeting', intro: 'Introduction', follow_up: 'Follow-up', pitch: 'Pitch', review: 'Review', call: 'Call' };
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.3rem' } }, colors.icon + ' Meeting Scheduled'),
+    h('div', { style: { fontSize: '0.82rem', fontWeight: 600, color: '#0f172a', marginBottom: '0.15rem' } }, d.title || 'Meeting'),
+    h('div', { style: { fontSize: '0.72rem', color: '#334155', marginBottom: '0.1rem' } },
+      (d.contact_name ? '👤 ' + d.contact_name : '') + (d.company_name ? ' — ' + d.company_name : '')),
+    h('div', { style: { fontSize: '0.72rem', color: '#475569', marginBottom: '0.15rem' } },
+      '🕐 ' + (d.meeting_date || '—') + ' at ' + (d.meeting_time || '—') + ' · ' + (d.duration_min || 30) + 'min'),
+    h('div', { style: { display: 'flex', gap: '0.3rem', marginBottom: '0.3rem', flexWrap: 'wrap' } },
+      h('span', { style: { fontSize: '0.6rem', padding: '0.1rem 0.4rem', borderRadius: '1rem', background: statusColor + '18', color: statusColor, fontWeight: 600 } }, d.status || 'scheduled'),
+      h('span', { style: { fontSize: '0.6rem', padding: '0.1rem 0.4rem', borderRadius: '1rem', background: '#f1f5f9', color: '#475569', fontWeight: 600 } }, typeLabels[d.meeting_type] || d.meeting_type || 'general')
+    ),
+    d.notes ? h('div', { style: { fontSize: '0.68rem', color: '#64748b', fontStyle: 'italic', marginBottom: '0.25rem' } }, d.notes) : null,
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
 // --- Card dispatcher ---
 function renderCard(card, onAction) {
   if (!card) return null;
@@ -1310,6 +1358,7 @@ function renderCard(card, onAction) {
     case 'PredictionCard': return renderPredictionCard(card, onAction);
     case 'AutomationCard': return renderAutomationCard(card, onAction);
     case 'BriefCard': return renderBriefCard(card, onAction);
+    case 'MeetingCard': return renderMeetingCard(card, onAction);
     default: return null;
   }
 }

@@ -2398,6 +2398,32 @@ def init_db():
     except Exception:
         pass
 
+    c.safe_execute('''
+        CREATE TABLE IF NOT EXISTS calendar_meetings (
+            id TEXT PRIMARY KEY,
+            contact_id TEXT,
+            group_id TEXT,
+            meeting_date TEXT NOT NULL,
+            meeting_time TEXT DEFAULT '09:00',
+            duration_min INTEGER DEFAULT 30,
+            meeting_type TEXT DEFAULT 'general',
+            title TEXT,
+            notes TEXT,
+            status TEXT DEFAULT 'scheduled',
+            outcome TEXT,
+            outcome_notes TEXT,
+            next_steps TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cal_meetings_date ON calendar_meetings(meeting_date, meeting_time)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cal_meetings_contact ON calendar_meetings(contact_id)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cal_meetings_status ON calendar_meetings(status)')
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -2451,6 +2477,7 @@ from api.routes.coi import coi_bp
 from api.routes.assistant import assistant_bp
 from api.routes.performance import performance_bp
 from api.routes.daily_brief import daily_brief_bp
+from api.routes.calendar import calendar_bp
 
 app.register_blueprint(leads_bp)
 app.register_blueprint(projects_bp)
@@ -2474,6 +2501,7 @@ app.register_blueprint(coi_bp)
 app.register_blueprint(assistant_bp)
 app.register_blueprint(performance_bp)
 app.register_blueprint(daily_brief_bp)
+app.register_blueprint(calendar_bp)
 
 # ===================================================================
 # DASHBOARD — Weather endpoint (WeatherAPI.com)
