@@ -1370,6 +1370,8 @@ function App({
     callTimingScores: callTimingScores
   })), activeTab === 'discovery' && user?.role !== 'broker' && /*#__PURE__*/React.createElement(DailyDiscovery, null), activeTab === 'pipeline' && user?.role !== 'broker' && /*#__PURE__*/React.createElement(UnderwritingDataPage, {
     user: user
+  }), activeTab === 'calendar' && /*#__PURE__*/React.createElement(CalendarPage, {
+    user: user
   }), activeTab === 'followups' && user?.role !== 'broker' && /*#__PURE__*/React.createElement(FollowUpsPage, {
     user: user
   }), activeTab === 'statewide' && user?.role !== 'broker' && /*#__PURE__*/React.createElement(StatewideDiscovery, null), activeTab === 'intelligence' && /*#__PURE__*/React.createElement(SunbeltIntelligence, {
@@ -5570,6 +5572,7 @@ const NAV_SECTIONS = [
     icon: '\u25C8', // ◈
     children: [
       { id: 'command', label: 'Overview' },
+      { id: 'calendar', label: 'Calendar' },
       { id: 'followups', label: 'Follow-ups Due' }
     ]
   },
@@ -17065,6 +17068,527 @@ function PipelinePage({
     )
   )
 
+  );
+}
+
+// ======= CRM CALENDAR PAGE =======
+function CalendarPage({ user }) {
+  const [view, setView] = useState('week');
+  const [meetings, setMeetings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedMeeting, setSelectedMeeting] = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [pendingReview, setPendingReview] = useState([]);
+  const [reviewMeeting, setReviewMeeting] = useState(null);
+  const [toast, setToast] = useState(null);
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
+
+  const getWeekRange = (date) => {
+    const d = new Date(date);
+    const day = d.getDay();
+    const start = new Date(d);
+    start.setDate(d.getDate() - day);
+    start.setHours(0,0,0,0);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    end.setHours(23,59,59,999);
+    return { start, end };
+  };
+
+  const getDayRange = (date) => {
+    const start = new Date(date);
+    start.setHours(0,0,0,0);
+    const end = new Date(date);
+    end.setHours(23,59,59,999);
+    return { start, end };
+  };
+
+  const fmt = (d) => d.toISOString().split('T')[0];
+
+  const loadMeetings = async () => {
+    setLoading(true);
+    try {
+      const range = view === 'week' ? getWeekRange(currentDate) : getDayRange(currentDate);
+      const res = await fetch(`${API_BASE}/api/calendar/meetings?start=${fmt(range.start)}&end=${fmt(range.end)}`);
+      const data = await res.json();
+      if (data.success) setMeetings(data.meetings || []);
+    } catch (e) { console.error('Calendar load error:', e); }
+    setLoading(false);
+  };
+
+  const loadPendingReview = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/calendar/meetings/pending-review`);
+      const data = await res.json();
+      if (data.success) setPendingReview(data.meetings || []);
+    } catch (e) { console.error('Pending review load error:', e); }
+  };
+
+  useEffect(() => { loadMeetings(); loadPendingReview(); }, [currentDate, view]);
+
+  const navigateDate = (dir) => {
+    const d = new Date(currentDate);
+    d.setDate(d.getDate() + (view === 'week' ? 7 * dir : dir));
+    setCurrentDate(d);
+  };
+
+  const goToday = () => setCurrentDate(new Date());
+
+  const statusColors = { scheduled: '#3b82f6', completed: '#16a34a', cancelled: '#94a3b8' };
+  const typeLabels = { general: 'Meeting', intro: 'Introduction', follow_up: 'Follow-up', pitch: 'Pitch', review: 'Review', call: 'Call' };
+
+  const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const hours = Array.from({length: 12}, (_, i) => i + 7);
+
+  const getWeekDates = () => {
+    const { start } = getWeekRange(currentDate);
+    return Array.from({length: 7}, (_, i) => {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      return d;
+    });
+  };
+
+  const headerDateStr = () => {
+    if (view === 'day') return currentDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+    const { start, end } = getWeekRange(currentDate);
+    return `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  };
+
+  const getMeetingsForDate = (dateStr) => meetings.filter(m => m.meeting_date === dateStr);
+
+  const timeToRow = (timeStr) => {
+    if (!timeStr) return 0;
+    const [h, m] = timeStr.split(':').map(Number);
+    return Math.max(0, (h - 7) * 2 + (m >= 30 ? 1 : 0));
+  };
+
+  // --- Meeting Detail Panel ---
+  const MeetingDetail = ({ meeting, onClose }) => {
+    const [detail, setDetail] = useState(null);
+    const [loadingDetail, setLoadingDetail] = useState(true);
+
+    useEffect(() => {
+      (async () => {
+        setLoadingDetail(true);
+        try {
+          const res = await fetch(`${API_BASE}/api/calendar/meetings/${meeting.id}`);
+          const data = await res.json();
+          if (data.success) setDetail(data);
+        } catch (e) { console.error(e); }
+        setLoadingDetail(false);
+      })();
+    }, [meeting.id]);
+
+    if (loadingDetail) return React.createElement('div', { style: { padding: '2rem', textAlign: 'center', color: '#64748b' } }, 'Loading...');
+
+    const m = detail?.meeting || meeting;
+    const tps = detail?.touchpoints || [];
+    const sigs = detail?.signals || [];
+
+    return React.createElement('div', { style: { background: '#fff', borderRadius: '0.75rem', border: '1px solid #e2e8f0', padding: '1.25rem', maxWidth: '480px' } },
+      React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' } },
+        React.createElement('div', null,
+          React.createElement('div', { style: { fontSize: '1.1rem', fontWeight: 700, color: '#0f172a' } }, m.title || 'Meeting'),
+          React.createElement('div', { style: { fontSize: '0.8rem', color: '#64748b', marginTop: '0.15rem' } },
+            `${m.meeting_date} at ${m.meeting_time || '—'} · ${m.duration_min || 30}min`)
+        ),
+        React.createElement('button', { onClick: onClose, style: { background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: '#94a3b8' } }, '✕')
+      ),
+      React.createElement('div', { style: { display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' } },
+        React.createElement('span', { style: { fontSize: '0.65rem', padding: '0.15rem 0.5rem', borderRadius: '1rem', background: (statusColors[m.status] || '#94a3b8') + '18', color: statusColors[m.status] || '#94a3b8', fontWeight: 600 } }, m.status),
+        React.createElement('span', { style: { fontSize: '0.65rem', padding: '0.15rem 0.5rem', borderRadius: '1rem', background: '#f1f5f9', color: '#475569', fontWeight: 600 } }, typeLabels[m.meeting_type] || m.meeting_type)
+      ),
+
+      // Contact Info
+      React.createElement('div', { style: { background: '#f8fafc', borderRadius: '0.5rem', padding: '0.75rem', marginBottom: '0.75rem', border: '1px solid #e2e8f0' } },
+        React.createElement('div', { style: { fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: '0.35rem' } }, 'Contact'),
+        React.createElement('div', { style: { fontSize: '0.85rem', fontWeight: 600, color: '#0f172a' } }, m.contact_name || '—'),
+        m.contact_title ? React.createElement('div', { style: { fontSize: '0.75rem', color: '#64748b' } }, m.contact_title) : null,
+        m.company_name ? React.createElement('div', { style: { fontSize: '0.75rem', color: '#475569', fontWeight: 500 } }, m.company_name) : null,
+        m.email ? React.createElement('div', { style: { fontSize: '0.7rem', color: '#3b82f6', marginTop: '0.2rem' } }, m.email) : null,
+        m.relationship_stage ? React.createElement('div', { style: { marginTop: '0.3rem' } },
+          React.createElement('span', { style: { fontSize: '0.6rem', padding: '0.1rem 0.4rem', borderRadius: '1rem', background: m.relationship_stage === 'hot' ? '#fef2f2' : m.relationship_stage === 'warm' ? '#fffbeb' : '#f0f9ff', color: m.relationship_stage === 'hot' ? '#dc2626' : m.relationship_stage === 'warm' ? '#d97706' : '#0369a1', fontWeight: 600 } }, m.relationship_stage)
+        ) : null
+      ),
+
+      // Last Touchpoints
+      tps.length > 0 ? React.createElement('div', { style: { marginBottom: '0.75rem' } },
+        React.createElement('div', { style: { fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: '0.3rem' } }, 'Recent Touchpoints'),
+        tps.slice(0, 3).map((tp, i) => React.createElement('div', { key: 'tp' + i, style: { fontSize: '0.72rem', color: '#334155', padding: '0.2rem 0', borderBottom: i < 2 ? '1px solid #f1f5f9' : 'none' } },
+          React.createElement('span', { style: { fontWeight: 600, color: '#475569', marginRight: '0.3rem' } }, tp.channel),
+          tp.summary || tp.subject || '—',
+          React.createElement('span', { style: { fontSize: '0.6rem', color: '#94a3b8', marginLeft: '0.3rem' } }, tp.occurred_at ? tp.occurred_at.split('T')[0] : '')
+        ))
+      ) : null,
+
+      // Signals
+      sigs.length > 0 ? React.createElement('div', { style: { marginBottom: '0.75rem' } },
+        React.createElement('div', { style: { fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: '0.3rem' } }, 'Signals'),
+        sigs.slice(0, 3).map((s, i) => React.createElement('div', { key: 'sig' + i, style: { fontSize: '0.72rem', color: '#334155', padding: '0.2rem 0' } },
+          React.createElement('span', { style: { color: '#f59e0b', marginRight: '0.25rem' } }, '⚡'),
+          s.title || s.summary || '—'
+        ))
+      ) : null,
+
+      // Notes
+      m.notes ? React.createElement('div', { style: { marginBottom: '0.75rem' } },
+        React.createElement('div', { style: { fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: '0.2rem' } }, 'Notes'),
+        React.createElement('div', { style: { fontSize: '0.75rem', color: '#334155', whiteSpace: 'pre-wrap' } }, m.notes)
+      ) : null,
+
+      // Leo Talking Points
+      React.createElement('div', { style: { background: '#fffbeb', borderRadius: '0.5rem', padding: '0.75rem', marginBottom: '0.75rem', border: '1px solid #fde68a' } },
+        React.createElement('div', { style: { fontSize: '0.65rem', fontWeight: 700, color: '#92400e', textTransform: 'uppercase', marginBottom: '0.35rem' } }, '🧠 Leo — Suggested Talking Points'),
+        React.createElement('div', { style: { fontSize: '0.72rem', color: '#78350f' } },
+          m.relationship_stage === 'cold' ? '• Lead with value — share a relevant market insight before asking for anything' :
+          m.relationship_stage === 'hot' ? '• This is a warm relationship — reference your last conversation and advance the deal' :
+          '• Build rapport — find common ground and demonstrate industry knowledge'),
+        React.createElement('div', { style: { fontSize: '0.72rem', color: '#78350f', marginTop: '0.15rem' } },
+          tps.length > 0 ? `• Last touchpoint was ${tps[0].channel} on ${(tps[0].occurred_at || '').split('T')[0]} — follow up on that` : '• No prior touchpoints — this is a first meeting'),
+        React.createElement('div', { style: { fontSize: '0.72rem', color: '#78350f', marginTop: '0.15rem' } },
+          sigs.length > 0 ? `• Mention recent signal: "${sigs[0].title || sigs[0].summary || ''}"` : '• Research their recent activity before the meeting')
+      ),
+
+      // Action buttons
+      m.status === 'scheduled' ? React.createElement('div', { style: { display: 'flex', gap: '0.5rem', flexWrap: 'wrap' } },
+        React.createElement('button', { onClick: () => { setReviewMeeting(m); setSelectedMeeting(null); }, style: { flex: 1, padding: '0.5rem', fontSize: '0.75rem', fontWeight: 600, background: '#16a34a', color: '#fff', border: 'none', borderRadius: '0.4rem', cursor: 'pointer' } }, 'Complete Meeting'),
+        React.createElement('button', { onClick: async () => {
+          await fetch(`${API_BASE}/api/calendar/meetings/${m.id}`, { method: 'DELETE' });
+          showToast('Meeting cancelled'); setSelectedMeeting(null); loadMeetings();
+        }, style: { padding: '0.5rem 0.75rem', fontSize: '0.75rem', fontWeight: 600, background: '#fff', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '0.4rem', cursor: 'pointer' } }, 'Cancel')
+      ) : null
+    );
+  };
+
+  // --- Create Meeting Form ---
+  const CreateMeetingForm = ({ onClose, onCreated }) => {
+    const [contactQuery, setContactQuery] = useState('');
+    const [contactResults, setContactResults] = useState([]);
+    const [selectedContact, setSelectedContact] = useState(null);
+    const [formData, setFormData] = useState({
+      meeting_date: fmt(new Date()),
+      meeting_time: '09:00',
+      duration_min: 30,
+      meeting_type: 'general',
+      title: '',
+      notes: ''
+    });
+    const [submitting, setSubmitting] = useState(false);
+    const [error, setError] = useState(null);
+
+    const searchContacts = async (q) => {
+      setContactQuery(q);
+      if (q.length < 2) { setContactResults([]); return; }
+      try {
+        const res = await fetch(`${API_BASE}/api/calendar/contacts/search?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        if (data.success) setContactResults(data.contacts || []);
+      } catch (e) { console.error(e); }
+    };
+
+    const handleSubmit = async () => {
+      if (!selectedContact) { setError('Select a contact'); return; }
+      if (!formData.meeting_date) { setError('Select a date'); return; }
+      setSubmitting(true); setError(null);
+      try {
+        const res = await fetch(`${API_BASE}/api/calendar/meetings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...formData, contact_id: selectedContact.id })
+        });
+        const data = await res.json();
+        if (data.success) { onCreated(); onClose(); }
+        else setError(data.error || 'Failed to create meeting');
+      } catch (e) { setError('Network error'); }
+      setSubmitting(false);
+    };
+
+    const fieldStyle = { width: '100%', padding: '0.45rem 0.6rem', fontSize: '0.78rem', border: '1px solid #e2e8f0', borderRadius: '0.35rem', outline: 'none', boxSizing: 'border-box' };
+    const labelStyle = { display: 'block', fontSize: '0.68rem', fontWeight: 600, color: '#475569', marginBottom: '0.2rem' };
+
+    return React.createElement('div', { style: { background: '#fff', borderRadius: '0.75rem', border: '1px solid #e2e8f0', padding: '1.25rem', maxWidth: '420px' } },
+      React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' } },
+        React.createElement('div', { style: { fontSize: '1rem', fontWeight: 700, color: '#0f172a' } }, 'Schedule Meeting'),
+        React.createElement('button', { onClick: onClose, style: { background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: '#94a3b8' } }, '✕')
+      ),
+
+      // Contact search
+      React.createElement('div', { style: { marginBottom: '0.75rem' } },
+        React.createElement('label', { style: labelStyle }, 'Contact *'),
+        selectedContact ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.6rem', background: '#f0f9ff', borderRadius: '0.35rem', border: '1px solid #bae6fd' } },
+          React.createElement('span', { style: { fontSize: '0.8rem', fontWeight: 600, color: '#0369a1', flex: 1 } }, selectedContact.full_name + (selectedContact.company_name ? ` — ${selectedContact.company_name}` : '')),
+          React.createElement('button', { onClick: () => { setSelectedContact(null); setContactQuery(''); }, style: { background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '0.9rem' } }, '✕')
+        ) : React.createElement('div', { style: { position: 'relative' } },
+          React.createElement('input', { type: 'text', value: contactQuery, onChange: (e) => searchContacts(e.target.value), placeholder: 'Search contacts...', style: fieldStyle }),
+          contactResults.length > 0 ? React.createElement('div', { style: { position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #e2e8f0', borderRadius: '0 0 0.35rem 0.35rem', maxHeight: '180px', overflowY: 'auto', zIndex: 50, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' } },
+            contactResults.map((c) => React.createElement('div', { key: c.id, onClick: () => {
+              setSelectedContact(c); setContactResults([]); setContactQuery('');
+              if (!formData.title) setFormData(prev => ({...prev, title: `Meeting with ${c.full_name}`}));
+            }, style: { padding: '0.45rem 0.6rem', fontSize: '0.75rem', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', color: '#0f172a' } },
+              React.createElement('div', { style: { fontWeight: 600 } }, c.full_name),
+              c.company_name ? React.createElement('div', { style: { fontSize: '0.65rem', color: '#64748b' } }, c.company_name + (c.title ? ` · ${c.title}` : '')) : null
+            ))
+          ) : null
+        )
+      ),
+
+      // Date + Time row
+      React.createElement('div', { style: { display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' } },
+        React.createElement('div', { style: { flex: 1 } },
+          React.createElement('label', { style: labelStyle }, 'Date *'),
+          React.createElement('input', { type: 'date', value: formData.meeting_date, onChange: (e) => setFormData(prev => ({...prev, meeting_date: e.target.value})), style: fieldStyle })
+        ),
+        React.createElement('div', { style: { flex: 1 } },
+          React.createElement('label', { style: labelStyle }, 'Time'),
+          React.createElement('input', { type: 'time', value: formData.meeting_time, onChange: (e) => setFormData(prev => ({...prev, meeting_time: e.target.value})), style: fieldStyle })
+        ),
+        React.createElement('div', { style: { width: '80px' } },
+          React.createElement('label', { style: labelStyle }, 'Duration'),
+          React.createElement('select', { value: formData.duration_min, onChange: (e) => setFormData(prev => ({...prev, duration_min: Number(e.target.value)})), style: fieldStyle },
+            [15, 30, 45, 60, 90].map(m => React.createElement('option', { key: m, value: m }, m + 'min'))
+          )
+        )
+      ),
+
+      // Type
+      React.createElement('div', { style: { marginBottom: '0.75rem' } },
+        React.createElement('label', { style: labelStyle }, 'Meeting Type'),
+        React.createElement('select', { value: formData.meeting_type, onChange: (e) => setFormData(prev => ({...prev, meeting_type: e.target.value})), style: fieldStyle },
+          ['general', 'intro', 'follow_up', 'pitch', 'review', 'call'].map(t => React.createElement('option', { key: t, value: t }, typeLabels[t] || t))
+        )
+      ),
+
+      // Title
+      React.createElement('div', { style: { marginBottom: '0.75rem' } },
+        React.createElement('label', { style: labelStyle }, 'Title'),
+        React.createElement('input', { type: 'text', value: formData.title, onChange: (e) => setFormData(prev => ({...prev, title: e.target.value})), placeholder: 'Meeting title...', style: fieldStyle })
+      ),
+
+      // Notes
+      React.createElement('div', { style: { marginBottom: '0.75rem' } },
+        React.createElement('label', { style: labelStyle }, 'Notes'),
+        React.createElement('textarea', { value: formData.notes, onChange: (e) => setFormData(prev => ({...prev, notes: e.target.value})), placeholder: 'Agenda, prep notes...', rows: 3, style: { ...fieldStyle, resize: 'vertical' } })
+      ),
+
+      error ? React.createElement('div', { style: { fontSize: '0.72rem', color: '#dc2626', marginBottom: '0.5rem', padding: '0.35rem 0.5rem', background: '#fef2f2', borderRadius: '0.25rem' } }, error) : null,
+
+      React.createElement('div', { style: { display: 'flex', gap: '0.5rem' } },
+        React.createElement('button', { onClick: handleSubmit, disabled: submitting, style: { flex: 1, padding: '0.55rem', fontSize: '0.8rem', fontWeight: 600, background: '#14b8a6', color: '#fff', border: 'none', borderRadius: '0.4rem', cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.6 : 1 } }, submitting ? 'Scheduling...' : 'Schedule Meeting'),
+        React.createElement('button', { onClick: onClose, style: { padding: '0.55rem 1rem', fontSize: '0.8rem', fontWeight: 600, background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '0.4rem', cursor: 'pointer' } }, 'Cancel')
+      )
+    );
+  };
+
+  // --- Post-Meeting Review Form ---
+  const PostMeetingReview = ({ meeting, onClose, onCompleted }) => {
+    const [outcome, setOutcome] = useState('productive');
+    const [outcomeNotes, setOutcomeNotes] = useState('');
+    const [nextSteps, setNextSteps] = useState('');
+    const [newStage, setNewStage] = useState('');
+    const [followUpDate, setFollowUpDate] = useState('');
+    const [submitting, setSubmitting] = useState(false);
+
+    const fieldStyle = { width: '100%', padding: '0.45rem 0.6rem', fontSize: '0.78rem', border: '1px solid #e2e8f0', borderRadius: '0.35rem', outline: 'none', boxSizing: 'border-box' };
+    const labelStyle = { display: 'block', fontSize: '0.68rem', fontWeight: 600, color: '#475569', marginBottom: '0.2rem' };
+
+    const handleSubmit = async () => {
+      setSubmitting(true);
+      try {
+        const res = await fetch(`${API_BASE}/api/calendar/meetings/${meeting.id}/complete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ outcome, outcome_notes: outcomeNotes, next_steps: nextSteps, new_stage: newStage || undefined, follow_up_date: followUpDate || undefined })
+        });
+        const data = await res.json();
+        if (data.success) { onCompleted(); onClose(); }
+      } catch (e) { console.error(e); }
+      setSubmitting(false);
+    };
+
+    return React.createElement('div', { style: { background: '#fff', borderRadius: '0.75rem', border: '1px solid #e2e8f0', padding: '1.25rem', maxWidth: '420px' } },
+      React.createElement('div', { style: { fontSize: '1rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.25rem' } }, 'How did it go?'),
+      React.createElement('div', { style: { fontSize: '0.78rem', color: '#64748b', marginBottom: '1rem' } }, meeting.title || `Meeting with ${meeting.contact_name || '—'}`),
+
+      React.createElement('div', { style: { marginBottom: '0.75rem' } },
+        React.createElement('label', { style: labelStyle }, 'Outcome'),
+        React.createElement('select', { value: outcome, onChange: (e) => setOutcome(e.target.value), style: fieldStyle },
+          React.createElement('option', { value: 'productive' }, 'Productive'),
+          React.createElement('option', { value: 'follow_up_needed' }, 'Follow-up Needed'),
+          React.createElement('option', { value: 'no_show' }, 'No Show'),
+          React.createElement('option', { value: 'rescheduled' }, 'Rescheduled'),
+          React.createElement('option', { value: 'lost' }, 'Lost / Not Interested')
+        )
+      ),
+
+      React.createElement('div', { style: { marginBottom: '0.75rem' } },
+        React.createElement('label', { style: labelStyle }, 'Notes'),
+        React.createElement('textarea', { value: outcomeNotes, onChange: (e) => setOutcomeNotes(e.target.value), placeholder: 'What happened? Key takeaways...', rows: 3, style: { ...fieldStyle, resize: 'vertical' } })
+      ),
+
+      React.createElement('div', { style: { marginBottom: '0.75rem' } },
+        React.createElement('label', { style: labelStyle }, 'Next Steps'),
+        React.createElement('textarea', { value: nextSteps, onChange: (e) => setNextSteps(e.target.value), placeholder: 'Action items, follow-up plan...', rows: 2, style: { ...fieldStyle, resize: 'vertical' } })
+      ),
+
+      React.createElement('div', { style: { display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' } },
+        React.createElement('div', { style: { flex: 1 } },
+          React.createElement('label', { style: labelStyle }, 'Update Stage'),
+          React.createElement('select', { value: newStage, onChange: (e) => setNewStage(e.target.value), style: fieldStyle },
+            React.createElement('option', { value: '' }, 'No change'),
+            React.createElement('option', { value: 'cold' }, 'Cold'),
+            React.createElement('option', { value: 'warm' }, 'Warm'),
+            React.createElement('option', { value: 'hot' }, 'Hot')
+          )
+        ),
+        React.createElement('div', { style: { flex: 1 } },
+          React.createElement('label', { style: labelStyle }, 'Schedule Follow-up'),
+          React.createElement('input', { type: 'date', value: followUpDate, onChange: (e) => setFollowUpDate(e.target.value), style: fieldStyle })
+        )
+      ),
+
+      React.createElement('div', { style: { display: 'flex', gap: '0.5rem' } },
+        React.createElement('button', { onClick: handleSubmit, disabled: submitting, style: { flex: 1, padding: '0.55rem', fontSize: '0.8rem', fontWeight: 600, background: '#16a34a', color: '#fff', border: 'none', borderRadius: '0.4rem', cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.6 : 1 } }, submitting ? 'Saving...' : 'Complete & Log'),
+        React.createElement('button', { onClick: onClose, style: { padding: '0.55rem 1rem', fontSize: '0.8rem', fontWeight: 600, background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '0.4rem', cursor: 'pointer' } }, 'Cancel')
+      )
+    );
+  };
+
+  // --- Render meeting event block ---
+  const renderMeetingBlock = (m) => {
+    const bg = statusColors[m.status] || '#3b82f6';
+    return React.createElement('div', {
+      key: m.id,
+      onClick: () => setSelectedMeeting(m),
+      style: { padding: '0.35rem 0.5rem', marginBottom: '0.2rem', borderRadius: '0.3rem', background: bg + '14', borderLeft: `3px solid ${bg}`, cursor: 'pointer', fontSize: '0.68rem', transition: 'background 0.15s' }
+    },
+      React.createElement('div', { style: { fontWeight: 600, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } },
+        (m.meeting_time || '') + ' ' + (m.contact_name || m.title || 'Meeting')),
+      React.createElement('div', { style: { color: '#64748b', fontSize: '0.6rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } },
+        (m.company_name || '') + (m.meeting_type ? ` · ${typeLabels[m.meeting_type] || m.meeting_type}` : ''))
+    );
+  };
+
+  // --- MAIN RENDER ---
+  return React.createElement('div', null,
+    React.createElement(SectionHeader, { title: 'Calendar', subtitle: 'CRM-integrated meeting schedule', icon: 'followups' }),
+    React.createElement(Divider, null),
+
+    // Pending review banner
+    pendingReview.length > 0 && !reviewMeeting ? React.createElement('div', { style: { background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '0.5rem', padding: '0.65rem 0.85rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' } },
+      React.createElement('span', { style: { fontSize: '0.78rem', color: '#92400e', fontWeight: 600 } }, `⏰ ${pendingReview.length} meeting${pendingReview.length > 1 ? 's' : ''} need${pendingReview.length === 1 ? 's' : ''} review — How did it go?`),
+      pendingReview.slice(0, 3).map(m => React.createElement('button', {
+        key: m.id,
+        onClick: () => setReviewMeeting(m),
+        style: { fontSize: '0.68rem', padding: '0.2rem 0.5rem', background: '#fff', border: '1px solid #fde68a', borderRadius: '0.3rem', cursor: 'pointer', color: '#92400e', fontWeight: 500 }
+      }, m.contact_name || m.title || 'Review'))
+    ) : null,
+
+    // Toolbar
+    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' } },
+      React.createElement('div', { style: { display: 'flex', gap: '0.35rem', alignItems: 'center' } },
+        React.createElement('button', { onClick: () => navigateDate(-1), style: { background: '#f1f5f9', border: 'none', borderRadius: '0.3rem', padding: '0.3rem 0.55rem', cursor: 'pointer', fontSize: '0.8rem', color: '#475569' } }, '‹'),
+        React.createElement('button', { onClick: goToday, style: { background: '#f1f5f9', border: 'none', borderRadius: '0.3rem', padding: '0.3rem 0.6rem', cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600, color: '#475569' } }, 'Today'),
+        React.createElement('button', { onClick: () => navigateDate(1), style: { background: '#f1f5f9', border: 'none', borderRadius: '0.3rem', padding: '0.3rem 0.55rem', cursor: 'pointer', fontSize: '0.8rem', color: '#475569' } }, '›'),
+        React.createElement('span', { style: { fontSize: '0.85rem', fontWeight: 700, color: '#0f172a', marginLeft: '0.5rem' } }, headerDateStr())
+      ),
+      React.createElement('div', { style: { display: 'flex', gap: '0.35rem', alignItems: 'center' } },
+        React.createElement('div', { style: { display: 'flex', background: '#f1f5f9', borderRadius: '0.3rem', overflow: 'hidden' } },
+          ['day', 'week'].map(v => React.createElement('button', {
+            key: v, onClick: () => setView(v),
+            style: { padding: '0.3rem 0.65rem', fontSize: '0.7rem', fontWeight: 600, border: 'none', cursor: 'pointer', background: view === v ? '#14b8a6' : 'transparent', color: view === v ? '#fff' : '#475569', transition: 'all 0.15s' }
+          }, v.charAt(0).toUpperCase() + v.slice(1)))
+        ),
+        React.createElement('button', { onClick: () => setShowCreate(true), style: { padding: '0.35rem 0.75rem', fontSize: '0.72rem', fontWeight: 600, background: '#14b8a6', color: '#fff', border: 'none', borderRadius: '0.3rem', cursor: 'pointer' } }, '+ Meeting')
+      )
+    ),
+
+    // Overlay modals
+    showCreate ? React.createElement('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 } },
+      React.createElement(CreateMeetingForm, { onClose: () => setShowCreate(false), onCreated: () => { loadMeetings(); showToast('Meeting scheduled'); } })
+    ) : null,
+
+    selectedMeeting ? React.createElement('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 } },
+      React.createElement(MeetingDetail, { meeting: selectedMeeting, onClose: () => setSelectedMeeting(null) })
+    ) : null,
+
+    reviewMeeting ? React.createElement('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 } },
+      React.createElement(PostMeetingReview, { meeting: reviewMeeting, onClose: () => setReviewMeeting(null), onCompleted: () => { loadMeetings(); loadPendingReview(); showToast('Meeting logged'); } })
+    ) : null,
+
+    // Loading
+    loading ? React.createElement('div', { style: { padding: '3rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' } }, 'Loading calendar...') : null,
+
+    // Weekly view
+    !loading && view === 'week' ? React.createElement('div', { style: { overflowX: 'auto' } },
+      React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '50px repeat(7, 1fr)', minWidth: '700px' } },
+        // Header row
+        React.createElement('div', { style: { padding: '0.4rem', fontSize: '0.6rem', color: '#94a3b8', borderBottom: '1px solid #e2e8f0' } }),
+        ...getWeekDates().map((date, i) => {
+          const isToday = fmt(date) === fmt(new Date());
+          return React.createElement('div', { key: 'wh' + i, style: { padding: '0.4rem 0.3rem', textAlign: 'center', borderBottom: '1px solid #e2e8f0', borderLeft: '1px solid #f1f5f9', background: isToday ? '#f0fdfa' : 'transparent' } },
+            React.createElement('div', { style: { fontSize: '0.6rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' } }, weekDays[i]),
+            React.createElement('div', { style: { fontSize: '0.85rem', fontWeight: isToday ? 700 : 500, color: isToday ? '#14b8a6' : '#0f172a' } }, date.getDate())
+          );
+        }),
+
+        // Time rows
+        ...hours.flatMap((hour) => [
+          React.createElement('div', { key: 'tl' + hour, style: { padding: '0.15rem 0.3rem', fontSize: '0.58rem', color: '#94a3b8', textAlign: 'right', borderBottom: '1px solid #f8fafc', height: '3rem', display: 'flex', alignItems: 'flex-start' } },
+            `${hour > 12 ? hour - 12 : hour}${hour >= 12 ? 'p' : 'a'}`
+          ),
+          ...getWeekDates().map((date, di) => {
+            const dateStr = fmt(date);
+            const dayMeetings = getMeetingsForDate(dateStr).filter(m => {
+              if (!m.meeting_time) return hour === 9;
+              const h = parseInt(m.meeting_time.split(':')[0], 10);
+              return h === hour;
+            });
+            const isToday = dateStr === fmt(new Date());
+            return React.createElement('div', {
+              key: 'wc' + hour + '-' + di,
+              style: { borderBottom: '1px solid #f8fafc', borderLeft: '1px solid #f1f5f9', padding: '0.1rem', minHeight: '3rem', background: isToday ? '#f0fdfa08' : 'transparent' }
+            }, dayMeetings.map(m => renderMeetingBlock(m)));
+          })
+        ])
+      )
+    ) : null,
+
+    // Day view
+    !loading && view === 'day' ? React.createElement('div', null,
+      (() => {
+        const dayMeetings = getMeetingsForDate(fmt(currentDate));
+        if (dayMeetings.length === 0) return React.createElement('div', { style: { padding: '3rem', textAlign: 'center' } },
+          React.createElement('div', { style: { fontSize: '0.85rem', color: '#94a3b8', marginBottom: '0.5rem' } }, 'No meetings scheduled'),
+          React.createElement('button', { onClick: () => setShowCreate(true), style: { fontSize: '0.75rem', padding: '0.4rem 0.8rem', background: '#14b8a6', color: '#fff', border: 'none', borderRadius: '0.3rem', cursor: 'pointer', fontWeight: 600 } }, '+ Schedule Meeting')
+        );
+        return React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.5rem' } },
+          dayMeetings.map(m => React.createElement('div', {
+            key: m.id,
+            onClick: () => setSelectedMeeting(m),
+            style: { display: 'flex', gap: '0.75rem', padding: '0.75rem', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '0.5rem', cursor: 'pointer', borderLeft: `4px solid ${statusColors[m.status] || '#3b82f6'}` }
+          },
+            React.createElement('div', { style: { minWidth: '55px' } },
+              React.createElement('div', { style: { fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' } }, m.meeting_time || '—'),
+              React.createElement('div', { style: { fontSize: '0.62rem', color: '#94a3b8' } }, `${m.duration_min || 30}min`)
+            ),
+            React.createElement('div', { style: { flex: 1 } },
+              React.createElement('div', { style: { fontSize: '0.85rem', fontWeight: 600, color: '#0f172a' } }, m.contact_name || m.title || 'Meeting'),
+              React.createElement('div', { style: { fontSize: '0.72rem', color: '#64748b' } }, m.company_name || ''),
+              React.createElement('div', { style: { display: 'flex', gap: '0.35rem', marginTop: '0.25rem', flexWrap: 'wrap' } },
+                React.createElement('span', { style: { fontSize: '0.6rem', padding: '0.1rem 0.4rem', borderRadius: '1rem', background: (statusColors[m.status] || '#94a3b8') + '18', color: statusColors[m.status] || '#94a3b8', fontWeight: 600 } }, m.status),
+                React.createElement('span', { style: { fontSize: '0.6rem', padding: '0.1rem 0.4rem', borderRadius: '1rem', background: '#f1f5f9', color: '#475569', fontWeight: 600 } }, typeLabels[m.meeting_type] || m.meeting_type)
+              )
+            )
+          ))
+        );
+      })()
+    ) : null,
+
+    // Toast
+    toast ? React.createElement('div', { style: { position: 'fixed', bottom: '1.5rem', right: '1.5rem', background: '#0f172a', color: '#fff', padding: '0.6rem 1rem', borderRadius: '0.4rem', fontSize: '0.78rem', fontWeight: 600, zIndex: 9999, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' } }, toast) : null
   );
 }
 
