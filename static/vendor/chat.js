@@ -43,7 +43,8 @@ var CARD_COLORS = {
   RelationshipCard:       { bg: '#fdf2f8', border: '#fbcfe8', accent: '#be185d', icon: '🤝' },
   FunnelCard:             { bg: '#f0f9ff', border: '#bae6fd', accent: '#0369a1', icon: '📊' },
   PredictionCard:         { bg: '#ecfdf5', border: '#a7f3d0', accent: '#059669', icon: '🔮' },
-  AutomationCard:         { bg: '#fffbeb', border: '#fde68a', accent: '#92400e', icon: '⚙️' }
+  AutomationCard:         { bg: '#fffbeb', border: '#fde68a', accent: '#92400e', icon: '⚙️' },
+  BriefCard:              { bg: '#f0f9ff', border: '#bae6fd', accent: '#0c4a6e', icon: '📰' }
 };
 
 var SLASH_HINTS = [
@@ -64,7 +65,9 @@ var SLASH_HINTS = [
   { cmd: '/relationship', desc: 'Relationship intel', ex: '/relationship Acme' },
   { cmd: '/funnel', desc: 'Conversion funnel', ex: '/funnel' },
   { cmd: '/predict', desc: 'Outcome prediction', ex: '/predict Acme' },
-  { cmd: '/automate', desc: 'Automation scan', ex: '/automate' }
+  { cmd: '/automate', desc: 'Automation scan', ex: '/automate' },
+  { cmd: '/brief-pdf', desc: 'Daily brief PDF', ex: '/brief-pdf' },
+  { cmd: '/patterns', desc: 'Pipeline patterns', ex: '/patterns' }
 ];
 
 var MODE_LABELS = {
@@ -888,6 +891,7 @@ function renderQueueCard(card, onAction) {
             item.target ? h('div', { style: { fontSize: '0.63rem', color: '#64748b' } }, item.target) : null,
             h('div', { style: { display: 'flex', gap: '0.3rem', marginTop: '0.2rem', flexWrap: 'wrap' } },
               h('span', { style: { fontSize: '0.55rem', fontWeight: 600, color: pc, background: pc + '14', padding: '0.08rem 0.3rem', borderRadius: '0.2rem' } }, prob.label + ' ' + (prob.score || 0)),
+              item.confidence ? h('span', { style: { fontSize: '0.55rem', fontWeight: 600, color: item.confidence.level === 'High' ? '#16a34a' : item.confidence.level === 'Medium' ? '#f59e0b' : '#dc2626', background: '#f8fafc', padding: '0.08rem 0.3rem', borderRadius: '0.2rem' } }, item.confidence.level + ' conf.') : null,
               item.reason ? h('span', { style: { fontSize: '0.55rem', color: '#94a3b8', fontStyle: 'italic' } }, item.reason) : null
             ),
             item.expected_outcome ? h('div', { style: { fontSize: '0.58rem', color: '#6b7280', marginTop: '0.15rem' } }, '→ ' + item.expected_outcome) : null
@@ -1156,6 +1160,10 @@ function renderPredictionCard(card, onAction) {
         return h('div', { key: i, style: { fontSize: '0.65rem', color: '#475569', padding: '0.1rem 0' } }, '• ' + f);
       })
     ) : null,
+    d.confidence ? h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.25rem', padding: '0.2rem 0.4rem', background: '#f8fafc', borderRadius: '0.25rem' } },
+      h('span', { style: { fontSize: '0.58rem', fontWeight: 700, color: d.confidence.level === 'High' ? '#16a34a' : d.confidence.level === 'Medium' ? '#f59e0b' : '#dc2626' } }, 'Confidence: ' + d.confidence.level),
+      d.confidence.reasons && d.confidence.reasons[0] ? h('span', { style: { fontSize: '0.55rem', color: '#94a3b8' } }, '— ' + d.confidence.reasons[0]) : null
+    ) : null,
     renderActionButtons(card.actions, onAction)
   );
 }
@@ -1191,6 +1199,42 @@ function renderAutomationCard(card, onAction) {
         );
       })
     ) : null,
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
+function renderBriefCard(card, onAction) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.BriefCard;
+  var snapshots = d.market_snapshot || [];
+  var actions_list = d.action_items || [];
+  var targets = d.daily_targets || [];
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' } },
+      h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em' } }, colors.icon + ' Daily Intelligence Brief'),
+      h('div', { style: { fontSize: '0.6rem', color: '#64748b' } }, d.date || '')
+    ),
+    h('div', { style: { fontSize: '0.82rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.35rem' } }, d.title || 'BTR Daily Brief'),
+    snapshots.length > 0 ? h('div', { style: { marginBottom: '0.35rem' } },
+      h('div', { style: { fontSize: '0.58rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.15rem' } }, 'Market Snapshot'),
+      snapshots.map(function(s, i) {
+        return h('div', { key: 'ms' + i, style: { fontSize: '0.62rem', color: '#334155', padding: '0.1rem 0' } }, '• ' + s.substring(0, 80) + (s.length > 80 ? '...' : ''));
+      })
+    ) : null,
+    actions_list.length > 0 ? h('div', { style: { marginBottom: '0.35rem' } },
+      h('div', { style: { fontSize: '0.58rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.15rem' } }, 'Top Actions'),
+      actions_list.map(function(a, i) {
+        return h('div', { key: 'ai' + i, style: { fontSize: '0.62rem', color: '#334155', padding: '0.1rem 0' } }, (i + 1) + '. ' + a.substring(0, 70) + (a.length > 70 ? '...' : ''));
+      })
+    ) : null,
+    targets.length > 0 ? h('div', { style: { marginBottom: '0.35rem' } },
+      h('div', { style: { fontSize: '0.58rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.15rem' } }, 'Targets'),
+      targets.map(function(t, i) {
+        return h('div', { key: 'dt' + i, style: { fontSize: '0.62rem', color: '#334155', padding: '0.1rem 0' } }, '• ' + t);
+      })
+    ) : null,
+    h('div', { style: { fontSize: '0.6rem', color: '#64748b', fontStyle: 'italic', marginBottom: '0.3rem' } }, 'Full brief includes BTR intelligence, analysis, learning insight, and more.'),
     renderActionButtons(card.actions, onAction)
   );
 }
@@ -1265,6 +1309,7 @@ function renderCard(card, onAction) {
     case 'FunnelCard': return renderFunnelCard(card, onAction);
     case 'PredictionCard': return renderPredictionCard(card, onAction);
     case 'AutomationCard': return renderAutomationCard(card, onAction);
+    case 'BriefCard': return renderBriefCard(card, onAction);
     default: return null;
   }
 }
