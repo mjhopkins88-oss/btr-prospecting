@@ -2403,6 +2403,7 @@ from api.routes.prospecting import prospecting_bp
 from api.routes.coi import coi_bp
 from api.routes.assistant import assistant_bp
 from api.routes.performance import performance_bp
+from api.routes.daily_brief import daily_brief_bp
 
 app.register_blueprint(leads_bp)
 app.register_blueprint(projects_bp)
@@ -2425,6 +2426,7 @@ app.register_blueprint(prospecting_bp)
 app.register_blueprint(coi_bp)
 app.register_blueprint(assistant_bp)
 app.register_blueprint(performance_bp)
+app.register_blueprint(daily_brief_bp)
 
 # ===================================================================
 # DASHBOARD — Weather endpoint (WeatherAPI.com)

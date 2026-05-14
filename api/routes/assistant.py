@@ -106,6 +106,7 @@ def _classify_intent(text):
             '/signals': 'analyze_company',
             '/relationship': 'analyze_company', '/funnel': 'diagnose',
             '/predict': 'analyze_company', '/automate': 'recommend_action',
+            '/brief-pdf': 'export_report',
         }
         return slash_map.get(cmd, 'recommend_action')
 
@@ -429,7 +430,8 @@ SLASH COMMANDS
 /relationship [company] — Relationship intelligence analysis
 /funnel — Conversion funnel diagnosis
 /predict [company] — Reply & meeting likelihood prediction
-/automate — Detect automation opportunities"""
+/automate — Detect automation opportunities
+/brief-pdf — Download daily BTR intelligence brief as PDF"""
 
 
 # ---------------------------------------------------------------------------
@@ -3272,6 +3274,9 @@ def _preprocess_slash(text):
             pass
         return "Show recent signals from SignalStack. Use a SignalInsightCard.", extra_ctx
 
+    if cmd == '/brief-pdf':
+        return '__v8_brief_pdf__', extra_ctx
+
     if cmd == '/relationship':
         if arg:
             return f'__v7_relationship__{arg}', extra_ctx
@@ -4023,6 +4028,29 @@ def chat():
         }
         _persist_chat(last_msg, card, 'automate', 'execution')
         return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'automate', 'mode': 'execution'})
+
+    # V8 brief PDF intercept
+    if processed_msg == '__v8_brief_pdf__':
+        from api.routes.daily_brief import _generate_brief_content
+        brief = _generate_brief_content()
+        card = {
+            'type': 'BriefCard',
+            'text': f"**{brief['title']}**\n\nYour daily intelligence brief is ready.",
+            'source': None,
+            'data': {
+                'title': brief['title'],
+                'date': brief['date'],
+                'market_snapshot': brief['market_snapshot'][:3],
+                'action_items': brief['action_items'][:3],
+                'daily_targets': brief['daily_targets'][:3],
+                'download_url': '/api/brief/download',
+            },
+            'actions': [
+                {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download', 'params': {'url': '/api/brief/download'}},
+            ]
+        }
+        _persist_chat(last_msg, card, 'brief_pdf', 'execution')
+        return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'brief_pdf', 'mode': 'execution'})
 
     intent = _classify_intent(last_msg)
     mode = INTENT_TO_MODE.get(intent, 'strategic')
