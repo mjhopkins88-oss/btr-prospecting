@@ -1817,9 +1817,9 @@ function BTRAssistantChat(props) {
       '@keyframes leoChatOpen{from{opacity:0;transform:translateY(12px) scale(0.96)}to{opacity:1;transform:translateY(0) scale(1)}}',
       '@keyframes leoMsgIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}',
       '@keyframes leoDot{0%,80%,100%{transform:scale(0.4);opacity:0.3}40%{transform:scale(1);opacity:1}}',
-      '@keyframes leoFabPulse{0%,100%{box-shadow:0 4px 20px rgba(20,184,166,0.25)}50%{box-shadow:0 4px 28px rgba(20,184,166,0.45)}}',
+      '@keyframes leoFabPulse{0%,100%{box-shadow:0 4px 20px rgba(0,255,170,0.25)}50%{box-shadow:0 4px 28px rgba(0,255,170,0.45)}}',
       '@keyframes leoFabFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}',
-      '@keyframes leoGlowRing{0%{box-shadow:0 0 0 0 rgba(20,184,166,0.4)}70%{box-shadow:0 0 0 8px rgba(20,184,166,0)}100%{box-shadow:0 0 0 0 rgba(20,184,166,0)}}',
+      '@keyframes leoGlowRing{0%{box-shadow:0 0 0 0 rgba(0,255,170,0.4)}70%{box-shadow:0 0 0 8px rgba(0,255,170,0)}100%{box-shadow:0 0 0 0 rgba(0,255,170,0)}}',
       '.leo-fab{transition:all 0.25s cubic-bezier(0.4,0,0.2,1)}',
       '.leo-fab:hover{transform:scale(1.1) translateY(-2px) !important;box-shadow:0 8px 32px rgba(20,184,166,0.35) !important}',
       '.leo-fab:active{transform:scale(0.95) !important}',
@@ -1843,21 +1843,102 @@ function BTRAssistantChat(props) {
     document.head.appendChild(style);
   }, []);
 
-  // Pixel cat SVG data URI (8x8 pixel art black cat)
-  var catSvg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'%3E%3Crect x='1' y='0' width='1' height='1' fill='%230f172a'/%3E%3Crect x='2' y='0' width='1' height='1' fill='%230f172a'/%3E%3Crect x='5' y='0' width='1' height='1' fill='%230f172a'/%3E%3Crect x='6' y='0' width='1' height='1' fill='%230f172a'/%3E%3Crect x='0' y='1' width='1' height='1' fill='%230f172a'/%3E%3Crect x='2' y='1' width='1' height='1' fill='%230f172a'/%3E%3Crect x='5' y='1' width='1' height='1' fill='%230f172a'/%3E%3Crect x='7' y='1' width='1' height='1' fill='%230f172a'/%3E%3Crect x='0' y='2' width='1' height='1' fill='%230f172a'/%3E%3Crect x='1' y='2' width='1' height='1' fill='%231e293b'/%3E%3Crect x='2' y='2' width='1' height='1' fill='%2314b8a6'/%3E%3Crect x='3' y='2' width='1' height='1' fill='%231e293b'/%3E%3Crect x='4' y='2' width='1' height='1' fill='%231e293b'/%3E%3Crect x='5' y='2' width='1' height='1' fill='%2314b8a6'/%3E%3Crect x='6' y='2' width='1' height='1' fill='%231e293b'/%3E%3Crect x='7' y='2' width='1' height='1' fill='%230f172a'/%3E%3Crect x='0' y='3' width='1' height='1' fill='%230f172a'/%3E%3Crect x='1' y='3' width='1' height='1' fill='%231e293b'/%3E%3Crect x='2' y='3' width='1' height='1' fill='%231e293b'/%3E%3Crect x='3' y='3' width='1' height='1' fill='%23475569'/%3E%3Crect x='4' y='3' width='1' height='1' fill='%23475569'/%3E%3Crect x='5' y='3' width='1' height='1' fill='%231e293b'/%3E%3Crect x='6' y='3' width='1' height='1' fill='%231e293b'/%3E%3Crect x='7' y='3' width='1' height='1' fill='%230f172a'/%3E%3Crect x='1' y='4' width='1' height='1' fill='%230f172a'/%3E%3Crect x='2' y='4' width='1' height='1' fill='%230f172a'/%3E%3Crect x='3' y='4' width='1' height='1' fill='%230f172a'/%3E%3Crect x='4' y='4' width='1' height='1' fill='%230f172a'/%3E%3Crect x='5' y='4' width='1' height='1' fill='%230f172a'/%3E%3Crect x='6' y='4' width='1' height='1' fill='%230f172a'/%3E%3Crect x='1' y='5' width='1' height='1' fill='%230f172a'/%3E%3Crect x='2' y='5' width='1' height='1' fill='%231e293b'/%3E%3Crect x='3' y='5' width='1' height='1' fill='%231e293b'/%3E%3Crect x='4' y='5' width='1' height='1' fill='%231e293b'/%3E%3Crect x='5' y='5' width='1' height='1' fill='%231e293b'/%3E%3Crect x='6' y='5' width='1' height='1' fill='%230f172a'/%3E%3Crect x='1' y='6' width='1' height='1' fill='%230f172a'/%3E%3Crect x='3' y='6' width='1' height='1' fill='%230f172a'/%3E%3Crect x='4' y='6' width='1' height='1' fill='%230f172a'/%3E%3Crect x='6' y='6' width='1' height='1' fill='%230f172a'/%3E%3C/svg%3E";
+  // Pixel cat SVG data URI (10x10 pixel art black cat, V12: sharper edges, neon eyes)
+  var catSvg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' shape-rendering='crispEdges'%3E" +
+    "%3Cdefs%3E%3Cfilter id='g'%3E%3CfeGaussianBlur stdDeviation='0.3'/%3E%3C/filter%3E%3C/defs%3E" +
+    // ears (row 0-1)
+    "%3Crect x='1' y='0' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='2' y='0' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='7' y='0' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='8' y='0' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='0' y='1' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='1' y='1' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='2' y='1' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='7' y='1' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='8' y='1' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='9' y='1' width='1' height='1' fill='%230f172a'/%3E" +
+    // head top (row 2)
+    "%3Crect x='0' y='2' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='1' y='2' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='2' y='2' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='3' y='2' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='4' y='2' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='5' y='2' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='6' y='2' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='7' y='2' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='8' y='2' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='9' y='2' width='1' height='1' fill='%230f172a'/%3E" +
+    // eyes row (row 3) - bright neon green/teal eyes with highlight
+    "%3Crect x='0' y='3' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='1' y='3' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='2' y='3' width='1' height='1' fill='%2300ffaa'/%3E" +
+    "%3Crect x='3' y='3' width='1' height='1' fill='%2300e89d'/%3E" +
+    "%3Crect x='4' y='3' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='5' y='3' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='6' y='3' width='1' height='1' fill='%2300ffaa'/%3E" +
+    "%3Crect x='7' y='3' width='1' height='1' fill='%2300e89d'/%3E" +
+    "%3Crect x='8' y='3' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='9' y='3' width='1' height='1' fill='%230f172a'/%3E" +
+    // eye glow
+    "%3Crect x='2' y='3' width='2' height='1' fill='%2300ffaa' filter='url(%23g)' opacity='0.4'/%3E" +
+    "%3Crect x='6' y='3' width='2' height='1' fill='%2300ffaa' filter='url(%23g)' opacity='0.4'/%3E" +
+    // nose/mouth (row 4)
+    "%3Crect x='0' y='4' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='1' y='4' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='2' y='4' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='3' y='4' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='4' y='4' width='1' height='1' fill='%23475569'/%3E" +
+    "%3Crect x='5' y='4' width='1' height='1' fill='%23475569'/%3E" +
+    "%3Crect x='6' y='4' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='7' y='4' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='8' y='4' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='9' y='4' width='1' height='1' fill='%230f172a'/%3E" +
+    // chin (row 5)
+    "%3Crect x='1' y='5' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='2' y='5' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='3' y='5' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='4' y='5' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='5' y='5' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='6' y='5' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='7' y='5' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='8' y='5' width='1' height='1' fill='%230f172a'/%3E" +
+    // body (row 6)
+    "%3Crect x='1' y='6' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='2' y='6' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='3' y='6' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='4' y='6' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='5' y='6' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='6' y='6' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='7' y='6' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='8' y='6' width='1' height='1' fill='%230f172a'/%3E" +
+    // body lower (row 7)
+    "%3Crect x='2' y='7' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='3' y='7' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='4' y='7' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='5' y='7' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='6' y='7' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='7' y='7' width='1' height='1' fill='%230f172a'/%3E" +
+    // paws (row 8)
+    "%3Crect x='2' y='8' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='3' y='8' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='6' y='8' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='7' y='8' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3C/svg%3E";
 
-  // Pixel cat avatar badge
+  // Pixel cat avatar badge with circular frame and glow
   var catAvatar = function(size, glow) {
     var s = size || 28;
     return h('div', { style: {
       width: s, height: s, borderRadius: '50%', flexShrink: 0,
-      background: 'rgba(255,255,255,0.12)',
+      background: 'radial-gradient(circle at 50% 40%, rgba(0,255,170,0.08) 0%, rgba(15,23,42,0.95) 70%)',
       backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-      border: '1.5px solid rgba(255,255,255,0.2)',
+      border: glow ? '1.5px solid rgba(0,255,170,0.35)' : '1.5px solid rgba(255,255,255,0.2)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      boxShadow: glow ? '0 0 12px rgba(20,184,166,0.3)' : 'none'
+      boxShadow: glow
+        ? '0 0 16px rgba(0,255,170,0.35), 0 0 4px rgba(0,255,170,0.2), inset 0 0 8px rgba(0,255,170,0.05)'
+        : '0 0 6px rgba(0,255,170,0.1)'
     } },
-      h('img', { src: catSvg, style: { width: s * 0.65, height: s * 0.65, imageRendering: 'pixelated' } })
+      h('img', { src: catSvg, style: { width: s * 0.62, height: s * 0.62, imageRendering: 'pixelated' } })
     );
   };
 
@@ -1870,9 +1951,9 @@ function BTRAssistantChat(props) {
         style: {
           width: '52px', height: '52px', borderRadius: '50%',
           background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)',
-          border: '1.5px solid rgba(20,184,166,0.3)',
+          border: '1.5px solid rgba(0,255,170,0.3)',
           color: '#f8fafc', cursor: 'pointer',
-          boxShadow: '0 4px 20px rgba(20,184,166,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
+          boxShadow: '0 4px 20px rgba(0,255,170,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           animation: insightBadge > 0 ? 'leoFabFloat 3s ease-in-out infinite, leoGlowRing 2s ease-in-out infinite' : 'none',
           padding: 0
@@ -1914,21 +1995,21 @@ function BTRAssistantChat(props) {
         color: '#f8fafc',
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         flexShrink: 0,
-        borderBottom: '1px solid rgba(20,184,166,0.15)',
+        borderBottom: '1px solid rgba(0,255,170,0.15)',
         position: 'relative', overflow: 'hidden'
       }
     },
       // Subtle gradient shimmer on header
-      h('div', { style: { position: 'absolute', inset: 0, background: 'linear-gradient(90deg, transparent 0%, rgba(20,184,166,0.04) 50%, transparent 100%)', pointerEvents: 'none' } }),
+      h('div', { style: { position: 'absolute', inset: 0, background: 'linear-gradient(90deg, transparent 0%, rgba(0,255,170,0.04) 50%, transparent 100%)', pointerEvents: 'none' } }),
       h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', position: 'relative', zIndex: 1 } },
         catAvatar(26, false),
         h('div', { style: { display: 'flex', flexDirection: 'column' } },
           h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.35rem' } },
             h('span', {
               style: { fontFamily: "'Orbitron', sans-serif", fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.05em',
-                background: 'linear-gradient(135deg, #14b8a6, #38bdf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }
+                background: 'linear-gradient(135deg, #00ffaa, #14b8a6, #38bdf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }
             }, 'LEO'),
-            h('span', { style: { fontSize: '0.52rem', color: '#64748b', fontWeight: 400 } }, 'Operator AI'),
+            h('span', { style: { fontSize: '0.52rem', color: '#64748b', fontWeight: 400 } }, 'Operator AI v12'),
             lastMode ? h('span', { style: {
               fontSize: '0.48rem', color: MODE_COLORS[lastMode] || '#94a3b8',
               background: (MODE_COLORS[lastMode] || '#94a3b8') + '22',
@@ -1977,11 +2058,11 @@ function BTRAssistantChat(props) {
         h('div', { style: {
           fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.2rem', color: '#334155',
           fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.03em',
-          background: 'linear-gradient(135deg, #14b8a6, #3b82f6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
+          background: 'linear-gradient(135deg, #00ffaa, #14b8a6, #38bdf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
         } }, 'LEO'),
-        h('div', { style: { fontSize: '0.72rem', fontWeight: 500, marginBottom: '0.15rem', color: '#475569' } }, 'Operator AI'),
+        h('div', { style: { fontSize: '0.72rem', fontWeight: 500, marginBottom: '0.15rem', color: '#475569' } }, 'BTR Intelligence Engine'),
         h('div', { style: { fontSize: '0.65rem', lineHeight: 1.6, marginBottom: '0.75rem', color: '#94a3b8' } },
-          'Strategy, outreach, data, actions — ask me anything.'
+          'Strategy, outreach, deal intelligence, actions — ask me anything.'
         ),
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
           [
