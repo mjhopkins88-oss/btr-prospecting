@@ -1808,30 +1808,84 @@ function BTRAssistantChat(props) {
     if (inputRef.current) inputRef.current.focus();
   };
 
+  // --- Inject chat-specific premium CSS ---
+  useEffect(function() {
+    if (document.getElementById('leo-chat-premium-css')) return;
+    var style = document.createElement('style');
+    style.id = 'leo-chat-premium-css';
+    style.textContent = [
+      '@keyframes leoChatOpen{from{opacity:0;transform:translateY(12px) scale(0.96)}to{opacity:1;transform:translateY(0) scale(1)}}',
+      '@keyframes leoMsgIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}',
+      '@keyframes leoDot{0%,80%,100%{transform:scale(0.4);opacity:0.3}40%{transform:scale(1);opacity:1}}',
+      '@keyframes leoFabPulse{0%,100%{box-shadow:0 4px 20px rgba(20,184,166,0.25)}50%{box-shadow:0 4px 28px rgba(20,184,166,0.45)}}',
+      '@keyframes leoFabFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}',
+      '@keyframes leoGlowRing{0%{box-shadow:0 0 0 0 rgba(20,184,166,0.4)}70%{box-shadow:0 0 0 8px rgba(20,184,166,0)}100%{box-shadow:0 0 0 0 rgba(20,184,166,0)}}',
+      '.leo-fab{transition:all 0.25s cubic-bezier(0.4,0,0.2,1)}',
+      '.leo-fab:hover{transform:scale(1.1) translateY(-2px) !important;box-shadow:0 8px 32px rgba(20,184,166,0.35) !important}',
+      '.leo-fab:active{transform:scale(0.95) !important}',
+      '.leo-header-btn{transition:all 0.15s ease}',
+      '.leo-header-btn:hover{background:rgba(255,255,255,0.12) !important}',
+      '.leo-input-area textarea:focus{border-color:#14b8a6 !important;box-shadow:0 0 0 3px rgba(20,184,166,0.12) !important}',
+      '.leo-send-btn{transition:all 0.2s ease}',
+      '.leo-send-btn:not(:disabled):hover{transform:scale(1.05);box-shadow:0 4px 12px rgba(20,184,166,0.3)}',
+      '.leo-send-btn:not(:disabled):active{transform:scale(0.95)}',
+      '.leo-msg-user{animation:leoMsgIn 0.25s ease-out}',
+      '.leo-msg-assistant{animation:leoMsgIn 0.3s ease-out}',
+      '.leo-suggestion-btn{transition:all 0.2s ease}',
+      '.leo-suggestion-btn:hover{border-color:#14b8a6 !important;background:rgba(20,184,166,0.04) !important;transform:translateY(-1px)}',
+      '.leo-slash-item{transition:all 0.12s ease}',
+      '.leo-slash-item:hover{background:rgba(20,184,166,0.06) !important}',
+      '.leo-scroll::-webkit-scrollbar{width:4px}',
+      '.leo-scroll::-webkit-scrollbar-track{background:transparent}',
+      '.leo-scroll::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:2px}',
+      '.leo-scroll::-webkit-scrollbar-thumb:hover{background:#94a3b8}'
+    ].join('\n');
+    document.head.appendChild(style);
+  }, []);
+
+  // Pixel cat SVG data URI (8x8 pixel art black cat)
+  var catSvg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'%3E%3Crect x='1' y='0' width='1' height='1' fill='%230f172a'/%3E%3Crect x='2' y='0' width='1' height='1' fill='%230f172a'/%3E%3Crect x='5' y='0' width='1' height='1' fill='%230f172a'/%3E%3Crect x='6' y='0' width='1' height='1' fill='%230f172a'/%3E%3Crect x='0' y='1' width='1' height='1' fill='%230f172a'/%3E%3Crect x='2' y='1' width='1' height='1' fill='%230f172a'/%3E%3Crect x='5' y='1' width='1' height='1' fill='%230f172a'/%3E%3Crect x='7' y='1' width='1' height='1' fill='%230f172a'/%3E%3Crect x='0' y='2' width='1' height='1' fill='%230f172a'/%3E%3Crect x='1' y='2' width='1' height='1' fill='%231e293b'/%3E%3Crect x='2' y='2' width='1' height='1' fill='%2314b8a6'/%3E%3Crect x='3' y='2' width='1' height='1' fill='%231e293b'/%3E%3Crect x='4' y='2' width='1' height='1' fill='%231e293b'/%3E%3Crect x='5' y='2' width='1' height='1' fill='%2314b8a6'/%3E%3Crect x='6' y='2' width='1' height='1' fill='%231e293b'/%3E%3Crect x='7' y='2' width='1' height='1' fill='%230f172a'/%3E%3Crect x='0' y='3' width='1' height='1' fill='%230f172a'/%3E%3Crect x='1' y='3' width='1' height='1' fill='%231e293b'/%3E%3Crect x='2' y='3' width='1' height='1' fill='%231e293b'/%3E%3Crect x='3' y='3' width='1' height='1' fill='%23475569'/%3E%3Crect x='4' y='3' width='1' height='1' fill='%23475569'/%3E%3Crect x='5' y='3' width='1' height='1' fill='%231e293b'/%3E%3Crect x='6' y='3' width='1' height='1' fill='%231e293b'/%3E%3Crect x='7' y='3' width='1' height='1' fill='%230f172a'/%3E%3Crect x='1' y='4' width='1' height='1' fill='%230f172a'/%3E%3Crect x='2' y='4' width='1' height='1' fill='%230f172a'/%3E%3Crect x='3' y='4' width='1' height='1' fill='%230f172a'/%3E%3Crect x='4' y='4' width='1' height='1' fill='%230f172a'/%3E%3Crect x='5' y='4' width='1' height='1' fill='%230f172a'/%3E%3Crect x='6' y='4' width='1' height='1' fill='%230f172a'/%3E%3Crect x='1' y='5' width='1' height='1' fill='%230f172a'/%3E%3Crect x='2' y='5' width='1' height='1' fill='%231e293b'/%3E%3Crect x='3' y='5' width='1' height='1' fill='%231e293b'/%3E%3Crect x='4' y='5' width='1' height='1' fill='%231e293b'/%3E%3Crect x='5' y='5' width='1' height='1' fill='%231e293b'/%3E%3Crect x='6' y='5' width='1' height='1' fill='%230f172a'/%3E%3Crect x='1' y='6' width='1' height='1' fill='%230f172a'/%3E%3Crect x='3' y='6' width='1' height='1' fill='%230f172a'/%3E%3Crect x='4' y='6' width='1' height='1' fill='%230f172a'/%3E%3Crect x='6' y='6' width='1' height='1' fill='%230f172a'/%3E%3C/svg%3E";
+
+  // Pixel cat avatar badge
+  var catAvatar = function(size, glow) {
+    var s = size || 28;
+    return h('div', { style: {
+      width: s, height: s, borderRadius: '50%', flexShrink: 0,
+      background: 'rgba(255,255,255,0.12)',
+      backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+      border: '1.5px solid rgba(255,255,255,0.2)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      boxShadow: glow ? '0 0 12px rgba(20,184,166,0.3)' : 'none'
+    } },
+      h('img', { src: catSvg, style: { width: s * 0.65, height: s * 0.65, imageRendering: 'pixelated' } })
+    );
+  };
+
   // --- Closed state (FAB) ---
   if (!open) {
     return h('div', { style: { position: 'fixed', bottom: '1.5rem', right: '1.5rem', zIndex: 9990 } },
       h('button', {
+        className: 'leo-fab',
         onClick: function() { setOpen(true); },
         style: {
-          width: '48px', height: '48px', borderRadius: '50%',
-          background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-          border: '2px solid #334155',
-          color: '#f8fafc', fontSize: '1.2rem', cursor: 'pointer',
-          boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+          width: '52px', height: '52px', borderRadius: '50%',
+          background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)',
+          border: '1.5px solid rgba(20,184,166,0.3)',
+          color: '#f8fafc', cursor: 'pointer',
+          boxShadow: '0 4px 20px rgba(20,184,166,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          transition: 'transform 0.15s, box-shadow 0.15s'
-        },
-        onMouseEnter: function(e) { e.currentTarget.style.transform = 'scale(1.08)'; },
-        onMouseLeave: function(e) { e.currentTarget.style.transform = 'scale(1)'; }
-      }, '✨'),
+          animation: insightBadge > 0 ? 'leoFabFloat 3s ease-in-out infinite, leoGlowRing 2s ease-in-out infinite' : 'none',
+          padding: 0
+        }
+      }, catAvatar(32, true)),
       insightBadge > 0 ? h('span', {
         style: {
-          position: 'absolute', top: '-4px', right: '-4px',
-          background: '#dc2626', color: '#fff', fontSize: '0.55rem', fontWeight: 700,
-          width: '18px', height: '18px', borderRadius: '50%',
+          position: 'absolute', top: '-3px', right: '-3px',
+          background: 'linear-gradient(135deg, #dc2626, #ef4444)', color: '#fff',
+          fontSize: '0.55rem', fontWeight: 700,
+          width: '19px', height: '19px', borderRadius: '50%',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          border: '2px solid #fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+          border: '2px solid #0f172a', boxShadow: '0 2px 6px rgba(220,38,38,0.4)'
         }
       }, insightBadge) : null
     );
@@ -1841,70 +1895,95 @@ function BTRAssistantChat(props) {
   return h('div', {
     style: {
       position: 'fixed', bottom: '1.5rem', right: '1.5rem', zIndex: 9990,
-      width: '420px', height: '600px', maxHeight: 'calc(100vh - 4rem)',
-      background: '#FFFFFF', border: '1px solid #e2e8f0',
-      borderRadius: '0.75rem', boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
+      width: '420px', height: '620px', maxHeight: 'calc(100vh - 3rem)',
+      background: 'rgba(255,255,255,0.85)',
+      backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+      border: '1px solid rgba(226,232,240,0.6)',
+      borderRadius: '1rem',
+      boxShadow: '0 25px 60px rgba(0,0,0,0.12), 0 8px 20px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.6)',
       display: 'flex', flexDirection: 'column', overflow: 'hidden',
       fontFamily: "'Inter', -apple-system, sans-serif",
-      animation: 'fadeInUp 0.2s ease-out'
+      animation: 'leoChatOpen 0.3s cubic-bezier(0.4,0,0.2,1)'
     }
   },
     // Header
     h('div', {
       style: {
-        padding: '0.6rem 0.85rem',
-        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+        padding: '0.65rem 0.9rem',
+        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0f172a 100%)',
         color: '#f8fafc',
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        flexShrink: 0
+        flexShrink: 0,
+        borderBottom: '1px solid rgba(20,184,166,0.15)',
+        position: 'relative', overflow: 'hidden'
       }
     },
-      h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } },
-        h('span', { style: { fontSize: '0.78rem', fontWeight: 700, background: 'linear-gradient(135deg, #14b8a6, #3b82f6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' } }, 'L'),
-        h('span', {
-          style: { fontFamily: "'Orbitron', sans-serif", fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.05em' }
-        }, 'LEO'),
-        h('span', { style: { fontSize: '0.55rem', color: '#94a3b8', fontWeight: 400, marginLeft: '0.2rem' } }, 'Operator AI'),
-        lastMode ? h('span', { style: { fontSize: '0.5rem', color: MODE_COLORS[lastMode] || '#94a3b8', background: (MODE_COLORS[lastMode] || '#94a3b8') + '22', padding: '0.08rem 0.3rem', borderRadius: '0.2rem', fontWeight: 600, marginLeft: '0.3rem' } }, MODE_LABELS[lastMode] || lastMode) : null
+      // Subtle gradient shimmer on header
+      h('div', { style: { position: 'absolute', inset: 0, background: 'linear-gradient(90deg, transparent 0%, rgba(20,184,166,0.04) 50%, transparent 100%)', pointerEvents: 'none' } }),
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem', position: 'relative', zIndex: 1 } },
+        catAvatar(26, false),
+        h('div', { style: { display: 'flex', flexDirection: 'column' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.35rem' } },
+            h('span', {
+              style: { fontFamily: "'Orbitron', sans-serif", fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.05em',
+                background: 'linear-gradient(135deg, #14b8a6, #38bdf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }
+            }, 'LEO'),
+            h('span', { style: { fontSize: '0.52rem', color: '#64748b', fontWeight: 400 } }, 'Operator AI'),
+            lastMode ? h('span', { style: {
+              fontSize: '0.48rem', color: MODE_COLORS[lastMode] || '#94a3b8',
+              background: (MODE_COLORS[lastMode] || '#94a3b8') + '22',
+              padding: '0.06rem 0.3rem', borderRadius: '1rem', fontWeight: 600
+            } }, MODE_LABELS[lastMode] || lastMode) : null
+          ),
+          h('div', { style: { fontSize: '0.48rem', color: '#475569', marginTop: '0.05rem' } }, 'Ready to assist')
+        )
       ),
-      h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.3rem' } },
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.15rem', position: 'relative', zIndex: 1 } },
         h('button', {
+          className: 'leo-header-btn',
           onClick: function() { setMessages([]); setLastMode(null); },
           title: 'Clear chat',
           style: {
-            background: 'none', border: 'none', color: '#64748b', fontSize: '0.7rem',
-            cursor: 'pointer', padding: '0.15rem 0.35rem'
+            background: 'rgba(255,255,255,0.06)', border: 'none', color: '#94a3b8', fontSize: '0.65rem',
+            cursor: 'pointer', padding: '0.2rem 0.45rem', borderRadius: '0.3rem',
+            fontFamily: "'Inter', sans-serif"
           }
         }, 'Clear'),
         h('button', {
+          className: 'leo-header-btn',
           onClick: function() { setOpen(false); },
           style: {
-            background: 'none', border: 'none', color: '#94a3b8', fontSize: '1.1rem',
-            cursor: 'pointer', padding: '0.1rem 0.3rem', lineHeight: 1
+            background: 'rgba(255,255,255,0.06)', border: 'none', color: '#94a3b8', fontSize: '0.95rem',
+            cursor: 'pointer', padding: '0.15rem 0.35rem', lineHeight: 1, borderRadius: '0.3rem'
           }
         }, '✕')
       )
     ),
 
-    // Messages
+    // Messages area
     h('div', {
       ref: scrollRef,
+      className: 'leo-scroll',
       style: {
-        flex: 1, overflowY: 'auto', padding: '0.65rem',
-        display: 'flex', flexDirection: 'column', gap: '0.45rem'
+        flex: 1, overflowY: 'auto', padding: '0.75rem',
+        display: 'flex', flexDirection: 'column', gap: '0.5rem'
       }
     },
       // Empty state
       messages.length === 0 && h('div', {
-        style: { textAlign: 'center', padding: '1.2rem 0.75rem', color: '#94a3b8' }
+        style: { textAlign: 'center', padding: '1.5rem 1rem', color: '#94a3b8' }
       },
-        h('div', { style: { fontSize: '1.3rem', marginBottom: '0.4rem', opacity: 0.3, fontWeight: 900, fontFamily: "'Orbitron', sans-serif", background: 'linear-gradient(135deg, #14b8a6, #3b82f6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' } }, 'L'),
-        h('div', { style: { fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.25rem', color: '#475569' } }, 'Leo — Operator AI'),
-        h('div', { style: { fontSize: '0.68rem', lineHeight: 1.5, marginBottom: '0.5rem', color: '#94a3b8' } },
-          'Ask me anything — strategy, outreach, data, or actions'
+        h('div', { style: { marginBottom: '0.6rem' } }, catAvatar(44, true)),
+        h('div', { style: {
+          fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.2rem', color: '#334155',
+          fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.03em',
+          background: 'linear-gradient(135deg, #14b8a6, #3b82f6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
+        } }, 'LEO'),
+        h('div', { style: { fontSize: '0.72rem', fontWeight: 500, marginBottom: '0.15rem', color: '#475569' } }, 'Operator AI'),
+        h('div', { style: { fontSize: '0.65rem', lineHeight: 1.6, marginBottom: '0.75rem', color: '#94a3b8' } },
+          'Strategy, outreach, data, actions — ask me anything.'
         ),
-        h('div', { style: { fontSize: '0.62rem', color: '#94a3b8', marginBottom: '0.5rem' } }, 'Ask me anything, or type / for commands'),
-        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem' } },
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
           [
             'How should I approach my top prospects?',
             "I talked to Material Capital but don't want to bother them",
@@ -1914,15 +1993,15 @@ function BTRAssistantChat(props) {
           ].map(function(q) {
             return h('button', {
               key: q,
+              className: 'leo-suggestion-btn',
               onClick: function() { setInput(q); if (inputRef.current) inputRef.current.focus(); },
               style: {
-                background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '0.35rem',
-                padding: '0.35rem 0.55rem', fontSize: '0.7rem', color: '#475569',
+                background: 'rgba(248,250,252,0.8)', border: '1px solid rgba(226,232,240,0.7)',
+                borderRadius: '0.5rem',
+                padding: '0.4rem 0.65rem', fontSize: '0.7rem', color: '#475569',
                 cursor: 'pointer', textAlign: 'left', fontFamily: "'Inter', sans-serif",
-                transition: 'border-color 0.15s'
-              },
-              onMouseEnter: function(e) { e.currentTarget.style.borderColor = '#94a3b8'; },
-              onMouseLeave: function(e) { e.currentTarget.style.borderColor = '#e2e8f0'; }
+                backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)'
+              }
             }, q);
           })
         )
@@ -1933,15 +2012,18 @@ function BTRAssistantChat(props) {
         var isUser = m.role === 'user';
 
         if (isUser) {
-          return h('div', { key: i, style: { display: 'flex', justifyContent: 'flex-end' } },
+          return h('div', { key: i, className: 'leo-msg-user', style: { display: 'flex', justifyContent: 'flex-end' } },
             h('div', {
               style: {
                 maxWidth: '85%',
-                background: '#0f172a', color: '#f8fafc',
-                borderRadius: '0.55rem 0.55rem 0.1rem 0.55rem',
-                padding: '0.45rem 0.65rem',
-                fontSize: '0.76rem', lineHeight: 1.5,
-                whiteSpace: 'pre-wrap', wordBreak: 'break-word'
+                background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+                color: '#f1f5f9',
+                borderRadius: '0.65rem 0.65rem 0.15rem 0.65rem',
+                padding: '0.5rem 0.75rem',
+                fontSize: '0.76rem', lineHeight: 1.55,
+                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                boxShadow: '0 2px 8px rgba(15,23,42,0.15)',
+                border: '1px solid rgba(51,65,85,0.3)'
               }
             }, m.content)
           );
@@ -1955,58 +2037,73 @@ function BTRAssistantChat(props) {
         var isLastMsg = i === messages.length - 1;
         var cardText = m.card && m.card.text ? sanitizeDisplayText(m.card.text) : '';
         var contentText = m.content ? sanitizeDisplayText(m.content) : '';
-        // Guarantee: at least one of cardText or contentText must be non-empty for display
         var displayText = cardText || contentText;
         var showTextBubble = isTextCard ? !!displayText : (!hasCard && !!displayText);
 
-        return h('div', { key: i, style: { display: 'flex', justifyContent: 'flex-start', maxWidth: '95%' } },
-          h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem', width: '100%' } },
+        return h('div', { key: i, className: 'leo-msg-assistant', style: { display: 'flex', justifyContent: 'flex-start', maxWidth: '95%' } },
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem', width: '100%' } },
             // Mode badge
-            modeLabel ? h('div', { style: { fontSize: '0.55rem', fontWeight: 600, color: modeColor || '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '-0.1rem' } }, modeLabel + ' mode') : null,
+            modeLabel ? h('div', { style: {
+              fontSize: '0.52rem', fontWeight: 600, color: modeColor || '#64748b',
+              textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '-0.05rem',
+              display: 'flex', alignItems: 'center', gap: '0.25rem'
+            } },
+              h('span', { style: { width: 5, height: 5, borderRadius: '50%', background: modeColor || '#64748b', display: 'inline-block' } }),
+              modeLabel
+            ) : null,
 
-            // Structured card (non-TextCard): render the card widget
+            // Structured card
             hasCard ? renderCard(m.card, handleAction) : null,
 
-            // Text bubble: TextCard text, content text, or any text alongside structured cards
+            // Text bubble — frosted glass style
             showTextBubble ? h('div', {
               style: {
-                background: '#f8fafc', border: '1px solid #e2e8f0',
-                borderRadius: '0.55rem 0.55rem 0.55rem 0.1rem',
-                padding: '0.55rem 0.7rem',
-                fontSize: '0.76rem', lineHeight: 1.55, color: '#1e293b',
-                wordBreak: 'break-word'
+                background: 'rgba(248,250,252,0.75)',
+                backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+                border: '1px solid rgba(226,232,240,0.5)',
+                borderRadius: '0.65rem 0.65rem 0.65rem 0.15rem',
+                padding: '0.55rem 0.75rem',
+                fontSize: '0.76rem', lineHeight: 1.6, color: '#1e293b',
+                wordBreak: 'break-word',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.03)'
               }
             }, isLastMsg && !loading ? h(TypingText, { text: displayText }) : renderMarkdownText(displayText)) : null,
 
-            // Structured card with text alongside it
+            // Structured card with text alongside
             hasCard && contentText && !cardText ? h('div', {
               style: {
-                background: '#f8fafc', border: '1px solid #e2e8f0',
-                borderRadius: '0.55rem 0.55rem 0.55rem 0.1rem',
-                padding: '0.45rem 0.65rem',
-                fontSize: '0.76rem', lineHeight: 1.5, color: '#1e293b',
-                wordBreak: 'break-word'
+                background: 'rgba(248,250,252,0.75)',
+                backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+                border: '1px solid rgba(226,232,240,0.5)',
+                borderRadius: '0.65rem 0.65rem 0.65rem 0.15rem',
+                padding: '0.5rem 0.7rem',
+                fontSize: '0.76rem', lineHeight: 1.55, color: '#1e293b',
+                wordBreak: 'break-word',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.03)'
               }
             }, renderMarkdownText(contentText)) : null
           )
         );
       }),
 
-      // Loading indicator
-      loading && h('div', { style: { display: 'flex', justifyContent: 'flex-start' } },
+      // Loading indicator — animated dots
+      loading && h('div', { className: 'leo-msg-assistant', style: { display: 'flex', justifyContent: 'flex-start' } },
         h('div', {
           style: {
-            background: '#f8fafc', border: '1px solid #e2e8f0',
-            borderRadius: '0.55rem 0.55rem 0.55rem 0.1rem',
-            padding: '0.45rem 0.65rem', fontSize: '0.76rem', color: '#94a3b8'
+            background: 'rgba(248,250,252,0.75)',
+            backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+            border: '1px solid rgba(226,232,240,0.5)',
+            borderRadius: '0.65rem 0.65rem 0.65rem 0.15rem',
+            padding: '0.6rem 0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.03)'
           }
         },
-          h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '0.3rem' } },
-            h('span', { style: { animation: 'pulse 1.2s ease-in-out infinite' } }, 'Leo is thinking'),
-            h('span', { style: { animation: 'pulse 1.2s ease-in-out infinite 0.2s' } }, '.'),
-            h('span', { style: { animation: 'pulse 1.2s ease-in-out infinite 0.4s' } }, '.'),
-            h('span', { style: { animation: 'pulse 1.2s ease-in-out infinite 0.6s' } }, '.')
-          )
+          h('div', { style: { display: 'flex', gap: '0.25rem', alignItems: 'center' } },
+            h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: '#14b8a6', display: 'inline-block', animation: 'leoDot 1.4s ease-in-out infinite' } }),
+            h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: '#14b8a6', display: 'inline-block', animation: 'leoDot 1.4s ease-in-out infinite 0.2s' } }),
+            h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: '#14b8a6', display: 'inline-block', animation: 'leoDot 1.4s ease-in-out infinite 0.4s' } })
+          ),
+          h('span', { style: { fontSize: '0.68rem', color: '#94a3b8', fontWeight: 500 } }, 'Leo is thinking')
         )
       )
     ),
@@ -2014,9 +2111,11 @@ function BTRAssistantChat(props) {
     // Slash command hints
     showSlash && h('div', {
       style: {
-        position: 'absolute', bottom: '52px', left: '0.5rem', right: '0.5rem',
-        background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '0.5rem',
-        boxShadow: '0 -4px 12px rgba(0,0,0,0.08)', padding: '0.35rem',
+        position: 'absolute', bottom: '56px', left: '0.6rem', right: '0.6rem',
+        background: 'rgba(255,255,255,0.92)',
+        backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+        border: '1px solid rgba(226,232,240,0.6)', borderRadius: '0.6rem',
+        boxShadow: '0 -8px 24px rgba(0,0,0,0.08)', padding: '0.4rem',
         display: 'flex', flexDirection: 'column', gap: '0.1rem', zIndex: 10
       }
     },
@@ -2025,27 +2124,30 @@ function BTRAssistantChat(props) {
       }).map(function(s) {
         return h('button', {
           key: s.cmd,
+          className: 'leo-slash-item',
           onClick: function() { pickSlash(s.cmd); },
           style: {
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            background: 'transparent', border: 'none', padding: '0.3rem 0.5rem',
-            cursor: 'pointer', borderRadius: '0.3rem', fontFamily: "'Inter', sans-serif",
-            transition: 'background 0.1s', width: '100%', textAlign: 'left'
-          },
-          onMouseEnter: function(e) { e.currentTarget.style.background = '#f1f5f9'; },
-          onMouseLeave: function(e) { e.currentTarget.style.background = 'transparent'; }
+            background: 'transparent', border: 'none', padding: '0.35rem 0.55rem',
+            cursor: 'pointer', borderRadius: '0.35rem', fontFamily: "'Inter', sans-serif",
+            width: '100%', textAlign: 'left'
+          }
         },
           h('span', { style: { fontSize: '0.72rem', fontWeight: 600, color: '#0f172a', fontFamily: "'JetBrains Mono', monospace" } }, s.cmd),
-          h('span', { style: { fontSize: '0.65rem', color: '#94a3b8' } }, s.desc)
+          h('span', { style: { fontSize: '0.62rem', color: '#94a3b8' } }, s.desc)
         );
       })
     ),
 
     // Input bar
     h('div', {
+      className: 'leo-input-area',
       style: {
-        padding: '0.45rem 0.65rem', borderTop: '1px solid #e2e8f0',
-        display: 'flex', gap: '0.35rem', flexShrink: 0, background: '#FFFFFF'
+        padding: '0.55rem 0.75rem',
+        borderTop: '1px solid rgba(226,232,240,0.5)',
+        display: 'flex', gap: '0.4rem', flexShrink: 0,
+        background: 'rgba(255,255,255,0.6)',
+        backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)'
       }
     },
       h('textarea', {
@@ -2053,27 +2155,34 @@ function BTRAssistantChat(props) {
         value: input,
         onChange: handleInputChange,
         onKeyDown: handleKeyDown,
-        placeholder: 'Ask Leo anything or type / for commands…',
+        placeholder: 'Ask Leo anything…',
         rows: 1,
         style: {
-          flex: 1, resize: 'none', border: '1px solid #e2e8f0',
-          borderRadius: '0.4rem', padding: '0.45rem 0.6rem',
+          flex: 1, resize: 'none',
+          border: '1px solid rgba(226,232,240,0.6)',
+          borderRadius: '0.55rem', padding: '0.5rem 0.7rem',
           fontSize: '0.76rem', fontFamily: "'Inter', sans-serif",
-          color: '#1e293b', background: '#f8fafc', outline: 'none',
-          lineHeight: 1.4, maxHeight: '72px', overflowY: 'auto'
+          color: '#1e293b', background: 'rgba(248,250,252,0.6)', outline: 'none',
+          lineHeight: 1.45, maxHeight: '72px', overflowY: 'auto',
+          transition: 'border-color 0.2s, box-shadow 0.2s',
+          backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)'
         }
       }),
       h('button', {
+        className: 'leo-send-btn',
         onClick: sendMessage,
         disabled: loading || !input.trim(),
         style: {
-          background: loading || !input.trim() ? '#cbd5e1' : 'linear-gradient(135deg, #0f172a, #1e293b)',
-          border: 'none', color: '#f8fafc', borderRadius: '0.4rem',
-          padding: '0.45rem 0.7rem', fontSize: '0.78rem', fontWeight: 600,
+          background: loading || !input.trim() ? 'rgba(203,213,225,0.6)' : 'linear-gradient(135deg, #14b8a6, #0d9488)',
+          border: 'none', color: '#fff', borderRadius: '0.55rem',
+          padding: '0.5rem 0.75rem', fontSize: '0.85rem', fontWeight: 600,
           cursor: loading || !input.trim() ? 'default' : 'pointer',
-          fontFamily: "'Inter', sans-serif", flexShrink: 0
+          fontFamily: "'Inter', sans-serif", flexShrink: 0,
+          boxShadow: loading || !input.trim() ? 'none' : '0 2px 8px rgba(20,184,166,0.2)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: '36px', height: '36px'
         }
-      }, '→')
+      }, h('span', { style: { fontSize: '0.9rem', lineHeight: 1 } }, '↑'))
     )
   );
 }
