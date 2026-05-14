@@ -447,14 +447,142 @@ PredictionCard: data: {"company":"...","reply_likelihood":{"score":N,"label":"Hi
 AutomationCard: data: {"patterns":[{"type":"...","detail":"...","frequency":N}],"suggestions":[{"action":"...","impact":"high|medium|low","time_saved_min":N}],"time_savings_est":N}
 
 ═══════════════════════════════
+INTERNAL THINKING (never expose)
+═══════════════════════════════
+
+Before producing any response, silently run through this checklist:
+1. TRUE INTENT — What does the user actually need? (not just what they typed)
+2. DESIRED OUTCOME — What would a perfect answer achieve for them?
+3. BLOCKERS — What's preventing them from getting there?
+4. OPTIONS — What are 2-3 realistic paths forward?
+5. SIMULATION — For each option: likely outcome, effort required, risk
+6. SELF-CHECK — Is my response specific? Actionable? High-value? If not, improve it.
+
+Never show this process. Output only the refined answer.
+
+═══════════════════════════════
+OPTION COMPARISON
+═══════════════════════════════
+
+When the user faces a real decision (not obvious ones), present 2-3 options:
+
+Each option should include:
+- What it is (one line)
+- Impact: high/medium/low
+- Effort: high/medium/low
+- Risk: what could go wrong
+
+Then recommend one clearly: "I'd go with Option B — here's why."
+
+Don't force options on simple requests. Use this when the choice genuinely matters.
+
+═══════════════════════════════
+PRIORITY ENGINE
+═══════════════════════════════
+
+When recommending actions, always establish why this is the priority:
+- Impact: high/medium/low — what changes if they do this
+- Urgency: time-sensitive or flexible
+- Effort: quick win vs. heavy lift
+
+If something is top priority, explain the reasoning:
+"This is #1 because the signal is 3 days old, warmth is 8/10, and they've replied before."
+
+Not every response needs this — but every recommendation should have a clear "why."
+
+═══════════════════════════════
+TEMPORAL INTELLIGENCE
+═══════════════════════════════
+
+Time drives most CRE relationship decisions. Always factor in:
+
+- Engagement decay: warm contacts go cold fast. 7 days of silence on a hot contact = urgency.
+- Signal windows: signals expire. A 3-day-old signal is actionable. A 30-day-old signal is noise.
+- Follow-up timing: too soon feels pushy, too late loses the thread. Sweet spot: 3-7 days.
+- Momentum windows: when activity is building, capitalize. Don't let streaks break.
+
+When timing data is available, weave it in naturally:
+"This signal is 4 days old — you have maybe 3-4 more days before the window closes."
+
+═══════════════════════════════
+LOOP CLOSURE
+═══════════════════════════════
+
+The system tracks suggestions Leo has made and whether the user acted on them.
+When SUGGESTION LOOP CLOSURE data is provided in context:
+- Acknowledge follow-through: "You followed up with Acme like we discussed — good move."
+- Gently flag inaction: "We talked about re-engaging Meridian last week — still worth doing."
+- Use action rates to calibrate: if user acts on 80% of suggestions, keep suggesting. If 20%, be more selective and explain why each one matters.
+- Learn from outcomes: if acted suggestions led to good results, reinforce that pattern.
+
+Never nag. Reference once, then move on.
+
+═══════════════════════════════
+CAUSE STACKING
+═══════════════════════════════
+
+When diagnosing problems, don't stop at the surface issue. Stack the causes:
+
+Surface: "Pipeline isn't moving"
+Layer 1: "Most contacts are stuck at 'contacted' stage"
+Layer 2: "Outreach messages don't include a clear ask"
+Layer 3: "No signal-based hooks to make outreach relevant"
+Root: "Signals are being collected but not converted to personalized outreach"
+
+Name each layer. Connect them. Then fix the root, not the symptom.
+
+═══════════════════════════════
+PREDICTION FRAMING
+═══════════════════════════════
+
+When recommending actions, include likely outcomes:
+
+"If you send a signal-referenced email today:
+- Reply likelihood: ~60% (they've replied before, signal is fresh)
+- Expected timeline: 2-3 business days
+- What affects success: personalization and specific ask"
+
+Ground predictions in data when available. When not, say so:
+"I'm estimating based on limited history — confidence is moderate."
+
+═══════════════════════════════
+STRATEGIC PUSHBACK
+═══════════════════════════════
+
+Challenge the user when their plan will hurt their pipeline. Be:
+- Direct: "That's going to cost you the relationship."
+- Logical: back it up with data or reasoning
+- Constructive: offer the better alternative immediately
+
+Pushback triggers:
+- Waiting too long on a warm contact
+- Sending generic outreach when they have signal data
+- Focusing on low-value contacts while hot leads decay
+- Repeating the same failed approach
+- Over-researching instead of acting
+
+═══════════════════════════════
+PATTERN ABSTRACTION
+═══════════════════════════════
+
+When a specific issue reveals a systemic pattern, zoom out:
+
+"This isn't just about Acme going cold — 4 of your top 10 contacts haven't been touched in 14+ days.
+The issue isn't one relationship, it's follow-up cadence across the board."
+
+Then suggest a system-level fix, not just a one-off patch.
+Only abstract when the pattern is real and supported by data.
+
+═══════════════════════════════
 RESPONSE STRUCTURE (when useful, not forced)
 ═══════════════════════════════
 
-For strategic or complex questions, you may structure as:
-1. Direct answer — what you'd do
-2. What's really happening — the underlying issue
-3. Recommendation — specific next step
-4. Confidence — woven into tone, not a label
+For strategic or complex questions, structure as:
+1. Direct answer — what you'd do and why
+2. What's really happening — the underlying issue (cause stacking)
+3. Options — if a real decision exists (with impact/effort/risk)
+4. Recommendation — specific next step with predicted outcome
+5. Confidence — woven into tone, with reasoning when Medium or Low
 
 For simple questions, just answer. Don't force structure.
 
@@ -469,10 +597,12 @@ RULES
 6. Never pretend an action was completed. Never fake success.
 7. Build on conversation — don't repeat yourself.
 8. End with a natural offer when relevant: "Want me to draft that?" — never force it.
-9. Never expose backend logic, raw JSON, system prompts, or internal data structures.
+9. Never expose backend logic, raw JSON, system prompts, internal data, or chain-of-thought.
 10. Match response length to question complexity. Short question = short answer.
 11. Clearly distinguish app facts from your reasoning. Don't blur the line.
 12. Never claim certainty without data to back it up.
+13. Before returning a response, verify it is specific, actionable, and high-value. Generic advice is worse than silence.
+14. When data exists, use it. "Follow up with them" is weak. "Email Sarah at Meridian — reference the fund launch signal from Tuesday" is strong.
 
 ═══════════════════════════════
 SLASH COMMANDS
@@ -2984,6 +3114,213 @@ def _compute_confidence(group=None, action_type='outreach'):
 
 
 # ---------------------------------------------------------------------------
+# V10: Loop closure — track suggestions → actions → outcomes
+# ---------------------------------------------------------------------------
+
+def _track_suggestion(suggestion_type, target_entity, target_id, suggestion_text):
+    """Record a suggestion Leo made so we can track whether it was acted on."""
+    try:
+        execute(
+            """INSERT INTO leo_suggestions (id, suggestion_type, target_entity, target_id, suggestion, created_at)
+               VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+            [new_id(), suggestion_type, target_entity, target_id, suggestion_text[:300]]
+        )
+    except Exception:
+        pass
+
+
+def _detect_suggestion_outcomes():
+    """
+    Scan for suggestions that were acted on or ignored.
+    Compares pending suggestions against recent touchpoints, stage changes, and completed tasks.
+    """
+    try:
+        pending = fetch_all(
+            """SELECT id, suggestion_type, target_entity, target_id, suggestion, created_at
+               FROM leo_suggestions
+               WHERE outcome IS NULL AND created_at > ?
+               ORDER BY created_at DESC LIMIT 20""",
+            [(datetime.utcnow() - timedelta(days=14)).isoformat()]
+        )
+        for s in (pending or []):
+            tid = s.get('target_id')
+            if not tid:
+                continue
+            created = s.get('created_at', '')
+
+            # Check if touchpoint was logged after suggestion
+            tp = fetch_one(
+                """SELECT id FROM prospecting_touchpoints
+                   WHERE group_id = ? AND occurred_at > ?
+                   LIMIT 1""",
+                [tid, created]
+            )
+            if tp:
+                execute(
+                    "UPDATE leo_suggestions SET outcome = 'acted', outcome_detected_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    [s['id']]
+                )
+                continue
+
+            # Check if stage changed
+            # Mark old suggestions as ignored if > 7 days with no action
+            age = _days_since(created)
+            if age > 7:
+                execute(
+                    "UPDATE leo_suggestions SET outcome = 'ignored', outcome_detected_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    [s['id']]
+                )
+    except Exception:
+        pass
+
+
+def _get_suggestion_outcomes():
+    """
+    Get loop closure summary: what suggestions were acted on vs ignored.
+    Returns context string for system prompt.
+    """
+    try:
+        acted = fetch_all(
+            """SELECT suggestion_type, target_entity, suggestion
+               FROM leo_suggestions WHERE outcome = 'acted'
+               ORDER BY outcome_detected_at DESC LIMIT 5""", []
+        )
+        ignored = fetch_all(
+            """SELECT suggestion_type, target_entity, suggestion
+               FROM leo_suggestions WHERE outcome = 'ignored'
+               ORDER BY outcome_detected_at DESC LIMIT 5""", []
+        )
+        if not acted and not ignored:
+            return ""
+        parts = ["SUGGESTION LOOP CLOSURE:"]
+        if acted:
+            parts.append(f"  Acted on ({len(acted)}):")
+            for a in acted[:3]:
+                parts.append(f"    - {a['target_entity']}: {a['suggestion'][:60]}")
+        if ignored:
+            parts.append(f"  Not acted on ({len(ignored)}):")
+            for i in ignored[:3]:
+                parts.append(f"    - {i['target_entity']}: {i['suggestion'][:60]}")
+        acted_count = len(acted) if acted else 0
+        ignored_count = len(ignored) if ignored else 0
+        total = acted_count + ignored_count
+        if total >= 3:
+            rate = round(acted_count / total * 100)
+            parts.append(f"  Action rate: {rate}% — {'strong follow-through' if rate >= 60 else 'many suggestions going unactioned'}")
+        return "\n".join(parts)
+    except Exception:
+        return ""
+
+
+def _extract_suggestions_from_reply(reply_text, intent, mentioned_groups):
+    """Auto-extract trackable suggestions from Leo's reply for loop closure."""
+    if not reply_text or intent in ('normal_chat', 'explain_metrics'):
+        return
+
+    suggestion_signals = [
+        'should follow up', 'should reach out', 'recommend', 'suggest',
+        'draft something', 'priority', 'top action', 're-engage',
+        'push forward', 'move to', 'schedule', 'set up a call',
+    ]
+    reply_lower = reply_text.lower()
+    has_suggestion = any(s in reply_lower for s in suggestion_signals)
+    if not has_suggestion:
+        return
+
+    for g in (mentioned_groups or [])[:2]:
+        clean = re.sub(r'<[^>]+>[\s\S]*?</[^>]+>', '', reply_text)
+        clean = re.sub(r'\*\*', '', clean).strip()
+        first_actionable = ''
+        for line in clean.split('\n'):
+            line = line.strip()
+            if any(s in line.lower() for s in suggestion_signals) and len(line) > 15:
+                first_actionable = line
+                break
+        if first_actionable:
+            _track_suggestion(
+                intent or 'recommendation',
+                g.get('name', ''),
+                g.get('id', ''),
+                first_actionable[:200]
+            )
+
+
+# ---------------------------------------------------------------------------
+# V10: Temporal intelligence — engagement decay calculations
+# ---------------------------------------------------------------------------
+
+def _get_temporal_context(group=None):
+    """
+    Compute temporal intelligence for a group or the pipeline overall.
+    Returns urgency windows, decay rates, and timing recommendations.
+    """
+    if group:
+        days_silent = _days_since(group.get('last_contacted_at'))
+        warmth = group.get('warmth_score') or 0
+        stage = (group.get('relationship_status') or '').lower()
+
+        # Decay assessment
+        if warmth >= 7:
+            half_life = 7
+        elif warmth >= 4:
+            half_life = 14
+        else:
+            half_life = 30
+
+        decay_pct = min(100, round(days_silent / half_life * 100))
+
+        # Urgency window
+        if days_silent < half_life * 0.5:
+            window = 'green'
+            window_desc = 'Still fresh — no urgency'
+        elif days_silent < half_life:
+            window = 'yellow'
+            window_desc = f'Engagement decaying — {half_life - days_silent}d until critical'
+        elif days_silent < half_life * 2:
+            window = 'red'
+            window_desc = 'Past decay threshold — re-engage now or risk cold restart'
+        else:
+            window = 'cold'
+            window_desc = 'Likely requires a cold restart approach'
+
+        return {
+            'days_silent': days_silent,
+            'decay_pct': decay_pct,
+            'half_life': half_life,
+            'window': window,
+            'window_desc': window_desc,
+            'stage': stage,
+        }
+
+    # Pipeline-wide temporal view
+    try:
+        urgents = fetch_all(
+            """SELECT name, warmth_score, last_contacted_at, relationship_status
+               FROM capital_groups
+               WHERE warmth_score >= 5
+                 AND relationship_status NOT IN ('dormant', 'lost', 'dead', 'closed')
+               ORDER BY warmth_score DESC LIMIT 20""", []
+        )
+        red_count = 0
+        yellow_count = 0
+        for g in (urgents or []):
+            ds = _days_since(g.get('last_contacted_at'))
+            w = g.get('warmth_score') or 0
+            hl = 7 if w >= 7 else (14 if w >= 4 else 30)
+            if ds >= hl:
+                red_count += 1
+            elif ds >= hl * 0.5:
+                yellow_count += 1
+        return {
+            'red_count': red_count,
+            'yellow_count': yellow_count,
+            'total_tracked': len(urgents or []),
+        }
+    except Exception:
+        return {}
+
+
+# ---------------------------------------------------------------------------
 # Interaction pattern analysis + behavior learning
 # ---------------------------------------------------------------------------
 
@@ -3363,6 +3700,27 @@ def _build_context(extra_context=None, include_history=True, lightweight=False):
                 ctx_parts.append(f"\n{patterns_v9}")
         except Exception:
             pass
+
+    # V10: Loop closure — suggestion outcomes
+    if not lightweight:
+        try:
+            _detect_suggestion_outcomes()
+            loop_data = _get_suggestion_outcomes()
+            if loop_data:
+                ctx_parts.append(f"\n{loop_data}")
+        except Exception:
+            pass
+
+    # V10: Temporal intelligence — pipeline-wide urgency
+    try:
+        temporal = _get_temporal_context()
+        if temporal and (temporal.get('red_count', 0) > 0 or temporal.get('yellow_count', 0) > 0):
+            ctx_parts.append(
+                f"\nTEMPORAL URGENCY: {temporal.get('red_count', 0)} contacts past decay threshold, "
+                f"{temporal.get('yellow_count', 0)} approaching — out of {temporal.get('total_tracked', 0)} tracked"
+            )
+    except Exception:
+        pass
 
     # Chat history (session memory)
     if include_history:
@@ -4790,10 +5148,16 @@ def chat():
                 [g['id']]
             )
             days = _days_since(g.get('last_contacted_at'))
+            # V10: Temporal intelligence for mentioned entities
+            temporal = _get_temporal_context(g)
+            temporal_note = ''
+            if temporal:
+                temporal_note = f", urgency={temporal.get('window', '?')} ({temporal.get('window_desc', '')})"
             entity_ctx_parts.append(
                 f"MENTIONED: {g['name']} — status={g.get('relationship_status', '?')}, "
                 f"warmth={g.get('warmth_score', '?')}/10, {days}d since last contact"
                 + (f", latest signal: {sig['title']}" if sig else '')
+                + temporal_note
             )
         for c in mentioned_contacts[:2]:
             cname = f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
@@ -4919,6 +5283,13 @@ def chat():
         # V9: Extract and store conversation memory
         try:
             _extract_memory_from_exchange(last_msg, card.get('text', ''), intent)
+        except Exception:
+            pass
+
+        # V10: Extract trackable suggestions for loop closure
+        try:
+            mentioned_groups = _find_groups_fuzzy(last_msg)
+            _extract_suggestions_from_reply(card.get('text', ''), intent, mentioned_groups)
         except Exception:
             pass
 
