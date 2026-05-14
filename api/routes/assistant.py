@@ -57,7 +57,9 @@ INTENT_KEYWORDS = {
                          'push them', 'push this', 'take to next level'],
     'schedule_meeting':  ['schedule meeting', 'book meeting', 'set up meeting', 'meeting with',
                          'schedule a call', 'set meeting', 'book a call',
-                         'schedule time', 'block time', 'meeting request'],
+                         'schedule time', 'block time', 'meeting request',
+                         'schedule my day', 'build my day', 'plan my day',
+                         'add to calendar', 'add to my calendar', 'put on calendar'],
     'update_calendar':  ['move meeting', 'reschedule', 'change meeting', 'update meeting',
                          'add notes to meeting', 'prep notes', 'cancel meeting',
                          'move my meeting', 'shift meeting'],
@@ -65,7 +67,9 @@ INTENT_KEYWORDS = {
                           'set focus', 'daily focus', 'add touchpoint', 'touchpoints',
                           'update revenue', 'revenue', 'monthly target', 'set target',
                           'log workout', 'did squats', 'completed workout'],
-    'export_report':    ['export', 'download', 'csv', 'report', 'spreadsheet', 'pull data'],
+    'export_report':    ['export', 'download', 'csv', 'report', 'spreadsheet', 'pull data',
+                         'brief', 'daily brief', 'my brief', 'generate brief', 'create brief',
+                         'intelligence brief', 'morning brief', 'build my brief', 'pdf'],
     'troubleshoot':     ['error', 'broken', 'not working', 'bug', 'issue', 'wrong',
                          'fix', 'help with app', 'problem'],
     'coach':            ['how am i doing', 'performance', 'momentum', 'cadence', 'habit',
@@ -4837,6 +4841,12 @@ def _sanitize_reply_text(text):
     # Strip <action>...</action>
     clean = re.sub(r'<action[^>]*>[\s\S]*?</action>', '', clean, flags=re.IGNORECASE)
     clean = re.sub(r'</?action[^>]*>', '', clean, flags=re.IGNORECASE)
+    # Strip raw card type tags: <ExportCard>, <DraftCard />, </BriefCard>, etc.
+    clean = re.sub(r'</?(?:Export|Draft|Brief|Meeting|FollowUp|Touchpoint|Signal|NextAction|'
+                   r'Confirmation|Error|Strategy|Queue|Sprint|Insight|Prediction|Automation|'
+                   r'Probability|Relationship|Funnel|Calendar|CrmUpdate|LeoAction|Approval|'
+                   r'Batch|Contact|Company|Performance|Execution|Fix|Claude|Ambiguity|Text)Card\s*/?>',
+                   '', clean, flags=re.IGNORECASE)
     # Strip standalone JSON blocks (lines that are just {...})
     clean = re.sub(r'^\s*\{[^}]{20,}\}\s*$', '', clean, flags=re.MULTILINE)
     # Strip common internal prefixes
@@ -5288,6 +5298,24 @@ def chat():
             _persist_chat(last_msg, card, 'schedule_meeting', 'execution')
             return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'schedule_meeting', 'mode': 'execution'})
 
+    # Draft outreach intercept — extract contact, inject context for LLM draft
+    if intent == 'draft_outreach':
+        target = re.sub(
+            r'\b(draft|write|compose|create|send|email|message|linkedin|outreach|reach out|follow up)\b',
+            '', last_msg, flags=re.IGNORECASE
+        ).strip(' .,!?')
+        target = re.sub(r'\b(to|for|an?|the|with|about)\b', '', target, flags=re.IGNORECASE).strip(' .,!?')
+        if target:
+            mentioned_contacts = _find_contacts_fuzzy(target)
+            mentioned_groups = _find_groups_fuzzy(target)
+            if mentioned_contacts:
+                c = mentioned_contacts[0]
+                signal = _latest_signal_for(c.get('group_id'), c.get('id'))
+                extra_ctx = (extra_ctx or '') + "\n" + _format_contact_detail(c, signal)
+            elif mentioned_groups:
+                g = mentioned_groups[0]
+                extra_ctx = (extra_ctx or '') + f"\nTarget company: {g['name']} (id={g['id'][:8]}, status={g.get('relationship_status')}, warmth={g.get('warmth_score')})"
+
     # CRM update intercept — parse locally, skip Claude call
     if intent == 'crm_update':
         parsed = _parse_crm_command(last_msg)
@@ -5321,6 +5349,65 @@ def chat():
                     'role': 'assistant', 'content': card['text'],
                     'card': card, 'intent': 'push_forward', 'mode': 'execution'
                 })
+
+    # Export/brief intercept — produce actionable card instead of LLM text
+    if intent == 'export_report':
+        lower_msg = last_msg.lower()
+        is_brief = any(w in lower_msg for w in ['brief', 'intelligence', 'daily brief', 'morning brief', 'my brief'])
+        if is_brief:
+            try:
+                from api.routes.daily_brief import _generate_brief_content
+                brief = _generate_brief_content()
+                card = {
+                    'type': 'BriefCard',
+                    'text': f"**{brief['title']}**\n\nYour daily intelligence brief is ready.",
+                    'data': {
+                        'title': brief['title'], 'date': brief['date'],
+                        'market_snapshot': brief.get('market_snapshot', [])[:3],
+                        'action_items': brief.get('action_items', [])[:3],
+                        'daily_targets': brief.get('daily_targets', [])[:3],
+                        'download_url': '/api/brief/download',
+                        'fileName': f"BTR_Brief_{brief['date']}.pdf",
+                    },
+                    'actions': [
+                        {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download',
+                         'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{brief['date']}.pdf"}},
+                    ]
+                }
+                _persist_chat(last_msg, card, 'brief_pdf', 'execution')
+                return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'brief_pdf', 'mode': 'execution'})
+            except Exception:
+                pass
+        else:
+            export_type = 'contacts'
+            if 'capital' in lower_msg or 'partner' in lower_msg:
+                export_type = 'capital_partners'
+            elif 'underwriting' in lower_msg:
+                export_type = 'underwriting'
+            elif 'prospect' in lower_msg:
+                export_type = 'prospects'
+            urls = {
+                'contacts': '/api/prospecting/contacts/export',
+                'capital_partners': '/api/prospecting/capital-groups-export',
+                'underwriting': '/api/underwriting/export?mode=latest',
+                'prospects': '/api/export',
+            }
+            url = urls.get(export_type, urls['contacts'])
+            file_name = f"{export_type}_{datetime.utcnow().strftime('%Y-%m-%d')}.csv"
+            card = {
+                'type': 'ExportCard',
+                'text': f'Your {export_type.replace("_", " ")} export is ready.',
+                'data': {
+                    'export_type': export_type, 'url': url,
+                    'fileName': file_name, 'filename': file_name,
+                },
+                'actions': [
+                    {'id': 'download_export', 'label': 'Download', 'action': 'download',
+                     'params': {'url': url, 'fileName': file_name}},
+                ]
+            }
+            _persist_chat(last_msg, card, 'export_report', 'execution')
+            return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'export_report', 'mode': 'execution'})
 
     # Page-aware context
     page_extra = ""
@@ -5803,6 +5890,33 @@ def execute_action():
                     'type': 'ErrorCard', 'text': result.get('message', 'Action failed.'),
                     'data': {'error': exec_action}, 'actions': []
                 }})
+            if exec_action == 'log_touchpoint':
+                return _exec_log_touchpoint(exec_params)
+            if exec_action == 'generate_brief':
+                try:
+                    from api.routes.daily_brief import _generate_brief_content
+                    brief = _generate_brief_content()
+                    return jsonify({'success': True, 'card': {
+                        'type': 'BriefCard',
+                        'text': f"**{brief['title']}**\n\nYour daily intelligence brief is ready.",
+                        'data': {
+                            'title': brief['title'], 'date': brief['date'],
+                            'market_snapshot': brief.get('market_snapshot', [])[:3],
+                            'action_items': brief.get('action_items', [])[:3],
+                            'daily_targets': brief.get('daily_targets', [])[:3],
+                            'download_url': '/api/brief/download',
+                            'fileName': f"BTR_Brief_{brief['date']}.pdf",
+                        },
+                        'actions': [
+                            {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download',
+                             'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{brief['date']}.pdf"}},
+                        ]
+                    }})
+                except Exception as e:
+                    return jsonify({'success': False, 'card': {
+                        'type': 'ErrorCard', 'text': f'Brief generation failed: {str(e)}',
+                        'data': {'error': 'generate_brief'}, 'actions': []
+                    }})
             return jsonify({'success': False, 'card': {
                 'type': 'ErrorCard', 'text': f'Unknown Leo action: {exec_action}',
                 'data': {'error': 'unknown_action'}, 'actions': []
