@@ -1418,8 +1418,8 @@ def _get_interaction_patterns():
 # Context builder — full CRM state + insights + patterns
 # ---------------------------------------------------------------------------
 
-def _build_context(extra_context=None, include_history=True):
-    """Gather current app state including CRM data, performance, insights, and patterns."""
+def _build_context(extra_context=None, include_history=True, lightweight=False):
+    """Gather current app state. lightweight=True skips heavy analytics for conversational mode."""
     ctx_parts = []
 
     # Capital groups
@@ -1559,82 +1559,81 @@ def _build_context(extra_context=None, include_history=True):
                 line += f" priority={t['priority']}"
             ctx_parts.append(line)
 
-    # Performance metrics
-    today = datetime.utcnow().strftime('%Y-%m-%d')
-    week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
-    two_weeks = (datetime.utcnow() - timedelta(days=14)).isoformat()
-
-    tp_today = fetch_one(
-        "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE DATE(occurred_at) = ?",
-        [today]
-    )
-    tp_week = fetch_one(
-        "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE occurred_at > ?",
-        [week_ago]
-    )
-    tp_last_week = fetch_one(
-        "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE occurred_at > ? AND occurred_at < ?",
-        [two_weeks, week_ago]
-    )
-    total_contacts = fetch_one("SELECT COUNT(*) as cnt FROM prospecting_contacts")
-    total_groups = fetch_one("SELECT COUNT(*) as cnt FROM capital_groups")
-    total_signals = fetch_one(
-        "SELECT COUNT(*) as cnt FROM prospecting_signals WHERE detected_at > ?",
-        [week_ago]
-    )
-    tasks_completed = fetch_one(
-        "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE status = 'completed' AND completed_at > ?",
-        [week_ago]
-    )
-    tasks_pending = fetch_one(
-        "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE status = 'pending'"
-    )
-    overdue_tasks = fetch_all(
-        """SELECT t.title, t.due_at, g.name as group_name
-           FROM prospecting_tasks t
-           LEFT JOIN capital_groups g ON t.capital_group_id = g.id
-           WHERE t.status = 'pending' AND t.due_at < ?
-           ORDER BY t.due_at ASC LIMIT 5""",
-        [today]
-    )
-
-    tw = tp_week['cnt'] if tp_week else 0
-    lw = tp_last_week['cnt'] if tp_last_week else 0
-    trend = 'flat'
-    if lw > 0:
-        if tw > lw * 1.15:
-            trend = 'up'
-        elif tw < lw * 0.85:
-            trend = 'down'
-
-    ctx_parts.append(f"\nPERFORMANCE (Performance dashboard):")
-    ctx_parts.append(f"  Total: {total_contacts['cnt'] if total_contacts else 0} contacts, "
-                     f"{total_groups['cnt'] if total_groups else 0} capital groups")
-    ctx_parts.append(f"  Today: {tp_today['cnt'] if tp_today else 0} touchpoints")
-    ctx_parts.append(f"  This week: {tw} touchpoints (last week: {lw}, trend: {trend})")
-    ctx_parts.append(f"  Signals this week: {total_signals['cnt'] if total_signals else 0} (SignalStack)")
-    ctx_parts.append(f"  Tasks: {tasks_completed['cnt'] if tasks_completed else 0} completed, "
-                     f"{tasks_pending['cnt'] if tasks_pending else 0} pending")
-    if overdue_tasks:
-        ctx_parts.append(f"  OVERDUE ({len(overdue_tasks)}):")
-        for ot in overdue_tasks:
-            ctx_parts.append(f"    - {ot['title']}"
-                             f"{' (' + ot['group_name'] + ')' if ot.get('group_name') else ''}"
-                             f" due={str(ot['due_at'])[:10]}")
-
     ctx_parts.append(f"\nTODAY: {datetime.utcnow().strftime('%A, %B %d, %Y')}")
 
-    # Proactive insights (data-driven)
-    insights = _generate_proactive_insights()
-    if insights:
-        ctx_parts.append("\nSYSTEM INSIGHTS (computed from your data):")
-        for ins in insights:
-            ctx_parts.append(f"  ⚠ {ins}")
+    # Heavy analytics — skip for conversational mode to keep context lean
+    if not lightweight:
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        two_weeks = (datetime.utcnow() - timedelta(days=14)).isoformat()
 
-    # Interaction patterns (self-improvement)
-    patterns = _get_interaction_patterns()
-    if patterns:
-        ctx_parts.append(f"\n{patterns}")
+        tp_today = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE DATE(occurred_at) = ?",
+            [today]
+        )
+        tp_week = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE occurred_at > ?",
+            [week_ago]
+        )
+        tp_last_week = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE occurred_at > ? AND occurred_at < ?",
+            [two_weeks, week_ago]
+        )
+        total_contacts = fetch_one("SELECT COUNT(*) as cnt FROM prospecting_contacts")
+        total_groups = fetch_one("SELECT COUNT(*) as cnt FROM capital_groups")
+        total_signals = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_signals WHERE detected_at > ?",
+            [week_ago]
+        )
+        tasks_completed = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE status = 'completed' AND completed_at > ?",
+            [week_ago]
+        )
+        tasks_pending = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE status = 'pending'"
+        )
+        overdue_tasks = fetch_all(
+            """SELECT t.title, t.due_at, g.name as group_name
+               FROM prospecting_tasks t
+               LEFT JOIN capital_groups g ON t.capital_group_id = g.id
+               WHERE t.status = 'pending' AND t.due_at < ?
+               ORDER BY t.due_at ASC LIMIT 5""",
+            [today]
+        )
+
+        tw = tp_week['cnt'] if tp_week else 0
+        lw = tp_last_week['cnt'] if tp_last_week else 0
+        trend = 'flat'
+        if lw > 0:
+            if tw > lw * 1.15:
+                trend = 'up'
+            elif tw < lw * 0.85:
+                trend = 'down'
+
+        ctx_parts.append(f"\nPERFORMANCE:")
+        ctx_parts.append(f"  Total: {total_contacts['cnt'] if total_contacts else 0} contacts, "
+                         f"{total_groups['cnt'] if total_groups else 0} capital groups")
+        ctx_parts.append(f"  Today: {tp_today['cnt'] if tp_today else 0} touchpoints")
+        ctx_parts.append(f"  This week: {tw} touchpoints (last week: {lw}, trend: {trend})")
+        ctx_parts.append(f"  Signals this week: {total_signals['cnt'] if total_signals else 0}")
+        ctx_parts.append(f"  Tasks: {tasks_completed['cnt'] if tasks_completed else 0} completed, "
+                         f"{tasks_pending['cnt'] if tasks_pending else 0} pending")
+        if overdue_tasks:
+            ctx_parts.append(f"  OVERDUE ({len(overdue_tasks)}):")
+            for ot in overdue_tasks:
+                ctx_parts.append(f"    - {ot['title']}"
+                                 f"{' (' + ot['group_name'] + ')' if ot.get('group_name') else ''}"
+                                 f" due={str(ot['due_at'])[:10]}")
+
+        insights = _generate_proactive_insights()
+        if insights:
+            ctx_parts.append("\nSYSTEM INSIGHTS:")
+            for ins in insights:
+                ctx_parts.append(f"  - {ins}")
+
+        patterns = _get_interaction_patterns()
+        if patterns:
+            ctx_parts.append(f"\n{patterns}")
 
     # Chat history (session memory)
     if include_history:
@@ -2795,10 +2794,14 @@ def chat():
             )
 
     combined_extra = (extra_ctx or '') + page_extra
-    mode_hint = f"\n\nACTIVE MODE: {mode.upper()}\nINTENT: {intent}"
-    combined_extra = (combined_extra or '') + mode_hint
 
-    context = _build_context(combined_extra if combined_extra.strip() else None)
+    if intent != 'normal_chat':
+        combined_extra = (combined_extra or '') + f"\n\nACTIVE MODE: {mode.upper()}\nINTENT: {intent}"
+
+    context = _build_context(
+        combined_extra if combined_extra.strip() else None,
+        lightweight=(intent == 'normal_chat')
+    )
     system = SYSTEM_PROMPT + "\n\n--- CURRENT DATA CONTEXT ---\n" + context
 
     api_messages = []
