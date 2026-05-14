@@ -56,8 +56,15 @@ INTENT_KEYWORDS = {
                          'accelerate', 'fast track', 'close the loop', 'drive forward',
                          'push them', 'push this', 'take to next level'],
     'schedule_meeting':  ['schedule meeting', 'book meeting', 'set up meeting', 'meeting with',
-                         'schedule a call', 'set meeting', 'book a call', 'calendar',
+                         'schedule a call', 'set meeting', 'book a call',
                          'schedule time', 'block time', 'meeting request'],
+    'update_calendar':  ['move meeting', 'reschedule', 'change meeting', 'update meeting',
+                         'add notes to meeting', 'prep notes', 'cancel meeting',
+                         'move my meeting', 'shift meeting'],
+    'update_performance': ['log squat', 'squats', 'mark workout', 'workout complete',
+                          'set focus', 'daily focus', 'add touchpoint', 'touchpoints',
+                          'update revenue', 'revenue', 'monthly target', 'set target',
+                          'log workout', 'did squats', 'completed workout'],
     'export_report':    ['export', 'download', 'csv', 'report', 'spreadsheet', 'pull data'],
     'troubleshoot':     ['error', 'broken', 'not working', 'bug', 'issue', 'wrong',
                          'fix', 'help with app', 'problem'],
@@ -79,7 +86,9 @@ INTENT_TO_MODE = {
     'log_update_crm':   'execution',
     'crm_update':       'execution',
     'push_forward':     'execution',
-    'schedule_meeting': 'execution',
+    'schedule_meeting':   'execution',
+    'update_calendar':    'execution',
+    'update_performance': 'execution',
     'export_report':    'execution',
     'troubleshoot':     'execution',
     'coach':            'coach',
@@ -113,6 +122,8 @@ def _classify_intent(text):
             '/predict': 'analyze_company', '/automate': 'recommend_action',
             '/brief-pdf': 'export_report', '/patterns': 'coach',
             '/meeting': 'schedule_meeting', '/calendar': 'schedule_meeting',
+            '/perf': 'update_performance', '/squats': 'update_performance',
+            '/workout': 'update_performance', '/focus': 'update_performance',
         }
         return slash_map.get(cmd, 'recommend_action')
 
@@ -452,6 +463,7 @@ FunnelCard: data: {"funnel":[{"stage":"...","count":N}],"rates":{"outreach_to_re
 PredictionCard: data: {"company":"...","reply_likelihood":{"score":N,"label":"High|Medium|Low","factors":["..."]},"meeting_likelihood":{"score":N,"label":"High|Medium|Low","factors":["..."]},"recommended_channel":"..."}
 AutomationCard: data: {"patterns":[{"type":"...","detail":"...","frequency":N}],"suggestions":[{"action":"...","impact":"high|medium|low","time_saved_min":N}],"time_savings_est":N}
 MeetingCard: data: {"contact_name":"...","contact_id":"...","group_id":"...","company_name":"...","meeting_date":"YYYY-MM-DD","meeting_time":"HH:MM","duration_min":N,"meeting_type":"general|intro|follow_up|pitch|review|call","title":"...","notes":"...","status":"scheduled"}
+LeoActionPreviewCard: data: {"action_type":"...","target_area":"calendar|performance|crm","description":"...","changes":[{"field":"...","old_value":"...","new_value":"..."}],"affected_record":"..."}
 
 ═══════════════════════════════
 INTERNAL THINKING (never expose)
@@ -4290,6 +4302,15 @@ def _preprocess_slash(text):
     if cmd == '/calendar':
         return '__calendar_view__', extra_ctx
 
+    if cmd == '/perf' and arg:
+        return arg, extra_ctx
+    if cmd == '/squats' and arg:
+        return f'log {arg} squats', extra_ctx
+    if cmd == '/workout':
+        return 'mark workout complete', extra_ctx
+    if cmd == '/focus' and arg:
+        return f'set daily focus to {arg}', extra_ctx
+
     if cmd == '/meeting':
         if arg:
             return f'__schedule_meeting__{arg}', extra_ctx
@@ -4731,6 +4752,73 @@ def get_automation():
 # Reply text sanitizer — strip all internal/backend syntax from user-facing text
 # ---------------------------------------------------------------------------
 
+def _ensure_card_actions(card):
+    """Auto-inject missing actions into known card types so buttons always render."""
+    if not card or not isinstance(card, dict):
+        return card
+    card_type = card.get('type', '')
+    if 'data' not in card:
+        card['data'] = {}
+    if 'actions' not in card:
+        card['actions'] = []
+
+    d = card['data']
+
+    if card_type == 'DraftCard' and not card['actions']:
+        card['actions'] = [
+            {'id': 'copy_draft', 'label': 'Copy', 'action': 'copy_draft', 'params': {'body': d.get('body', '')}},
+        ]
+
+    if card_type == 'ExportCard':
+        url = d.get('url') or d.get('fileUrl') or ''
+        file_name = d.get('fileName') or d.get('filename') or ''
+        if url and not card['actions']:
+            card['actions'] = [
+                {'id': 'download', 'label': 'Download', 'action': 'download', 'params': {'url': url, 'fileName': file_name}}
+            ]
+        if not url:
+            card['type'] = 'ErrorCard'
+            card['text'] = card.get('text', 'Export failed — no download URL available.')
+            card['data'] = {'error': 'No file URL', 'suggestion': 'Try the export again.'}
+            card['actions'] = []
+
+    if card_type == 'BriefCard' and not card['actions']:
+        brief_date = d.get('date', datetime.utcnow().strftime('%Y-%m-%d'))
+        card['actions'] = [
+            {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download',
+             'params': {'url': '/api/brief/download', 'fileName': f'BTR_Brief_{brief_date}.pdf'}}
+        ]
+
+    if card_type == 'MeetingCard' and not card['actions']:
+        card['actions'] = [
+            {'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}}
+        ]
+
+    if card_type == 'TouchpointLogCard' and not card['actions']:
+        card['actions'] = [
+            {'id': 'log_tp', 'label': 'Log Touchpoint', 'action': 'log_touchpoint', 'params': {
+                'contact_id': d.get('contact_id', ''), 'group_id': d.get('group_id', ''),
+                'channel': d.get('channel', 'note'), 'summary': d.get('summary', ''),
+                'direction': d.get('direction', 'outbound')
+            }}
+        ]
+
+    if card_type == 'FollowUpCard' and not card['actions']:
+        card['actions'] = [
+            {'id': 'create_fu', 'label': 'Create Follow-Up', 'action': 'create_followup', 'params': {
+                'contact_id': d.get('contact_id', ''), 'title': d.get('title', ''),
+                'due_date': d.get('due_date', '')
+            }}
+        ]
+
+    if card_type == 'LeoActionPreviewCard' and not card['actions']:
+        card['actions'] = [
+            {'id': 'cancel_leo_action', 'label': 'Cancel', 'action': 'cancel', 'params': {}}
+        ]
+
+    return card
+
+
 def _sanitize_reply_text(text):
     """Remove card tags, action tags, JSON blocks, and internal syntax."""
     if not text:
@@ -5119,9 +5207,47 @@ def chat():
         _persist_chat(last_msg, card, 'schedule_meeting', 'execution')
         return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'schedule_meeting', 'mode': 'execution'})
 
+    # Permission guard — block people-management requests early
+    allowed, block_reason = _leo_permission_check('_check_text', {'_raw_text': last_msg})
+    if not allowed:
+        card = {
+            'type': 'ErrorCard', 'text': block_reason,
+            'data': {'error': 'permission_denied'}, 'actions': []
+        }
+        _persist_chat(last_msg, card, 'blocked', 'execution')
+        return jsonify({'role': 'assistant', 'content': block_reason, 'card': card, 'intent': 'blocked', 'mode': 'execution'})
+
     intent = _classify_intent(last_msg)
     mode = INTENT_TO_MODE.get(intent, 'strategic')
     max_tokens = MODE_MAX_TOKENS.get(mode, 2000)
+
+    # Performance action intercept — parse NLP, show preview card
+    if intent == 'update_performance':
+        parsed = _parse_performance_command(last_msg)
+        if parsed and parsed.get('action') and not parsed['action'].endswith('_error'):
+            card = _build_leo_action_preview(
+                parsed['action'], 'performance', parsed['description'],
+                parsed['changes'], parsed['affected'],
+                parsed['action'], parsed
+            )
+            _persist_chat(last_msg, card, 'update_performance', 'execution')
+            return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'update_performance', 'mode': 'execution'})
+
+    # Calendar modification intercept — parse NLP, show preview card
+    if intent == 'update_calendar':
+        parsed = _parse_calendar_command(last_msg)
+        if parsed:
+            if parsed.get('action') == 'cal_error':
+                card = {'type': 'ErrorCard', 'text': parsed['error'], 'data': {'error': parsed['error']}, 'actions': []}
+                _persist_chat(last_msg, card, 'update_calendar', 'execution')
+                return jsonify({'role': 'assistant', 'content': parsed['error'], 'card': card, 'intent': 'update_calendar', 'mode': 'execution'})
+            card = _build_leo_action_preview(
+                parsed['action'], 'calendar', parsed['description'],
+                parsed['changes'], parsed['affected'],
+                parsed['action'], parsed
+            )
+            _persist_chat(last_msg, card, 'update_calendar', 'execution')
+            return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'update_calendar', 'mode': 'execution'})
 
     # CRM update intercept — parse locally, skip Claude call
     if intent == 'crm_update':
@@ -5256,7 +5382,7 @@ def chat():
         text_outside_card = ''
 
         # Try <card>JSON</card> format — use regex for robustness
-        card_match = re.search(r'<card>([\s\S]*?)</card>', reply, re.IGNORECASE)
+        card_match = re.search(r'<card\s*>([\s\S]*?)</card\s*>', reply, re.IGNORECASE)
         if card_match:
             try:
                 card = json.loads(card_match.group(1).strip())
@@ -5275,7 +5401,7 @@ def chat():
         # Try <card type="..." ...>...</card> attribute format
         if not card:
             attr_match = re.search(
-                r'<card\s+[^>]*?type=["\'](\w+)["\'][^>]*>([\s\S]*?)</card>',
+                r'<card\s+[^>]*?type=["\'](\w+)["\'][^>]*>([\s\S]*?)</card\s*>',
                 reply, re.IGNORECASE
             )
             if attr_match:
@@ -5296,7 +5422,7 @@ def chat():
         # Try <action>JSON</action> format
         action = None
         if not card:
-            action_match = re.search(r'<action>([\s\S]*?)</action>', reply, re.IGNORECASE)
+            action_match = re.search(r'<action\s*>([\s\S]*?)</action\s*>', reply, re.IGNORECASE)
             if action_match:
                 try:
                     action = json.loads(action_match.group(1).strip())
@@ -5305,8 +5431,32 @@ def chat():
                 except json.JSONDecodeError:
                     pass
 
-        # Build final response
+        # Last resort: try to find a JSON object with a "type" key in the raw reply
+        if not card:
+            json_match = re.search(r'\{[^{}]*"type"\s*:\s*"(\w+Card)"[^{}]*\}', reply)
+            if not json_match:
+                json_match = re.search(r'\{[\s\S]*?"type"\s*:\s*"(\w+Card)"[\s\S]*?\}', reply)
+            if json_match:
+                try:
+                    candidate = json_match.group()
+                    brace_start = json_match.start()
+                    depth = 0
+                    end = brace_start
+                    for ci, ch in enumerate(reply[brace_start:]):
+                        if ch == '{': depth += 1
+                        elif ch == '}': depth -= 1
+                        if depth == 0:
+                            end = brace_start + ci + 1
+                            break
+                    card = json.loads(reply[brace_start:end])
+                    text_outside_card = reply[:brace_start] + reply[end:]
+                    logger.info(f"[Leo] Recovered card from raw JSON: type={card.get('type')}")
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+        # Ensure card has required structure and auto-inject missing actions
         if card:
+            card = _ensure_card_actions(card)
             extra_text = _sanitize_reply_text(text_outside_card).strip()
             if card.get('text'):
                 card['text'] = _sanitize_reply_text(card['text'])
@@ -5564,6 +5714,42 @@ def execute_action():
                     {'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}}
                 ]
             }})
+        if action == 'leo_execute':
+            allowed, reason = _leo_permission_check(params.get('exec_action', ''), params.get('exec_params', {}))
+            if not allowed:
+                return jsonify({'success': False, 'card': {
+                    'type': 'ErrorCard', 'text': reason,
+                    'data': {'error': 'permission_denied'}, 'actions': []
+                }})
+            exec_action = params.get('exec_action', '')
+            exec_params = params.get('exec_params', {})
+            if exec_action.startswith('perf_'):
+                result = _exec_performance_action(exec_params)
+                if result.get('success'):
+                    return jsonify({'success': True, 'card': {
+                        'type': 'ConfirmationCard', 'text': result['message'],
+                        'data': {'what': exec_action, 'result': 'success'}, 'actions': []
+                    }})
+                return jsonify({'success': False, 'card': {
+                    'type': 'ErrorCard', 'text': result.get('message', 'Action failed.'),
+                    'data': {'error': exec_action}, 'actions': []
+                }})
+            if exec_action.startswith('cal_'):
+                result = _exec_calendar_action(exec_params)
+                if result.get('success'):
+                    return jsonify({'success': True, 'card': {
+                        'type': 'ConfirmationCard', 'text': result['message'],
+                        'data': {'what': exec_action, 'result': 'success'},
+                        'actions': [{'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}}]
+                    }})
+                return jsonify({'success': False, 'card': {
+                    'type': 'ErrorCard', 'text': result.get('message', 'Action failed.'),
+                    'data': {'error': exec_action}, 'actions': []
+                }})
+            return jsonify({'success': False, 'card': {
+                'type': 'ErrorCard', 'text': f'Unknown Leo action: {exec_action}',
+                'data': {'error': 'unknown_action'}, 'actions': []
+            }})
         if action == 'cancel':
             return jsonify({'success': True, 'card': {
                 'type': 'ConfirmationCard', 'text': 'Cancelled.',
@@ -5709,6 +5895,386 @@ def _exec_complete_task(params):
         'data': {'what': 'task', 'result': 'completed', 'entity_id': task_id},
         'actions': []
     }})
+
+
+# ===================================================================
+# LEO ACTION PERMISSION SYSTEM
+# ===================================================================
+
+BLOCKED_ACTIONS = frozenset([
+    'add_contact', 'create_contact', 'delete_contact', 'remove_contact',
+    'add_person', 'create_person', 'delete_person', 'remove_person',
+    'add_user', 'create_user', 'delete_user', 'remove_user',
+    'change_password', 'update_security', 'change_email', 'change_role',
+    'delete_account', 'remove_account',
+])
+
+ALLOWED_AREAS = frozenset([
+    'calendar', 'performance', 'crm_touchpoint', 'crm_stage',
+    'crm_followup', 'crm_task', 'crm_notes', 'export',
+])
+
+
+def _leo_permission_check(action_type, params=None):
+    """Check if Leo is allowed to perform this action. Returns (allowed, reason)."""
+    if action_type in BLOCKED_ACTIONS:
+        return False, f"Leo cannot {action_type.replace('_', ' ')}. Only you can manage people and account settings."
+
+    text_lower = (params or {}).get('_raw_text', '').lower()
+    people_phrases = ['add contact', 'create contact', 'new contact', 'add person',
+                      'delete contact', 'remove contact', 'delete person', 'remove person',
+                      'add a new', 'create a new contact', 'new user', 'add user']
+    for phrase in people_phrases:
+        if phrase in text_lower:
+            return False, "Leo cannot add or remove people. Use the Contacts page to manage contacts directly."
+
+    return True, ''
+
+
+def _log_leo_action(action_type, target_area, description, params=None, result=None):
+    """Audit log every Leo-initiated action."""
+    try:
+        execute(
+            "INSERT INTO leo_action_log (id, action_type, target_area, description, "
+            "params_json, result_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [str(uuid.uuid4()), action_type, target_area, description,
+             json.dumps(params or {}), json.dumps(result or {}),
+             datetime.utcnow().isoformat()]
+        )
+    except Exception:
+        pass
+
+
+def _build_leo_action_preview(action_type, target_area, description, changes, affected_record, exec_action, exec_params):
+    """Build a LeoActionPreviewCard for user confirmation before executing."""
+    return {
+        'type': 'LeoActionPreviewCard',
+        'text': f"**{description}**\n\nReview the changes below and confirm to proceed.",
+        'data': {
+            'action_type': action_type,
+            'target_area': target_area,
+            'description': description,
+            'changes': changes,
+            'affected_record': affected_record,
+        },
+        'actions': [
+            {'id': 'confirm_leo_action', 'label': 'Confirm', 'action': 'leo_execute',
+             'params': {'exec_action': exec_action, 'exec_params': exec_params}},
+            {'id': 'edit_leo_action', 'label': 'Edit', 'action': 'navigate',
+             'params': {'tab': target_area if target_area in ('calendar', 'performance') else 'prospecting'}},
+            {'id': 'cancel_leo_action', 'label': 'Cancel', 'action': 'cancel', 'params': {}},
+        ]
+    }
+
+
+# ===================================================================
+# LEO PERFORMANCE ACTIONS
+# ===================================================================
+
+def _parse_performance_command(text):
+    """Parse natural language performance updates. Returns action preview params."""
+    lower = text.lower()
+
+    if re.search(r'(?:log|did|add)\s+(\d+)\s*squats?', lower):
+        m = re.search(r'(\d+)\s*squats?', lower)
+        count = int(m.group(1))
+        day = fetch_one("SELECT squats FROM performance_daily WHERE date_str = ?",
+                        [datetime.utcnow().strftime('%Y-%m-%d')])
+        current = (day.get('squats', 0) or 0) if day else 0
+        return {
+            'action': 'perf_squats', 'value': count,
+            'changes': [{'field': 'Squats', 'old_value': str(current), 'new_value': str(current + count)}],
+            'description': f'Log {count} squats',
+            'affected': f"Today's performance ({datetime.utcnow().strftime('%Y-%m-%d')})"
+        }
+
+    if re.search(r'(\d+)\s*squats?', lower):
+        m = re.search(r'(\d+)\s*squats?', lower)
+        count = int(m.group(1))
+        day = fetch_one("SELECT squats FROM performance_daily WHERE date_str = ?",
+                        [datetime.utcnow().strftime('%Y-%m-%d')])
+        current = (day.get('squats', 0) or 0) if day else 0
+        return {
+            'action': 'perf_squats', 'value': count,
+            'changes': [{'field': 'Squats', 'old_value': str(current), 'new_value': str(current + count)}],
+            'description': f'Log {count} squats',
+            'affected': f"Today's performance ({datetime.utcnow().strftime('%Y-%m-%d')})"
+        }
+
+    if re.search(r'(?:mark|log|did|completed?)\s+(?:a\s+)?workout', lower) or \
+       re.search(r'workout\s+(?:complete|done|finished)', lower):
+        return {
+            'action': 'perf_workout', 'value': 1,
+            'changes': [{'field': 'Workout', 'old_value': 'Not done', 'new_value': 'Complete'}],
+            'description': 'Mark workout complete',
+            'affected': f"Today's performance ({datetime.utcnow().strftime('%Y-%m-%d')})"
+        }
+
+    focus_m = re.search(r'(?:set|change|update)\s+(?:today.s?\s+)?(?:daily\s+)?focus\s+(?:to\s+)?(.+)', lower)
+    if focus_m:
+        focus_text = focus_m.group(1).strip().rstrip('.')
+        return {
+            'action': 'perf_focus', 'value': focus_text,
+            'changes': [{'field': 'Daily Focus', 'old_value': '—', 'new_value': focus_text}],
+            'description': f'Set daily focus to "{focus_text}"',
+            'affected': f"Today's performance ({datetime.utcnow().strftime('%Y-%m-%d')})"
+        }
+
+    tp_m = re.search(r'(?:add|log)\s+(\d+)\s+touchpoints?', lower)
+    if tp_m:
+        count = int(tp_m.group(1))
+        return {
+            'action': 'perf_touchpoints', 'value': count,
+            'changes': [{'field': 'Touchpoints', 'old_value': '—', 'new_value': f'+{count}'}],
+            'description': f'Log {count} touchpoints',
+            'affected': f"Today's performance ({datetime.utcnow().strftime('%Y-%m-%d')})"
+        }
+
+    rev_m = re.search(r'(?:update|set|change|add)\s+(?:today.s?\s+)?revenue\s+(?:to\s+)?[\$]?(\d[\d,]*\.?\d*)', lower)
+    if rev_m:
+        val = float(rev_m.group(1).replace(',', ''))
+        day = fetch_one("SELECT revenue FROM performance_daily WHERE date_str = ?",
+                        [datetime.utcnow().strftime('%Y-%m-%d')])
+        current = (day.get('revenue', 0) or 0) if day else 0
+        is_set = 'set' in lower or 'update' in lower or 'change' in lower
+        new_val = val if is_set else current + val
+        return {
+            'action': 'perf_revenue', 'value': new_val, 'mode': 'set' if is_set else 'add',
+            'changes': [{'field': 'Revenue', 'old_value': f'${current:,.0f}', 'new_value': f'${new_val:,.0f}'}],
+            'description': f'{"Set" if is_set else "Add"} revenue {"to" if is_set else ""} ${val:,.0f}',
+            'affected': f"Today's performance ({datetime.utcnow().strftime('%Y-%m-%d')})"
+        }
+
+    target_m = re.search(r'(?:change|set|update)\s+(?:my\s+)?(?:monthly\s+)?target\s+(?:to\s+)?[\$]?(\d[\d,]*\.?\d*)', lower)
+    if target_m:
+        val = float(target_m.group(1).replace(',', ''))
+        day = fetch_one("SELECT revenue_target FROM performance_daily WHERE date_str = ?",
+                        [datetime.utcnow().strftime('%Y-%m-%d')])
+        current = (day.get('revenue_target', 0) or 0) if day else 0
+        return {
+            'action': 'perf_target', 'value': val,
+            'changes': [{'field': 'Monthly Target', 'old_value': f'${current:,.0f}', 'new_value': f'${val:,.0f}'}],
+            'description': f'Set monthly target to ${val:,.0f}',
+            'affected': f"Today's performance ({datetime.utcnow().strftime('%Y-%m-%d')})"
+        }
+
+    return None
+
+
+def _exec_performance_action(parsed):
+    """Execute a confirmed performance action."""
+    action = parsed.get('action')
+    value = parsed.get('value')
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    now = datetime.utcnow().isoformat()
+
+    from api.routes.performance import _ensure_day
+    _ensure_day(today)
+
+    if action == 'perf_squats':
+        day = fetch_one("SELECT squats FROM performance_daily WHERE date_str = ?", [today])
+        current = (day.get('squats', 0) or 0) if day else 0
+        execute("UPDATE performance_daily SET squats = ?, updated_at = ? WHERE date_str = ?",
+                [current + value, now, today])
+        execute("INSERT INTO performance_logs (id, date_str, log_type, raw_text, parsed_value, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                [str(uuid.uuid4()), today, 'squats', f'{value} squats via Leo', json.dumps({'action': 'squats', 'value': current + value, 'added': value}), now])
+        _log_leo_action('perf_squats', 'performance', f'Logged {value} squats', {'value': value}, {'total': current + value})
+        return {'success': True, 'message': f'Logged {value} squats (total: {current + value})'}
+
+    if action == 'perf_workout':
+        execute("UPDATE performance_daily SET workout = 1, updated_at = ? WHERE date_str = ?", [now, today])
+        execute("INSERT INTO performance_logs (id, date_str, log_type, raw_text, parsed_value, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                [str(uuid.uuid4()), today, 'workout', 'Workout complete via Leo', json.dumps({'action': 'workout', 'value': 1}), now])
+        _log_leo_action('perf_workout', 'performance', 'Marked workout complete', {}, {'workout': 1})
+        return {'success': True, 'message': 'Workout marked complete'}
+
+    if action == 'perf_focus':
+        execute("UPDATE performance_daily SET daily_focus = ?, updated_at = ? WHERE date_str = ?", [value, now, today])
+        execute("INSERT INTO performance_logs (id, date_str, log_type, raw_text, parsed_value, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                [str(uuid.uuid4()), today, 'focus', f'Focus: {value} via Leo', json.dumps({'action': 'focus', 'value': value}), now])
+        _log_leo_action('perf_focus', 'performance', f'Set daily focus: {value}', {'focus': value}, {})
+        return {'success': True, 'message': f'Daily focus set to "{value}"'}
+
+    if action == 'perf_revenue':
+        execute("UPDATE performance_daily SET revenue = ?, updated_at = ? WHERE date_str = ?", [value, now, today])
+        execute("INSERT INTO performance_logs (id, date_str, log_type, raw_text, parsed_value, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                [str(uuid.uuid4()), today, 'revenue', f'Revenue ${value:,.0f} via Leo', json.dumps({'action': 'revenue', 'value': value}), now])
+        _log_leo_action('perf_revenue', 'performance', f'Updated revenue to ${value:,.0f}', {'value': value}, {})
+        return {'success': True, 'message': f'Revenue updated to ${value:,.0f}'}
+
+    if action == 'perf_target':
+        execute("UPDATE performance_daily SET revenue_target = ?, updated_at = ? WHERE date_str = ?", [value, now, today])
+        execute("INSERT INTO performance_logs (id, date_str, log_type, raw_text, parsed_value, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                [str(uuid.uuid4()), today, 'revenue', f'Target ${value:,.0f} via Leo', json.dumps({'action': 'target', 'value': value}), now])
+        _log_leo_action('perf_target', 'performance', f'Set monthly target to ${value:,.0f}', {'value': value}, {})
+        return {'success': True, 'message': f'Monthly target set to ${value:,.0f}'}
+
+    if action == 'perf_touchpoints':
+        _log_leo_action('perf_touchpoints', 'performance', f'Logged {value} touchpoints', {'value': value}, {})
+        return {'success': True, 'message': f'Noted {value} touchpoints — use /log to record details'}
+
+    return {'success': False, 'message': 'Unknown performance action'}
+
+
+# ===================================================================
+# LEO CALENDAR ACTIONS (NLP)
+# ===================================================================
+
+def _parse_calendar_command(text):
+    """Parse natural language calendar modifications. Returns action preview params."""
+    lower = text.lower()
+
+    # "Move my meeting with X to Friday"
+    move_m = re.search(r'(?:move|reschedule|shift|change)\s+(?:my\s+)?meeting\s+(?:with\s+)?(.+?)\s+to\s+(.+)', lower)
+    if move_m:
+        contact_name = move_m.group(1).strip()
+        date_text = move_m.group(2).strip().rstrip('.')
+        new_date = _parse_relative_date(date_text)
+        meeting = _find_upcoming_meeting_for(contact_name)
+        if meeting and new_date:
+            return {
+                'action': 'cal_move', 'meeting_id': meeting['id'],
+                'new_date': new_date, 'contact_name': contact_name,
+                'changes': [{'field': 'Date', 'old_value': meeting.get('meeting_date', '—'), 'new_value': new_date}],
+                'description': f'Move meeting with {meeting.get("contact_name", contact_name)} to {new_date}',
+                'affected': meeting.get('title', 'Meeting')
+            }
+        if not meeting:
+            return {'action': 'cal_error', 'error': f'No upcoming meeting found with "{contact_name}"'}
+        if not new_date:
+            return {'action': 'cal_error', 'error': f'Could not understand the date "{date_text}"'}
+
+    # "Add prep notes to tomorrow's call" / "Add notes to meeting with X"
+    notes_m = re.search(r'(?:add|update|set)\s+(?:prep\s+)?notes?\s+(?:to|for|on)\s+(.+)', lower)
+    if notes_m:
+        rest = notes_m.group(1).strip()
+        contact_m = re.search(r'(?:meeting|call)\s+with\s+(.+)', rest)
+        if contact_m:
+            contact_name = contact_m.group(1).strip().rstrip('.')
+            meeting = _find_upcoming_meeting_for(contact_name)
+            if meeting:
+                note_text = text[notes_m.end():].strip() if notes_m.end() < len(text) else ''
+                return {
+                    'action': 'cal_add_notes', 'meeting_id': meeting['id'],
+                    'notes': note_text, 'contact_name': contact_name,
+                    'changes': [{'field': 'Notes', 'old_value': meeting.get('notes', '—') or '—', 'new_value': note_text or '(will prompt for notes)'}],
+                    'description': f'Add notes to meeting with {meeting.get("contact_name", contact_name)}',
+                    'affected': meeting.get('title', 'Meeting')
+                }
+
+    # "Cancel meeting with X"
+    cancel_m = re.search(r'cancel\s+(?:my\s+)?meeting\s+(?:with\s+)?(.+)', lower)
+    if cancel_m:
+        contact_name = cancel_m.group(1).strip().rstrip('.')
+        meeting = _find_upcoming_meeting_for(contact_name)
+        if meeting:
+            return {
+                'action': 'cal_cancel', 'meeting_id': meeting['id'],
+                'contact_name': contact_name,
+                'changes': [{'field': 'Status', 'old_value': 'scheduled', 'new_value': 'cancelled'}],
+                'description': f'Cancel meeting with {meeting.get("contact_name", contact_name)}',
+                'affected': meeting.get('title', 'Meeting')
+            }
+
+    return None
+
+
+def _find_upcoming_meeting_for(contact_name):
+    """Find the next upcoming scheduled meeting for a contact by fuzzy name match."""
+    parts = contact_name.strip().split()
+    if not parts:
+        return None
+    like = f"%{parts[0]}%"
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    meetings = fetch_all(
+        "SELECT m.*, c.first_name, c.last_name FROM calendar_meetings m "
+        "LEFT JOIN prospecting_contacts c ON c.id = m.contact_id "
+        "WHERE m.status = 'scheduled' AND m.meeting_date >= ? "
+        "AND (c.first_name LIKE ? OR c.last_name LIKE ?) "
+        "ORDER BY m.meeting_date ASC LIMIT 1",
+        [today, like, like]
+    )
+    if meetings:
+        m = meetings[0]
+        m['contact_name'] = f"{m.get('first_name', '')} {m.get('last_name', '')}".strip()
+        return m
+    return None
+
+
+def _parse_relative_date(text):
+    """Parse relative date expressions like 'tomorrow', 'Friday', 'next week'."""
+    lower = text.lower().strip()
+    now = datetime.utcnow()
+    weekdays = {'monday': 0, 'tuesday': 1, 'wednesday': 2, 'thursday': 3,
+                'friday': 4, 'saturday': 5, 'sunday': 6}
+
+    if lower == 'today':
+        return now.strftime('%Y-%m-%d')
+    if lower == 'tomorrow':
+        return (now + timedelta(days=1)).strftime('%Y-%m-%d')
+    if lower.startswith('next week'):
+        days_ahead = 7 - now.weekday()
+        return (now + timedelta(days=days_ahead)).strftime('%Y-%m-%d')
+
+    for day_name, day_num in weekdays.items():
+        if day_name in lower:
+            days_ahead = (day_num - now.weekday()) % 7
+            if days_ahead == 0:
+                days_ahead = 7
+            return (now + timedelta(days=days_ahead)).strftime('%Y-%m-%d')
+
+    in_days_m = re.search(r'in\s+(\d+)\s+days?', lower)
+    if in_days_m:
+        return (now + timedelta(days=int(in_days_m.group(1)))).strftime('%Y-%m-%d')
+
+    try:
+        from dateutil import parser as dateparser
+        parsed = dateparser.parse(text, fuzzy=True)
+        if parsed:
+            return parsed.strftime('%Y-%m-%d')
+    except Exception:
+        pass
+
+    return None
+
+
+def _exec_calendar_action(parsed):
+    """Execute a confirmed calendar action."""
+    action = parsed.get('action')
+    now = datetime.utcnow().isoformat()
+
+    if action == 'cal_move':
+        meeting_id = parsed['meeting_id']
+        new_date = parsed['new_date']
+        execute("UPDATE calendar_meetings SET meeting_date = ?, updated_at = ? WHERE id = ?",
+                [new_date, now, meeting_id])
+        _log_leo_action('cal_move', 'calendar', f'Moved meeting to {new_date}',
+                        {'meeting_id': meeting_id, 'new_date': new_date}, {})
+        return {'success': True, 'message': f'Meeting moved to {new_date}'}
+
+    if action == 'cal_add_notes':
+        meeting_id = parsed['meeting_id']
+        notes = parsed.get('notes', '')
+        if notes:
+            existing = fetch_one("SELECT notes FROM calendar_meetings WHERE id = ?", [meeting_id])
+            old_notes = (existing.get('notes', '') or '') if existing else ''
+            combined = (old_notes + '\n' + notes).strip() if old_notes else notes
+            execute("UPDATE calendar_meetings SET notes = ?, updated_at = ? WHERE id = ?",
+                    [combined, now, meeting_id])
+            _log_leo_action('cal_add_notes', 'calendar', 'Added meeting notes',
+                            {'meeting_id': meeting_id}, {})
+            return {'success': True, 'message': 'Notes added to meeting'}
+        return {'success': True, 'message': 'Open the calendar to add notes'}
+
+    if action == 'cal_cancel':
+        meeting_id = parsed['meeting_id']
+        execute("UPDATE calendar_meetings SET status = 'cancelled', updated_at = ? WHERE id = ?",
+                [now, meeting_id])
+        _log_leo_action('cal_cancel', 'calendar', 'Cancelled meeting',
+                        {'meeting_id': meeting_id}, {})
+        return {'success': True, 'message': 'Meeting cancelled'}
+
+    return {'success': False, 'message': 'Unknown calendar action'}
 
 
 def _exec_schedule_meeting(params):

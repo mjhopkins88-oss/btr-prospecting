@@ -2424,6 +2424,22 @@ def init_db():
     except Exception:
         pass
 
+    c.safe_execute('''
+        CREATE TABLE IF NOT EXISTS leo_action_log (
+            id TEXT PRIMARY KEY,
+            action_type TEXT NOT NULL,
+            target_area TEXT NOT NULL,
+            description TEXT,
+            params_json TEXT,
+            result_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_leo_action_log_date ON leo_action_log(created_at DESC)')
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
