@@ -74,7 +74,14 @@ INTENT_KEYWORDS = {
                           'log workout', 'did squats', 'completed workout'],
     'export_report':    ['export', 'download', 'csv', 'report', 'spreadsheet', 'pull data',
                          'brief', 'daily brief', 'my brief', 'generate brief', 'create brief',
-                         'intelligence brief', 'morning brief', 'build my brief', 'pdf'],
+                         'intelligence brief', 'morning brief', 'build my brief', 'pdf',
+                         'attack plan', 'strategy plan', 'execution plan', 'market brief',
+                         'generate plan', 'create plan', 'build plan', 'build schedule',
+                         'generate schedule', 'create schedule', 'daily schedule',
+                         'my attack', 'my strategy', 'my schedule', 'my plan',
+                         'give me a plan', 'make a plan', 'make me a plan',
+                         'create a strategy', 'create a plan', 'create an attack',
+                         'create an execution', 'generate a plan', 'build a plan'],
     'troubleshoot':     ['error', 'broken', 'not working', 'bug', 'issue', 'wrong',
                          'fix', 'help with app', 'problem'],
     'coach':            ['how am i doing', 'performance', 'momentum', 'cadence', 'habit',
@@ -6117,7 +6124,8 @@ def chat():
     # Export/brief intercept — produce actionable card instead of LLM text
     if intent == 'export_report':
         lower_msg = last_msg.lower()
-        is_brief = any(w in lower_msg for w in ['brief', 'intelligence', 'daily brief', 'morning brief', 'my brief'])
+        is_market_brief = any(w in lower_msg for w in ['market brief', 'market report', 'market intel', 'signal report'])
+        is_brief = not is_market_brief and any(w in lower_msg for w in ['brief', 'intelligence', 'daily brief', 'morning brief', 'my brief'])
         if is_brief:
             try:
                 from api.routes.daily_brief import _generate_brief_content
@@ -6142,7 +6150,32 @@ def chat():
                 return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'brief_pdf', 'mode': 'execution'})
             except Exception:
                 pass
-        else:
+
+        # PDF document intercept — attack plan, strategy, schedule, market brief, execution plan
+        doc_type = None
+        if any(w in lower_msg for w in ['attack plan', 'attack']):
+            doc_type = 'attack_plan'
+        elif any(w in lower_msg for w in ['strategy plan', 'strategy doc', 'strategy report']):
+            doc_type = 'strategy'
+        elif any(w in lower_msg for w in ['schedule', 'daily schedule', 'time block', 'build my day', 'plan my day']):
+            doc_type = 'schedule'
+        elif any(w in lower_msg for w in ['market brief', 'market report', 'market intel', 'signal report']):
+            doc_type = 'market_brief'
+        elif any(w in lower_msg for w in ['execution plan', 'action plan', 'action queue']):
+            doc_type = 'execution_plan'
+        elif 'pdf' in lower_msg and any(w in lower_msg for w in ['plan', 'strategy', 'schedule']):
+            doc_type = 'attack_plan'
+
+        if doc_type and not is_brief:
+            try:
+                card, err = _generate_doc_pdf(doc_type)
+                if card:
+                    _persist_chat(last_msg, card, 'doc_pdf', 'execution')
+                    return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'doc_pdf', 'mode': 'execution'})
+            except Exception:
+                pass
+
+        if not is_brief and not doc_type:
             export_type = 'contacts'
             if 'capital' in lower_msg or 'partner' in lower_msg:
                 export_type = 'capital_partners'
@@ -7726,6 +7759,212 @@ def _exec_create_calendar_events(params):
         return {'success': False, 'message': 'All events already exist in calendar — nothing to add. ' + '; '.join(skipped)}
 
     return {'success': True, 'message': '. '.join(parts) + '.', 'created': created, 'skipped': skipped}
+
+
+def _generate_doc_pdf(doc_type):
+    """
+    Generate a structured document and convert to downloadable PDF.
+    doc_type: 'attack_plan' | 'strategy' | 'schedule' | 'execution_plan' | 'market_brief'
+    Returns (card_dict, None) on success, (None, error_str) on failure.
+    """
+    from api.routes.daily_brief import build_doc_pdf, store_pdf
+
+    today = datetime.utcnow()
+    date_str = today.strftime('%A, %B %d, %Y')
+
+    plan, _ = _generate_daily_plan()
+    ranked = _get_ranked_opportunities(limit=8)
+
+    if doc_type == 'attack_plan':
+        title = 'Attack Plan'
+        subtitle = 'Prioritized execution targets with deal progression strategy'
+        filename = f"Attack_Plan_{today.strftime('%Y-%m-%d')}.pdf"
+        sections = []
+
+        # Critical targets
+        critical = [p for p in plan if p.get('priority') == 'critical']
+        high = [p for p in plan if p.get('priority') == 'high']
+        medium = [p for p in plan if p.get('priority') in ('medium', 'low')]
+
+        if critical:
+            sections.append({
+                'heading': 'CRITICAL — IMMEDIATE ACTION',
+                'items': [f"{p['action']} — {p['target']} ({p['reason']})" for p in critical]
+            })
+        if high:
+            sections.append({
+                'heading': 'HIGH PRIORITY — TODAY',
+                'items': [f"{p['action']} — {p['target']} ({p['reason']})" for p in high]
+            })
+        if medium:
+            sections.append({
+                'heading': 'STANDARD PRIORITY',
+                'items': [f"{p['action']} — {p['target']} ({p['reason']})" for p in medium]
+            })
+
+        if ranked:
+            sections.append({
+                'heading': 'TOP TARGETS BY SCORE',
+                'items': [
+                    f"{r['group']['name']} — score {r['score']}/100 ({r['reason']})"
+                    for r in ranked[:6]
+                ]
+            })
+
+        if not sections:
+            sections.append({
+                'heading': 'STATUS',
+                'body': 'No actionable items in pipeline. Focus on prospecting new capital partners and logging signals.'
+            })
+
+    elif doc_type == 'strategy':
+        title = 'Strategy Plan'
+        subtitle = 'Pipeline strategy and relationship progression roadmap'
+        filename = f"Strategy_Plan_{today.strftime('%Y-%m-%d')}.pdf"
+        sections = []
+
+        # Pipeline by stage
+        try:
+            stages = fetch_all(
+                """SELECT relationship_status, COUNT(*) as cnt, AVG(warmth_score) as avg_warmth
+                   FROM capital_groups
+                   WHERE relationship_status NOT IN ('dormant', 'lost', 'dead')
+                   GROUP BY relationship_status ORDER BY cnt DESC""", []
+            )
+            if stages:
+                sections.append({
+                    'heading': 'PIPELINE BY STAGE',
+                    'items': [
+                        f"{s['relationship_status'].title()}: {s['cnt']} groups (avg warmth {s['avg_warmth']:.1f}/10)"
+                        for s in stages
+                    ]
+                })
+        except Exception:
+            pass
+
+        if ranked:
+            sections.append({
+                'heading': 'TOP OPPORTUNITIES',
+                'items': [
+                    f"{r['group']['name']} — {r['group'].get('relationship_status', '?')} "
+                    f"(warmth {r['group'].get('warmth_score', '?')}/10, score {r['score']})"
+                    for r in ranked[:6]
+                ]
+            })
+
+        if plan:
+            sections.append({
+                'heading': 'RECOMMENDED ACTIONS',
+                'items': [f"{p['action']} — {p['target']}" for p in plan[:6]]
+            })
+
+        if not sections:
+            sections.append({'heading': 'STATUS', 'body': 'Pipeline data insufficient for strategy generation.'})
+
+    elif doc_type == 'schedule':
+        title = 'Daily Schedule'
+        subtitle = 'Time-blocked execution plan for today'
+        filename = f"Schedule_{today.strftime('%Y-%m-%d')}.pdf"
+        sections = []
+
+        # Calendar events
+        try:
+            cal = fetch_all(
+                "SELECT title, meeting_date, meeting_time, duration_min, meeting_type "
+                "FROM calendar_meetings WHERE meeting_date = ? AND status = 'scheduled' "
+                "ORDER BY meeting_time ASC",
+                [today.strftime('%Y-%m-%d')]
+            )
+            if cal:
+                sections.append({
+                    'heading': 'SCHEDULED MEETINGS',
+                    'items': [f"{m['meeting_time']} — {m['title']} ({m.get('duration_min', 30)}min)" for m in cal]
+                })
+        except Exception:
+            pass
+
+        if plan:
+            sections.append({
+                'heading': 'EXECUTION TASKS',
+                'items': [
+                    f"{p['action']} — {p['target']} (est. {p.get('est_minutes', 10)}min)"
+                    for p in plan[:8]
+                ]
+            })
+
+        if not sections:
+            sections.append({'heading': 'STATUS', 'body': 'No meetings or tasks scheduled for today.'})
+
+    elif doc_type == 'market_brief':
+        title = 'Market Brief'
+        subtitle = 'BTR market intelligence and signal analysis'
+        filename = f"Market_Brief_{today.strftime('%Y-%m-%d')}.pdf"
+        sections = []
+
+        try:
+            signals = fetch_all(
+                """SELECT title, summary, importance, detected_at
+                   FROM prospecting_signals
+                   ORDER BY detected_at DESC LIMIT 10""", []
+            )
+            if signals:
+                sections.append({
+                    'heading': 'RECENT SIGNALS',
+                    'items': [
+                        f"[{s.get('importance', '?')}/10] {s['title']}"
+                        + (f" — {s['summary'][:80]}" if s.get('summary') else '')
+                        for s in signals
+                    ]
+                })
+        except Exception:
+            pass
+
+        pattern_text = _get_pattern_insights()
+        if pattern_text:
+            lines = [l.strip().lstrip('- ') for l in pattern_text.split('\n') if l.strip() and not l.startswith('PATTERN')]
+            if lines:
+                sections.append({'heading': 'PATTERN INSIGHTS', 'items': lines})
+
+        if not sections:
+            sections.append({'heading': 'STATUS', 'body': 'No market signals or patterns available yet.'})
+
+    else:
+        title = 'Execution Plan'
+        subtitle = 'Prioritized action queue'
+        filename = f"Execution_Plan_{today.strftime('%Y-%m-%d')}.pdf"
+        sections = []
+        if plan:
+            sections.append({
+                'heading': 'ACTION QUEUE',
+                'items': [f"[{p.get('priority', 'med').upper()}] {p['action']} — {p['target']} ({p['reason']})" for p in plan]
+            })
+        if not sections:
+            sections.append({'heading': 'STATUS', 'body': 'No pending actions.'})
+
+    doc = {'title': title, 'subtitle': subtitle, 'date': date_str, 'sections': sections}
+
+    try:
+        pdf_bytes = build_doc_pdf(doc)
+        pdf_id = store_pdf(pdf_bytes, filename)
+        url = f'/api/brief/doc/{pdf_id}'
+        card = {
+            'type': 'ExportCard',
+            'text': f'**{title}** — {date_str}\n\nYour document is ready for download.',
+            'data': {
+                'export_type': doc_type,
+                'url': url,
+                'fileUrl': url,
+                'fileName': filename,
+                'filename': filename,
+            },
+            'actions': [
+                {'id': 'download_pdf', 'label': 'Download PDF', 'action': 'download',
+                 'params': {'url': url, 'fileName': filename}},
+            ]
+        }
+        return card, None
+    except Exception as e:
+        return None, str(e)
 
 
 def _exec_export(params):
