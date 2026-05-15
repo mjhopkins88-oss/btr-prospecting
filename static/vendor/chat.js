@@ -48,7 +48,8 @@ var CARD_COLORS = {
   MeetingCard:            { bg: '#f0fdf4', border: '#bbf7d0', accent: '#15803d', icon: '📅' },
   LeoActionPreviewCard:   { bg: '#fffbeb', border: '#fde68a', accent: '#92400e', icon: '🧠' },
   CalendarConfirmCard:    { bg: '#f0fdf4', border: '#86efac', accent: '#15803d', icon: '📅' },
-  SchedulePlanCard:       { bg: '#f0f9ff', border: '#7dd3fc', accent: '#0369a1', icon: '📅' }
+  SchedulePlanCard:       { bg: '#f0f9ff', border: '#7dd3fc', accent: '#0369a1', icon: '📅' },
+  ResearchCard:           { bg: '#f5f3ff', border: '#c4b5fd', accent: '#6d28d9', icon: '🔍' }
 };
 
 var SLASH_HINTS = [
@@ -77,7 +78,8 @@ var SLASH_HINTS = [
   { cmd: '/squats', desc: 'Log squats', ex: '/squats 50' },
   { cmd: '/workout', desc: 'Mark workout done', ex: '/workout' },
   { cmd: '/focus', desc: 'Set daily focus', ex: '/focus follow-ups' },
-  { cmd: '/perf', desc: 'Performance update', ex: '/perf update revenue to 15000' }
+  { cmd: '/perf', desc: 'Performance update', ex: '/perf update revenue to 15000' },
+  { cmd: '/research', desc: 'Web research', ex: '/research Max Lyle, Alkeme Insurance' }
 ];
 
 var MODE_LABELS = {
@@ -626,6 +628,70 @@ function renderErrorCard(card) {
   return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.5rem 0.7rem' } },
     h('div', { style: { fontSize: '0.74rem', color: colors.accent, fontWeight: 600 } }, colors.icon + ' ' + (card.text || 'Error')),
     d.suggestion ? h('div', { style: { fontSize: '0.65rem', color: '#6b7280', marginTop: '0.2rem' } }, d.suggestion) : null
+  );
+}
+
+function renderResearchCard(card, onAction, loadingState) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.ResearchCard;
+  var facts = d.key_facts || [];
+  var sources = d.sources || [];
+  var intros = d.intros || [];
+  var confColors = { high: '#16a34a', medium: '#d97706', low: '#dc2626' };
+  var confColor = confColors[d.confidence] || confColors.low;
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    h('div', { style: { fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '0.4rem' } },
+      colors.icon + ' Research: ' + (d.query || '')
+    ),
+
+    d.summary ? h('div', { style: { fontSize: '0.72rem', color: '#1e293b', lineHeight: 1.5, padding: '0.35rem 0.45rem', background: '#ffffff', borderRadius: '0.35rem', border: '1px solid ' + colors.border, marginBottom: '0.4rem' } },
+      renderMarkdownText(d.summary)
+    ) : null,
+
+    h('div', { style: { display: 'flex', gap: '0.3rem', marginBottom: '0.4rem', alignItems: 'center' } },
+      h('span', { style: { fontSize: '0.6rem', fontWeight: 600, padding: '0.1rem 0.35rem', borderRadius: '0.2rem', background: confColor + '18', color: confColor } }, d.confidence + ' confidence'),
+      d.gaps ? h('span', { style: { fontSize: '0.6rem', color: '#94a3b8' } }, d.gaps) : null
+    ),
+
+    facts.length > 0 ? h('div', { style: { marginBottom: '0.4rem' } },
+      h('div', { style: { fontSize: '0.63rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '0.15rem' } }, 'Key Facts'),
+      h('ul', { style: { margin: 0, paddingLeft: '1rem', fontSize: '0.7rem', color: '#374151', lineHeight: 1.5 } },
+        facts.map(function(f, i) { return h('li', { key: i }, f); })
+      )
+    ) : null,
+
+    sources.length > 0 ? h('div', { style: { marginBottom: '0.4rem' } },
+      h('div', { style: { fontSize: '0.63rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '0.15rem' } }, 'Sources'),
+      h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.15rem' } },
+        sources.map(function(s, i) {
+          return h('div', { key: i, style: { fontSize: '0.66rem' } },
+            s.url ? h('a', { href: s.url, target: '_blank', rel: 'noopener', style: { color: colors.accent, textDecoration: 'none' } },
+              s.title || s.url
+            ) : h('span', null, s.title || 'Source'),
+            s.snippet ? h('span', { style: { color: '#6b7280', marginLeft: '0.3rem' } }, ' — ' + s.snippet) : null
+          );
+        })
+      )
+    ) : null,
+
+    intros.length > 0 ? h('div', { style: { marginBottom: '0.4rem' } },
+      h('div', { style: { fontSize: '0.63rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '0.2rem' } }, 'Suggested Intros'),
+      h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem' } },
+        intros.map(function(intro, i) {
+          var chanIcon = intro.channel === 'linkedin' ? '💼' : '✉️';
+          return h('div', { key: i, style: { padding: '0.35rem 0.45rem', background: '#ffffff', borderRadius: '0.35rem', border: '1px solid ' + colors.border } },
+            h('div', { style: { fontSize: '0.66rem', fontWeight: 600, color: colors.accent, marginBottom: '0.15rem' } },
+              chanIcon + ' ' + (intro.label || intro.channel || '')
+            ),
+            intro.subject ? h('div', { style: { fontSize: '0.66rem', color: '#64748b', fontStyle: 'italic', marginBottom: '0.1rem' } }, 'Subject: ' + intro.subject) : null,
+            h('div', { style: { fontSize: '0.7rem', color: '#1e293b', lineHeight: 1.4, whiteSpace: 'pre-wrap' } }, intro.body || '')
+          );
+        })
+      )
+    ) : null,
+
+    renderActionButtons(card.actions, onAction, null, loadingState)
   );
 }
 
@@ -1663,6 +1729,7 @@ function renderCard(card, onAction, loadingState) {
     case 'LeoActionPreviewCard': return renderLeoActionPreviewCard(card, oa, loadingState);
     case 'CalendarConfirmCard': return renderCalendarConfirmCard(card, oa, loadingState);
     case 'SchedulePlanCard': return renderSchedulePlanCard(card, oa, loadingState);
+    case 'ResearchCard': return renderResearchCard(card, oa, loadingState);
     default:
       if (card.text) {
         return h('div', { style: { fontSize: '0.74rem', color: '#334155', whiteSpace: 'pre-wrap', lineHeight: 1.5 } }, card.text);
