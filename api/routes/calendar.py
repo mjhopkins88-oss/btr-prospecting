@@ -2,7 +2,6 @@
 CRM-integrated Calendar system for meetings.
 Supports creating, listing, updating, and post-meeting flows tied to contacts/companies.
 """
-import uuid
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify
 from shared.database import fetch_all, fetch_one, execute, new_id

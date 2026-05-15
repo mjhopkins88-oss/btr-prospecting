@@ -14,7 +14,10 @@ import uuid
 import anthropic
 import json
 import re
-import math
+import logging
+from urllib.parse import urlparse
+
+logger = logging.getLogger('leo')
 
 try:
     from services.proactive_suggestions import get_proactive_suggestions
@@ -71,7 +74,7 @@ def _set_pending_action(action_type, payload, description, user_message=''):
             [action_id, action_type, json.dumps(payload), description, user_message[:500] if user_message else '', now, now]
         )
     except Exception:
-        pass
+        logger.warning("Failed to persist pending action to DB", exc_info=True)
     _pending_action_cache.clear()
     _pending_action_cache.update({
         'id': action_id,
@@ -108,7 +111,7 @@ def _consume_pending_action():
                 'description': row.get('description', ''),
             }
     except Exception:
-        pass
+        logger.warning("Failed to fetch pending action from DB", exc_info=True)
     return None
 
 def _mark_pending_action(action_id, status):
@@ -121,7 +124,7 @@ def _mark_pending_action(action_id, status):
             [status, datetime.utcnow().isoformat(), action_id]
         )
     except Exception:
-        pass
+        logger.warning("Failed to mark pending action %s as %s", action_id, status, exc_info=True)
 
 def _execute_pending_action(action):
     """Dispatch a pending action by type. Returns a Flask response or None."""
@@ -269,7 +272,9 @@ INTENT_KEYWORDS = {
                          'create an execution', 'generate a plan', 'build a plan'],
     'research_web':     ['research', 'look up', 'find out about', 'google',
                          'search for', 'search online', 'web search', 'dig into',
-                         'background on', 'look into'],
+                         'background on', 'look into', 'find the best approach',
+                         'best way to reach', 'how to reach', 'outreach using online',
+                         'write outreach using'],
     'troubleshoot':     ['error', 'broken', 'not working', 'bug', 'issue', 'wrong',
                          'fix', 'help with app', 'problem'],
     'coach':            ['how am i doing', 'performance', 'momentum', 'cadence', 'habit',
@@ -2510,66 +2515,236 @@ def _predict_outcomes(group):
 # Web Research — search the web and synthesize findings + outreach
 # ---------------------------------------------------------------------------
 
+def _extract_research_entities(query):
+    """Extract person_name, company_name, industry_hint, outreach_goal from a research query."""
+    text = query.strip()
+
+    person_name = ''
+    company_name = ''
+    industry_hint = ''
+    outreach_goal = 'general outreach'
+
+    at_patterns = [
+        r'(.+?)\s+at\s+(.+)',
+        r'(.+?)\s*,\s*(.+)',
+        r'(.+?)\s+from\s+(.+)',
+        r'(.+?)\s+with\s+(.+)',
+    ]
+    for pat in at_patterns:
+        m = re.match(pat, text, re.IGNORECASE)
+        if m:
+            person_name = m.group(1).strip().strip('"\'')
+            company_name = m.group(2).strip().strip('"\'')
+            break
+
+    if not person_name:
+        person_name = text
+
+    goal_patterns = {
+        'partnership': r'partner|joint venture|jv|collaborate',
+        'investment pitch': r'invest|capital|fund|raise|pitch',
+        'deal sourcing': r'deal|acquisition|buy|purchase|source',
+        'general outreach': r'reach out|connect|intro|meet|approach',
+    }
+    lower = query.lower()
+    for goal, pat in goal_patterns.items():
+        if re.search(pat, lower):
+            outreach_goal = goal
+            break
+
+    btr_terms = ['btr', 'build to rent', 'build-to-rent', 'sfr', 'single family rental',
+                 'multifamily', 'real estate', 'development', 'property', 'housing']
+    for term in btr_terms:
+        if term in lower:
+            industry_hint = 'BTR / Real Estate'
+            break
+
+    return {
+        'person_name': person_name,
+        'company_name': company_name,
+        'industry_hint': industry_hint or 'BTR / Real Estate',
+        'outreach_goal': outreach_goal,
+    }
+
+
+_HIGH_QUALITY_DOMAINS = frozenset([
+    'linkedin.com', 'bloomberg.com', 'reuters.com', 'wsj.com',
+    'sec.gov', 'prnewswire.com', 'businesswire.com', 'globenewswire.com',
+    'bisnow.com', 'globest.com', 'multihousingnews.com', 'rentalhousingjournal.com',
+    'connectcre.com', 'cpexecutive.com', 'rebusinessonline.com',
+    'bhg.com', 'builderonline.com', 'nahb.org', 'nmhc.org',
+    'crunchbase.com', 'pitchbook.com', 'fortune.com', 'forbes.com',
+    'cnbc.com', 'yahoo.com', 'marketwatch.com',
+])
+
+_LOW_QUALITY_DOMAINS = frozenset([
+    'zoominfo.com', 'rocketreach.co', 'signalhire.com', 'lusha.com',
+    'apollo.io', 'clearbit.com', 'leadiq.com', 'seamless.ai',
+    'yellowpages.com', 'whitepages.com', 'spokeo.com', 'beenverified.com',
+    'truepeoplesearch.com', 'fastpeoplesearch.com', 'thatsThem.com',
+    'buzzfile.com', 'owler.com',
+])
+
+
+def _score_source(source):
+    """Score a source 0-100 for quality. Higher = more trustworthy."""
+    url = (source.get('url') or '').lower()
+    title = (source.get('title') or '').lower()
+    snippet = (source.get('snippet') or '').lower()
+
+    score = 50
+
+    try:
+        domain = urlparse(url).netloc.replace('www.', '')
+    except Exception:
+        domain = ''
+
+    if domain in _HIGH_QUALITY_DOMAINS:
+        score += 30
+    elif domain in _LOW_QUALITY_DOMAINS:
+        score -= 40
+
+    if any(d in domain for d in ['.gov', '.edu', '.org']):
+        score += 15
+    if any(kw in title + snippet for kw in ['press release', 'announces', 'acquisition', 'partnership', 'funding', 'sec filing']):
+        score += 10
+    if any(kw in title + snippet for kw in ['build-to-rent', 'btr', 'single family rental', 'sfr', 'multifamily']):
+        score += 10
+    if any(kw in title + snippet for kw in ['phone number', 'email address', 'contact info', 'salary', 'net worth']):
+        score -= 30
+
+    return max(0, min(100, score))
+
+
+def _filter_and_rank_sources(sources):
+    """Filter out low-quality sources and rank by relevance."""
+    scored = []
+    for s in sources:
+        quality = _score_source(s)
+        if quality >= 25:
+            scored.append({**s, '_quality': quality})
+    scored.sort(key=lambda x: x['_quality'], reverse=True)
+    return scored
+
+
+def _build_search_queries(entities):
+    """Build multi-query search strategy from extracted entities."""
+    person = entities['person_name']
+    company = entities['company_name']
+    queries = []
+
+    if person and company:
+        queries.append(f'"{person}" "{company}"')
+        queries.append(f'"{company}" company overview')
+        queries.append(f'"{company}" recent news')
+        queries.append(f'"{company}" build-to-rent OR BTR OR "single family rental" OR SFR')
+        queries.append(f'"{company}" acquisition OR development OR capital OR deals OR investment')
+        queries.append(f'"{person}" build-to-rent OR BTR OR real estate OR development')
+    elif person:
+        queries.append(f'"{person}" real estate OR BTR OR development')
+        queries.append(f'"{person}" company role background')
+    elif company:
+        queries.append(f'"{company}" company overview')
+        queries.append(f'"{company}" BTR build-to-rent OR real estate')
+        queries.append(f'"{company}" recent news acquisitions deals')
+
+    return queries
+
+
 def _research_web(query):
     """
-    Search the web for public info on a person/company, synthesize findings,
-    and generate 3 personalized intro message variants.
-    Returns: { query, summary, key_facts, sources, intros } or None on failure.
+    Multi-query outreach intelligence research.
+    Runs targeted searches for person + company, filters sources,
+    verifies entity matches, and produces BTR-focused intelligence.
+    Returns structured research dict or None on failure.
     """
-    import logging
-    logger = logging.getLogger('leo')
-
     api_key = os.getenv('ANTHROPIC_API_KEY')
     if not api_key:
         return None
 
-    search_prompt = f"""Search the web for public information about: {query}
+    entities = _extract_research_entities(query)
+    search_queries = _build_search_queries(entities)
+    person = entities['person_name']
+    company = entities['company_name']
 
-Look for:
-- Professional background and current role/title
-- Company overview, size, focus areas
-- Recent news, press releases, or public statements
-- LinkedIn profile details (title, company, location)
-- Industry involvement, conferences, publications
-- Notable achievements or projects
+    query_list = '\n'.join(f'{i+1}. {q}' for i, q in enumerate(search_queries))
 
-For each source found, note the URL and what you learned from it.
+    search_prompt = f"""You are an outreach intelligence analyst for a BTR (Build-to-Rent) real estate firm.
 
-Then synthesize your findings into a structured JSON response:
+Research the following entity thoroughly using web search. Run MULTIPLE searches to cover different angles.
+
+PERSON: {person}
+COMPANY: {company or 'Unknown — try to identify from search results'}
+INDUSTRY CONTEXT: {entities['industry_hint']}
+
+SEARCH STRATEGY — run these searches (adapt as needed based on what you find):
+{query_list}
+
+For EACH search, evaluate what you find before moving to the next. If early searches reveal the company's full name, industry, or person's role, use that info to refine later searches.
+
+AFTER completing your searches, produce a JSON response with this EXACT structure:
 {{
-  "query": "{query}",
-  "summary": "2-3 sentence overview of who/what this is",
-  "key_facts": [
-    "Fact 1 with source attribution",
-    "Fact 2 with source attribution",
-    "Fact 3 with source attribution"
+  "person_name": "{person}",
+  "company_name": "{company or ''}",
+  "company_snapshot": {{
+    "description": "What the company does — 2-3 sentences",
+    "business_model": "How they make money / operate",
+    "geography": "Where they operate if known",
+    "size_indicators": "Employee count, AUM, portfolio size, etc. if found",
+    "real_estate_relevance": "How they relate to real estate / development / capital"
+  }},
+  "recent_activity": [
+    {{"event": "Description of deal/news/activity", "date": "When if known", "source_url": "URL where found"}},
   ],
+  "btr_connection": {{
+    "level": "direct | indirect | none",
+    "explanation": "How they connect to BTR/SFR/multifamily specifically",
+    "evidence": ["Specific evidence points with sources"]
+  }},
+  "person_connection": {{
+    "role": "Their title/role if found",
+    "tied_to_activity": true/false,
+    "explanation": "How they connect to the company's real estate/deal activity",
+    "confidence": "high | medium | low"
+  }},
+  "outreach_angle": {{
+    "why_they_care": "What would make this person want to take a meeting",
+    "what_to_reference": "Specific sourced fact to mention in outreach",
+    "what_to_avoid": "Topics or approaches that would not work",
+    "recommended_cta": "Best call-to-action for first contact"
+  }},
   "sources": [
-    {{"title": "Page title", "url": "https://...", "snippet": "What was found here"}},
-    {{"title": "Page title", "url": "https://...", "snippet": "What was found here"}}
+    {{"title": "Page title", "url": "https://...", "snippet": "What was found here", "supports": "What claim this source backs up"}}
   ],
-  "confidence": "high | medium | low",
-  "gaps": "What information was NOT found or could not be verified"
+  "confidence": {{
+    "overall": "high | medium | low",
+    "reasons": ["Why this confidence level — source quality, match verification, recency"]
+  }},
+  "gaps": "What important information was NOT found or could not be verified"
 }}
 
 RULES:
-- Only include facts you actually found in search results
-- Cite the source for every fact
-- If little info is found, say so honestly in the summary and set confidence to "low"
-- Do not infer private details (home address, personal phone, etc.)
-- Do not speculate — clearly separate confirmed facts from uncertain information
+- Only include facts you actually found in search results — NEVER fabricate
+- If you cannot verify the person works at this company, say so in person_connection
+- If the company has no BTR/real estate connection, set btr_connection.level to "none" and explain
+- Cite the source URL for every claim in recent_activity
+- Separate confirmed facts from reasonable inferences
+- If little info is found, set confidence.overall to "low" and explain in gaps
+- Do not include personal details (home address, personal phone, etc.)
+- Prioritize: company websites, LinkedIn, press releases, SEC filings, news articles, industry publications
+- Ignore: spam directories, people-search sites, low-quality scraper sites
 - Return ONLY the JSON object, no other text"""
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=4096,
+            max_tokens=8000,
             tools=[
                 {
                     "type": "web_search_20250305",
                     "name": "web_search",
-                    "max_uses": 5
+                    "max_uses": 20
                 }
             ],
             messages=[{"role": "user", "content": search_prompt}]
@@ -2584,91 +2759,136 @@ RULES:
         json_end = response_text.rfind('}') + 1
         if json_start >= 0 and json_end > json_start:
             research = json.loads(response_text[json_start:json_end])
-            research.setdefault('query', query)
-            research.setdefault('summary', '')
-            research.setdefault('key_facts', [])
+            research.setdefault('person_name', person)
+            research.setdefault('company_name', company)
+            research.setdefault('company_snapshot', {})
+            research.setdefault('recent_activity', [])
+            research.setdefault('btr_connection', {'level': 'none', 'explanation': '', 'evidence': []})
+            research.setdefault('person_connection', {'role': '', 'tied_to_activity': False, 'explanation': '', 'confidence': 'low'})
+            research.setdefault('outreach_angle', {})
             research.setdefault('sources', [])
-            research.setdefault('confidence', 'low')
+            research.setdefault('confidence', {'overall': 'low', 'reasons': []})
             research.setdefault('gaps', '')
-            logger.info(f"[Leo] Web research complete: query={query}, sources={len(research['sources'])}, confidence={research['confidence']}")
+
+            if isinstance(research.get('confidence'), str):
+                research['confidence'] = {'overall': research['confidence'], 'reasons': []}
+
+            research['sources'] = _filter_and_rank_sources(research.get('sources', []))
+
+            logger.info(f"[Leo] Outreach intel complete: person={person}, company={company}, "
+                        f"sources={len(research['sources'])}, confidence={research['confidence'].get('overall', 'low')}")
             return research
         else:
-            logger.warning(f"[Leo] Web research returned no JSON for: {query}")
+            logger.warning(f"[Leo] Outreach intel returned no JSON for: {query}")
             return {
-                'query': query,
-                'summary': response_text[:500] if response_text else 'No results found.',
-                'key_facts': [],
-                'sources': [],
-                'confidence': 'low',
-                'gaps': 'Could not parse structured results from web search.',
+                'person_name': person, 'company_name': company,
+                'company_snapshot': {'description': response_text[:500] if response_text else 'No results found.'},
+                'recent_activity': [], 'btr_connection': {'level': 'none', 'explanation': '', 'evidence': []},
+                'person_connection': {'role': '', 'tied_to_activity': False, 'explanation': '', 'confidence': 'low'},
+                'outreach_angle': {}, 'sources': [],
+                'confidence': {'overall': 'low', 'reasons': ['Could not parse structured results']},
+                'gaps': 'Research returned unstructured data.',
             }
 
     except Exception as e:
-        logger.error(f"[Leo] Web research error for '{query}': {e}")
+        logger.error(f"[Leo] Outreach intel error for '{query}': {e}")
         return None
 
 
 def _generate_research_intros(query, research):
     """
-    Generate 3 personalized intro messages based on web research findings.
+    Generate 3 tailored outreach messages based on structured research intelligence.
     Returns list of 3 dicts: [{label, channel, subject, body}, ...]
     """
-    if not research or not research.get('key_facts'):
+    if not research or not research.get('company_snapshot'):
         return _generate_generic_intros(query)
 
-    name_parts = query.split(',')
-    person_name = name_parts[0].strip()
-    company_name = name_parts[1].strip() if len(name_parts) > 1 else ''
+    entities = _extract_research_entities(query)
+    person = research.get('person_name') or entities['person_name']
+    company = research.get('company_name') or entities['company_name']
 
-    facts_text = '\n'.join(f'- {f}' for f in research['key_facts'][:6])
-    summary = research.get('summary', '')
+    snapshot = research.get('company_snapshot', {})
+    btr = research.get('btr_connection', {})
+    person_conn = research.get('person_connection', {})
+    angle = research.get('outreach_angle', {})
+    activity = research.get('recent_activity', [])
+
+    activity_text = '\n'.join(
+        f"- {a.get('event', '')}" + (f" ({a.get('date', '')})" if a.get('date') else '')
+        for a in activity[:5]
+    ) or 'No recent activity found.'
+
+    sources_text = '\n'.join(
+        f"- {s.get('title', 'Source')}: {s.get('snippet', '')}"
+        for s in research.get('sources', [])[:5]
+    ) or 'Limited sources.'
 
     api_key = os.getenv('ANTHROPIC_API_KEY')
     if not api_key:
         return _generate_generic_intros(query)
 
-    prompt = f"""Based on this research about {person_name}{' at ' + company_name if company_name else ''}, write 3 personalized intro messages.
+    prompt = f"""You are a senior BTR (Build-to-Rent) dealmaker writing outreach messages. Generate 3 versions based on this researched intelligence.
 
-RESEARCH:
-{summary}
+TARGET PERSON: {person}
+COMPANY: {company}
+ROLE: {person_conn.get('role', 'Unknown')}
 
-KEY FACTS:
-{facts_text}
+COMPANY SNAPSHOT:
+{snapshot.get('description', 'Limited info')}
+Business model: {snapshot.get('business_model', 'Unknown')}
+Real estate relevance: {snapshot.get('real_estate_relevance', 'Unknown')}
 
-Generate exactly 3 variants as a JSON array:
+BTR CONNECTION: {btr.get('level', 'none')} — {btr.get('explanation', 'No clear connection found')}
+
+RECENT ACTIVITY:
+{activity_text}
+
+BEST OUTREACH ANGLE:
+Why they care: {angle.get('why_they_care', 'Unknown')}
+What to reference: {angle.get('what_to_reference', 'No specific reference identified')}
+What to avoid: {angle.get('what_to_avoid', 'Generic pitches')}
+Recommended CTA: {angle.get('recommended_cta', 'Request a brief call')}
+
+KEY SOURCES:
+{sources_text}
+
+Generate exactly 3 outreach variants as a JSON array:
 [
   {{
-    "label": "LinkedIn Intro",
+    "label": "LinkedIn Short",
     "channel": "linkedin",
     "subject": "",
-    "body": "Short LinkedIn connection request message (under 300 chars). Reference something specific from the research."
+    "body": "LinkedIn connection request (under 280 chars). Reference ONE specific sourced insight. Low-friction CTA."
   }},
   {{
     "label": "Warm Email",
     "channel": "email",
-    "subject": "Email subject line",
-    "body": "Professional warm email (3-4 sentences). Reference a specific fact from the research. Include a clear ask."
+    "subject": "Specific, non-generic subject line",
+    "body": "Professional warm email (4-5 sentences). Open by referencing a specific recent activity or sourced fact. Show you understand their business. Connect to BTR relevance. Close with a specific, low-friction CTA."
   }},
   {{
-    "label": "Direct Business",
+    "label": "Direct Business Intro",
     "channel": "email",
-    "subject": "Email subject line",
-    "body": "Direct business intro (2-3 sentences). Lead with value proposition relevant to their role/company. Be specific, not generic."
+    "subject": "Specific subject referencing their activity",
+    "body": "Direct business intro (3-4 sentences). Lead with a specific value proposition relevant to their company's activity. Reference the outreach angle. Be direct about what you bring to the table. End with specific next step."
   }}
 ]
 
 RULES:
-- Reference actual researched facts, not generic platitudes
-- Keep LinkedIn under 300 characters
-- Each message must feel personalized to this specific person
-- Do not make up facts not in the research
+- Every message MUST reference at least one specific sourced fact (a real deal, news item, or activity)
+- Do NOT use generic phrases like "I came across your profile" or "I've been following your work" without specifics
+- Do NOT fabricate deals, news, or facts not provided above
+- If BTR connection is "none", angle the message around adjacent real estate or capital themes
+- Keep LinkedIn under 280 characters
+- Avoid fake familiarity — be professional and direct
+- Each CTA should be low-friction (15-minute call, coffee, quick question — NOT "let me send you our deck")
 - Return ONLY the JSON array"""
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
         resp = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=2000,
+            max_tokens=3000,
             messages=[{"role": "user", "content": prompt}]
         )
         reply = resp.content[0].text if resp.content else ''
@@ -2679,67 +2899,88 @@ RULES:
             if isinstance(intros, list) and len(intros) >= 1:
                 return intros[:3]
     except Exception:
-        pass
+        logger.warning("Failed to generate research intros, falling back to generic", exc_info=True)
 
     return _generate_generic_intros(query)
 
 
 def _generate_generic_intros(query):
     """Fallback intros when research data is insufficient."""
-    name_parts = query.split(',')
-    person_name = name_parts[0].strip()
-    company_name = name_parts[1].strip() if len(name_parts) > 1 else 'your company'
+    entities = _extract_research_entities(query)
+    person_name = entities['person_name']
+    company_name = entities['company_name'] or 'your company'
 
     return [
         {
-            'label': 'LinkedIn Intro', 'channel': 'linkedin', 'subject': '',
-            'body': f"Hi {person_name}, I came across your profile and would love to connect. I work in real estate capital markets and think there may be some synergy between our work.",
+            'label': 'LinkedIn Short', 'channel': 'linkedin', 'subject': '',
+            'body': f"Hi {person_name}, I work in BTR capital placement and noticed some potential alignment with {company_name}. Would love to connect and compare notes on the space.",
         },
         {
             'label': 'Warm Email', 'channel': 'email',
-            'subject': f"Quick intro — {company_name}",
-            'body': f"Hi {person_name},\n\nI hope this finds you well. I've been following {company_name}'s work and wanted to introduce myself. I focus on capital placement in the BTR/multifamily space and think there could be some interesting alignment.\n\nWould you be open to a brief call this week?",
+            'subject': f"Quick intro — BTR alignment with {company_name}",
+            'body': f"Hi {person_name},\n\nI focus on capital placement in the BTR and multifamily space and have been looking at how {company_name} fits into the broader market.\n\nI'd welcome a quick conversation to see if there's alignment. Would you have 15 minutes this week or next?\n\nBest regards",
         },
         {
-            'label': 'Direct Business', 'channel': 'email',
-            'subject': f"Capital opportunities — {company_name}",
-            'body': f"Hi {person_name},\n\nI'll keep this brief. We work with institutional capital partners in the BTR and multifamily space and are actively placing deals. Given {company_name}'s focus, I think we should talk.\n\nDo you have 15 minutes this week?",
+            'label': 'Direct Business Intro', 'channel': 'email',
+            'subject': f"BTR capital opportunities — {company_name}",
+            'body': f"Hi {person_name},\n\nWe work with institutional capital partners actively deploying into BTR and single-family rental. Given {company_name}'s position, I think there may be a fit.\n\nDo you have 15 minutes for a brief call?",
         },
     ]
 
 
 def _build_research_response(query, research, intros):
-    """Build ResearchCard text + card dict from research results and intros."""
-    facts_md = '\n'.join(f'- {f}' for f in research.get('key_facts', []))
+    """Build OutreachIntelCard text + card dict from research results and intros."""
+    entities = _extract_research_entities(query)
+    person = research.get('person_name') or entities['person_name']
+    company = research.get('company_name') or entities['company_name']
+
+    snapshot = research.get('company_snapshot', {})
+    btr = research.get('btr_connection', {})
+    person_conn = research.get('person_connection', {})
+    angle = research.get('outreach_angle', {})
+    activity = research.get('recent_activity', [])
+    confidence = research.get('confidence', {})
+    if isinstance(confidence, str):
+        confidence = {'overall': confidence, 'reasons': []}
+
+    activity_md = '\n'.join(
+        f"- {a.get('event', '')}" + (f" ({a.get('date', '')})" if a.get('date') else '')
+        for a in activity[:5]
+    ) or 'No recent activity found.'
+
     sources_md = '\n'.join(
-        f'- [{s.get("title", "Source")}]({s["url"]})'
+        f'- [{s.get("title", "Source")}]({s["url"]})' + (f' — {s.get("supports", "")}' if s.get("supports") else '')
         for s in research.get('sources', []) if s.get('url')
     )
-    intro_md = ''
-    for intro in intros:
-        chan_label = intro.get('label', intro.get('channel', ''))
-        subj = f"*Subject:* {intro['subject']}\n" if intro.get('subject') else ''
-        intro_md += f"\n**{chan_label}:**\n{subj}{intro['body']}\n"
-    gaps = research.get('gaps', '')
-    gaps_md = f"\n**Gaps:** {gaps}" if gaps else ''
+
+    btr_icon = {'direct': 'Direct', 'indirect': 'Indirect', 'none': 'None'}.get(btr.get('level', 'none'), 'Unknown')
+    conf_level = confidence.get('overall', 'low')
+
     text = (
-        f"**Research: {query}**\n\n"
-        f"{research.get('summary', 'No summary available.')}\n\n"
-        f"**Key Facts:**\n{facts_md or 'Limited information found.'}\n\n"
+        f"**Outreach Intelligence: {person}**" + (f" at **{company}**" if company else '') + "\n\n"
+        f"**Company Snapshot:**\n{snapshot.get('description', 'Limited information available.')}\n\n"
+        f"**Recent Activity:**\n{activity_md}\n\n"
+        f"**BTR Connection:** {btr_icon} — {btr.get('explanation', 'No clear connection found.')}\n\n"
+        f"**Person:** {person_conn.get('role', 'Role unknown')} — {person_conn.get('explanation', 'Limited info')}\n\n"
+        f"**Best Angle:** {angle.get('why_they_care', 'General outreach')}\n\n"
         f"**Sources:**\n{sources_md or 'No sources found.'}\n\n"
-        f"**Confidence:** {research.get('confidence', 'low')}{gaps_md}\n\n"
-        f"---\n\n**Suggested Intros:**{intro_md}"
+        f"**Confidence:** {conf_level}"
     )
+
     card = {
-        'type': 'ResearchCard',
+        'type': 'OutreachIntelCard',
         'text': text,
         'data': {
-            'query': query,
-            'summary': research.get('summary', ''),
-            'key_facts': research.get('key_facts', []),
-            'sources': research.get('sources', []),
-            'confidence': research.get('confidence', 'low'),
-            'gaps': gaps,
+            'person_name': person,
+            'company_name': company,
+            'company_snapshot': snapshot,
+            'recent_activity': activity,
+            'btr_connection': btr,
+            'person_connection': person_conn,
+            'outreach_angle': angle,
+            'sources': [{k: v for k, v in s.items() if k != '_quality'} for s in research.get('sources', [])],
+            'confidence': confidence,
+            'gaps': research.get('gaps', ''),
             'intros': intros,
         },
         'actions': [
@@ -2747,7 +2988,7 @@ def _build_research_response(query, research, intros):
              'params': {'subject': intros[0].get('subject', ''), 'body': intros[0]['body']}},
             {'id': 'copy_warm', 'label': 'Copy Warm Email', 'action': 'copy_text',
              'params': {'subject': intros[1].get('subject', ''), 'body': intros[1]['body']}},
-            {'id': 'copy_direct', 'label': 'Copy Direct', 'action': 'copy_text',
+            {'id': 'copy_direct', 'label': 'Copy Direct Intro', 'action': 'copy_text',
              'params': {'subject': intros[2].get('subject', ''), 'body': intros[2]['body']}},
         ],
     }
@@ -3078,7 +3319,7 @@ def _generate_execution_queue(limit=10):
 
     items.sort(key=lambda x: x.get('priority_score', 0), reverse=True)
     items = items[:limit]
-    _filter_plan_tasks(items)
+    items = _filter_plan_tasks(items) or items
 
     for i, item in enumerate(items):
         item['rank'] = i + 1
@@ -5764,6 +6005,10 @@ def _preprocess_slash(text):
 
     if cmd == '/draft':
         if arg:
+            m = re.match(r'^top\s+(\d+)', arg.strip(), re.IGNORECASE)
+            if m:
+                count = int(m.group(1))
+                return f'__v6_batch_draft__{count}', extra_ctx
             contact = _find_contact(arg)
             if contact:
                 signal = _latest_signal_for(contact.get('group_id'), contact.get('id'))
@@ -5903,12 +6148,6 @@ def _preprocess_slash(text):
         if arg:
             return f'__schedule_meeting__{arg}', extra_ctx
         return "Who would you like to meet with? Use /meeting [contact name].", extra_ctx
-
-    if cmd == '/draft' and arg:
-        m = re.match(r'^top\s+(\d+)', arg.strip(), re.IGNORECASE)
-        if m:
-            count = int(m.group(1))
-            return f'__v6_batch_draft__{count}', extra_ctx
 
     return text, extra_ctx
 
@@ -6593,8 +6832,7 @@ def _chat_inner():
 
     api_key = os.getenv('ANTHROPIC_API_KEY')
     if not api_key:
-        import logging
-        logging.getLogger('leo').error("[Leo] ANTHROPIC_API_KEY not set — chat disabled")
+        logger.error("ANTHROPIC_API_KEY not set — chat disabled")
         return jsonify({
             'role': 'assistant', 'content': '',
             'card': {
@@ -6604,7 +6842,7 @@ def _chat_inner():
                          'suggestion': 'Set ANTHROPIC_API_KEY in your environment variables or Railway config.'},
                 'actions': []
             }
-        })
+        }), 503
 
     last_msg = messages[-1].get('content', '') if messages else ''
     processed_msg, extra_ctx = _preprocess_slash(last_msg)
@@ -6710,7 +6948,10 @@ def _chat_inner():
         return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'probability', 'mode': 'analyst'})
 
     if processed_msg.startswith('__v6_batch_draft__'):
-        count = int(processed_msg.replace('__v6_batch_draft__', ''))
+        try:
+            count = int(processed_msg.replace('__v6_batch_draft__', ''))
+        except (ValueError, TypeError):
+            count = 5
         drafts = _generate_batch_drafts(count=count)
         if not drafts:
             card = {'type': 'TextCard', 'text': 'No contacts found for drafting. Add contacts to your pipeline first.', 'data': {}, 'actions': []}
@@ -7065,7 +7306,10 @@ def _chat_inner():
         query = re.sub(
             r'\b(research|look up|find out about|google|search for|search online|'
             r'web search|dig into|background on|intel on|look into|and write me an? intro'
-            r'|and write an? intro|and draft|write me|intro message|outreach)\b',
+            r'|and write an? intro|and draft|write me|intro message|outreach'
+            r'|find the best approach to reach out|find the best approach|best way to reach'
+            r'|best approach to reach out|how to reach|and find|online|to reach out'
+            r'|write outreach using)\b',
             '', last_msg, flags=re.IGNORECASE
         ).strip(' .,!?')
         if query:

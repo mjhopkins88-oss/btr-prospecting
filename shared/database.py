@@ -71,37 +71,44 @@ def upsert_entity(table, conflict_cols, data):
 def fetch_one(sql, params=None):
     """Execute SQL, return one row as dict (or None)."""
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute(sql, params or [])
-    row = cur.fetchone()
-    if row and cur.description:
-        cols = [d[0] for d in cur.description]
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, params or [])
+        row = cur.fetchone()
+        if row and cur.description:
+            cols = [d[0] for d in cur.description]
+            return dict(zip(cols, row))
+        return None
+    finally:
         conn.close()
-        return dict(zip(cols, row))
-    conn.close()
-    return None
 
 
 def fetch_all(sql, params=None):
     """Execute SQL, return list of dicts."""
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute(sql, params or [])
-    rows = cur.fetchall()
-    if rows and cur.description:
-        cols = [d[0] for d in cur.description]
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, params or [])
+        rows = cur.fetchall()
+        if rows and cur.description:
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, r)) for r in rows]
+        return []
+    finally:
         conn.close()
-        return [dict(zip(cols, r)) for r in rows]
-    conn.close()
-    return []
 
 
 def execute(sql, params=None):
     """Execute a write statement, commit, return rowcount."""
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute(sql, params or [])
-    rc = cur.rowcount
-    conn.commit()
-    conn.close()
-    return rc
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, params or [])
+        rc = cur.rowcount
+        conn.commit()
+        return rc
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()

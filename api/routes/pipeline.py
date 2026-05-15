@@ -3,7 +3,6 @@ API Routes: Pipeline Control
 Flask Blueprint for triggering and monitoring the lead intelligence pipeline.
 """
 from flask import Blueprint, request, jsonify
-import threading
 
 from shared.database import fetch_all, fetch_one
 from shared.queue import enqueue

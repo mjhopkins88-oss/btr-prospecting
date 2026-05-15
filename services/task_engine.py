@@ -550,7 +550,6 @@ def get_schedule(days=5):
     now = _now()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     result = []
-    day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
     for offset in range(days):
         day_dt = today_start + timedelta(days=offset)
         day_end = day_dt + timedelta(days=1)

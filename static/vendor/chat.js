@@ -49,7 +49,8 @@ var CARD_COLORS = {
   LeoActionPreviewCard:   { bg: '#fffbeb', border: '#fde68a', accent: '#92400e', icon: '🧠' },
   CalendarConfirmCard:    { bg: '#f0fdf4', border: '#86efac', accent: '#15803d', icon: '📅' },
   SchedulePlanCard:       { bg: '#f0f9ff', border: '#7dd3fc', accent: '#0369a1', icon: '📅' },
-  ResearchCard:           { bg: '#f5f3ff', border: '#c4b5fd', accent: '#6d28d9', icon: '🔍' }
+  ResearchCard:           { bg: '#f5f3ff', border: '#c4b5fd', accent: '#6d28d9', icon: '🔍' },
+  OutreachIntelCard:      { bg: '#f0f9ff', border: '#93c5fd', accent: '#1e40af', icon: '🎯' }
 };
 
 var SLASH_HINTS = [
@@ -735,6 +736,152 @@ function renderResearchCard(card, onAction, loadingState) {
       )
     ) : null,
 
+    renderActionButtons(card.actions, onAction, null, loadingState)
+  );
+}
+
+function renderOutreachIntelCard(card, onAction, loadingState) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.OutreachIntelCard;
+  var snapshot = d.company_snapshot || {};
+  var activity = d.recent_activity || [];
+  var btr = d.btr_connection || {};
+  var personConn = d.person_connection || {};
+  var angle = d.outreach_angle || {};
+  var sources = d.sources || [];
+  var intros = d.intros || [];
+  var confidence = d.confidence || {};
+  var confLevel = confidence.overall || 'low';
+  var confColors = { high: '#16a34a', medium: '#d97706', low: '#dc2626' };
+  var confColor = confColors[confLevel] || confColors.low;
+  var btrColors = { direct: '#16a34a', indirect: '#d97706', none: '#94a3b8' };
+  var btrColor = btrColors[btr.level] || btrColors.none;
+
+  var sectionHead = function(label) {
+    return h('div', { style: { fontSize: '0.6rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.15rem', marginTop: '0.3rem' } }, label);
+  };
+
+  var pill = function(text, bg, fg) {
+    return h('span', { style: { fontSize: '0.58rem', fontWeight: 600, padding: '0.08rem 0.3rem', borderRadius: '0.2rem', background: bg, color: fg, whiteSpace: 'nowrap' } }, text);
+  };
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.7rem' } },
+    // Header
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.35rem' } },
+      h('div', null,
+        h('div', { style: { fontSize: '0.72rem', fontWeight: 700, color: colors.accent } },
+          colors.icon + ' Outreach Intelligence'
+        ),
+        h('div', { style: { fontSize: '0.68rem', color: '#334155', marginTop: '0.05rem' } },
+          (d.person_name || '') + (d.company_name ? ' at ' + d.company_name : '')
+        )
+      ),
+      h('div', { style: { display: 'flex', gap: '0.2rem' } },
+        pill(confLevel + ' confidence', confColor + '18', confColor),
+        pill('BTR: ' + (btr.level || 'none'), btrColor + '18', btrColor)
+      )
+    ),
+
+    // Company Snapshot
+    snapshot.description ? h('div', null,
+      sectionHead('Company Snapshot'),
+      h('div', { style: { fontSize: '0.7rem', color: '#1e293b', lineHeight: 1.5, padding: '0.3rem 0.4rem', background: '#ffffff', borderRadius: '0.3rem', border: '1px solid ' + colors.border } },
+        h('div', null, snapshot.description),
+        snapshot.business_model ? h('div', { style: { marginTop: '0.15rem', color: '#475569' } }, 'Model: ' + snapshot.business_model) : null,
+        snapshot.geography ? h('div', { style: { color: '#475569' } }, 'Geography: ' + snapshot.geography) : null,
+        snapshot.real_estate_relevance ? h('div', { style: { color: '#475569' } }, 'RE Relevance: ' + snapshot.real_estate_relevance) : null
+      )
+    ) : null,
+
+    // Recent Activity
+    activity.length > 0 ? h('div', null,
+      sectionHead('Recent Activity'),
+      h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.15rem' } },
+        activity.slice(0, 5).map(function(a, i) {
+          return h('div', { key: i, style: { fontSize: '0.68rem', color: '#334155', padding: '0.2rem 0.35rem', background: '#ffffff', borderRadius: '0.25rem', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between' } },
+            h('span', null, a.event || ''),
+            a.date ? h('span', { style: { color: '#94a3b8', fontSize: '0.6rem', flexShrink: 0, marginLeft: '0.3rem' } }, a.date) : null
+          );
+        })
+      )
+    ) : null,
+
+    // BTR Connection
+    h('div', null,
+      sectionHead('BTR Connection'),
+      h('div', { style: { fontSize: '0.68rem', color: '#334155', padding: '0.2rem 0.35rem', background: btrColor + '08', borderRadius: '0.25rem', border: '1px solid ' + btrColor + '30' } },
+        h('span', { style: { fontWeight: 600, color: btrColor } }, (btr.level || 'none').charAt(0).toUpperCase() + (btr.level || 'none').slice(1) + ': '),
+        btr.explanation || 'No clear connection found.'
+      )
+    ),
+
+    // Person Connection
+    h('div', null,
+      sectionHead('Person Connection'),
+      h('div', { style: { fontSize: '0.68rem', color: '#334155', padding: '0.2rem 0.35rem', background: '#ffffff', borderRadius: '0.25rem', border: '1px solid #e2e8f0' } },
+        personConn.role ? h('div', null, h('span', { style: { fontWeight: 600 } }, 'Role: '), personConn.role) : null,
+        h('div', null, personConn.explanation || 'Limited information found connecting this person to this company.'),
+        h('div', { style: { marginTop: '0.1rem' } },
+          pill('Match: ' + (personConn.confidence || 'low'), confColors[personConn.confidence] ? confColors[personConn.confidence] + '18' : '#f1f5f9', confColors[personConn.confidence] || '#94a3b8')
+        )
+      )
+    ),
+
+    // Best Outreach Angle
+    angle.why_they_care ? h('div', null,
+      sectionHead('Best Outreach Angle'),
+      h('div', { style: { fontSize: '0.68rem', padding: '0.3rem 0.4rem', background: colors.accent + '08', borderRadius: '0.3rem', border: '1px solid ' + colors.accent + '25' } },
+        angle.why_they_care ? h('div', { style: { color: '#1e293b' } }, h('span', { style: { fontWeight: 600, color: colors.accent } }, 'Why they care: '), angle.why_they_care) : null,
+        angle.what_to_reference ? h('div', { style: { color: '#334155', marginTop: '0.1rem' } }, h('span', { style: { fontWeight: 600 } }, 'Reference: '), angle.what_to_reference) : null,
+        angle.what_to_avoid ? h('div', { style: { color: '#94a3b8', marginTop: '0.1rem', fontStyle: 'italic' } }, 'Avoid: ' + angle.what_to_avoid) : null,
+        angle.recommended_cta ? h('div', { style: { color: '#334155', marginTop: '0.1rem' } }, h('span', { style: { fontWeight: 600 } }, 'CTA: '), angle.recommended_cta) : null
+      )
+    ) : null,
+
+    // Outreach Messages
+    intros.length > 0 ? h('div', null,
+      sectionHead('Tailored Outreach Messages'),
+      h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem' } },
+        intros.map(function(intro, i) {
+          var chanIcon = intro.channel === 'linkedin' ? '💼' : '✉️';
+          return h('div', { key: i, style: { padding: '0.35rem 0.45rem', background: '#ffffff', borderRadius: '0.35rem', border: '1px solid ' + colors.border } },
+            h('div', { style: { fontSize: '0.63rem', fontWeight: 600, color: colors.accent, marginBottom: '0.1rem' } },
+              chanIcon + ' ' + (intro.label || intro.channel || '')
+            ),
+            intro.subject ? h('div', { style: { fontSize: '0.64rem', color: '#64748b', fontStyle: 'italic', marginBottom: '0.08rem' } }, 'Subject: ' + intro.subject) : null,
+            h('div', { style: { fontSize: '0.68rem', color: '#1e293b', lineHeight: 1.45, whiteSpace: 'pre-wrap' } }, intro.body || '')
+          );
+        })
+      )
+    ) : null,
+
+    // Sources
+    sources.length > 0 ? h('div', null,
+      sectionHead('Sources'),
+      h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.1rem' } },
+        sources.slice(0, 8).map(function(s, i) {
+          return h('div', { key: i, style: { fontSize: '0.62rem', lineHeight: 1.4 } },
+            s.url ? h('a', { href: s.url, target: '_blank', rel: 'noopener', style: { color: colors.accent, textDecoration: 'none' } },
+              s.title || s.url
+            ) : h('span', null, s.title || 'Source'),
+            s.supports ? h('span', { style: { color: '#94a3b8', marginLeft: '0.2rem' } }, ' — ' + s.supports) : null
+          );
+        })
+      )
+    ) : null,
+
+    // Confidence Reasons
+    confidence.reasons && confidence.reasons.length > 0 ? h('div', null,
+      sectionHead('Confidence Assessment'),
+      h('ul', { style: { margin: 0, paddingLeft: '0.8rem', fontSize: '0.64rem', color: '#64748b', lineHeight: 1.4 } },
+        confidence.reasons.map(function(r, i) { return h('li', { key: i }, r); })
+      )
+    ) : null,
+
+    // Gaps
+    d.gaps ? h('div', { style: { fontSize: '0.64rem', color: '#94a3b8', marginTop: '0.3rem', fontStyle: 'italic' } }, 'Gaps: ' + d.gaps) : null,
+
+    // Action buttons
     renderActionButtons(card.actions, onAction, null, loadingState)
   );
 }
@@ -1774,6 +1921,7 @@ function renderCard(card, onAction, loadingState) {
     case 'CalendarConfirmCard': return renderCalendarConfirmCard(card, oa, loadingState);
     case 'SchedulePlanCard': return renderSchedulePlanCard(card, oa, loadingState);
     case 'ResearchCard': return renderResearchCard(card, oa, loadingState);
+    case 'OutreachIntelCard': return renderOutreachIntelCard(card, oa, loadingState);
     default:
       if (card.text) {
         return h('div', { style: { fontSize: '0.74rem', color: '#334155', whiteSpace: 'pre-wrap', lineHeight: 1.5 } }, card.text);
@@ -1933,8 +2081,8 @@ function BTRAssistantChat(props) {
         return t;
       });
       var doneCount = updatedTasks.filter(function(t) { return t.status === 'done'; }).length;
-      var nextPending = updatedTasks.find(function(t) { return t.status === 'pending'; });
-      if (nextPending) nextPending.status = 'current';
+      var nextPendingIdx = updatedTasks.findIndex(function(t) { return t.status === 'pending'; });
+      if (nextPendingIdx !== -1) updatedTasks[nextPendingIdx] = Object.assign({}, updatedTasks[nextPendingIdx], { status: 'current' });
       var updatedSprint = Object.assign({}, sprint, { tasks: updatedTasks, completed: doneCount });
       setSprint(updatedSprint);
 
@@ -1973,6 +2121,18 @@ function BTRAssistantChat(props) {
         setMessages(function(prev) {
           return prev.concat([{ role: 'assistant', card: { type: 'NextActionCard', text: 'Top Opportunities — ranked by composite score', data: { recommendations: recs }, actions: [] }, mode: 'analyst' }]);
         });
+      }
+      return;
+    }
+
+    if (act.action === 'retry') {
+      var lastUserMsg = null;
+      for (var ri = messages.length - 1; ri >= 0; ri--) {
+        if (messages[ri].role === 'user') { lastUserMsg = messages[ri].content; break; }
+      }
+      if (lastUserMsg) {
+        setInput(lastUserMsg);
+        setMessages(messages.slice(0, -2));
       }
       return;
     }
@@ -2314,7 +2474,7 @@ function BTRAssistantChat(props) {
       h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.15rem', position: 'relative', zIndex: 1 } },
         h('button', {
           className: 'leo-header-btn',
-          onClick: function() { setMessages([]); setLastMode(null); },
+          onClick: function() { setMessages([]); setLastMode(null); setSprint(null); setProactiveFetched(false); setInsightBadge(0); },
           title: 'Clear chat',
           style: {
             background: 'rgba(255,255,255,0.06)', border: 'none', color: '#94a3b8', fontSize: '0.65rem',
