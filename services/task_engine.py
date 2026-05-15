@@ -45,11 +45,11 @@ def _log_feed(capital_group_id, feed_type, action, detail=None):
     )
 
 
-# ── Rule 1: New group created → research + LinkedIn touch ────────────
+# ── Rule 1: New group created → outreach + LinkedIn touch ────────────
 def rule_new_group(capital_group_id, group_name):
     now = _now()
-    _create_task(capital_group_id, 'research', f'Research {group_name}',
-                 f'Pull background intel on {group_name} — strategy, markets, recent deals.',
+    _create_task(capital_group_id, 'email', f'Send intro outreach — {group_name}',
+                 f'Draft and send a targeted intro to a key contact at {group_name}.',
                  now + timedelta(days=1), 'new_group_research', priority=7)
     _create_task(capital_group_id, 'linkedin', f'Initial LinkedIn touch — {group_name}',
                  f'Send connection request or intro message to key contact at {group_name}.',
@@ -81,15 +81,15 @@ def rule_stale_60d(groups):
                          now, 'stale_60d', priority=8)
 
 
-# ── Rule 4: New high-priority signal → signal review + outreach ──────
+# ── Rule 4: New high-priority signal → outreach referencing signal ────
 def rule_signal(capital_group_id, group_name, signal_detail):
     now = _now()
-    _create_task(capital_group_id, 'research', f'Signal review — {group_name}',
-                 f'New market signal: {signal_detail}',
+    _create_task(capital_group_id, 'email', f'Act on signal — {group_name}',
+                 f'Draft outreach referencing: {signal_detail}',
                  now + timedelta(hours=4), 'signal_review', priority=8)
-    _create_task(capital_group_id, 'email', f'Signal outreach — {group_name}',
-                 f'Share signal with contact: {signal_detail}',
-                 now + timedelta(days=1), 'signal_outreach', priority=7)
+    _create_task(capital_group_id, 'follow_up', f'Signal follow-up — {group_name}',
+                 f'Follow up on signal-based outreach: {signal_detail}',
+                 now + timedelta(days=2), 'signal_outreach', priority=7)
     _log_feed(capital_group_id, 'signal', 'Market signal detected', signal_detail)
 
 
@@ -230,7 +230,7 @@ def get_task_buckets():
     today_end = (now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).isoformat()
     week_end = (now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=7)).isoformat()
 
-    type_keys = ['linkedin', 'email', 'call', 'meeting', 'research', 'check_in', 'follow_up', 'sequence_step']
+    type_keys = ['linkedin', 'email', 'call', 'meeting', 'check_in', 'follow_up', 'sequence_step']
 
     def bucket_counts(where_clause, params):
         total_row = fetch_one(f"SELECT COUNT(*) AS c FROM prospecting_tasks WHERE status = 'pending' AND {where_clause}", params) or {}

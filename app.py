@@ -2494,6 +2494,14 @@ def init_db():
         except Exception:
             pass
 
+    # Auto-close existing research tasks — research is not an execution action
+    try:
+        c.safe_execute(
+            "UPDATE prospecting_tasks SET status = 'cancelled' WHERE type = 'research' AND status IN ('pending', 'in_progress')"
+        )
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 

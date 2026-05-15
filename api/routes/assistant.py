@@ -1509,14 +1509,24 @@ def _convert_research_task(action_text):
     return f"{replacement} {remainder}" if remainder else action_text
 
 
+_PASSIVE_TASK_PATTERN = re.compile(
+    r'^(research|analyze|review|explore|look into|investigate|examine|assess|'
+    r'audit|study|evaluate|consider|think about|brainstorm)\s',
+    re.IGNORECASE
+)
+
 def _filter_plan_tasks(plan):
-    """Filter and convert research tasks in a daily plan or sprint task list."""
+    """Convert research tasks to execution actions; drop items that can't be converted."""
+    filtered = []
     for item in plan:
         action = item.get('action', '')
         converted = _convert_research_task(action)
         if converted != action:
             item['action'] = converted
-    return plan
+        if _PASSIVE_TASK_PATTERN.match(item.get('action', '')):
+            continue
+        filtered.append(item)
+    return filtered
 
 
 # ---------------------------------------------------------------------------
@@ -1539,13 +1549,14 @@ def _generate_daily_plan():
     today = datetime.utcnow().strftime('%Y-%m-%d')
     tomorrow = (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d')
 
-    # 1. Overdue tasks (highest priority)
+    # 1. Overdue tasks (highest priority) — exclude passive/research types
     try:
         overdue = fetch_all(
             """SELECT t.id, t.title, t.due_at, t.type, g.name as group_name, g.id as group_id
                FROM prospecting_tasks t
                LEFT JOIN capital_groups g ON t.capital_group_id = g.id
                WHERE t.status = 'pending' AND t.due_at < ?
+                 AND t.type NOT IN ('research')
                ORDER BY t.due_at ASC LIMIT 3""",
             [today]
         )
@@ -1620,13 +1631,14 @@ def _generate_daily_plan():
     except Exception:
         pass
 
-    # 4. Follow-ups due today/tomorrow
+    # 4. Follow-ups due today/tomorrow — exclude passive types
     try:
         due_soon = fetch_all(
             """SELECT t.id, t.title, t.due_at, g.name as group_name, g.id as group_id
                FROM prospecting_tasks t
                LEFT JOIN capital_groups g ON t.capital_group_id = g.id
                WHERE t.status = 'pending' AND t.due_at >= ? AND t.due_at <= ?
+                 AND t.type NOT IN ('research')
                ORDER BY t.due_at ASC LIMIT 3""",
             [today, tomorrow]
         )
@@ -2824,13 +2836,14 @@ def _generate_execution_queue(limit=10):
     seen_ids = set()
     today = datetime.utcnow().strftime('%Y-%m-%d')
 
-    # 1. Overdue tasks
+    # 1. Overdue tasks — exclude research/passive types
     try:
         overdue = fetch_all(
             """SELECT t.id, t.title, t.due_at, t.type, g.name as group_name, g.id as group_id
                FROM prospecting_tasks t
                LEFT JOIN capital_groups g ON t.capital_group_id = g.id
                WHERE t.status = 'pending' AND t.due_at < ?
+                 AND t.type NOT IN ('research')
                ORDER BY t.due_at ASC LIMIT 5""",
             [today]
         )
@@ -2928,7 +2941,7 @@ def _generate_execution_queue(limit=10):
     except Exception:
         pass
 
-    # 4. Follow-ups due today/tomorrow
+    # 4. Follow-ups due today/tomorrow — exclude passive types
     try:
         tomorrow = (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d')
         due_soon = fetch_all(
@@ -2936,6 +2949,7 @@ def _generate_execution_queue(limit=10):
                FROM prospecting_tasks t
                LEFT JOIN capital_groups g ON t.capital_group_id = g.id
                WHERE t.status = 'pending' AND t.due_at >= ? AND t.due_at <= ?
+                 AND t.type NOT IN ('research')
                ORDER BY t.due_at ASC LIMIT 5""",
             [today, tomorrow]
         )
@@ -4983,13 +4997,13 @@ def _build_context(extra_context=None, include_history=True, lightweight=False):
                 f"(status={r['relationship_status']}, warmth={r.get('warmth_score', '?')})"
             )
 
-    # Pending tasks
+    # Pending tasks — exclude research/passive types
     tasks = fetch_all(
         """SELECT t.id, t.title, t.type, t.due_at, t.priority,
                   g.name as group_name
            FROM prospecting_tasks t
            LEFT JOIN capital_groups g ON t.capital_group_id = g.id
-           WHERE t.status = 'pending'
+           WHERE t.status = 'pending' AND t.type NOT IN ('research')
            ORDER BY t.priority DESC, t.due_at ASC NULLS LAST LIMIT 10""", []
     )
     if tasks:
@@ -5035,13 +5049,14 @@ def _build_context(extra_context=None, include_history=True, lightweight=False):
             [week_ago]
         )
         tasks_pending = fetch_one(
-            "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE status = 'pending'"
+            "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE status = 'pending' AND type NOT IN ('research')"
         )
         overdue_tasks = fetch_all(
             """SELECT t.title, t.due_at, g.name as group_name
                FROM prospecting_tasks t
                LEFT JOIN capital_groups g ON t.capital_group_id = g.id
                WHERE t.status = 'pending' AND t.due_at < ?
+                 AND t.type NOT IN ('research')
                ORDER BY t.due_at ASC LIMIT 5""",
             [today]
         )
@@ -7624,7 +7639,7 @@ def execute_action():
                                     'created_count': len(created), 'skipped_count': len(skipped)}
                     if skipped:
                         confirm_data['skipped'] = skipped
-                    return jsonify({'success': True, 'card': {
+                    return jsonify({'success': True, 'calendar_changed': True, 'card': {
                         'type': 'ConfirmationCard', 'text': result['message'],
                         'data': confirm_data,
                         'actions': [{'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}}]
