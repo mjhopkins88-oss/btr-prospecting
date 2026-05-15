@@ -363,3 +363,122 @@ def preview_brief():
         mimetype='application/pdf',
         as_attachment=False,
     )
+
+
+# ---------------------------------------------------------------------------
+# General-purpose PDF generator for Leo documents
+# ---------------------------------------------------------------------------
+
+_pdf_store = {}
+
+
+def build_doc_pdf(doc):
+    """
+    Build a PDF from a structured document dict.
+    doc = {
+        'title': str,
+        'subtitle': str (optional),
+        'date': str,
+        'sections': [
+            {'heading': str, 'items': [str, ...]}
+            or {'heading': str, 'body': str}
+        ]
+    }
+    Returns PDF bytes.
+    """
+    from fpdf import FPDF
+
+    class DocPDF(FPDF):
+        def header(self):
+            self.set_font('Helvetica', 'B', 9)
+            self.set_text_color(100, 116, 139)
+            self.cell(0, 8, 'BTR PROSPECTING ENGINE', align='R')
+            self.ln(12)
+
+        def footer(self):
+            self.set_y(-15)
+            self.set_font('Helvetica', 'I', 7)
+            self.set_text_color(148, 163, 184)
+            self.cell(0, 10, f'Generated {doc.get("date", "")} | Confidential', align='C')
+
+    pdf = DocPDF('P', 'mm', 'Letter')
+    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.add_page()
+
+    # Title
+    pdf.set_font('Helvetica', 'B', 18)
+    pdf.set_text_color(15, 23, 42)
+    safe_title = doc.get('title', 'Document').encode('latin-1', 'replace').decode('latin-1')
+    pdf.cell(0, 12, safe_title, new_x='LMARGIN', new_y='NEXT')
+    if doc.get('subtitle'):
+        pdf.set_font('Helvetica', '', 10)
+        pdf.set_text_color(100, 116, 139)
+        safe_sub = doc['subtitle'].encode('latin-1', 'replace').decode('latin-1')
+        pdf.cell(0, 6, safe_sub, new_x='LMARGIN', new_y='NEXT')
+    pdf.set_font('Helvetica', '', 9)
+    pdf.set_text_color(148, 163, 184)
+    pdf.cell(0, 6, doc.get('date', ''), new_x='LMARGIN', new_y='NEXT')
+    pdf.ln(4)
+
+    pdf.set_draw_color(226, 232, 240)
+    pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+    pdf.ln(6)
+
+    for section in doc.get('sections', []):
+        heading = section.get('heading', '')
+        safe_heading = heading.encode('latin-1', 'replace').decode('latin-1')
+        pdf.set_font('Helvetica', 'B', 11)
+        pdf.set_text_color(15, 23, 42)
+        pdf.set_fill_color(241, 245, 249)
+        pdf.cell(0, 8, f'  {safe_heading}', fill=True, new_x='LMARGIN', new_y='NEXT')
+        pdf.ln(3)
+
+        if section.get('body'):
+            pdf.set_font('Helvetica', '', 9)
+            pdf.set_text_color(51, 65, 85)
+            safe_body = section['body'].encode('latin-1', 'replace').decode('latin-1')
+            pdf.multi_cell(0, 5, safe_body)
+            pdf.ln(2)
+
+        for i, item in enumerate(section.get('items', []), 1):
+            safe_item = str(item).encode('latin-1', 'replace').decode('latin-1')
+            pdf.set_font('Helvetica', 'B', 9)
+            pdf.set_text_color(20, 184, 166)
+            x = pdf.get_x()
+            pdf.set_x(x + 4)
+            pdf.cell(6, 5, f'{i}.')
+            pdf.set_font('Helvetica', '', 9)
+            pdf.set_text_color(51, 65, 85)
+            pdf.multi_cell(0, 5, f' {safe_item}')
+            pdf.ln(1)
+
+        pdf.ln(3)
+
+    return pdf.output()
+
+
+def store_pdf(pdf_bytes, filename):
+    """Store PDF bytes in memory, return download ID."""
+    import uuid
+    pdf_id = str(uuid.uuid4())
+    _pdf_store[pdf_id] = {'bytes': pdf_bytes, 'filename': filename, 'created': datetime.utcnow()}
+    # Evict old entries (keep last 20)
+    if len(_pdf_store) > 20:
+        oldest = sorted(_pdf_store.keys(), key=lambda k: _pdf_store[k]['created'])
+        for k in oldest[:len(_pdf_store) - 20]:
+            del _pdf_store[k]
+    return pdf_id
+
+
+@daily_brief_bp.route('/doc/<pdf_id>', methods=['GET'])
+def download_doc(pdf_id):
+    """Download a generated PDF by ID."""
+    entry = _pdf_store.get(pdf_id)
+    if not entry:
+        return jsonify({'success': False, 'error': 'PDF not found or expired'}), 404
+    return send_file(
+        io.BytesIO(entry['bytes']),
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=entry['filename'],
+    )
