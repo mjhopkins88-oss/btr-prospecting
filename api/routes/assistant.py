@@ -262,6 +262,9 @@ INTENT_KEYWORDS = {
                          'give me a plan', 'make a plan', 'make me a plan',
                          'create a strategy', 'create a plan', 'create an attack',
                          'create an execution', 'generate a plan', 'build a plan'],
+    'research_web':     ['research', 'look up', 'find out about', 'google',
+                         'search for', 'search online', 'web search', 'dig into',
+                         'background on', 'intel on', 'look into'],
     'troubleshoot':     ['error', 'broken', 'not working', 'bug', 'issue', 'wrong',
                          'fix', 'help with app', 'problem'],
     'coach':            ['how am i doing', 'performance', 'momentum', 'cadence', 'habit',
@@ -286,6 +289,7 @@ INTENT_TO_MODE = {
     'update_calendar':    'execution',
     'update_performance': 'execution',
     'export_report':    'execution',
+    'research_web':     'analyst',
     'troubleshoot':     'execution',
     'coach':            'coach',
 }
@@ -317,6 +321,7 @@ def _classify_intent(text):
             '/relationship': 'analyze_company', '/funnel': 'diagnose',
             '/predict': 'analyze_company', '/automate': 'recommend_action',
             '/brief-pdf': 'export_report', '/patterns': 'coach',
+            '/research': 'research_web',
             '/meeting': 'schedule_meeting', '/calendar': 'schedule_meeting',
             '/perf': 'update_performance', '/squats': 'update_performance',
             '/workout': 'update_performance', '/focus': 'update_performance',
@@ -334,7 +339,7 @@ def _classify_intent(text):
     # Action intents (scheduling, CRM updates, logging) should trigger on a single keyword match
     # because their keywords are already specific multi-word phrases
     action_intents = {'schedule_meeting', 'update_calendar', 'log_update_crm', 'crm_update',
-                      'update_performance', 'export_report', 'push_forward'}
+                      'update_performance', 'export_report', 'push_forward', 'research_web'}
     if best_score >= 1 and best_intent in action_intents:
         return best_intent
 
@@ -2409,6 +2414,254 @@ def _predict_outcomes(group):
         'recommended_channel': rel['communication_style']['preferred_channel'],
         'best_timing': 'morning' if days_silent > 7 else 'anytime',
     }
+
+
+# ---------------------------------------------------------------------------
+# Web Research — search the web and synthesize findings + outreach
+# ---------------------------------------------------------------------------
+
+def _research_web(query):
+    """
+    Search the web for public info on a person/company, synthesize findings,
+    and generate 3 personalized intro message variants.
+    Returns: { query, summary, key_facts, sources, intros } or None on failure.
+    """
+    import logging
+    logger = logging.getLogger('leo')
+
+    api_key = os.getenv('ANTHROPIC_API_KEY')
+    if not api_key:
+        return None
+
+    search_prompt = f"""Search the web for public information about: {query}
+
+Look for:
+- Professional background and current role/title
+- Company overview, size, focus areas
+- Recent news, press releases, or public statements
+- LinkedIn profile details (title, company, location)
+- Industry involvement, conferences, publications
+- Notable achievements or projects
+
+For each source found, note the URL and what you learned from it.
+
+Then synthesize your findings into a structured JSON response:
+{{
+  "query": "{query}",
+  "summary": "2-3 sentence overview of who/what this is",
+  "key_facts": [
+    "Fact 1 with source attribution",
+    "Fact 2 with source attribution",
+    "Fact 3 with source attribution"
+  ],
+  "sources": [
+    {{"title": "Page title", "url": "https://...", "snippet": "What was found here"}},
+    {{"title": "Page title", "url": "https://...", "snippet": "What was found here"}}
+  ],
+  "confidence": "high | medium | low",
+  "gaps": "What information was NOT found or could not be verified"
+}}
+
+RULES:
+- Only include facts you actually found in search results
+- Cite the source for every fact
+- If little info is found, say so honestly in the summary and set confidence to "low"
+- Do not infer private details (home address, personal phone, etc.)
+- Do not speculate — clearly separate confirmed facts from uncertain information
+- Return ONLY the JSON object, no other text"""
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            tools=[
+                {
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": 5
+                }
+            ],
+            messages=[{"role": "user", "content": search_prompt}]
+        )
+
+        response_text = ""
+        for block in message.content:
+            if block.type == "text":
+                response_text += block.text
+
+        json_start = response_text.find('{')
+        json_end = response_text.rfind('}') + 1
+        if json_start >= 0 and json_end > json_start:
+            research = json.loads(response_text[json_start:json_end])
+            research.setdefault('query', query)
+            research.setdefault('summary', '')
+            research.setdefault('key_facts', [])
+            research.setdefault('sources', [])
+            research.setdefault('confidence', 'low')
+            research.setdefault('gaps', '')
+            logger.info(f"[Leo] Web research complete: query={query}, sources={len(research['sources'])}, confidence={research['confidence']}")
+            return research
+        else:
+            logger.warning(f"[Leo] Web research returned no JSON for: {query}")
+            return {
+                'query': query,
+                'summary': response_text[:500] if response_text else 'No results found.',
+                'key_facts': [],
+                'sources': [],
+                'confidence': 'low',
+                'gaps': 'Could not parse structured results from web search.',
+            }
+
+    except Exception as e:
+        logger.error(f"[Leo] Web research error for '{query}': {e}")
+        return None
+
+
+def _generate_research_intros(query, research):
+    """
+    Generate 3 personalized intro messages based on web research findings.
+    Returns list of 3 dicts: [{label, channel, subject, body}, ...]
+    """
+    if not research or not research.get('key_facts'):
+        return _generate_generic_intros(query)
+
+    name_parts = query.split(',')
+    person_name = name_parts[0].strip()
+    company_name = name_parts[1].strip() if len(name_parts) > 1 else ''
+
+    facts_text = '\n'.join(f'- {f}' for f in research['key_facts'][:6])
+    summary = research.get('summary', '')
+
+    api_key = os.getenv('ANTHROPIC_API_KEY')
+    if not api_key:
+        return _generate_generic_intros(query)
+
+    prompt = f"""Based on this research about {person_name}{' at ' + company_name if company_name else ''}, write 3 personalized intro messages.
+
+RESEARCH:
+{summary}
+
+KEY FACTS:
+{facts_text}
+
+Generate exactly 3 variants as a JSON array:
+[
+  {{
+    "label": "LinkedIn Intro",
+    "channel": "linkedin",
+    "subject": "",
+    "body": "Short LinkedIn connection request message (under 300 chars). Reference something specific from the research."
+  }},
+  {{
+    "label": "Warm Email",
+    "channel": "email",
+    "subject": "Email subject line",
+    "body": "Professional warm email (3-4 sentences). Reference a specific fact from the research. Include a clear ask."
+  }},
+  {{
+    "label": "Direct Business",
+    "channel": "email",
+    "subject": "Email subject line",
+    "body": "Direct business intro (2-3 sentences). Lead with value proposition relevant to their role/company. Be specific, not generic."
+  }}
+]
+
+RULES:
+- Reference actual researched facts, not generic platitudes
+- Keep LinkedIn under 300 characters
+- Each message must feel personalized to this specific person
+- Do not make up facts not in the research
+- Return ONLY the JSON array"""
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        reply = resp.content[0].text if resp.content else ''
+        json_start = reply.find('[')
+        json_end = reply.rfind(']') + 1
+        if json_start >= 0 and json_end > json_start:
+            intros = json.loads(reply[json_start:json_end])
+            if isinstance(intros, list) and len(intros) >= 1:
+                return intros[:3]
+    except Exception:
+        pass
+
+    return _generate_generic_intros(query)
+
+
+def _generate_generic_intros(query):
+    """Fallback intros when research data is insufficient."""
+    name_parts = query.split(',')
+    person_name = name_parts[0].strip()
+    company_name = name_parts[1].strip() if len(name_parts) > 1 else 'your company'
+
+    return [
+        {
+            'label': 'LinkedIn Intro', 'channel': 'linkedin', 'subject': '',
+            'body': f"Hi {person_name}, I came across your profile and would love to connect. I work in real estate capital markets and think there may be some synergy between our work.",
+        },
+        {
+            'label': 'Warm Email', 'channel': 'email',
+            'subject': f"Quick intro — {company_name}",
+            'body': f"Hi {person_name},\n\nI hope this finds you well. I've been following {company_name}'s work and wanted to introduce myself. I focus on capital placement in the BTR/multifamily space and think there could be some interesting alignment.\n\nWould you be open to a brief call this week?",
+        },
+        {
+            'label': 'Direct Business', 'channel': 'email',
+            'subject': f"Capital opportunities — {company_name}",
+            'body': f"Hi {person_name},\n\nI'll keep this brief. We work with institutional capital partners in the BTR and multifamily space and are actively placing deals. Given {company_name}'s focus, I think we should talk.\n\nDo you have 15 minutes this week?",
+        },
+    ]
+
+
+def _build_research_response(query, research, intros):
+    """Build ResearchCard text + card dict from research results and intros."""
+    facts_md = '\n'.join(f'- {f}' for f in research.get('key_facts', []))
+    sources_md = '\n'.join(
+        f'- [{s.get("title", "Source")}]({s["url"]})'
+        for s in research.get('sources', []) if s.get('url')
+    )
+    intro_md = ''
+    for intro in intros:
+        chan_label = intro.get('label', intro.get('channel', ''))
+        subj = f"*Subject:* {intro['subject']}\n" if intro.get('subject') else ''
+        intro_md += f"\n**{chan_label}:**\n{subj}{intro['body']}\n"
+    gaps = research.get('gaps', '')
+    gaps_md = f"\n**Gaps:** {gaps}" if gaps else ''
+    text = (
+        f"**Research: {query}**\n\n"
+        f"{research.get('summary', 'No summary available.')}\n\n"
+        f"**Key Facts:**\n{facts_md or 'Limited information found.'}\n\n"
+        f"**Sources:**\n{sources_md or 'No sources found.'}\n\n"
+        f"**Confidence:** {research.get('confidence', 'low')}{gaps_md}\n\n"
+        f"---\n\n**Suggested Intros:**{intro_md}"
+    )
+    card = {
+        'type': 'ResearchCard',
+        'text': text,
+        'data': {
+            'query': query,
+            'summary': research.get('summary', ''),
+            'key_facts': research.get('key_facts', []),
+            'sources': research.get('sources', []),
+            'confidence': research.get('confidence', 'low'),
+            'gaps': gaps,
+            'intros': intros,
+        },
+        'actions': [
+            {'id': 'copy_linkedin', 'label': 'Copy LinkedIn', 'action': 'copy_text',
+             'params': {'subject': intros[0].get('subject', ''), 'body': intros[0]['body']}},
+            {'id': 'copy_warm', 'label': 'Copy Warm Email', 'action': 'copy_text',
+             'params': {'subject': intros[1].get('subject', ''), 'body': intros[1]['body']}},
+            {'id': 'copy_direct', 'label': 'Copy Direct', 'action': 'copy_text',
+             'params': {'subject': intros[2].get('subject', ''), 'body': intros[2]['body']}},
+        ],
+    }
+    return text, card
 
 
 # ---------------------------------------------------------------------------
@@ -5480,6 +5733,11 @@ def _preprocess_slash(text):
     if cmd == '/automate':
         return '__v7_automate__', extra_ctx
 
+    if cmd == '/research':
+        if arg:
+            return f'__research_web__{arg}', extra_ctx
+        return "Who or what would you like me to research? Use /research [person, company].", extra_ctx
+
     if cmd == '/patterns':
         return '__v9_patterns__', extra_ctx
 
@@ -6159,22 +6417,46 @@ def _generate_fallback_response(user_msg, intent, mode, context_str):
 
 @assistant_bp.route('/chat', methods=['POST'])
 def chat():
+    try:
+        return _chat_inner()
+    except Exception as e:
+        import logging, traceback
+        logging.getLogger('leo').error(f"[Leo] Fatal chat error: {e}\n{traceback.format_exc()}")
+        msg = str(e) or 'Internal server error'
+        return jsonify({
+            'role': 'assistant', 'content': '',
+            'card': {
+                'type': 'ErrorCard',
+                'text': f'Leo encountered an error: {msg}',
+                'data': {'error': msg, 'suggestion': 'Try again or check server logs.'},
+                'actions': [{'id': 'retry', 'label': 'Try Again', 'action': 'retry', 'params': {}}]
+            },
+            'intent': 'error', 'mode': 'execution'
+        })
+
+def _chat_inner():
     data = request.get_json(silent=True) or {}
     messages = data.get('messages', [])
     page_context = data.get('page_context', {})
 
     if not messages:
-        return jsonify({'error': 'No messages provided'}), 400
+        return jsonify({
+            'role': 'assistant', 'content': '',
+            'card': {'type': 'ErrorCard', 'text': 'No messages provided.', 'data': {'error': 'empty_request'}, 'actions': []},
+            'intent': 'error', 'mode': 'execution'
+        }), 400
 
     api_key = os.getenv('ANTHROPIC_API_KEY')
     if not api_key:
+        import logging
+        logging.getLogger('leo').error("[Leo] ANTHROPIC_API_KEY not set — chat disabled")
         return jsonify({
             'role': 'assistant', 'content': '',
             'card': {
                 'type': 'ErrorCard',
-                'text': 'AI assistant is not configured.',
+                'text': 'Leo API configuration missing: ANTHROPIC_API_KEY is not set.',
                 'data': {'error': 'ANTHROPIC_API_KEY not set',
-                         'suggestion': 'Set it in your environment variables.'},
+                         'suggestion': 'Set ANTHROPIC_API_KEY in your environment variables or Railway config.'},
                 'actions': []
             }
         })
@@ -6456,6 +6738,25 @@ def chat():
         _persist_chat(last_msg, card, 'patterns', 'coach')
         return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'patterns', 'mode': 'coach'})
 
+    # Web research intercept
+    if processed_msg.startswith('__research_web__'):
+        query = processed_msg.replace('__research_web__', '').strip()
+        if query:
+            research = _research_web(query)
+            if research:
+                intros = _generate_research_intros(query, research)
+                text, card = _build_research_response(query, research, intros)
+                _persist_chat(last_msg, card, 'research_web', 'analyst')
+                return jsonify({'role': 'assistant', 'content': text, 'card': card, 'intent': 'research_web', 'mode': 'analyst'})
+            else:
+                card = {
+                    'type': 'ErrorCard',
+                    'text': f'Web research failed for "{query}". Check that ANTHROPIC_API_KEY is set.',
+                    'data': {'error': 'research_failed', 'query': query},
+                    'actions': [{'id': 'retry_research', 'label': 'Try Again', 'action': 'retry', 'params': {}}],
+                }
+                return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'research_web', 'mode': 'analyst'})
+
     # Calendar view intercept
     if processed_msg == '__calendar_view__':
         pending = fetch_all(
@@ -6515,7 +6816,7 @@ def chat():
         return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'schedule_meeting', 'mode': 'execution'})
 
     # V16: Generalized pending action approval — execute stored payload on approval
-    if _pending_action and _is_approval(last_msg):
+    if _pending_action_cache and _is_approval(last_msg):
         action = _consume_pending_action()
         if action:
             result = _execute_pending_action(action)
@@ -6613,6 +6914,30 @@ def chat():
         _persist_chat(last_msg, fallback_card, 'schedule_meeting', 'execution')
         return jsonify({'role': 'assistant', 'content': fallback_card['text'], 'card': fallback_card,
                         'intent': 'schedule_meeting', 'mode': 'execution'})
+
+    # Web research intent — extract query and redirect to research handler
+    if intent == 'research_web' and not processed_msg.startswith('__'):
+        query = re.sub(
+            r'\b(research|look up|find out about|google|search for|search online|'
+            r'web search|dig into|background on|intel on|look into|and write me an? intro'
+            r'|and write an? intro|and draft|write me|intro message|outreach)\b',
+            '', last_msg, flags=re.IGNORECASE
+        ).strip(' .,!?')
+        if query:
+            research = _research_web(query)
+            if research:
+                intros = _generate_research_intros(query, research)
+                text, card = _build_research_response(query, research, intros)
+                _persist_chat(last_msg, card, 'research_web', 'analyst')
+                return jsonify({'role': 'assistant', 'content': text, 'card': card, 'intent': 'research_web', 'mode': 'analyst'})
+            else:
+                card = {
+                    'type': 'ErrorCard',
+                    'text': f'Web research failed for "{query}". Check that ANTHROPIC_API_KEY is set.',
+                    'data': {'error': 'research_failed', 'query': query},
+                    'actions': [{'id': 'retry_research', 'label': 'Try Again', 'action': 'retry', 'params': {}}],
+                }
+                return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'research_web', 'mode': 'analyst'})
 
     # V16: Draft outreach intercept — generate 3 variants locally when contact found
     if intent == 'draft_outreach':
