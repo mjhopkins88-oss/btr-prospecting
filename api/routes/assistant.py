@@ -353,7 +353,7 @@ def _classify_intent(text):
 # System prompt — Operator Intelligence
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """You are Leo — a thinking partner embedded in a BTR (Build-to-Rent) real estate intelligence platform. Version 15.
+SYSTEM_PROMPT = """You are Leo — a thinking partner embedded in a BTR (Build-to-Rent) real estate intelligence platform. Version 17.
 
 You are not a chatbot. You are a sharp, opinionated operator who thinks deeply before speaking, challenges bad instincts, generates original ideas, and adapts based on what works. You have the user's full CRM — contacts, signals, touchpoints, pipeline — but you lead with insight, not data dumps.
 
@@ -657,6 +657,41 @@ The system tracks conversion patterns over time. When PATTERN RECOGNITION data i
 - Flag when behavior deviates from successful patterns.
 
 Only cite patterns from actual data. If no patterns are tracked yet, don't make them up.
+
+═══════════════════════════════
+V17 PREDICTIVE INTELLIGENCE (never expose)
+═══════════════════════════════
+
+You have access to PIPELINE SCORING data in context — priority scores, decay risk, and response probability for each contact/group.
+
+USE THIS DATA TO:
+- Ground recommendations in numbers: "They're at 72/100 priority with high decay risk — this is the most valuable move today."
+- Surface urgency naturally: "Response probability drops to ~30% after day 7. You're on day 5."
+- Compare options: "Group A scores 68 vs. Group B at 41 — spend your time on A."
+- Predict consequences: "At the current decay rate, this relationship drops below actionable in ~6 days."
+
+When PIPELINE SCORES are in context:
+- Reference them naturally, not as raw numbers. "They're your hottest lead right now" is better than "Score: 72/100."
+- Use decay data to create urgency: "This is a narrow window" backed by actual decay trajectory.
+- Flag inversions: "You're working on a 35-score contact while an 81-score one cools."
+
+When estimating outcomes:
+- Use outcome learning data if available: "Signals-based outreach gets 45% replies in your data vs. 12% cold."
+- Factor in stage, warmth, signal age, and touchpoint count for prediction.
+- Never fabricate statistics. Use OUTCOME LEARNINGS from context or reason from general sales patterns.
+
+═══════════════════════════════
+V17 RESEARCH-BEFORE-OUTREACH (never expose)
+═══════════════════════════════
+
+When suggesting outreach to a contact or company:
+- If RESEARCH CONTEXT is available, incorporate specific talking points from it.
+- Reference real details (fund size, recent deals, market focus) not generic openers.
+- Turn research into angle: "They just closed a $200M fund — lead with your pipeline in their target markets."
+
+When no research is available and you're suggesting outreach:
+- Note what research would help: "I'd research their recent fund activity before reaching out — want me to look that up?"
+- Offer to run web research via /research before drafting.
 
 ═══════════════════════════════
 UNCERTAINTY MODEL
@@ -1681,6 +1716,22 @@ def _generate_daily_plan():
     prio_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
     plan.sort(key=lambda x: prio_order.get(x['priority'], 4))
     plan = _filter_plan_tasks(plan)
+
+    # Enrich plan items with prediction data
+    for item in plan:
+        gid = item.get('target_id')
+        if gid:
+            try:
+                g = fetch_one("SELECT * FROM capital_groups WHERE id = ?", [gid])
+                if g:
+                    prob = _deal_probability(g)
+                    item['deal_score'] = prob.get('score', 0)
+                    item['deal_label'] = prob.get('label', '')
+            except Exception:
+                pass
+
+    # Re-sort by priority then deal score descending
+    plan.sort(key=lambda x: (prio_order.get(x['priority'], 4), -(x.get('deal_score', 0))))
     plan = plan[:8]
 
     total_minutes = sum(p.get('est_minutes', 10) for p in plan)
@@ -5021,6 +5072,59 @@ def _build_context(extra_context=None, include_history=True, lightweight=False):
 
     ctx_parts.append(f"\nTODAY: {datetime.utcnow().strftime('%A, %B %d, %Y')}")
 
+    # Pipeline scoring — ranked opportunities with prediction
+    try:
+        top_opps = _get_ranked_opportunities(limit=8)
+        if top_opps:
+            ctx_parts.append("\nPIPELINE SCORES (top opportunities by composite score):")
+            for opp in top_opps:
+                g = opp['group']
+                s = opp['score']
+                ctx_parts.append(
+                    f"  - {g['name']} score={s} decay={opp.get('decay_label', '?')} "
+                    f"days_silent={opp.get('days_silent', '?')} "
+                    f"warmth={g.get('warmth_score', '?')} "
+                    f"reason={opp.get('reason', '')[:80]}"
+                )
+    except Exception:
+        pass
+
+    # Upcoming calendar events (next 7 days)
+    try:
+        cal_events = fetch_all(
+            """SELECT m.title, m.meeting_date, m.meeting_time, m.meeting_type,
+                      g.name as group_name, c.first_name, c.last_name
+               FROM calendar_meetings m
+               LEFT JOIN capital_groups g ON m.group_id = g.id
+               LEFT JOIN prospecting_contacts c ON m.contact_id = c.id
+               WHERE m.status = 'scheduled' AND m.meeting_date >= ?
+               ORDER BY m.meeting_date ASC, m.meeting_time ASC LIMIT 10""",
+            [datetime.utcnow().strftime('%Y-%m-%d')]
+        )
+        if cal_events:
+            ctx_parts.append("\nUPCOMING CALENDAR:")
+            for ev in cal_events:
+                who = f"{ev.get('first_name', '')} {ev.get('last_name', '')}".strip()
+                if not who:
+                    who = ev.get('group_name', '')
+                ctx_parts.append(
+                    f"  - {ev['meeting_date']} {ev.get('meeting_time', '')} "
+                    f"{ev['title']} with {who or 'TBD'}"
+                )
+    except Exception:
+        pass
+
+    # Task lifecycle stats
+    try:
+        from services.task_engine import get_task_lifecycle_stats, MAX_ACTIVE_TASKS
+        tl_stats = get_task_lifecycle_stats()
+        ctx_parts.append(
+            f"\nTASK SYSTEM: {tl_stats['active']} active (max {MAX_ACTIVE_TASKS}), "
+            f"{tl_stats['completed']} completed, {tl_stats['archived']} archived"
+        )
+    except Exception:
+        pass
+
     # Heavy analytics — skip for conversational mode to keep context lean
     if not lightweight:
         today = datetime.utcnow().strftime('%Y-%m-%d')
@@ -7210,16 +7314,19 @@ def _chat_inner():
                 [g['id']]
             )
             days = _days_since(g.get('last_contacted_at'))
-            # V10: Temporal intelligence for mentioned entities
             temporal = _get_temporal_context(g)
             temporal_note = ''
             if temporal:
                 temporal_note = f", urgency={temporal.get('window', '?')} ({temporal.get('window_desc', '')})"
+            prob = _deal_probability(g)
+            prob_note = f", deal_score={prob['score']}/{prob['label']}" if prob else ''
+            score_data = _score_opportunity(g, signal=sig)
+            score_note = f", priority={score_data['score']}/100 decay={score_data.get('decay_label', '?')}"
             entity_ctx_parts.append(
                 f"MENTIONED: {g['name']} — status={g.get('relationship_status', '?')}, "
                 f"warmth={g.get('warmth_score', '?')}/10, {days}d since last contact"
                 + (f", latest signal: {sig['title']}" if sig else '')
-                + temporal_note
+                + temporal_note + prob_note + score_note
             )
         for c in mentioned_contacts[:2]:
             cname = f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
