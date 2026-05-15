@@ -1376,6 +1376,8 @@ def init_db():
     _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'generated_reason', 'TEXT')
     _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'next_best_action_type', 'TEXT')
     _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'updated_at', 'TIMESTAMP')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'last_activity_at', 'TIMESTAMP')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'source', 'TEXT')
 
     c.execute('''
         CREATE TABLE IF NOT EXISTS prospecting_contacts (
@@ -2506,6 +2508,19 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+    # Run one-time task lifecycle cleanup after schema is ready
+    try:
+        from services.task_engine import cleanup_existing_bloat
+        result = cleanup_existing_bloat()
+        if any(v > 0 for v in result.values()):
+            import logging
+            logging.getLogger('task_engine').info(
+                'Task bloat cleanup: invalid=%d, duplicates=%d, stale=%d',
+                result['invalid_removed'], result['duplicates_merged'], result['stale_archived']
+            )
+    except Exception:
+        pass
 
 init_db()
 

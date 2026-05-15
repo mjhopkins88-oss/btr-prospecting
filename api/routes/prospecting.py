@@ -15,7 +15,8 @@ from services.task_engine import (
     get_groups_list, get_sequences_list, get_feed,
     complete_task, run_daily_scheduler,
     rule_new_group, rule_meeting_followup, rule_proposal_followup,
-    rule_signal, get_todays_focus, get_followup_queue
+    rule_signal, get_todays_focus, get_followup_queue,
+    get_task_lifecycle_stats, run_task_maintenance, cleanup_existing_bloat,
 )
 from services.prospecting_rules import (
     rule_initial_followup, rule_task_complete, compute_next_best_action,
@@ -144,6 +145,24 @@ def list_tasks():
 def run_scheduler():
     result = run_daily_scheduler()
     return jsonify(result)
+
+
+@prospecting_bp.route('/task-stats', methods=['GET'])
+def task_stats():
+    return jsonify(get_task_lifecycle_stats())
+
+
+@prospecting_bp.route('/maintenance/archive', methods=['POST'])
+def maintenance_archive():
+    result = run_task_maintenance()
+    return jsonify({'success': True, **result})
+
+
+@prospecting_bp.route('/maintenance/cleanup', methods=['POST'])
+def maintenance_cleanup():
+    result = cleanup_existing_bloat()
+    stats = get_task_lifecycle_stats()
+    return jsonify({'success': True, 'cleanup': result, 'stats': stats})
 
 
 @prospecting_bp.route('/trigger/new-group', methods=['POST'])
