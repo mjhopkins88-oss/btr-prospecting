@@ -1886,7 +1886,16 @@ function BTRAssistantChat(props) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages: newMsgs, page_context: pageCtx })
     })
-      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        if (!r.ok) {
+          return r.text().then(function(body) {
+            var detail = 'Server error (HTTP ' + r.status + ')';
+            try { var j = JSON.parse(body); if (j.card && j.card.text) detail = j.card.text; else if (j.error) detail = j.error; } catch(e) {}
+            throw new Error(detail);
+          });
+        }
+        return r.json();
+      })
       .then(function(d) {
         var card = d.card || null;
 
@@ -1913,10 +1922,12 @@ function BTRAssistantChat(props) {
         }
         setLoading(false);
       })
-      .catch(function() {
+      .catch(function(err) {
+        var errMsg = (err && err.message) ? err.message : 'Connection error — check your network.';
         setMessages(function(prev) {
-          return prev.concat([{ role: 'assistant', content: 'Connection error.', card: {
-            type: 'ErrorCard', text: 'Connection error.', data: { error: 'Network', suggestion: 'Check your connection.' }, actions: []
+          return prev.concat([{ role: 'assistant', content: errMsg, card: {
+            type: 'ErrorCard', text: errMsg, data: { error: errMsg, suggestion: 'Try again or check server logs.' },
+            actions: [{ id: 'retry', label: 'Try Again', action: 'retry', params: {} }]
           }}]);
         });
         setLoading(false);

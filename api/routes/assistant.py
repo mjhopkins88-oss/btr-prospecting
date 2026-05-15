@@ -6159,22 +6159,46 @@ def _generate_fallback_response(user_msg, intent, mode, context_str):
 
 @assistant_bp.route('/chat', methods=['POST'])
 def chat():
+    try:
+        return _chat_inner()
+    except Exception as e:
+        import logging, traceback
+        logging.getLogger('leo').error(f"[Leo] Fatal chat error: {e}\n{traceback.format_exc()}")
+        msg = str(e) or 'Internal server error'
+        return jsonify({
+            'role': 'assistant', 'content': '',
+            'card': {
+                'type': 'ErrorCard',
+                'text': f'Leo encountered an error: {msg}',
+                'data': {'error': msg, 'suggestion': 'Try again or check server logs.'},
+                'actions': [{'id': 'retry', 'label': 'Try Again', 'action': 'retry', 'params': {}}]
+            },
+            'intent': 'error', 'mode': 'execution'
+        })
+
+def _chat_inner():
     data = request.get_json(silent=True) or {}
     messages = data.get('messages', [])
     page_context = data.get('page_context', {})
 
     if not messages:
-        return jsonify({'error': 'No messages provided'}), 400
+        return jsonify({
+            'role': 'assistant', 'content': '',
+            'card': {'type': 'ErrorCard', 'text': 'No messages provided.', 'data': {'error': 'empty_request'}, 'actions': []},
+            'intent': 'error', 'mode': 'execution'
+        }), 400
 
     api_key = os.getenv('ANTHROPIC_API_KEY')
     if not api_key:
+        import logging
+        logging.getLogger('leo').error("[Leo] ANTHROPIC_API_KEY not set — chat disabled")
         return jsonify({
             'role': 'assistant', 'content': '',
             'card': {
                 'type': 'ErrorCard',
-                'text': 'AI assistant is not configured.',
+                'text': 'Leo API configuration missing: ANTHROPIC_API_KEY is not set.',
                 'data': {'error': 'ANTHROPIC_API_KEY not set',
-                         'suggestion': 'Set it in your environment variables.'},
+                         'suggestion': 'Set ANTHROPIC_API_KEY in your environment variables or Railway config.'},
                 'actions': []
             }
         })
@@ -6515,7 +6539,7 @@ def chat():
         return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'schedule_meeting', 'mode': 'execution'})
 
     # V16: Generalized pending action approval — execute stored payload on approval
-    if _pending_action and _is_approval(last_msg):
+    if _pending_action_cache and _is_approval(last_msg):
         action = _consume_pending_action()
         if action:
             result = _execute_pending_action(action)
