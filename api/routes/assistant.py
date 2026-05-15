@@ -1,9 +1,10 @@
 """
-API Routes: AI Assistant — Proactive Operator Intelligence System (V12).
+API Routes: AI Assistant — Proactive Operator Intelligence System (V13).
 
 Core intelligence layer: daily plans, prioritized execution, proactive insights,
 sprint mode, behavior learning, multi-step action chains, signal intelligence,
-advanced cognition, BTR domain intelligence, knowledge compounding.
+advanced cognition, BTR domain intelligence, knowledge compounding,
+adaptive intelligence, data-driven learning, synthesis engine.
 """
 from flask import Blueprint, request, jsonify
 from shared.database import fetch_all, fetch_one, execute, new_id
@@ -739,6 +740,47 @@ Track your own recommendation quality through outcomes:
 4. When the user's behavior contradicts your advice → investigate: maybe they know something you don't
 
 Calibrate over time: if your follow-up suggestions get acted on 80% of the time but your outreach drafts only 30%, focus on improving draft quality or adjust your approach.
+
+═══════════════════════════════
+SYNTHESIS INTELLIGENCE
+═══════════════════════════════
+
+Don't just report data — synthesize it. Combine multiple inputs to generate NEW insights:
+
+1. SIGNAL + CONTACT + TIMING → "Meridian just closed Fund IV (signal) and Sarah Chen hasn't been contacted in 12d (contact). They're allocating now. This is a 48-hour window."
+2. PATTERN + BEHAVIOR → "Your email reply rate is 35% but LinkedIn is 0%. You're over-indexed on email — try mixing channels."
+3. OUTCOME + CONTEXT → "Signal-based outreach gets 2x replies in your data. This signal is 2 days old. Lead with it."
+4. MOMENTUM + STAGE → "3 touchpoints in 7 days with Apex Capital — they're accelerating. Push for a meeting now, not another email."
+
+When SYNTHESIS INSIGHTS or OUTCOME LEARNINGS data is provided in context, use it to make recommendations data-driven rather than intuition-based.
+
+═══════════════════════════════
+CROSS-DOMAIN THINKING
+═══════════════════════════════
+
+Apply principles from psychology, sales science, and behavioral economics:
+
+Reciprocity: Give value before asking. Share a market insight, intro, or data point before requesting a meeting.
+Social proof: "Other LPs in your segment are actively deploying in BTR" — framing that reduces perceived risk.
+Loss aversion: "If you wait, this allocation window closes" is more motivating than "If you act, you might win."
+Commitment escalation: Small yeses lead to big yeses. Don't ask for a $50M commitment — ask for 15 minutes.
+Timing bias: People are more receptive Monday-Wednesday mornings. Friday afternoons are dead.
+Peak-end rule: The last interaction shapes the relationship. Make every touchpoint end with a clear, valuable next step.
+
+Apply these naturally. Never label them ("I'm using reciprocity here"). Just build them into recommendations and outreach drafts.
+
+═══════════════════════════════
+ADAPTIVE STRATEGY
+═══════════════════════════════
+
+Evolve recommendations based on changing conditions:
+
+1. When new signals appear → reprioritize: "This changes the picture. Move [company] up — fresh signal outweighs your existing queue."
+2. When performance shifts → adjust: "Reply rates dropped 20% this week. Let's look at what changed — maybe outreach volume is too high."
+3. When a contact goes silent → escalate: "3 follow-ups with no reply. Time to switch channels or find a different contact."
+4. When outcomes contradict patterns → update: "LinkedIn is outperforming email for you now — the pattern has shifted."
+
+Don't lock into a strategy. Reference OUTCOME LEARNINGS data when available to ground adaptations in real results.
 
 ═══════════════════════════════
 RESPONSE QUALITY GATE
@@ -2423,6 +2465,64 @@ def _generate_batch_drafts(count=5):
             signal_ref = signal.get('title', '')
 
         draft_id = f"draft_{item['id']}"
+        first_name = contact_name.split()[0] if contact_name else 'there'
+
+        # V13: Generate contextual hook based on available data
+        hook = ''
+        if signal and signal.get('summary'):
+            hook = f"I saw that {signal['summary'][:80].rstrip('.')} — "
+        elif signal_ref:
+            hook = f"I noticed {signal_ref.lower()} — "
+
+        # V13: Stage-aware messaging
+        stage = ''
+        if gid:
+            g_row = fetch_one("SELECT relationship_status FROM capital_groups WHERE id = ?", [gid])
+            stage = (g_row.get('relationship_status', '') if g_row else '').lower()
+
+        if stage in ('new', 'cold', 'contacted'):
+            subject = f"Quick question — {item['target']}"
+            body = (
+                f"Hi {first_name},\n\n"
+                + (hook if hook else f"I've been following {item['target']}'s activity in the BTR space — ")
+                + f"and wanted to see if there's an opportunity to connect.\n\n"
+                f"We're actively deploying in markets that may align with your strategy. "
+                f"Would you have 15 minutes this week for a quick intro call?\n\nBest regards"
+            )
+        elif stage in ('warm', 'active'):
+            last_tp = fetch_one(
+                "SELECT summary, channel FROM prospecting_touchpoints WHERE group_id = ? ORDER BY occurred_at DESC LIMIT 1",
+                [gid]
+            ) if gid else None
+            last_ref = f"Since our last conversation" if last_tp else "Following up"
+            subject = f"Next steps — {item['target']}"
+            body = (
+                f"Hi {first_name},\n\n"
+                f"{last_ref}, "
+                + (hook if hook else "I wanted to share a few updates. ")
+                + f"I'd love to get your thoughts on specific deal parameters "
+                f"that would make sense for {item['target']}.\n\n"
+                f"Do you have time for a call this week? I can share some "
+                f"current opportunities that match your criteria.\n\nBest"
+            )
+        elif stage in ('engaged', 'closing'):
+            subject = f"Following up — {item['target']}"
+            body = (
+                f"Hi {first_name},\n\n"
+                + (hook if hook else "Checking in on our conversation — ")
+                + f"I have some updates on the deal parameters we discussed. "
+                f"Want to set up a call to walk through the details?\n\n"
+                f"Happy to work around your schedule.\n\nBest"
+            )
+        else:
+            subject = f"Following up — {item['target']}"
+            body = (
+                f"Hi {first_name},\n\n"
+                + (hook if hook else f"I wanted to reach out regarding {item['target']}. ")
+                + f"I'd love to find time to connect and explore how we might work together.\n\n"
+                f"Would you have 15 minutes this week?\n\nBest regards"
+            )
+
         draft = {
             'id': draft_id,
             'rank': item['rank'],
@@ -2435,14 +2535,8 @@ def _generate_batch_drafts(count=5):
             'probability': item['probability'],
             'priority_score': item['priority_score'],
             'signal_ref': signal_ref,
-            'subject': f"Following up — {item['target']}",
-            'body': (
-                f"Hi {contact_name.split()[0] if contact_name else 'there'},\n\n"
-                f"I wanted to follow up regarding {item['target']}. "
-                + (f"I noticed {signal_ref.lower()} — " if signal_ref else '')
-                + "I'd love to find a time to connect and discuss how we might work together.\n\n"
-                f"Would you have 15 minutes this week?\n\nBest regards"
-            ),
+            'subject': subject,
+            'body': body,
             'status': 'pending',
         }
         drafts.append(draft)
@@ -3261,6 +3355,362 @@ def _scan_for_new_patterns():
 
 
 # ---------------------------------------------------------------------------
+# V13: Synthesis engine — cross-reference signals + contacts + touchpoints
+# ---------------------------------------------------------------------------
+
+def _synthesize_cross_insights():
+    """
+    Combine signals, contact behavior, and touchpoint patterns to generate
+    compound insights that none of those data sources reveal alone.
+    Returns context string for system prompt.
+    """
+    insights = []
+
+    try:
+        # 1. Signal-to-action gap: signals detected but no follow-up touchpoint
+        unactioned = fetch_all(
+            """SELECT s.title, s.importance, s.detected_at, g.name as group_name,
+                      g.warmth_score, g.id as gid
+               FROM prospecting_signals s
+               JOIN capital_groups g ON s.group_id = g.id
+               WHERE s.detected_at > ?
+                 AND NOT EXISTS (
+                     SELECT 1 FROM prospecting_touchpoints t
+                     WHERE t.group_id = s.group_id AND t.occurred_at > s.detected_at
+                 )
+               ORDER BY s.importance DESC LIMIT 5""",
+            [(datetime.utcnow() - timedelta(days=14)).isoformat()]
+        )
+        if unactioned:
+            names = [f"{u['group_name']} (imp {u.get('importance', '?')})" for u in unactioned[:3]]
+            insights.append(
+                f"SIGNAL-ACTION GAP: {len(unactioned)} signals unactioned in 14d — "
+                f"top: {', '.join(names)}. These are decaying opportunities."
+            )
+
+        # 2. Momentum clusters: groups where multiple positive signals coincide
+        multi_signal = fetch_all(
+            """SELECT g.name, g.id, g.warmth_score, COUNT(s.id) as sig_count
+               FROM prospecting_signals s
+               JOIN capital_groups g ON s.group_id = g.id
+               WHERE s.detected_at > ?
+               GROUP BY g.id
+               HAVING COUNT(s.id) >= 2
+               ORDER BY COUNT(s.id) DESC LIMIT 3""",
+            [(datetime.utcnow() - timedelta(days=14)).isoformat()]
+        )
+        if multi_signal:
+            for ms in multi_signal:
+                insights.append(
+                    f"MOMENTUM CLUSTER: {ms['name']} has {ms['sig_count']} signals "
+                    f"in 14d (warmth {ms.get('warmth_score', '?')}/10) — "
+                    f"high-probability outreach window"
+                )
+
+        # 3. Engagement velocity: contacts with accelerating touchpoint frequency
+        velocity = fetch_all(
+            """SELECT g.name, g.id, g.warmth_score,
+                      COUNT(CASE WHEN t.occurred_at > ? THEN 1 END) as recent,
+                      COUNT(CASE WHEN t.occurred_at > ? AND t.occurred_at <= ? THEN 1 END) as prior
+               FROM prospecting_touchpoints t
+               JOIN capital_groups g ON t.group_id = g.id
+               GROUP BY g.id
+               HAVING recent > prior AND recent >= 2
+               ORDER BY recent DESC LIMIT 3""",
+            [
+                (datetime.utcnow() - timedelta(days=7)).isoformat(),
+                (datetime.utcnow() - timedelta(days=14)).isoformat(),
+                (datetime.utcnow() - timedelta(days=7)).isoformat(),
+            ]
+        )
+        if velocity:
+            for v in velocity:
+                insights.append(
+                    f"ACCELERATING: {v['name']} — {v['recent']} touchpoints this week "
+                    f"vs {v['prior']} last week. Capitalize on momentum."
+                )
+
+        # 4. Silent high-warmth: warm contacts going dark (signal of disengagement)
+        silent_warm = fetch_all(
+            """SELECT name, warmth_score, last_contacted_at, relationship_status
+               FROM capital_groups
+               WHERE warmth_score >= 7
+                 AND last_contacted_at < ?
+                 AND relationship_status NOT IN ('dormant', 'lost', 'dead')
+               ORDER BY warmth_score DESC LIMIT 3""",
+            [(datetime.utcnow() - timedelta(days=10)).isoformat()]
+        )
+        if silent_warm:
+            for sw in silent_warm:
+                days = _days_since(sw.get('last_contacted_at'))
+                insights.append(
+                    f"DECAY RISK: {sw['name']} (warmth {sw['warmth_score']}/10) — "
+                    f"{days}d silent. Relationship is cooling — re-engage before trust erodes."
+                )
+
+        # 5. Channel-stage mismatch: using wrong channel for stage
+        channel_mismatch = fetch_all(
+            """SELECT g.name, g.relationship_status, t.channel,
+                      COUNT(*) as cnt
+               FROM prospecting_touchpoints t
+               JOIN capital_groups g ON t.group_id = g.id
+               WHERE t.occurred_at > ?
+               GROUP BY g.id, t.channel
+               ORDER BY cnt DESC LIMIT 10""",
+            [(datetime.utcnow() - timedelta(days=30)).isoformat()]
+        )
+        email_only_advanced = []
+        for cm in (channel_mismatch or []):
+            if cm.get('relationship_status') in ('active', 'engaged', 'closing') \
+               and cm.get('channel') == 'email' and cm.get('cnt', 0) >= 3:
+                email_only_advanced.append(cm['name'])
+        if email_only_advanced:
+            insights.append(
+                f"CHANNEL UPGRADE: {', '.join(email_only_advanced[:2])} are at advanced stage "
+                f"but only using email — consider calls or meetings to deepen."
+            )
+
+    except Exception:
+        pass
+
+    if not insights:
+        return ""
+
+    return "SYNTHESIS INSIGHTS:\n" + "\n".join(f"  - {i}" for i in insights[:6])
+
+
+# ---------------------------------------------------------------------------
+# V13: Outcome learning — track actions → results to learn what works
+# ---------------------------------------------------------------------------
+
+def _record_outcome(action_type, channel, group_id, contact_id=None,
+                    signal_used=False, signal_age=None, outcome='unknown',
+                    outcome_detail=None):
+    """Record an action outcome for learning."""
+    try:
+        tp_count = 0
+        warmth = 0
+        stage = ''
+        if group_id:
+            g = fetch_one("SELECT warmth_score, relationship_status FROM capital_groups WHERE id = ?", [group_id])
+            if g:
+                warmth = g.get('warmth_score', 0)
+                stage = g.get('relationship_status', '')
+            tp_row = fetch_one(
+                "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE group_id = ?", [group_id]
+            )
+            tp_count = tp_row['cnt'] if tp_row else 0
+
+        execute(
+            """INSERT INTO leo_outcome_log
+               (id, action_type, channel, group_id, contact_id, signal_used,
+                signal_age_days, touchpoint_count_at_action, warmth_at_action,
+                stage_at_action, outcome, outcome_detail)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [new_id(), action_type, channel, group_id, contact_id,
+             1 if signal_used else 0, signal_age, tp_count, warmth, stage,
+             outcome, outcome_detail]
+        )
+    except Exception:
+        pass
+
+
+def _detect_outreach_outcomes():
+    """Scan for outcomes of past outreach by checking for inbound replies after outbound touchpoints."""
+    try:
+        recent_outbound = fetch_all(
+            """SELECT t.id, t.group_id, t.contact_id, t.channel, t.occurred_at
+               FROM prospecting_touchpoints t
+               WHERE t.direction = 'outbound' AND t.occurred_at > ?
+               ORDER BY t.occurred_at DESC LIMIT 30""",
+            [(datetime.utcnow() - timedelta(days=30)).isoformat()]
+        )
+        for ob in (recent_outbound or []):
+            already = fetch_one(
+                "SELECT id FROM leo_outcome_log WHERE group_id = ? AND action_type = 'outreach' AND created_at > ? LIMIT 1",
+                [ob['group_id'], ob['occurred_at']]
+            )
+            if already:
+                continue
+
+            reply = fetch_one(
+                """SELECT id FROM prospecting_touchpoints
+                   WHERE group_id = ? AND direction = 'inbound' AND occurred_at > ?
+                   LIMIT 1""",
+                [ob['group_id'], ob['occurred_at']]
+            )
+            sig = fetch_one(
+                """SELECT detected_at FROM prospecting_signals
+                   WHERE group_id = ? AND detected_at < ?
+                   ORDER BY detected_at DESC LIMIT 1""",
+                [ob['group_id'], ob['occurred_at']]
+            )
+            signal_used = bool(sig and _days_since(sig.get('detected_at')) <= 7)
+            signal_age = _days_since(sig.get('detected_at')) if sig else None
+
+            outcome = 'reply' if reply else 'no_reply'
+            if _days_since(ob['occurred_at']) < 7 and not reply:
+                continue
+
+            _record_outcome(
+                'outreach', ob.get('channel', 'email'), ob['group_id'],
+                ob.get('contact_id'), signal_used=signal_used,
+                signal_age=signal_age, outcome=outcome
+            )
+    except Exception:
+        pass
+
+
+def _get_outcome_learnings():
+    """
+    Analyze outcome log to extract what works and what doesn't.
+    Returns context string with actionable learnings.
+    """
+    learnings = []
+
+    try:
+        total = fetch_one("SELECT COUNT(*) as cnt FROM leo_outcome_log")
+        if not total or total['cnt'] < 3:
+            return ""
+
+        # Signal-based vs non-signal outreach success rate
+        sig_outcomes = fetch_all(
+            """SELECT signal_used, outcome, COUNT(*) as cnt
+               FROM leo_outcome_log
+               WHERE action_type = 'outreach'
+               GROUP BY signal_used, outcome""", []
+        )
+        sig_reply = 0
+        sig_total = 0
+        nosig_reply = 0
+        nosig_total = 0
+        for r in (sig_outcomes or []):
+            if r.get('signal_used'):
+                sig_total += r['cnt']
+                if r.get('outcome') == 'reply':
+                    sig_reply += r['cnt']
+            else:
+                nosig_total += r['cnt']
+                if r.get('outcome') == 'reply':
+                    nosig_reply += r['cnt']
+
+        if sig_total >= 2 and nosig_total >= 2:
+            sig_rate = round(sig_reply / sig_total * 100)
+            nosig_rate = round(nosig_reply / nosig_total * 100)
+            if sig_rate > nosig_rate:
+                learnings.append(
+                    f"Signal-based outreach: {sig_rate}% reply rate vs {nosig_rate}% without signals — "
+                    f"always reference signals when available"
+                )
+            elif nosig_rate > sig_rate:
+                learnings.append(
+                    f"Non-signal outreach: {nosig_rate}% reply rate vs {sig_rate}% with signals — "
+                    f"signal references may not be landing well, try different hooks"
+                )
+
+        # Channel effectiveness
+        ch_outcomes = fetch_all(
+            """SELECT channel, outcome, COUNT(*) as cnt
+               FROM leo_outcome_log
+               WHERE action_type = 'outreach'
+               GROUP BY channel, outcome""", []
+        )
+        ch_data = {}
+        for r in (ch_outcomes or []):
+            ch = r.get('channel', 'unknown')
+            if ch not in ch_data:
+                ch_data[ch] = {'total': 0, 'reply': 0}
+            ch_data[ch]['total'] += r['cnt']
+            if r.get('outcome') == 'reply':
+                ch_data[ch]['reply'] += r['cnt']
+
+        best_ch = None
+        best_rate = 0
+        for ch, d in ch_data.items():
+            if d['total'] >= 2:
+                rate = d['reply'] / d['total']
+                if rate > best_rate:
+                    best_rate = rate
+                    best_ch = ch
+        if best_ch and len(ch_data) > 1:
+            learnings.append(
+                f"Best channel: {best_ch} ({round(best_rate * 100)}% reply rate) — "
+                f"prioritize this for cold outreach"
+            )
+
+        # Warmth-to-outcome correlation
+        warmth_outcomes = fetch_all(
+            """SELECT
+                 CASE WHEN warmth_at_action >= 7 THEN 'high'
+                      WHEN warmth_at_action >= 4 THEN 'mid'
+                      ELSE 'low' END as warmth_band,
+                 outcome, COUNT(*) as cnt
+               FROM leo_outcome_log
+               WHERE action_type = 'outreach'
+               GROUP BY warmth_band, outcome""", []
+        )
+        warmth_data = {}
+        for r in (warmth_outcomes or []):
+            band = r.get('warmth_band', 'low')
+            if band not in warmth_data:
+                warmth_data[band] = {'total': 0, 'reply': 0}
+            warmth_data[band]['total'] += r['cnt']
+            if r.get('outcome') == 'reply':
+                warmth_data[band]['reply'] += r['cnt']
+
+        for band in ['high', 'mid', 'low']:
+            d = warmth_data.get(band)
+            if d and d['total'] >= 2:
+                rate = round(d['reply'] / d['total'] * 100)
+                learnings.append(
+                    f"{band.title()}-warmth outreach: {rate}% reply rate ({d['reply']}/{d['total']})"
+                )
+
+        # Touchpoint count sweet spot
+        tp_outcomes = fetch_all(
+            """SELECT
+                 CASE WHEN touchpoint_count_at_action <= 2 THEN 'early (0-2)'
+                      WHEN touchpoint_count_at_action <= 5 THEN 'mid (3-5)'
+                      ELSE 'deep (6+)' END as tp_band,
+                 outcome, COUNT(*) as cnt
+               FROM leo_outcome_log
+               WHERE action_type = 'outreach'
+               GROUP BY tp_band, outcome""", []
+        )
+        tp_data = {}
+        for r in (tp_outcomes or []):
+            band = r.get('tp_band', 'early (0-2)')
+            if band not in tp_data:
+                tp_data[band] = {'total': 0, 'reply': 0}
+            tp_data[band]['total'] += r['cnt']
+            if r.get('outcome') == 'reply':
+                tp_data[band]['reply'] += r['cnt']
+
+        best_tp = None
+        best_tp_rate = 0
+        for band, d in tp_data.items():
+            if d['total'] >= 2:
+                rate = d['reply'] / d['total']
+                if rate > best_tp_rate:
+                    best_tp_rate = rate
+                    best_tp = band
+
+        if best_tp and len(tp_data) > 1:
+            learnings.append(
+                f"Best reply window: {best_tp} touchpoints ({round(best_tp_rate * 100)}% rate) — "
+                f"time outreach accordingly"
+            )
+
+    except Exception:
+        pass
+
+    if not learnings:
+        return ""
+
+    return "OUTCOME LEARNINGS:\n" + "\n".join(f"  - {l}" for l in learnings[:6])
+
+
+# ---------------------------------------------------------------------------
 # V9: Confidence system — data-backed confidence for recommendations
 # ---------------------------------------------------------------------------
 
@@ -3974,6 +4424,25 @@ def _build_context(extra_context=None, include_history=True, lightweight=False):
             )
     except Exception:
         pass
+
+    # V13: Synthesis engine — cross-domain compound insights
+    if not lightweight:
+        try:
+            synthesis = _synthesize_cross_insights()
+            if synthesis:
+                ctx_parts.append(f"\n{synthesis}")
+        except Exception:
+            pass
+
+    # V13: Outcome learning — what actions produce results
+    if not lightweight:
+        try:
+            _detect_outreach_outcomes()
+            outcomes = _get_outcome_learnings()
+            if outcomes:
+                ctx_parts.append(f"\n{outcomes}")
+        except Exception:
+            pass
 
     # Chat history (session memory)
     if include_history:
@@ -4990,23 +5459,41 @@ _GENERIC_PHRASES = re.compile(
     r'(?:great question|that\'s a (?:good|great) (?:point|question)|'
     r'let me know if you need anything|hope this helps|'
     r'here are some (?:things|ideas|suggestions) to consider|'
-    r'i\'d be happy to help|feel free to)',
+    r'i\'d be happy to help|feel free to|'
+    r'i hope this (?:helps|is useful)|don\'t hesitate to|'
+    r'i\'m here to help|happy to assist|'
+    r'that\'s an? (?:excellent|interesting|important) (?:question|point|observation))'
+    r'[.!,]*\s*',
     re.IGNORECASE
 )
 
 _FILLER_OPENERS = re.compile(
-    r'^\s*(?:So,|Well,|Absolutely|Definitely|Of course)[,!]?\s',
+    r'^\s*(?:So,|Well,|Absolutely|Definitely|Of course|Sure thing|Certainly)[,!]?\s',
     re.IGNORECASE
+)
+
+_RESTATING_PATTERN = re.compile(
+    r'^(?:You(?:\'re| are) (?:asking|wondering|looking)|'
+    r'I understand (?:you|that)|It sounds like you|'
+    r'Based on what you(?:\'ve| have) (?:said|mentioned|described))',
+    re.IGNORECASE | re.MULTILINE
 )
 
 
 def _quality_check_response(text):
-    """Post-process response text to strip low-value patterns."""
+    """Post-process response text to strip low-value patterns. V13: stronger filtering."""
     if not text:
         return text
     cleaned = text
     cleaned = _GENERIC_PHRASES.sub('', cleaned)
     cleaned = _FILLER_OPENERS.sub('', cleaned)
+    # Strip restating sentences (entire line) only when there's other content
+    lines = cleaned.split('\n')
+    non_restate = [l for l in lines if not (l.strip() and _RESTATING_PATTERN.match(l.strip()))]
+    if any(l.strip() for l in non_restate):
+        cleaned = '\n'.join(non_restate)
+    else:
+        cleaned = '\n'.join(lines)
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
     return cleaned.strip()
 
@@ -6227,6 +6714,13 @@ def _exec_log_touchpoint(params):
             [tp2, group_id, params.get('channel', 'note'),
              params.get('summary', params.get('notes', '')), '']
         )
+
+    # V13: Record outcome for learning
+    direction = params.get('direction', 'outbound')
+    if direction == 'inbound' and group_id:
+        _record_outcome('reply_received', params.get('channel', 'note'),
+                        group_id, contact_id, outcome='reply',
+                        outcome_detail=params.get('summary', '')[:100])
 
     entity_name = params.get('summary', params.get('notes', ''))[:50]
     feedback = _action_feedback('log_touchpoint', entity_name,

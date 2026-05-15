@@ -2009,7 +2009,7 @@ function BTRAssistantChat(props) {
               style: { fontFamily: "'Orbitron', sans-serif", fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.05em',
                 background: 'linear-gradient(135deg, #00ffaa, #14b8a6, #38bdf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }
             }, 'LEO'),
-            h('span', { style: { fontSize: '0.52rem', color: '#64748b', fontWeight: 400 } }, 'Operator AI v12'),
+            h('span', { style: { fontSize: '0.52rem', color: '#64748b', fontWeight: 400 } }, 'Operator AI v13'),
             lastMode ? h('span', { style: {
               fontSize: '0.48rem', color: MODE_COLORS[lastMode] || '#94a3b8',
               background: (MODE_COLORS[lastMode] || '#94a3b8') + '22',
