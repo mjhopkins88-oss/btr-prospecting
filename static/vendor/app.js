@@ -997,6 +997,7 @@ function App({
     if (uniqueKeys.length === 0) return;
     try {
       const res = await fetch(`${API_BASE}/api/crm/leads/bulk-status?keys=${encodeURIComponent(uniqueKeys.join(','))}`);
+      if (!res.ok) return;
       const data = await res.json();
       if (data.success) setCrmStatuses(data.statuses || {});
     } catch (e) {
@@ -1015,6 +1016,7 @@ function App({
     if (uniqueKeys.length === 0) return;
     try {
       const res = await fetch(`${API_BASE}/api/intelligence/call-timing/lookup?keys=${encodeURIComponent(uniqueKeys.join(','))}`);
+      if (!res.ok) return;
       const data = await res.json();
       if (data.success) setCallTimingScores(data.scores || {});
     } catch (e) {
@@ -1047,6 +1049,7 @@ function App({
       const qs = params.toString();
       if (qs) url += '?' + qs;
       const response = await fetch(url);
+      if (!response.ok) throw new Error('HTTP ' + response.status);
       const data = await response.json();
       if (data.success) {
         setProspects(data.prospects);
@@ -1083,6 +1086,7 @@ function App({
           maxTotalProspects: 300
         })
       });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
       const data = await response.json();
       if (!data.success) {
         setSearchStatus(`Error: ${data.message}`);
@@ -1096,6 +1100,7 @@ function App({
       pollRef.current = setInterval(async () => {
         try {
           const statusRes = await fetch(`${API_BASE}/api/prospecting/run/${runId}/status`);
+          if (!statusRes.ok) return;
           const statusData = await statusRes.json();
           if (statusData.total_prospects > 0) {
             setSearchStatus(`Found ${statusData.total_prospects} prospects so far...`);
@@ -1146,6 +1151,11 @@ function App({
         signal: controller.signal
       });
       clearTimeout(timeout);
+      if (!response.ok) {
+        setSearchStatus('Email generation failed (server error). Try again.');
+        setTimeout(() => setSearchStatus(''), 5000);
+        return;
+      }
       const text = await response.text();
       let data;
       try {
@@ -1281,6 +1291,7 @@ function App({
           company_name: prospect.company
         })
       });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
       if (data.success) {
         setCrmStatuses(prev => ({
@@ -1447,7 +1458,7 @@ function AssistantChat({ user }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages: newMsgs })
     })
-      .then(function(r) { return r.json(); })
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function(d) {
         var content = (d.content || '').replace(/<action>[\s\S]*?<\/action>/g, '').trim();
         setMessages(function(prev) {
@@ -1455,9 +1466,9 @@ function AssistantChat({ user }) {
         });
         setLoading(false);
       })
-      .catch(function() {
+      .catch(function(err) {
         setMessages(function(prev) {
-          return prev.concat([{ role: 'assistant', content: 'Connection error. Please try again.' }]);
+          return prev.concat([{ role: 'assistant', content: 'Connection error: ' + (err.message || 'unknown') + '. Please try again.' }]);
         });
         setLoading(false);
       });
@@ -1483,7 +1494,7 @@ function AssistantChat({ user }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: action })
     })
-      .then(function(r) { return r.json(); })
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function(d) {
         setMessages(function(prev) {
           return prev.concat([{ role: 'assistant', content: d.message || 'Action completed.' }]);
@@ -1796,7 +1807,7 @@ function LinkedInHub({
       setLoading(true);
       setError(null);
       try {
-        const [pRes, sRes] = await Promise.all([fetch(`${API_BASE}/api/prospects`).then(r => r.json()).catch(() => ({
+        const [pRes, sRes] = await Promise.all([fetch(`${API_BASE}/api/prospects`).then(r => r.ok ? r.json() : { prospects: [] }).catch(() => ({
           prospects: []
         })), fetch(`${API_BASE}/api/signalstack/prospects`).then(r => r.ok ? r.json() : {
           prospects: []
@@ -2116,7 +2127,7 @@ function CentersOfInfluencePage({ user }) {
 
   useEffect(() => {
     fetch(`${API_BASE}/api/coi`)
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(d => { setItems(d.centers_of_influence || []); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
@@ -2198,6 +2209,7 @@ function CapitalGroupsPage({ user }) {
       if (typeFilter) params.set('type', typeFilter);
       if (statusFilter) params.set('status', statusFilter);
       const res = await fetch(`${API_BASE}/api/capital-groups?${params}`);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const d = await res.json();
       setGroups(d.capital_groups || []);
     } catch (e) {
@@ -2222,6 +2234,7 @@ function CapitalGroupsPage({ user }) {
     setDetailLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/capital-groups/${id}`);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const d = await res.json();
       if (d.error) { alert(d.error); return; }
       setSelectedGroup(d);
@@ -2264,6 +2277,7 @@ function CapitalGroupsPage({ user }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const d = await res.json();
       if (d.error) { alert(d.error); return; }
       setShowForm(false);
@@ -2352,6 +2366,7 @@ function CapitalGroupsPage({ user }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const d = await res.json();
       if (d.error) { alert(d.error); return; }
       if (tpFollowup && selectedGroup) {
@@ -2366,6 +2381,7 @@ function CapitalGroupsPage({ user }) {
       if (!editingTp) {
         try {
           var _weekRes = await fetch(API_BASE + '/api/prospecting/engagement');
+          if (!_weekRes.ok) throw new Error('HTTP ' + _weekRes.status);
           var _weekData = await _weekRes.json();
           _reward('Touchpoint logged +1 · Week: ' + (_weekData.week_tp_count || '?') + '/' + (_weekData.weekly_goal || 40), selectedGroup?.id);
         } catch(_) {
@@ -2407,6 +2423,7 @@ function CapitalGroupsPage({ user }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ first_name: cfFirst, last_name: cfLast, title: cfTitle, email: cfEmail, phone: cfPhone, notes: cfNotes })
       });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const d = await res.json();
       if (d.error) { alert(d.error); return; }
       setShowContactForm(false);
@@ -3165,7 +3182,7 @@ function ProspectingSummaryTab() {
 
   useEffect(() => {
     fetch(API_BASE + '/api/prospecting/summary')
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(d => { setData(d); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
@@ -3234,10 +3251,10 @@ function ProspectingOverviewPanel() {
 
   useEffect(() => {
     Promise.all([
-      fetch(API_BASE + '/api/prospecting/tasks?status=pending').then(r => r.json()).catch(() => []),
-      fetch(API_BASE + '/api/prospecting/notices?status=new').then(r => r.json()).catch(() => []),
-      fetch(API_BASE + '/api/capital-groups?status=dormant&limit=100').then(r => r.json()).catch(() => ({ capital_groups: [] })),
-      fetch(API_BASE + '/api/capital-groups?status=cold&limit=100').then(r => r.json()).catch(() => ({ capital_groups: [] }))
+      fetch(API_BASE + '/api/prospecting/tasks?status=pending').then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch(API_BASE + '/api/prospecting/notices?status=new').then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch(API_BASE + '/api/capital-groups?status=dormant&limit=100').then(r => r.ok ? r.json() : { capital_groups: [] }).catch(() => ({ capital_groups: [] })),
+      fetch(API_BASE + '/api/capital-groups?status=cold&limit=100').then(r => r.ok ? r.json() : { capital_groups: [] }).catch(() => ({ capital_groups: [] }))
     ]).then(([t, n, dg, cg]) => {
       setTasks(Array.isArray(t) ? t : []);
       setNotices(Array.isArray(n) ? n : []);
@@ -3349,7 +3366,7 @@ function ProspectingGroupsTab() {
     if (statusFilter) params.set('status', statusFilter);
     if (sort) params.set('sort', sort);
     fetch(API_BASE + '/api/prospecting/groups?' + params.toString())
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(d => { setRows(Array.isArray(d) ? d : []); setLoading(false); })
       .catch(() => setLoading(false));
   }, [search, typeFilter, statusFilter, sort]);
@@ -3646,14 +3663,14 @@ function ProspectingContactsTab({ user }) {
     if (stageFilter) params.set('stage', stageFilter);
     setLoading(true);
     fetch(API_BASE + '/api/prospecting/contacts?' + params.toString())
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(d => { setRows(Array.isArray(d) ? d : []); setLoading(false); })
       .catch(() => setLoading(false));
   }, [search, stageFilter, refreshKey]);
 
   useEffect(() => {
     fetch(API_BASE + '/api/capital-groups?limit=500')
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(d => { setGroups((d && d.capital_groups) || []); })
       .catch(() => {});
   }, []);
@@ -3702,7 +3719,7 @@ function ProspectingContactsTab({ user }) {
 
   const toggleFavorite = (cid) => {
     fetch(API_BASE + '/api/prospecting/contacts/' + cid + '/favorite', { method: 'PATCH' })
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(d => {
         setRows(prev => prev.map(r => r.id === cid ? { ...r, is_favorite: d.is_favorite } : r));
         setContactToast(d.is_favorite ? 'Added to favorites' : 'Removed from favorites');
@@ -3752,7 +3769,7 @@ function ProspectingContactsTab({ user }) {
         company_name: name,
         website: contact.linkedin_url || null
       })
-    }).then(function(r) { return r.json(); })
+    }).then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function(d) {
         if (d.success) {
           alert(d.already_exists ? 'Lead already exists in pipeline.' : 'Lead created in pipeline!');
@@ -4314,7 +4331,7 @@ function ProspectingNoticesTab() {
   const load = () => {
     setLoading(true);
     fetch(API_BASE + '/api/prospecting/notices?status=' + encodeURIComponent(statusFilter))
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(d => { setRows(Array.isArray(d) ? d : []); setLoading(false); })
       .catch(() => { setRows([]); setLoading(false); });
   };
@@ -4544,7 +4561,7 @@ function ProspectingSequencesTab() {
 
   useEffect(() => {
     fetch(API_BASE + '/api/prospecting/sequences')
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(d => { setSeqs(Array.isArray(d) ? d : []); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
@@ -4731,7 +4748,7 @@ function ProspectingScheduleTab() {
 
   useEffect(() => {
     fetch(API_BASE + '/api/prospecting/schedule?days=5')
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(d => { setSchedule(Array.isArray(d) ? d : []); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
@@ -4887,7 +4904,7 @@ function ProspectingFeedTab() {
     const params = new URLSearchParams();
     if (typeFilter) params.set('type', typeFilter);
     fetch(API_BASE + '/api/prospecting/feed?' + params.toString())
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(d => { setItems(Array.isArray(d) ? d : []); setLoading(false); })
       .catch(() => setLoading(false));
   }, [typeFilter]);
@@ -5106,7 +5123,7 @@ function ProspectingCanvasTab() {
 
   useEffect(() => {
     fetch(API_BASE + '/api/prospecting/canvas-stats')
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(d => setStats(d))
       .catch(() => {});
 
@@ -7444,6 +7461,7 @@ function SignalIntelligencePanel() {
   const fetchData = useCallback(async () => {
     try {
       const res = await fetch('/api/signal-intelligence?limit=20');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const json = await res.json();
       if (json.success) setData(json);
     } catch (e) {
@@ -7835,6 +7853,7 @@ function CapitalFlowPanel() {
       let url = '/api/capital-flow?limit=100';
       if (filterState) url += '&state=' + encodeURIComponent(filterState);
       const res = await fetch(url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
       setPredictions(data.predictions || []);
     } catch (e) {
@@ -7845,6 +7864,7 @@ function CapitalFlowPanel() {
   const loadDetail = async id => {
     try {
       const res = await fetch('/api/capital-flow/' + id);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
       setSelectedPrediction(data);
     } catch (e) {
@@ -8190,6 +8210,7 @@ function DeveloperIntentPanel() {
       let url = '/api/developer-intent?limit=100';
       if (filterState) url += '&state=' + encodeURIComponent(filterState);
       const res = await fetch(url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
       setPredictions(data.predictions || []);
     } catch (e) {
@@ -8200,6 +8221,7 @@ function DeveloperIntentPanel() {
   const loadDetail = async id => {
     try {
       const res = await fetch('/api/developer-intent/' + id);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
       setSelectedPrediction(data);
     } catch (e) {
@@ -8499,6 +8521,7 @@ function LiveIntelligenceFeed() {
       let url = `${API_BASE}/api/intelligence-feed?limit=100`;
       if (filterType) url += `&type=${filterType}`;
       const res = await fetch(url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
       if (data.success && data.events) {
         // Detect new events for animation
@@ -9596,6 +9619,7 @@ function ProspectCard({
             company: prospect.company
           })
         });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         const d = await res.json();
         alert(d.success ? 'Saved to Deal Board!' : d.message || 'Failed');
       } catch (e) {
@@ -9748,6 +9772,7 @@ function DailyDiscovery() {
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`${API_BASE}/api/discovery/status`);
+        if (!res.ok) return;
         const data = await res.json();
         if (!data.running) {
           setRunning(false);
@@ -9766,6 +9791,7 @@ function DailyDiscovery() {
   const loadConfig = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/discovery/config`);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
       if (data.success) setConfig(data.config);
     } catch (e) {
@@ -9775,6 +9801,7 @@ function DailyDiscovery() {
   const loadLatest = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/discovery/latest`);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
       if (data.success && data.run) {
         setLatestRun(data.run);
@@ -9787,6 +9814,7 @@ function DailyDiscovery() {
   const loadHistory = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/discovery/history`);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
       if (data.success) setHistory(data.runs);
     } catch (e) {
@@ -9796,6 +9824,7 @@ function DailyDiscovery() {
   const checkStatus = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/discovery/status`);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
       if (data.running) {
         setRunning(true);
@@ -16141,7 +16170,7 @@ function ActivityModal({
   const [activities, setActivities] = useState([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
-    fetch(`${API_BASE}/api/crm/leads/${leadId}/activity`).then(r => r.json()).then(d => {
+    fetch(`${API_BASE}/api/crm/leads/${leadId}/activity`).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }).then(d => {
       if (d.success) setActivities(d.activities || []);
     }).catch(() => {}).finally(() => setLoading(false));
   }, [leadId]);
@@ -16526,7 +16555,7 @@ function PipelinePage({
   useEffect(() => {
     loadLeads();
     if (user?.role === 'admin') {
-      fetch(`${API_BASE}/api/crm/workspace-users`).then(r => r.json()).then(d => {
+      fetch(`${API_BASE}/api/crm/workspace-users`).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }).then(d => {
         if (d.success) setWorkspaceUsers(d.users || []);
       }).catch(() => {});
     }
