@@ -3,10 +3,35 @@ Prospecting Task Engine
 
 Generates tasks from relationship data using 8 trigger rules,
 computes next-best-action per group, and provides the daily schedule.
+Includes task lifecycle management, decay scoring, and anti-bloat controls.
 """
 import json
+import logging
+import re
 from datetime import datetime, timedelta
 from shared.database import fetch_all, fetch_one, execute, new_id
+
+_log = logging.getLogger('task_engine')
+
+# ── Task lifecycle constants ────────────────────────────────────────
+VALID_TASK_TYPES = frozenset([
+    'email', 'linkedin', 'call', 'meeting', 'check_in',
+    'follow_up', 'sequence_step',
+])
+
+_INVALID_TITLE_PATTERN = re.compile(
+    r'^(research|analyze|review|explore|investigate|look into|examine|'
+    r'audit|study|evaluate|consider|think about|brainstorm)\s',
+    re.IGNORECASE
+)
+
+MAX_ACTIVE_TASKS = 30
+ARCHIVE_DEAD_DAYS = 30
+ARCHIVE_SIGNAL_DAYS = 14
+ARCHIVE_FOLLOWUP_DAYS = 21
+
+TASK_STATUSES = frozenset(['pending', 'in_progress', 'completed', 'archived', 'expired', 'cancelled'])
+ACTIVE_STATUSES = ('pending', 'in_progress')
 
 
 def _now():
@@ -15,6 +40,25 @@ def _now():
 
 def _iso(dt):
     return dt.isoformat() if dt else None
+
+
+def _parse_dt(val):
+    if not val:
+        return None
+    try:
+        return datetime.fromisoformat(val)
+    except (ValueError, TypeError):
+        return None
+
+
+# ── Validation ──────────────────────────────────────────────────────
+
+def validate_task(task_type, title=''):
+    if task_type not in VALID_TASK_TYPES:
+        return False, f'invalid type: {task_type}'
+    if _INVALID_TITLE_PATTERN.match(title):
+        return False, f'passive title: {title[:60]}'
+    return True, ''
 
 
 def _has_open_task(capital_group_id, trigger_rule):
@@ -26,16 +70,255 @@ def _has_open_task(capital_group_id, trigger_rule):
     return row is not None
 
 
-def _create_task(capital_group_id, task_type, title, description, due_at, trigger_rule, priority=5, enrollment_id=None):
+def _has_active_task_for_objective(capital_group_id, task_type):
+    """1 contact/group = 1 active task per objective (type)."""
+    if not capital_group_id:
+        return None
+    row = fetch_one(
+        "SELECT id, title FROM prospecting_tasks "
+        "WHERE capital_group_id = ? AND type = ? AND status IN ('pending', 'in_progress') "
+        "ORDER BY priority DESC, created_at DESC LIMIT 1",
+        [capital_group_id, task_type]
+    )
+    return row
+
+
+def _create_task(capital_group_id, task_type, title, description, due_at,
+                 trigger_rule, priority=5, enrollment_id=None, source='system'):
+    valid, reason = validate_task(task_type, title)
+    if not valid:
+        _log.debug('Task rejected: %s', reason)
+        return None
+
     if capital_group_id and _has_open_task(capital_group_id, trigger_rule):
         return None
+
+    existing = _has_active_task_for_objective(capital_group_id, task_type)
+    if existing:
+        execute(
+            "UPDATE prospecting_tasks SET title = ?, description = ?, priority = MAX(priority, ?), "
+            "due_at = CASE WHEN due_at > ? THEN ? ELSE due_at END, "
+            "last_activity_at = ?, updated_at = ? WHERE id = ?",
+            [title, description, priority, _iso(due_at), _iso(due_at),
+             _iso(_now()), _iso(_now()), existing['id']]
+        )
+        return existing['id']
+
     tid = new_id()
+    now = _iso(_now())
     execute(
-        "INSERT INTO prospecting_tasks (id, capital_group_id, type, title, description, status, priority, due_at, trigger_rule, enrollment_id, created_at) "
-        "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)",
-        [tid, capital_group_id, task_type, title, description, priority, _iso(due_at), trigger_rule, enrollment_id, _iso(_now())]
+        "INSERT INTO prospecting_tasks "
+        "(id, capital_group_id, type, title, description, status, priority, "
+        "due_at, trigger_rule, enrollment_id, source, created_at, last_activity_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)",
+        [tid, capital_group_id, task_type, title, description, priority,
+         _iso(due_at), trigger_rule, enrollment_id, source, now, now, now]
     )
     return tid
+
+
+# ── Decay scoring ───────────────────────────────────────────────────
+
+def calculate_decay_score(task):
+    """Returns decay score 0-100 and label (low/medium/high/critical)."""
+    now = _now()
+    created = _parse_dt(task.get('created_at'))
+    due = _parse_dt(task.get('due_at'))
+    last_activity = _parse_dt(task.get('last_activity_at')) or created
+    signal_id = task.get('signal_id')
+
+    if not created:
+        return 100, 'critical'
+
+    age_days = (now - created).days
+    activity_gap = (now - last_activity).days if last_activity else age_days
+    overdue_days = max(0, (now - due).days) if due else 0
+
+    score = 0
+    score += min(age_days * 1.5, 40)
+    score += min(activity_gap * 2.0, 35)
+    score += min(overdue_days * 2.5, 25)
+
+    if signal_id and age_days > ARCHIVE_SIGNAL_DAYS:
+        score += 20
+
+    score = min(round(score), 100)
+
+    if score >= 76:
+        label = 'critical'
+    elif score >= 51:
+        label = 'high'
+    elif score >= 26:
+        label = 'medium'
+    else:
+        label = 'low'
+
+    return score, label
+
+
+# ── Auto-archive engine ────────────────────────────────────────────
+
+def auto_archive_stale_tasks():
+    """Archive tasks that have decayed beyond recovery thresholds."""
+    now = _now()
+    archived_count = 0
+
+    dead_cutoff = _iso(now - timedelta(days=ARCHIVE_DEAD_DAYS))
+    rows = fetch_all(
+        "SELECT id FROM prospecting_tasks "
+        "WHERE status IN ('pending', 'in_progress') "
+        "AND COALESCE(last_activity_at, created_at) < ?",
+        [dead_cutoff]
+    )
+    if rows:
+        ids = [r['id'] for r in rows]
+        for tid in ids:
+            execute(
+                "UPDATE prospecting_tasks SET status = 'archived', updated_at = ? WHERE id = ?",
+                [_iso(now), tid]
+            )
+        archived_count += len(ids)
+
+    signal_cutoff = _iso(now - timedelta(days=ARCHIVE_SIGNAL_DAYS))
+    r = fetch_one(
+        "SELECT COUNT(*) AS c FROM prospecting_tasks "
+        "WHERE status IN ('pending', 'in_progress') "
+        "AND signal_id IS NOT NULL AND created_at < ?",
+        [signal_cutoff]
+    )
+    if r and r['c'] > 0:
+        execute(
+            "UPDATE prospecting_tasks SET status = 'expired', updated_at = ? "
+            "WHERE status IN ('pending', 'in_progress') "
+            "AND signal_id IS NOT NULL AND created_at < ?",
+            [_iso(now), signal_cutoff]
+        )
+        archived_count += r['c']
+
+    followup_cutoff = _iso(now - timedelta(days=ARCHIVE_FOLLOWUP_DAYS))
+    r = fetch_one(
+        "SELECT COUNT(*) AS c FROM prospecting_tasks "
+        "WHERE status IN ('pending', 'in_progress') "
+        "AND type = 'follow_up' AND COALESCE(last_activity_at, created_at) < ?",
+        [followup_cutoff]
+    )
+    if r and r['c'] > 0:
+        execute(
+            "UPDATE prospecting_tasks SET status = 'archived', updated_at = ? "
+            "WHERE status IN ('pending', 'in_progress') "
+            "AND type = 'follow_up' AND COALESCE(last_activity_at, created_at) < ?",
+            [_iso(now), followup_cutoff]
+        )
+        archived_count += r['c']
+
+    return archived_count
+
+
+def enforce_task_limit():
+    """Keep active tasks within MAX_ACTIVE_TASKS by archiving lowest-value overflow."""
+    now = _now()
+    count_row = fetch_one(
+        "SELECT COUNT(*) AS c FROM prospecting_tasks WHERE status IN ('pending', 'in_progress')"
+    )
+    active_count = (count_row or {}).get('c', 0)
+    if active_count <= MAX_ACTIVE_TASKS:
+        return 0
+
+    overflow = active_count - MAX_ACTIVE_TASKS
+
+    tasks = fetch_all(
+        "SELECT id, type, priority, created_at, due_at, last_activity_at, signal_id "
+        "FROM prospecting_tasks WHERE status IN ('pending', 'in_progress') "
+        "ORDER BY priority ASC, COALESCE(last_activity_at, created_at) ASC "
+        "LIMIT ?",
+        [overflow]
+    )
+
+    for t in tasks:
+        execute(
+            "UPDATE prospecting_tasks SET status = 'archived', updated_at = ? WHERE id = ?",
+            [_iso(now), t['id']]
+        )
+    return len(tasks)
+
+
+# ── Bloat cleanup (one-time or periodic) ────────────────────────────
+
+def cleanup_existing_bloat():
+    """
+    Remove invalid tasks, deduplicate, archive stale items.
+    Returns dict of counts for each action taken.
+    """
+    now = _now()
+    results = {'invalid_removed': 0, 'duplicates_merged': 0, 'stale_archived': 0}
+
+    invalid = fetch_all(
+        "SELECT id FROM prospecting_tasks "
+        "WHERE status IN ('pending', 'in_progress') AND type NOT IN "
+        "('email', 'linkedin', 'call', 'meeting', 'check_in', 'follow_up', 'sequence_step')"
+    )
+    for r in (invalid or []):
+        execute(
+            "UPDATE prospecting_tasks SET status = 'cancelled', updated_at = ? WHERE id = ?",
+            [_iso(now), r['id']]
+        )
+    results['invalid_removed'] = len(invalid or [])
+
+    dupes = fetch_all(
+        "SELECT capital_group_id, type, COUNT(*) AS cnt "
+        "FROM prospecting_tasks "
+        "WHERE status IN ('pending', 'in_progress') AND capital_group_id IS NOT NULL "
+        "GROUP BY capital_group_id, type HAVING cnt > 1"
+    )
+    for d in (dupes or []):
+        group_tasks = fetch_all(
+            "SELECT id, priority, due_at, created_at FROM prospecting_tasks "
+            "WHERE capital_group_id = ? AND type = ? AND status IN ('pending', 'in_progress') "
+            "ORDER BY priority DESC, due_at ASC",
+            [d['capital_group_id'], d['type']]
+        )
+        for t in group_tasks[1:]:
+            execute(
+                "UPDATE prospecting_tasks SET status = 'archived', updated_at = ? WHERE id = ?",
+                [_iso(now), t['id']]
+            )
+            results['duplicates_merged'] += 1
+
+    results['stale_archived'] = auto_archive_stale_tasks()
+
+    enforce_task_limit()
+
+    return results
+
+
+def run_task_maintenance():
+    """Orchestrate periodic task maintenance: archive + enforce cap."""
+    archived = auto_archive_stale_tasks()
+    capped = enforce_task_limit()
+    return {'archived': archived, 'capped': capped}
+
+
+# ── Task lifecycle stats ────────────────────────────────────────────
+
+def get_task_lifecycle_stats():
+    """Return active, archived, completed, expired, and total counts."""
+    rows = fetch_all(
+        "SELECT status, COUNT(*) AS c FROM prospecting_tasks GROUP BY status"
+    )
+    stats = {}
+    for r in (rows or []):
+        stats[r['status']] = r['c']
+
+    active = stats.get('pending', 0) + stats.get('in_progress', 0)
+    return {
+        'active': active,
+        'archived': stats.get('archived', 0),
+        'completed': stats.get('completed', 0),
+        'expired': stats.get('expired', 0),
+        'cancelled': stats.get('cancelled', 0),
+        'total': sum(stats.values()),
+        'max_active': MAX_ACTIVE_TASKS,
+    }
 
 
 def _log_feed(capital_group_id, feed_type, action, detail=None):
@@ -171,7 +454,12 @@ def run_daily_scheduler():
     rule_stale_60d(groups)
     rule_sequence_steps()
     rule_property_touchpoints()
-    return {'rules_checked': 4, 'groups_scanned': len(groups)}
+    maintenance = run_task_maintenance()
+    return {
+        'rules_checked': 4,
+        'groups_scanned': len(groups),
+        'maintenance': maintenance,
+    }
 
 
 # ── Next-best-action: ranked task list per group ─────────────────────
@@ -213,14 +501,20 @@ def get_summary_stats():
     active_seqs = fetch_one(
         "SELECT COUNT(*) AS c FROM prospecting_sequences WHERE status = 'active'"
     ) or {}
+    active_tasks = fetch_one(
+        "SELECT COUNT(*) AS c FROM prospecting_tasks WHERE status IN ('pending', 'in_progress')"
+    ) or {}
+    archived_tasks = fetch_one(
+        "SELECT COUNT(*) AS c FROM prospecting_tasks WHERE status IN ('archived', 'expired', 'cancelled')"
+    ) or {}
 
     return [
-        {'label': 'Active Groups', 'value': total_groups.get('c', 0), 'accent': '#34d399', 'sub': 'total tracked'},
-        {'label': 'Warm Relationships', 'value': warm.get('c', 0), 'accent': '#22d3ee', 'sub': 'warmth \u2265 5'},
+        {'label': 'Active Tasks', 'value': active_tasks.get('c', 0), 'accent': '#34d399', 'sub': f'of {MAX_ACTIVE_TASKS} max'},
         {'label': 'Due Today', 'value': due_today.get('c', 0), 'accent': '#fbbf24', 'sub': 'tasks pending'},
         {'label': 'Overdue', 'value': overdue.get('c', 0), 'accent': '#ef4444', 'sub': 'needs attention'},
+        {'label': 'Warm Relationships', 'value': warm.get('c', 0), 'accent': '#22d3ee', 'sub': 'warmth \u2265 5'},
         {'label': 'Inactive 30d+', 'value': (inactive.get('c', 0) + no_contact.get('c', 0)), 'accent': '#a78bfa', 'sub': 'no recent touch'},
-        {'label': 'Active Campaigns', 'value': active_seqs.get('c', 0), 'accent': '#60a5fa', 'sub': 'live sequences'},
+        {'label': 'Archived', 'value': archived_tasks.get('c', 0), 'accent': '#64748b', 'sub': 'cleaned up'},
     ]
 
 
@@ -602,9 +896,11 @@ def get_followup_queue(limit=30):
 
 
 def complete_task(task_id):
+    now = _iso(_now())
     execute(
-        "UPDATE prospecting_tasks SET status = 'completed', completed_at = ? WHERE id = ?",
-        [_iso(_now()), task_id]
+        "UPDATE prospecting_tasks SET status = 'completed', completed_at = ?, "
+        "last_activity_at = ?, updated_at = ? WHERE id = ?",
+        [now, now, now, task_id]
     )
     task = fetch_one("SELECT * FROM prospecting_tasks WHERE id = ?", [task_id])
     if task and task.get('capital_group_id'):

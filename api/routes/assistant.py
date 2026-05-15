@@ -1556,7 +1556,7 @@ def _generate_daily_plan():
                FROM prospecting_tasks t
                LEFT JOIN capital_groups g ON t.capital_group_id = g.id
                WHERE t.status = 'pending' AND t.due_at < ?
-                 AND t.type NOT IN ('research')
+                 AND t.type NOT IN ('research') AND t.status NOT IN ('archived', 'expired', 'cancelled')
                ORDER BY t.due_at ASC LIMIT 3""",
             [today]
         )
@@ -1638,7 +1638,7 @@ def _generate_daily_plan():
                FROM prospecting_tasks t
                LEFT JOIN capital_groups g ON t.capital_group_id = g.id
                WHERE t.status = 'pending' AND t.due_at >= ? AND t.due_at <= ?
-                 AND t.type NOT IN ('research')
+                 AND t.type NOT IN ('research') AND t.status NOT IN ('archived', 'expired', 'cancelled')
                ORDER BY t.due_at ASC LIMIT 3""",
             [today, tomorrow]
         )
@@ -1675,12 +1675,13 @@ def _generate_daily_plan():
                 'type': 'opportunity',
                 'score': opp['score'],
             })
-            if len(plan) >= 7:
+            if len(plan) >= 8:
                 break
 
     prio_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
     plan.sort(key=lambda x: prio_order.get(x['priority'], 4))
     plan = _filter_plan_tasks(plan)
+    plan = plan[:8]
 
     total_minutes = sum(p.get('est_minutes', 10) for p in plan)
     return plan, total_minutes
@@ -2843,7 +2844,7 @@ def _generate_execution_queue(limit=10):
                FROM prospecting_tasks t
                LEFT JOIN capital_groups g ON t.capital_group_id = g.id
                WHERE t.status = 'pending' AND t.due_at < ?
-                 AND t.type NOT IN ('research')
+                 AND t.type NOT IN ('research') AND t.status NOT IN ('archived', 'expired', 'cancelled')
                ORDER BY t.due_at ASC LIMIT 5""",
             [today]
         )
@@ -2949,7 +2950,7 @@ def _generate_execution_queue(limit=10):
                FROM prospecting_tasks t
                LEFT JOIN capital_groups g ON t.capital_group_id = g.id
                WHERE t.status = 'pending' AND t.due_at >= ? AND t.due_at <= ?
-                 AND t.type NOT IN ('research')
+                 AND t.type NOT IN ('research') AND t.status NOT IN ('archived', 'expired', 'cancelled')
                ORDER BY t.due_at ASC LIMIT 5""",
             [today, tomorrow]
         )
@@ -5003,7 +5004,7 @@ def _build_context(extra_context=None, include_history=True, lightweight=False):
                   g.name as group_name
            FROM prospecting_tasks t
            LEFT JOIN capital_groups g ON t.capital_group_id = g.id
-           WHERE t.status = 'pending' AND t.type NOT IN ('research')
+           WHERE t.status = 'pending' AND t.type NOT IN ('research') AND t.status NOT IN ('archived', 'expired', 'cancelled')
            ORDER BY t.priority DESC, t.due_at ASC NULLS LAST LIMIT 10""", []
     )
     if tasks:
@@ -5056,7 +5057,7 @@ def _build_context(extra_context=None, include_history=True, lightweight=False):
                FROM prospecting_tasks t
                LEFT JOIN capital_groups g ON t.capital_group_id = g.id
                WHERE t.status = 'pending' AND t.due_at < ?
-                 AND t.type NOT IN ('research')
+                 AND t.type NOT IN ('research') AND t.status NOT IN ('archived', 'expired', 'cancelled')
                ORDER BY t.due_at ASC LIMIT 5""",
             [today]
         )
@@ -7864,11 +7865,14 @@ def _exec_create_followup(params):
                 'data': {'error': 'group_id not found'}, 'actions': []
             }}), 400
     task_id = new_id()
+    now = datetime.utcnow().isoformat()
     execute(
         """INSERT INTO prospecting_tasks
-           (id, capital_group_id, type, title, status, priority, due_at, created_at)
-           VALUES (?, ?, 'follow_up', ?, 'pending', 7, ?, CURRENT_TIMESTAMP)""",
-        [task_id, group_id, title, due_date]
+           (id, capital_group_id, type, title, status, priority, due_at,
+            source, created_at, last_activity_at, updated_at)
+           VALUES (?, ?, 'follow_up', ?, 'pending', 7, ?,
+            'leo', ?, ?, ?)""",
+        [task_id, group_id, title, due_date, now, now, now]
     )
     feedback = _action_feedback('create_followup', title, f"Due {due_date}")
     confirm_text = f'Follow-up created: "{title}" due {due_date}.'
@@ -9502,11 +9506,15 @@ def _exec_batch(params):
     if params.get('follow_up'):
         fu = params['follow_up']
         task_id = new_id()
+        _fu_now = datetime.utcnow().isoformat()
         execute(
             """INSERT INTO prospecting_tasks
-               (id, capital_group_id, type, title, status, priority, due_at, created_at)
-               VALUES (?, ?, 'follow_up', ?, 'pending', 7, ?, CURRENT_TIMESTAMP)""",
-            [task_id, group_id, fu['title'], fu['due_date']]
+               (id, capital_group_id, type, title, status, priority, due_at,
+                source, created_at, last_activity_at, updated_at)
+               VALUES (?, ?, 'follow_up', ?, 'pending', 7, ?,
+                'leo', ?, ?, ?)""",
+            [task_id, group_id, fu['title'], fu['due_date'],
+             _fu_now, _fu_now, _fu_now]
         )
         results.append(f"Created follow-up due {fu['due_date']}")
 
