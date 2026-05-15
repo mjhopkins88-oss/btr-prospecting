@@ -205,6 +205,29 @@ def _execute_pending_action(action):
         _mark_pending_action(action_id, 'failed')
         return None
 
+    if atype == 'crm_update':
+        exec_action = payload.get('exec_action', '')
+        exec_params = payload.get('exec_params', payload)
+        handler_map = {
+            'create_contacts': _exec_create_contacts,
+            'update_warmth': _exec_update_warmth,
+            'update_opportunity': _exec_update_opportunity,
+            'update_stage': _exec_update_stage,
+            'create_followup': _exec_create_followup,
+            'log_touchpoint': _exec_log_touchpoint,
+        }
+        handler = handler_map.get(exec_action)
+        if handler:
+            try:
+                result = handler(exec_params)
+                _mark_pending_action(action_id, 'executed')
+                return result
+            except Exception:
+                _mark_pending_action(action_id, 'failed')
+                return None
+        _mark_pending_action(action_id, 'failed')
+        return None
+
     return None
 
 # ---------------------------------------------------------------------------
@@ -8005,6 +8028,12 @@ def execute_action():
             }})
         if action == 'create_followup':
             return _exec_create_followup(params)
+        if action == 'create_contacts':
+            return _exec_create_contacts(params)
+        if action == 'update_warmth':
+            return _exec_update_warmth(params)
+        if action == 'update_opportunity':
+            return _exec_update_opportunity(params)
         if action == 'complete_task':
             return _exec_complete_task(params)
         if action == 'export':
@@ -8145,6 +8174,16 @@ def execute_action():
                 }})
             if exec_action == 'log_touchpoint':
                 return _exec_log_touchpoint(exec_params)
+            if exec_action == 'create_contacts':
+                return _exec_create_contacts(exec_params)
+            if exec_action == 'update_warmth':
+                return _exec_update_warmth(exec_params)
+            if exec_action == 'update_opportunity':
+                return _exec_update_opportunity(exec_params)
+            if exec_action == 'update_stage':
+                return _exec_update_stage(exec_params)
+            if exec_action == 'create_followup':
+                return _exec_create_followup(exec_params)
             if exec_action == 'generate_brief':
                 try:
                     from api.routes.daily_brief import _generate_brief_content
@@ -8371,6 +8410,151 @@ def _exec_create_followup(params):
     }})
 
 
+def _exec_create_contacts(params):
+    """Create one or more contacts from Leo's action. Returns Flask response."""
+    contacts = params.get('contacts', [])
+    group_id = params.get('group_id')
+    group_name = params.get('group_name', '')
+
+    if not contacts:
+        return jsonify({'success': False, 'card': {
+            'type': 'ErrorCard', 'text': 'No contacts provided to add.',
+            'data': {'error': 'empty_contacts'}, 'actions': []
+        }}), 400
+
+    if group_id:
+        group = fetch_one("SELECT id, name FROM capital_groups WHERE id = ?", [group_id])
+        if not group:
+            return jsonify({'success': False, 'card': {
+                'type': 'ErrorCard', 'text': f'Company "{group_name}" not found.',
+                'data': {'error': 'group_not_found'}, 'actions': []
+            }}), 400
+        group_name = group.get('name', group_name)
+
+    created = []
+    skipped = []
+    for c in contacts:
+        first_name = c.get('first_name', '').strip()
+        last_name = c.get('last_name', '').strip()
+        if not first_name and not last_name:
+            skipped.append('(empty name)')
+            continue
+
+        if group_id:
+            existing = fetch_one(
+                "SELECT id FROM prospecting_contacts WHERE group_id = ? AND LOWER(first_name) = ? AND LOWER(last_name) = ?",
+                [group_id, first_name.lower(), last_name.lower()]
+            )
+            if existing:
+                skipped.append(f"{first_name} {last_name}")
+                continue
+
+        cid = new_id()
+        now = datetime.utcnow().isoformat()
+        execute(
+            """INSERT INTO prospecting_contacts
+               (id, group_id, first_name, last_name, title, email, phone, linkedin_url,
+                relationship_stage, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'prospect', ?, ?)""",
+            [cid, group_id, first_name, last_name,
+             c.get('title', ''), c.get('email', ''), c.get('phone', ''),
+             c.get('linkedin_url', ''), now, now]
+        )
+        created.append(f"{first_name} {last_name}")
+
+    parts = []
+    if created:
+        parts.append(f"Added {len(created)} contact{'s' if len(created) != 1 else ''}")
+        if group_name:
+            parts.append(f"to {group_name}")
+    if skipped:
+        parts.append(f"({len(skipped)} skipped — already exist or empty)")
+
+    summary = " ".join(parts) if parts else "No contacts created"
+    _log_leo_action('create_contacts', 'crm_contact', summary,
+                    {'group_id': group_id, 'count': len(created), 'contacts': created},
+                    {'created': len(created), 'skipped': len(skipped)})
+    return jsonify({'success': True, 'card': {
+        'type': 'ConfirmationCard', 'text': summary,
+        'data': {'what': 'contacts_created', 'result': 'success',
+                 'created': created, 'skipped': skipped, 'group_id': group_id},
+        'actions': []
+    }})
+
+
+def _exec_update_warmth(params):
+    """Update warmth score for a capital group."""
+    group_id = params.get('group_id')
+    warmth = params.get('warmth_score')
+    if not group_id or warmth is None:
+        return jsonify({'success': False, 'card': {
+            'type': 'ErrorCard', 'text': 'Missing company or warmth score.',
+            'data': {'error': 'group_id and warmth_score required'}, 'actions': []
+        }}), 400
+    group = fetch_one("SELECT id, name, warmth_score FROM capital_groups WHERE id = ?", [group_id])
+    if not group:
+        return jsonify({'success': False, 'card': {
+            'type': 'ErrorCard', 'text': 'Company not found.',
+            'data': {'error': 'group_not_found'}, 'actions': []
+        }}), 400
+    old_warmth = group.get('warmth_score', 0)
+    execute("UPDATE capital_groups SET warmth_score = ? WHERE id = ?", [warmth, group_id])
+    text = f"Updated {group['name']} warmth: {old_warmth} → {warmth}"
+    _log_leo_action('update_warmth', 'crm_warmth', text,
+                    {'group_id': group_id, 'old': old_warmth, 'new': warmth}, {'success': True})
+    return jsonify({'success': True, 'card': {
+        'type': 'ConfirmationCard', 'text': text,
+        'data': {'what': 'warmth', 'result': str(warmth), 'entity_id': group_id},
+        'actions': []
+    }})
+
+
+def _exec_update_opportunity(params):
+    """Update opportunity stage/value for a capital group."""
+    group_id = params.get('group_id')
+    if not group_id:
+        return jsonify({'success': False, 'card': {
+            'type': 'ErrorCard', 'text': 'Missing company.',
+            'data': {'error': 'group_id required'}, 'actions': []
+        }}), 400
+    group = fetch_one("SELECT id, name, opportunity_stage, opportunity_value FROM capital_groups WHERE id = ?", [group_id])
+    if not group:
+        return jsonify({'success': False, 'card': {
+            'type': 'ErrorCard', 'text': 'Company not found.',
+            'data': {'error': 'group_not_found'}, 'actions': []
+        }}), 400
+    updates = []
+    sql_parts = []
+    sql_vals = []
+    if params.get('opportunity_stage'):
+        sql_parts.append("opportunity_stage = ?")
+        sql_vals.append(params['opportunity_stage'])
+        updates.append(f"stage → {params['opportunity_stage']}")
+    if params.get('opportunity_value') is not None:
+        sql_parts.append("opportunity_value = ?")
+        sql_vals.append(params['opportunity_value'])
+        updates.append(f"value → ${params['opportunity_value']:,.0f}" if isinstance(params['opportunity_value'], (int, float)) else f"value → {params['opportunity_value']}")
+    if params.get('opportunity_notes'):
+        sql_parts.append("opportunity_notes = ?")
+        sql_vals.append(params['opportunity_notes'])
+        updates.append("notes updated")
+    if not sql_parts:
+        return jsonify({'success': False, 'card': {
+            'type': 'ErrorCard', 'text': 'No opportunity fields to update.',
+            'data': {'error': 'no_fields'}, 'actions': []
+        }}), 400
+    sql_vals.append(group_id)
+    execute(f"UPDATE capital_groups SET {', '.join(sql_parts)} WHERE id = ?", sql_vals)
+    text = f"Updated {group['name']} opportunity: {', '.join(updates)}"
+    _log_leo_action('update_opportunity', 'crm_opportunity', text,
+                    {'group_id': group_id, 'updates': updates}, {'success': True})
+    return jsonify({'success': True, 'card': {
+        'type': 'ConfirmationCard', 'text': text,
+        'data': {'what': 'opportunity', 'result': 'updated', 'entity_id': group_id},
+        'actions': []
+    }})
+
+
 def _exec_complete_task(params):
     task_id = params.get('task_id')
     if not task_id:
@@ -8409,8 +8593,6 @@ def _exec_complete_task(params):
 # ===================================================================
 
 BLOCKED_ACTIONS = frozenset([
-    'add_contact', 'create_contact', 'delete_contact', 'remove_contact',
-    'add_person', 'create_person', 'delete_person', 'remove_person',
     'add_user', 'create_user', 'delete_user', 'remove_user',
     'change_password', 'update_security', 'change_email', 'change_role',
     'delete_account', 'remove_account',
@@ -8418,22 +8600,23 @@ BLOCKED_ACTIONS = frozenset([
 
 ALLOWED_AREAS = frozenset([
     'calendar', 'performance', 'crm_touchpoint', 'crm_stage',
-    'crm_followup', 'crm_task', 'crm_notes', 'export',
+    'crm_followup', 'crm_task', 'crm_notes', 'crm_contact',
+    'crm_group', 'crm_warmth', 'crm_opportunity', 'export',
 ])
 
 
 def _leo_permission_check(action_type, params=None):
     """Check if Leo is allowed to perform this action. Returns (allowed, reason)."""
     if action_type in BLOCKED_ACTIONS:
-        return False, f"Leo cannot {action_type.replace('_', ' ')}. Only you can manage people and account settings."
+        return False, f"Leo cannot {action_type.replace('_', ' ')}. Only you can manage user accounts and security settings."
 
     text_lower = (params or {}).get('_raw_text', '').lower()
-    people_phrases = ['add contact', 'create contact', 'new contact', 'add person',
-                      'delete contact', 'remove contact', 'delete person', 'remove person',
-                      'add a new', 'create a new contact', 'new user', 'add user']
-    for phrase in people_phrases:
+    user_mgmt_phrases = ['add user', 'create user', 'new user', 'delete user', 'remove user',
+                         'change password', 'reset password', 'change email', 'change role',
+                         'delete account', 'remove account']
+    for phrase in user_mgmt_phrases:
         if phrase in text_lower:
-            return False, "Leo cannot add or remove people. Use the Contacts page to manage contacts directly."
+            return False, "Leo cannot manage user accounts. Use the Admin page for user management."
 
     return True, ''
 
@@ -10065,6 +10248,71 @@ def _exec_batch(params):
              _fu_now, _fu_now, _fu_now]
         )
         results.append(f"Created follow-up due {fu['due_date']}")
+
+    # 4) Create contacts
+    if params.get('contacts'):
+        batch_contacts = params['contacts']
+        created_names = []
+        skipped_names = []
+        for c in batch_contacts:
+            first_name = c.get('first_name', '').strip()
+            last_name = c.get('last_name', '').strip()
+            if not first_name and not last_name:
+                skipped_names.append('(empty name)')
+                continue
+            if group_id:
+                existing = fetch_one(
+                    "SELECT id FROM prospecting_contacts WHERE group_id = ? AND LOWER(first_name) = ? AND LOWER(last_name) = ?",
+                    [group_id, first_name.lower(), last_name.lower()]
+                )
+                if existing:
+                    skipped_names.append(f"{first_name} {last_name}")
+                    continue
+            cid = new_id()
+            _c_now = datetime.utcnow().isoformat()
+            execute(
+                """INSERT INTO prospecting_contacts
+                   (id, group_id, first_name, last_name, title, email, phone, linkedin_url,
+                    relationship_stage, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'prospect', ?, ?)""",
+                [cid, group_id, first_name, last_name,
+                 c.get('title', ''), c.get('email', ''), c.get('phone', ''),
+                 c.get('linkedin_url', ''), _c_now, _c_now]
+            )
+            created_names.append(f"{first_name} {last_name}")
+        if created_names:
+            results.append(f"Added {len(created_names)} contact{'s' if len(created_names) != 1 else ''}")
+        if skipped_names:
+            results.append(f"{len(skipped_names)} contact{'s' if len(skipped_names) != 1 else ''} skipped (duplicate/empty)")
+        _log_leo_action('create_contacts', 'crm_contact',
+                        f"Batch: {len(created_names)} created, {len(skipped_names)} skipped",
+                        {'group_id': group_id, 'contacts': created_names},
+                        {'created': len(created_names), 'skipped': len(skipped_names)})
+
+    # 5) Update warmth
+    if params.get('warmth_score') is not None and group_id:
+        warmth = params['warmth_score']
+        execute("UPDATE capital_groups SET warmth_score = ? WHERE id = ?", [warmth, group_id])
+        results.append(f"Warmth updated to {warmth}")
+
+    # 6) Update opportunity
+    if params.get('opportunity'):
+        opp = params['opportunity']
+        opp_parts = []
+        opp_vals = []
+        if opp.get('stage'):
+            opp_parts.append("opportunity_stage = ?")
+            opp_vals.append(opp['stage'])
+        if opp.get('value') is not None:
+            opp_parts.append("opportunity_value = ?")
+            opp_vals.append(opp['value'])
+        if opp.get('notes'):
+            opp_parts.append("opportunity_notes = ?")
+            opp_vals.append(opp['notes'])
+        if opp_parts and group_id:
+            opp_vals.append(group_id)
+            execute(f"UPDATE capital_groups SET {', '.join(opp_parts)} WHERE id = ?", opp_vals)
+            results.append("Opportunity updated")
 
     summary_text = " · ".join(results) if results else "No changes made"
     feedback = _action_feedback('execute_batch', group_name or contact_name, summary_text)
