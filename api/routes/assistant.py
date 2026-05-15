@@ -6308,9 +6308,24 @@ _CREATE_CONTACT_RE = re.compile(
     r'(?:named?|called|for)\s+(.+?)(?:\s+(?:at|for|to)\s+(.+))?$',
     re.IGNORECASE
 )
+_CREATE_CONTACT_TO_RE = re.compile(
+    r'(?:create|add|new)\s+(?:a\s+)?(?:new\s+)?contact\s+'
+    r'(?:to|at|for|in)\s+["\']?(.+?)["\']?\s+'
+    r'(?:named?|called)\s+(.+?)$',
+    re.IGNORECASE
+)
+_ADD_PERSON_TO_GROUP_RE = re.compile(
+    r'(?:add|create|new)\s+["\']?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)["\']?\s+'
+    r'(?:to|at|for|in)\s+(.+?)$',
+    re.IGNORECASE
+)
+_ROLE_RE = re.compile(
+    r'(?:(?:make\s+(?:him|her|them)\s+)|(?:as\s+(?:a\s+)?)|(?:(?:his|her|their)\s+(?:role|title|position)\s+(?:is|as)\s+))(.+?)$',
+    re.IGNORECASE
+)
 
 
-def _try_parse_creation_command(text):
+def _try_parse_creation_command(text, conv_state=None):
     """
     Detect 'create company X' / 'add contact Y at Z' commands.
     Returns a preview card dict with a confirm button, or None.
@@ -6353,41 +6368,104 @@ def _try_parse_creation_command(text):
         }
 
     # --- Contact creation ---
-    m = _CREATE_CONTACT_RE.search(text_stripped)
+    full_name = None
+    company_hint = None
+    title_hint = None
+
+    # Extract role/title from end of message: "make him CEO", "as CEO", "his role is CEO"
+    role_m = _ROLE_RE.search(text_stripped)
+    if role_m:
+        title_hint = role_m.group(1).strip().rstrip('.,!?')
+        text_for_contact = text_stripped[:role_m.start()].strip().rstrip(' ,')
+    else:
+        # Also check for "and his/her role/title is X" pattern mid-sentence
+        role_and = re.search(r'\s+and\s+(?:his|her|their)\s+(?:role|title|position)\s+(?:is|as)\s+(.+?)$',
+                             text_stripped, re.IGNORECASE)
+        if role_and:
+            title_hint = role_and.group(1).strip().rstrip('.,!?')
+            text_for_contact = text_stripped[:role_and.start()].strip()
+        else:
+            text_for_contact = text_stripped
+
+    # Pattern 1: "add contact named Curtis Barton at Alkeme Insurance"
+    m = _CREATE_CONTACT_RE.search(text_for_contact)
     if m:
         full_name = m.group(1).strip().strip('"\'')
         company_hint = (m.group(2) or '').strip().strip('"\'')
-        parts = full_name.split(None, 1)
-        first_name = parts[0] if parts else full_name
-        last_name = parts[1] if len(parts) > 1 else ''
 
-        group = None
-        group_id = None
-        if company_hint:
-            groups = _find_groups_fuzzy(company_hint)
-            if groups:
-                group = groups[0]
-                group_id = group['id']
+    # Pattern 2: "add contact to Alkeme Insurance named Curtis Barton"
+    if not full_name:
+        m = _CREATE_CONTACT_TO_RE.search(text_for_contact)
+        if m:
+            company_hint = m.group(1).strip().strip('"\'')
+            full_name = m.group(2).strip().strip('"\'')
 
-        contact_data = {
-            'contacts': [{'first_name': first_name, 'last_name': last_name}],
-            'group_id': group_id,
-            'group_name': group['name'] if group else '',
-        }
-        label = f'{first_name} {last_name}'.strip()
-        if group:
-            label += f' at {group["name"]}'
+    # Pattern 3: "add Curtis Barton to Alkeme Insurance" / "add Curtis Barton to that group"
+    if not full_name:
+        m = _ADD_PERSON_TO_GROUP_RE.search(text_for_contact)
+        if m:
+            full_name = m.group(1).strip().strip('"\'')
+            company_hint = m.group(2).strip().strip('"\'')
 
-        return {
-            'type': 'ConfirmationCard',
-            'text': f'Add contact **{label}**?',
-            'data': {'what': 'create_contact', 'name': label},
-            'actions': [
-                {'id': 'confirm_create', 'label': 'Confirm', 'action': 'create_contacts',
-                 'params': contact_data},
-                {'id': 'cancel', 'label': 'Cancel', 'action': 'cancel', 'params': {}},
-            ],
-        }
+    if not full_name:
+        return None
+
+    # Clean trailing role phrases and dangling conjunctions from the name
+    full_name = re.sub(r'\s+(?:as|and make|and his|and her|and their)\b.*$', '', full_name, flags=re.IGNORECASE).strip()
+    full_name = re.sub(r'\s+and\s*$', '', full_name, flags=re.IGNORECASE).strip()
+    if full_name.lower() in _PRONOUNS or len(full_name) < 2:
+        return None
+
+    # Clean trailing role phrases from company hint
+    if company_hint:
+        company_hint = re.sub(r'\s+(?:and|as)\b.*$', '', company_hint, flags=re.IGNORECASE).strip()
+
+    # Resolve contextual references: "that group", "the group", "that company"
+    _GROUP_REFS = {'that group', 'the group', 'this group', 'that company', 'the company', 'this company'}
+    if company_hint and company_hint.lower() in _GROUP_REFS:
+        if conv_state and conv_state.get('companies'):
+            last_co = conv_state['companies'][-1]
+            company_hint = last_co.get('name', '')
+        else:
+            company_hint = ''
+
+    group = None
+    group_id = None
+    if company_hint:
+        groups = _find_groups_fuzzy(company_hint)
+        if groups:
+            group = groups[0]
+            group_id = group['id']
+
+    parts = full_name.split(None, 1)
+    first_name = parts[0] if parts else full_name
+    last_name = parts[1] if len(parts) > 1 else ''
+
+    contact_entry = {'first_name': first_name, 'last_name': last_name}
+    if title_hint:
+        contact_entry['title'] = title_hint
+
+    contact_data = {
+        'contacts': [contact_entry],
+        'group_id': group_id,
+        'group_name': group['name'] if group else '',
+    }
+    label = f'{first_name} {last_name}'.strip()
+    if title_hint:
+        label += f' ({title_hint})'
+    if group:
+        label += f' at {group["name"]}'
+
+    return {
+        'type': 'ConfirmationCard',
+        'text': f'Add contact **{label}**?',
+        'data': {'what': 'create_contact', 'name': label},
+        'actions': [
+            {'id': 'confirm_create', 'label': 'Confirm', 'action': 'create_contacts',
+             'params': contact_data},
+            {'id': 'cancel', 'label': 'Cancel', 'action': 'cancel', 'params': {}},
+        ],
+    }
 
     return None
 
@@ -7848,7 +7926,7 @@ def _chat_inner():
 
     # Early creation intercept — catch "create company/contact" BEFORE intent classification
     _creation_input = resolved_msg if resolved_refs else last_msg
-    _early_creation = _try_parse_creation_command(_creation_input)
+    _early_creation = _try_parse_creation_command(_creation_input, conv_state)
     if _early_creation:
         _persist_chat(last_msg, _early_creation, 'crm_update', 'execution')
         return jsonify({
@@ -8487,7 +8565,7 @@ def _chat_inner():
             ]
             _is_fake_success = any(p in _card_text_lower for p in _fake_success_patterns)
             if _is_fake_success and intent in ('crm_update', 'normal_chat'):
-                creation_card = _try_parse_creation_command(last_msg)
+                creation_card = _try_parse_creation_command(last_msg, conv_state)
                 if creation_card:
                     card = creation_card
                 else:
