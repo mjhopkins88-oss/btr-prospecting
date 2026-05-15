@@ -47,7 +47,8 @@ var CARD_COLORS = {
   BriefCard:              { bg: '#f0f9ff', border: '#bae6fd', accent: '#0c4a6e', icon: '📰' },
   MeetingCard:            { bg: '#f0fdf4', border: '#bbf7d0', accent: '#15803d', icon: '📅' },
   LeoActionPreviewCard:   { bg: '#fffbeb', border: '#fde68a', accent: '#92400e', icon: '🧠' },
-  CalendarConfirmCard:    { bg: '#f0fdf4', border: '#86efac', accent: '#15803d', icon: '📅' }
+  CalendarConfirmCard:    { bg: '#f0fdf4', border: '#86efac', accent: '#15803d', icon: '📅' },
+  SchedulePlanCard:       { bg: '#f0f9ff', border: '#7dd3fc', accent: '#0369a1', icon: '📅' }
 };
 
 var SLASH_HINTS = [
@@ -273,6 +274,13 @@ function ensureCardActions(card) {
       { id: 'cancel_cal_events', label: 'Cancel', action: 'cancel', params: {} }
     ];
   }
+  if (card.type === 'SchedulePlanCard' && card.actions.length === 0 && d.schedule_events && d.schedule_events.length > 0) {
+    card.actions = [
+      { id: 'add_full_schedule', label: 'Add ' + d.schedule_events.length + ' Blocks to Calendar', action: 'leo_execute',
+        params: { exec_action: 'cal_create_events', exec_params: { events: d.schedule_events } } },
+      { id: 'nav_cal', label: 'Open Calendar', action: 'navigate', params: { tab: 'calendar' } }
+    ];
+  }
   return card;
 }
 
@@ -332,15 +340,32 @@ function executeCardAction(act, messages, setMessages, setActionLoading) {
   trackInteraction('action_clicked', act.action, act.id);
 
   if (act.action === 'copy_text' || act.action === 'copy_draft') {
-    if (act.params && act.params.body && navigator.clipboard) {
-      var copyText = (act.params.subject ? 'Subject: ' + act.params.subject + '\n\n' : '') + act.params.body;
-      navigator.clipboard.writeText(copyText);
+    var copyText = '';
+    if (act.params && act.params.body) {
+      copyText = (act.params.subject ? 'Subject: ' + act.params.subject + '\n\n' : '') + act.params.body;
     }
-    setMessages(function(prev) {
-      return prev.concat([{ role: 'assistant', card: {
-        type: 'ConfirmationCard', text: 'Copied to clipboard.', data: {}, actions: []
-      }}]);
-    });
+    if (copyText && navigator.clipboard) {
+      navigator.clipboard.writeText(copyText).then(function() {
+        setMessages(function(prev) {
+          return prev.concat([{ role: 'assistant', card: {
+            type: 'ConfirmationCard', text: 'Copied to clipboard.', data: {}, actions: []
+          }}]);
+        });
+      }).catch(function() {
+        setMessages(function(prev) {
+          return prev.concat([{ role: 'assistant', card: {
+            type: 'ErrorCard', text: 'Could not copy — try selecting and copying manually.',
+            data: { error: 'clipboard_failed' }, actions: []
+          }}]);
+        });
+      });
+    } else if (!copyText) {
+      setMessages(function(prev) {
+        return prev.concat([{ role: 'assistant', card: {
+          type: 'ErrorCard', text: 'No draft content to copy.', data: { error: 'empty_draft' }, actions: []
+        }}]);
+      });
+    }
     return;
   }
 
@@ -417,6 +442,10 @@ function executeCardAction(act, messages, setMessages, setActionLoading) {
           act.params.exec_action.indexOf('cal_') === 0) {
         window.dispatchEvent(new CustomEvent('btr-calendar-refresh'));
       }
+      if (d.success && (act.action === 'schedule_meeting' || act.action === 'log_touchpoint' ||
+          act.action === 'update_stage' || act.action === 'create_followup' || act.action === 'complete_task')) {
+        window.dispatchEvent(new CustomEvent('btr-calendar-refresh'));
+      }
     })
     .catch(function() {
       setActionLoading(false);
@@ -431,7 +460,7 @@ function executeCardAction(act, messages, setMessages, setActionLoading) {
 
 // --- Card renderers ---
 
-function renderDraftCard(card, onAction) {
+function renderDraftCard(card, onAction, loadingState) {
   var d = card.data || {};
   var colors = CARD_COLORS.DraftCard;
   var channelLabel = { email: 'Email', linkedin: 'LinkedIn', call: 'Call Script' }[d.channel] || d.channel || 'Draft';
@@ -569,7 +598,9 @@ function renderExportCard(card, onAction) {
   var exportType = d.export_type || 'Data';
 
   if (!fileUrl && (!card.actions || card.actions.length === 0)) {
-    return null;
+    return h('div', { style: { background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '0.5rem', padding: '0.5rem 0.7rem', fontSize: '0.74rem', color: '#dc2626', fontWeight: 600 } },
+      '⚠ Export failed — no file was generated. Try again or ask Leo to regenerate.'
+    );
   }
 
   var displayName = fileName || (exportType + ' export');
@@ -1383,15 +1414,19 @@ function renderBriefCard(card, onAction) {
   );
 }
 
-function renderActionButtons(actions, onAction, draftData) {
+function renderActionButtons(actions, onAction, draftData, currentLoading) {
   if (!actions || actions.length === 0) return null;
 
   return h('div', { style: { display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.4rem' } },
     actions.map(function(act) {
       var isCopy = act.action === 'copy_text' || act.action === 'copy_draft';
+      var isLoading = currentLoading && (currentLoading === true || currentLoading === act.id);
+      var isDisabled = !!currentLoading;
       return h('button', {
         key: act.id,
+        disabled: isDisabled,
         onClick: function() {
+          if (isDisabled) return;
           if (isCopy && draftData) {
             var text = (draftData.subject ? 'Subject: ' + draftData.subject + '\n\n' : '') + (draftData.body || '');
             if (navigator.clipboard) {
@@ -1401,18 +1436,19 @@ function renderActionButtons(actions, onAction, draftData) {
           onAction(act);
         },
         style: {
-          background: isCopy ? '#15803d' : 'transparent',
+          background: isCopy ? '#15803d' : isLoading ? '#e5e7eb' : 'transparent',
           border: isCopy ? 'none' : '1px solid #d1d5db',
-          color: isCopy ? '#ffffff' : '#374151',
+          color: isCopy ? '#ffffff' : isDisabled ? '#9ca3af' : '#374151',
           padding: '0.25rem 0.55rem',
           borderRadius: '0.3rem',
           fontSize: '0.68rem',
           fontWeight: 600,
-          cursor: 'pointer',
+          cursor: isDisabled ? 'not-allowed' : 'pointer',
           fontFamily: "'Inter', sans-serif",
-          transition: 'all 0.15s'
+          transition: 'all 0.15s',
+          opacity: isDisabled && !isLoading ? 0.6 : 1
         }
-      }, act.label);
+      }, isLoading ? 'Working...' : act.label);
     })
   );
 }
@@ -1439,7 +1475,7 @@ function renderMeetingCard(card, onAction) {
   );
 }
 
-function renderLeoActionPreviewCard(card, onAction) {
+function renderLeoActionPreviewCard(card, onAction, loadingState) {
   var d = card.data || {};
   var colors = CARD_COLORS.LeoActionPreviewCard;
   var changes = d.changes || [];
@@ -1463,11 +1499,11 @@ function renderLeoActionPreviewCard(card, onAction) {
         );
       })
     ) : null,
-    renderActionButtons(card.actions, onAction)
+    renderActionButtons(card.actions, onAction, null, loadingState)
   );
 }
 
-function renderCalendarConfirmCard(card, onAction) {
+function renderCalendarConfirmCard(card, onAction, loadingState) {
   var d = card.data || {};
   var colors = CARD_COLORS.CalendarConfirmCard;
   var events = d.events || [];
@@ -1518,51 +1554,120 @@ function renderCalendarConfirmCard(card, onAction) {
       h('div', { style: { fontSize: '0.6rem', color: '#92400e', background: '#fef3c7', padding: '0.3rem 0.5rem', borderRadius: '0.3rem', marginBottom: '0.4rem' } },
         '\u{26A0}\u{FE0F} Some contacts could not be matched to CRM records. Meetings will be created without a CRM link.'
       ) : null,
-    renderActionButtons(card.actions, onAction)
+    renderActionButtons(card.actions, onAction, null, loadingState)
+  );
+}
+
+function renderSchedulePlanCard(card, onAction, loadingState) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.SchedulePlanCard;
+  var blocks = d.blocks || [];
+  var prioColors = { critical: '#dc2626', high: '#f59e0b', medium: '#3b82f6', low: '#94a3b8', normal: '#64748b' };
+
+  var formatTime12 = function(t) {
+    if (!t) return '';
+    var parts = t.split(':');
+    var hr = parseInt(parts[0], 10);
+    var m = parts[1] || '00';
+    var ampm = hr >= 12 ? 'PM' : 'AM';
+    var h12 = hr > 12 ? hr - 12 : (hr === 0 ? 12 : hr);
+    return m === '00' ? h12 + ' ' + ampm : h12 + ':' + m + ' ' + ampm;
+  };
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.6rem', padding: '0.85rem', overflow: 'hidden' } },
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' } },
+      h('div', { style: { fontSize: '0.72rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em' } },
+        colors.icon + ' Schedule — ' + (d.date_label || d.date || 'Today')
+      ),
+      d.new_block_count > 0 ?
+        h('span', { style: { fontSize: '0.58rem', padding: '0.08rem 0.4rem', borderRadius: '1rem', background: '#dbeafe', color: '#1e40af', fontWeight: 600 } },
+          d.new_block_count + ' new block' + (d.new_block_count !== 1 ? 's' : '')
+        ) : null
+    ),
+    d.total_minutes ? h('div', { style: { fontSize: '0.6rem', color: '#64748b', marginBottom: '0.4rem' } }, '~' + d.total_minutes + ' min of execution time') : null,
+    h('div', { style: { background: '#fff', borderRadius: '0.4rem', border: '1px solid ' + colors.border, marginBottom: '0.5rem', overflow: 'hidden' } },
+      blocks.map(function(b, i) {
+        var isExisting = b.is_existing;
+        var pc = prioColors[b.priority] || '#64748b';
+        var leftColor = isExisting ? '#94a3b8' : pc;
+        return h('div', { key: 'b' + i, style: {
+          display: 'flex', alignItems: 'flex-start', gap: '0.5rem',
+          padding: '0.5rem 0.6rem',
+          borderBottom: i < blocks.length - 1 ? '1px solid #f1f5f9' : 'none',
+          borderLeft: '3px solid ' + leftColor,
+          opacity: isExisting ? 0.65 : 1,
+          background: isExisting ? '#f8fafc' : '#fff'
+        } },
+          h('div', { style: { minWidth: '72px', flexShrink: 0 } },
+            h('div', { style: { fontSize: '0.72rem', fontWeight: 700, color: '#0f172a' } }, formatTime12(b.start_time)),
+            h('div', { style: { fontSize: '0.55rem', color: '#94a3b8' } }, b.duration_min + 'min')
+          ),
+          h('div', { style: { flex: 1, minWidth: 0 } },
+            h('div', { style: { fontSize: '0.72rem', fontWeight: 600, color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } },
+              b.title + (isExisting ? ' [existing]' : '')
+            ),
+            b.description && !isExisting ?
+              h('div', { style: { fontSize: '0.58rem', color: '#64748b', marginTop: '0.1rem', fontStyle: 'italic' } }, b.description) : null,
+            !isExisting && b.priority && b.priority !== 'normal' ?
+              h('span', { style: { fontSize: '0.52rem', padding: '0.04rem 0.3rem', borderRadius: '1rem', background: pc + '18', color: pc, fontWeight: 600, marginTop: '0.1rem', display: 'inline-block' } },
+                (b.priority || '').toUpperCase()
+              ) : null
+          ),
+          h('div', { style: { fontSize: '0.58rem', color: '#94a3b8', whiteSpace: 'nowrap', flexShrink: 0 } }, formatTime12(b.end_time))
+        );
+      })
+    ),
+    renderActionButtons(card.actions, onAction, null, loadingState)
   );
 }
 
 // --- Card dispatcher ---
-function renderCard(card, onAction) {
+function renderCard(card, onAction, loadingState) {
   if (!card) return null;
   var type = card.type || 'TextCard';
+  var oa = function(act) { return onAction(act); };
 
   switch (type) {
-    case 'DraftCard': return renderDraftCard(card, onAction);
-    case 'NextActionCard': return renderNextActionCard(card, onAction);
-    case 'SignalCard': return renderSignalCard(card, onAction);
+    case 'DraftCard': return renderDraftCard(card, oa, loadingState);
+    case 'NextActionCard': return renderNextActionCard(card, oa);
+    case 'SignalCard': return renderSignalCard(card, oa);
     case 'ContactSummaryCard':
-    case 'CompanySummaryCard': return renderSummaryCard(card, onAction);
-    case 'TouchpointLogCard': return renderTouchpointCard(card, onAction);
-    case 'FollowUpCard': return renderFollowUpCard(card, onAction);
-    case 'ExportCard': return renderExportCard(card, onAction);
+    case 'CompanySummaryCard': return renderSummaryCard(card, oa);
+    case 'TouchpointLogCard': return renderTouchpointCard(card, oa);
+    case 'FollowUpCard': return renderFollowUpCard(card, oa);
+    case 'ExportCard': return renderExportCard(card, oa);
     case 'ConfirmationCard': return renderConfirmationCard(card);
     case 'ErrorCard': return renderErrorCard(card);
-    case 'StrategyCard': return renderStrategyCard(card, onAction);
-    case 'ClaudePromptCard': return renderClaudePromptCard(card, onAction);
-    case 'ContactInsightCard': return renderContactInsightCard(card, onAction);
-    case 'SignalInsightCard': return renderSignalInsightCard(card, onAction);
-    case 'PerformanceInsightCard': return renderPerformanceInsightCard(card, onAction);
-    case 'ExecutionPlanCard': return renderExecutionPlanCard(card, onAction);
-    case 'FixCard': return renderFixCard(card, onAction);
-    case 'CrmUpdatePreviewCard': return renderCrmUpdatePreviewCard(card, onAction);
-    case 'AmbiguityCard': return renderAmbiguityCard(card, onAction);
-    case 'DailyPlanCard': return renderDailyPlanCard(card, onAction);
-    case 'SprintCard': return renderSprintCard(card, onAction);
-    case 'InsightCard': return renderInsightCard(card, onAction);
-    case 'QueueCard': return renderQueueCard(card, onAction);
-    case 'BatchDraftCard': return renderBatchDraftCard(card, onAction);
-    case 'ApprovalQueueCard': return renderApprovalQueueCard(card, onAction);
-    case 'ProbabilityCard': return renderProbabilityCard(card, onAction);
-    case 'RelationshipCard': return renderRelationshipCard(card, onAction);
-    case 'FunnelCard': return renderFunnelCard(card, onAction);
-    case 'PredictionCard': return renderPredictionCard(card, onAction);
-    case 'AutomationCard': return renderAutomationCard(card, onAction);
-    case 'BriefCard': return renderBriefCard(card, onAction);
-    case 'MeetingCard': return renderMeetingCard(card, onAction);
-    case 'LeoActionPreviewCard': return renderLeoActionPreviewCard(card, onAction);
-    case 'CalendarConfirmCard': return renderCalendarConfirmCard(card, onAction);
-    default: return null;
+    case 'StrategyCard': return renderStrategyCard(card, oa);
+    case 'ClaudePromptCard': return renderClaudePromptCard(card, oa);
+    case 'ContactInsightCard': return renderContactInsightCard(card, oa);
+    case 'SignalInsightCard': return renderSignalInsightCard(card, oa);
+    case 'PerformanceInsightCard': return renderPerformanceInsightCard(card, oa);
+    case 'ExecutionPlanCard': return renderExecutionPlanCard(card, oa);
+    case 'FixCard': return renderFixCard(card, oa);
+    case 'CrmUpdatePreviewCard': return renderCrmUpdatePreviewCard(card, oa);
+    case 'AmbiguityCard': return renderAmbiguityCard(card, oa);
+    case 'DailyPlanCard': return renderDailyPlanCard(card, oa);
+    case 'SprintCard': return renderSprintCard(card, oa);
+    case 'InsightCard': return renderInsightCard(card, oa);
+    case 'QueueCard': return renderQueueCard(card, oa);
+    case 'BatchDraftCard': return renderBatchDraftCard(card, oa);
+    case 'ApprovalQueueCard': return renderApprovalQueueCard(card, oa);
+    case 'ProbabilityCard': return renderProbabilityCard(card, oa);
+    case 'RelationshipCard': return renderRelationshipCard(card, oa);
+    case 'FunnelCard': return renderFunnelCard(card, oa);
+    case 'PredictionCard': return renderPredictionCard(card, oa);
+    case 'AutomationCard': return renderAutomationCard(card, oa);
+    case 'BriefCard': return renderBriefCard(card, oa);
+    case 'MeetingCard': return renderMeetingCard(card, oa);
+    case 'LeoActionPreviewCard': return renderLeoActionPreviewCard(card, oa, loadingState);
+    case 'CalendarConfirmCard': return renderCalendarConfirmCard(card, oa, loadingState);
+    case 'SchedulePlanCard': return renderSchedulePlanCard(card, oa, loadingState);
+    default:
+      if (card.text) {
+        return h('div', { style: { fontSize: '0.74rem', color: '#334155', whiteSpace: 'pre-wrap', lineHeight: 1.5 } }, card.text);
+      }
+      return null;
   }
 }
 
@@ -1689,9 +1794,23 @@ function BTRAssistantChat(props) {
             setMessages(function(prev) {
               return prev.concat([{ role: 'assistant', card: sprintCard, mode: 'execution' }]);
             });
+          } else {
+            setMessages(function(prev) {
+              return prev.concat([{ role: 'assistant', card: {
+                type: 'ErrorCard', text: d.error || 'Could not start sprint — no tasks available.',
+                data: { error: 'sprint_failed' }, actions: []
+              }}]);
+            });
           }
         })
-        .catch(function() {});
+        .catch(function() {
+          setMessages(function(prev) {
+            return prev.concat([{ role: 'assistant', card: {
+              type: 'ErrorCard', text: 'Sprint failed — connection error.',
+              data: { error: 'network' }, actions: []
+            }}]);
+          });
+        });
       return;
     }
 
@@ -1712,7 +1831,14 @@ function BTRAssistantChat(props) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'complete_task', task_id: taskId, original_task_id: act.params && act.params.original_task_id })
-      }).catch(function() {});
+      }).catch(function() {
+        setMessages(function(prev) {
+          return prev.concat([{ role: 'assistant', card: {
+            type: 'ErrorCard', text: 'Task marked locally but failed to sync — it will retry on next action.',
+            data: { error: 'sprint_sync' }, actions: []
+          }}]);
+        });
+      });
 
       var progressCard = {
         type: 'SprintCard',
@@ -1848,20 +1974,22 @@ function BTRAssistantChat(props) {
     document.head.appendChild(style);
   }, []);
 
-  // Pixel cat SVG data URI (10x10 pixel art black cat, V12: sharper edges, neon eyes)
-  var catSvg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' shape-rendering='crispEdges'%3E" +
-    "%3Cdefs%3E%3Cfilter id='g'%3E%3CfeGaussianBlur stdDeviation='0.3'/%3E%3C/filter%3E%3C/defs%3E" +
-    // ears (row 0-1)
+  // Pixel cat SVG data URI (12x12 pixel art black cat, V15: sharper 8-bit, bright teal eyes, subtle glow)
+  var catSvg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' shape-rendering='crispEdges'%3E" +
+    "%3Cdefs%3E%3Cfilter id='g'%3E%3CfeGaussianBlur stdDeviation='0.35'/%3E%3C/filter%3E%3C/defs%3E" +
+    // ears (row 0-1) — sharp triangular ears
     "%3Crect x='1' y='0' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='2' y='0' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='7' y='0' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='8' y='0' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='2' y='0' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='9' y='0' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='10' y='0' width='1' height='1' fill='%230f172a'/%3E" +
     "%3Crect x='0' y='1' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='1' y='1' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='2' y='1' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='7' y='1' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='8' y='1' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='9' y='1' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='1' y='1' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='2' y='1' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='3' y='1' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='8' y='1' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='9' y='1' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='10' y='1' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='11' y='1' width='1' height='1' fill='%230f172a'/%3E" +
     // head top (row 2)
     "%3Crect x='0' y='2' width='1' height='1' fill='%230f172a'/%3E" +
     "%3Crect x='1' y='2' width='1' height='1' fill='%231e293b'/%3E" +
@@ -1872,78 +2000,112 @@ function BTRAssistantChat(props) {
     "%3Crect x='6' y='2' width='1' height='1' fill='%231e293b'/%3E" +
     "%3Crect x='7' y='2' width='1' height='1' fill='%231e293b'/%3E" +
     "%3Crect x='8' y='2' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='9' y='2' width='1' height='1' fill='%230f172a'/%3E" +
-    // eyes row (row 3) - bright neon green/teal eyes with highlight
+    "%3Crect x='9' y='2' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='10' y='2' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='11' y='2' width='1' height='1' fill='%230f172a'/%3E" +
+    // brow (row 3)
     "%3Crect x='0' y='3' width='1' height='1' fill='%230f172a'/%3E" +
     "%3Crect x='1' y='3' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='2' y='3' width='1' height='1' fill='%2300ffaa'/%3E" +
-    "%3Crect x='3' y='3' width='1' height='1' fill='%2300e89d'/%3E" +
+    "%3Crect x='2' y='3' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='3' y='3' width='1' height='1' fill='%231e293b'/%3E" +
     "%3Crect x='4' y='3' width='1' height='1' fill='%231e293b'/%3E" +
     "%3Crect x='5' y='3' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='6' y='3' width='1' height='1' fill='%2300ffaa'/%3E" +
-    "%3Crect x='7' y='3' width='1' height='1' fill='%2300e89d'/%3E" +
+    "%3Crect x='6' y='3' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='7' y='3' width='1' height='1' fill='%231e293b'/%3E" +
     "%3Crect x='8' y='3' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='9' y='3' width='1' height='1' fill='%230f172a'/%3E" +
-    // eye glow
-    "%3Crect x='2' y='3' width='2' height='1' fill='%2300ffaa' filter='url(%23g)' opacity='0.4'/%3E" +
-    "%3Crect x='6' y='3' width='2' height='1' fill='%2300ffaa' filter='url(%23g)' opacity='0.4'/%3E" +
-    // nose/mouth (row 4)
+    "%3Crect x='9' y='3' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='10' y='3' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='11' y='3' width='1' height='1' fill='%230f172a'/%3E" +
+    // eyes row (row 4) — bright teal with pupil and highlight
     "%3Crect x='0' y='4' width='1' height='1' fill='%230f172a'/%3E" +
     "%3Crect x='1' y='4' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='2' y='4' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='3' y='4' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='4' y='4' width='1' height='1' fill='%23475569'/%3E" +
-    "%3Crect x='5' y='4' width='1' height='1' fill='%23475569'/%3E" +
+    "%3Crect x='2' y='4' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='3' y='4' width='1' height='1' fill='%2300ffaa'/%3E" +
+    "%3Crect x='4' y='4' width='1' height='1' fill='%2300e0a0'/%3E" +
+    "%3Crect x='5' y='4' width='1' height='1' fill='%231e293b'/%3E" +
     "%3Crect x='6' y='4' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='7' y='4' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='8' y='4' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='9' y='4' width='1' height='1' fill='%230f172a'/%3E" +
-    // chin (row 5)
-    "%3Crect x='1' y='5' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='7' y='4' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='8' y='4' width='1' height='1' fill='%2300ffaa'/%3E" +
+    "%3Crect x='9' y='4' width='1' height='1' fill='%2300e0a0'/%3E" +
+    "%3Crect x='10' y='4' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='11' y='4' width='1' height='1' fill='%230f172a'/%3E" +
+    // eye glow overlay
+    "%3Crect x='3' y='4' width='2' height='1' fill='%2300ffaa' filter='url(%23g)' opacity='0.45'/%3E" +
+    "%3Crect x='8' y='4' width='2' height='1' fill='%2300ffaa' filter='url(%23g)' opacity='0.45'/%3E" +
+    // nose/mouth (row 5)
+    "%3Crect x='0' y='5' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='1' y='5' width='1' height='1' fill='%231e293b'/%3E" +
     "%3Crect x='2' y='5' width='1' height='1' fill='%231e293b'/%3E" +
     "%3Crect x='3' y='5' width='1' height='1' fill='%231e293b'/%3E" +
     "%3Crect x='4' y='5' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='5' y='5' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='6' y='5' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='5' y='5' width='1' height='1' fill='%23334155'/%3E" +
+    "%3Crect x='6' y='5' width='1' height='1' fill='%23334155'/%3E" +
     "%3Crect x='7' y='5' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='8' y='5' width='1' height='1' fill='%230f172a'/%3E" +
-    // body (row 6)
+    "%3Crect x='8' y='5' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='9' y='5' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='10' y='5' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='11' y='5' width='1' height='1' fill='%230f172a'/%3E" +
+    // chin (row 6)
     "%3Crect x='1' y='6' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='2' y='6' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='3' y='6' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='4' y='6' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='5' y='6' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='6' y='6' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='7' y='6' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='8' y='6' width='1' height='1' fill='%230f172a'/%3E" +
-    // body lower (row 7)
+    "%3Crect x='2' y='6' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='3' y='6' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='4' y='6' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='5' y='6' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='6' y='6' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='7' y='6' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='8' y='6' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='9' y='6' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='10' y='6' width='1' height='1' fill='%230f172a'/%3E" +
+    // neck (row 7)
     "%3Crect x='2' y='7' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='3' y='7' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='4' y='7' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='5' y='7' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='6' y='7' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='7' y='7' width='1' height='1' fill='%230f172a'/%3E" +
-    // paws (row 8)
+    "%3Crect x='3' y='7' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='4' y='7' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='5' y='7' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='6' y='7' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='7' y='7' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='8' y='7' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='9' y='7' width='1' height='1' fill='%230f172a'/%3E" +
+    // body (row 8)
     "%3Crect x='2' y='8' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='3' y='8' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='6' y='8' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='7' y='8' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='3' y='8' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='4' y='8' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='5' y='8' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='6' y='8' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='7' y='8' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='8' y='8' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='9' y='8' width='1' height='1' fill='%230f172a'/%3E" +
+    // lower body (row 9)
+    "%3Crect x='2' y='9' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='3' y='9' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='4' y='9' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='5' y='9' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='6' y='9' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='7' y='9' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='8' y='9' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='9' y='9' width='1' height='1' fill='%230f172a'/%3E" +
+    // paws (row 10)
+    "%3Crect x='2' y='10' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='3' y='10' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='4' y='10' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='7' y='10' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='8' y='10' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='9' y='10' width='1' height='1' fill='%230f172a'/%3E" +
     "%3C/svg%3E";
 
-  // Pixel cat avatar badge with circular frame and glow
+  // Pixel cat avatar badge with circular frame, glow, centered (V15: cleaner, stronger glow)
   var catAvatar = function(size, glow) {
     var s = size || 28;
     return h('div', { style: {
       width: s, height: s, borderRadius: '50%', flexShrink: 0,
-      background: 'radial-gradient(circle at 50% 40%, rgba(0,255,170,0.08) 0%, rgba(15,23,42,0.95) 70%)',
-      backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-      border: glow ? '1.5px solid rgba(0,255,170,0.35)' : '1.5px solid rgba(255,255,255,0.2)',
+      background: 'radial-gradient(circle at 50% 38%, rgba(0,255,170,0.10) 0%, rgba(15,23,42,0.97) 65%)',
+      backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+      border: glow ? '1.5px solid rgba(0,255,170,0.4)' : '1.5px solid rgba(255,255,255,0.15)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       boxShadow: glow
-        ? '0 0 16px rgba(0,255,170,0.35), 0 0 4px rgba(0,255,170,0.2), inset 0 0 8px rgba(0,255,170,0.05)'
-        : '0 0 6px rgba(0,255,170,0.1)'
+        ? '0 0 20px rgba(0,255,170,0.4), 0 0 6px rgba(0,255,170,0.25), inset 0 0 10px rgba(0,255,170,0.06)'
+        : '0 0 8px rgba(0,255,170,0.12)'
     } },
-      h('img', { src: catSvg, style: { width: s * 0.62, height: s * 0.62, imageRendering: 'pixelated' } })
+      h('img', { src: catSvg, style: { width: s * 0.6, height: s * 0.6, imageRendering: 'pixelated' } })
     );
   };
 
@@ -2014,7 +2176,7 @@ function BTRAssistantChat(props) {
               style: { fontFamily: "'Orbitron', sans-serif", fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.05em',
                 background: 'linear-gradient(135deg, #00ffaa, #14b8a6, #38bdf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }
             }, 'LEO'),
-            h('span', { style: { fontSize: '0.52rem', color: '#64748b', fontWeight: 400 } }, 'Operator AI v13'),
+            h('span', { style: { fontSize: '0.52rem', color: '#64748b', fontWeight: 400 } }, 'Operator AI v14'),
             lastMode ? h('span', { style: {
               fontSize: '0.48rem', color: MODE_COLORS[lastMode] || '#94a3b8',
               background: (MODE_COLORS[lastMode] || '#94a3b8') + '22',
@@ -2065,9 +2227,9 @@ function BTRAssistantChat(props) {
           fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.03em',
           background: 'linear-gradient(135deg, #00ffaa, #14b8a6, #38bdf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
         } }, 'LEO'),
-        h('div', { style: { fontSize: '0.72rem', fontWeight: 500, marginBottom: '0.15rem', color: '#475569' } }, 'BTR Intelligence Engine'),
+        h('div', { style: { fontSize: '0.72rem', fontWeight: 500, marginBottom: '0.15rem', color: '#475569' } }, 'Thinking Partner'),
         h('div', { style: { fontSize: '0.65rem', lineHeight: 1.6, marginBottom: '0.75rem', color: '#94a3b8' } },
-          'Strategy, outreach, deal intelligence, actions — ask me anything.'
+          'Strategy, outreach, deal intelligence — I think before I speak.'
         ),
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
           [
@@ -2139,7 +2301,7 @@ function BTRAssistantChat(props) {
             ) : null,
 
             // Structured card
-            hasCard ? renderCard(m.card, handleAction) : null,
+            hasCard ? renderCard(m.card, handleAction, actionLoading) : null,
 
             // Text bubble — frosted glass style
             showTextBubble ? h('div', {

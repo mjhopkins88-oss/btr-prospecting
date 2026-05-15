@@ -373,88 +373,290 @@ _pdf_store = {}
 
 
 def build_doc_pdf(doc):
-    """
-    Build a PDF from a structured document dict.
-    doc = {
-        'title': str,
-        'subtitle': str (optional),
-        'date': str,
-        'sections': [
-            {'heading': str, 'items': [str, ...]}
-            or {'heading': str, 'body': str}
-        ]
-    }
+    """Build a premium PDF from a structured document dict.
+
+    Supports section types:
+      priority_snapshot, action_queue, schedule, intel,
+      insight, metrics, quote, outreach, standard (default).
     Returns PDF bytes.
     """
     from fpdf import FPDF
 
-    class DocPDF(FPDF):
+    S900 = (15, 23, 42)
+    S700 = (51, 65, 85)
+    S500 = (100, 116, 139)
+    S400 = (148, 163, 184)
+    S200 = (226, 232, 240)
+    S100 = (241, 245, 249)
+    TEAL = (13, 148, 136)
+    TEAL_LT = (20, 184, 166)
+    TEAL_BG = (240, 253, 250)
+    RED = (220, 38, 38)
+    AMBER = (217, 119, 6)
+    BLUE = (37, 99, 235)
+    PRIO_CLR = {'critical': RED, 'high': AMBER, 'medium': BLUE, 'low': S500}
+
+    def safe(text):
+        text = str(text)
+        text = text.replace('—', ' - ').replace('–', '-')
+        text = text.replace('’', "'").replace('‘', "'")
+        text = text.replace('“', '"').replace('”', '"')
+        return text.encode('latin-1', 'replace').decode('latin-1')
+
+    class PremiumPDF(FPDF):
         def header(self):
-            self.set_font('Helvetica', 'B', 9)
-            self.set_text_color(100, 116, 139)
-            self.cell(0, 8, 'BTR PROSPECTING ENGINE', align='R')
-            self.ln(12)
+            self.set_fill_color(*TEAL)
+            self.rect(0, 0, self.w, 2.5, 'F')
+            self.set_y(7)
+            self.set_font('Helvetica', 'B', 8)
+            self.set_text_color(*TEAL)
+            self.cell(0, 5, 'BTR PROSPECTING ENGINE', align='L')
+            self.set_font('Helvetica', '', 8)
+            self.set_text_color(*S400)
+            self.cell(0, 5, safe(doc.get('date', '')), align='R')
+            self.ln(10)
 
         def footer(self):
-            self.set_y(-15)
-            self.set_font('Helvetica', 'I', 7)
-            self.set_text_color(148, 163, 184)
-            self.cell(0, 10, f'Generated {doc.get("date", "")} | Confidential', align='C')
+            self.set_y(-12)
+            self.set_draw_color(*S200)
+            self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
+            self.set_y(-10)
+            self.set_font('Helvetica', '', 7)
+            self.set_text_color(*S400)
+            self.cell(0, 5, safe(f'Confidential  |  {doc.get("date", "")}  |  Page {self.page_no()}'), align='C')
 
-    pdf = DocPDF('P', 'mm', 'Letter')
+        def section_head(self, text):
+            self.ln(2)
+            y = self.get_y()
+            self.set_fill_color(*TEAL)
+            self.rect(self.l_margin, y, 3, 7, 'F')
+            self.set_x(self.l_margin + 6)
+            self.set_font('Helvetica', 'B', 11)
+            self.set_text_color(*S900)
+            self.cell(0, 7, safe(text), new_x='LMARGIN', new_y='NEXT')
+            self.ln(3)
+
+        def divider(self):
+            self.set_draw_color(*S200)
+            self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
+            self.ln(4)
+
+        def indented_text(self, indent, w, h, text, **kw):
+            orig = self.l_margin
+            self.set_left_margin(orig + indent)
+            self.set_x(orig + indent)
+            self.multi_cell(w, h, text, **kw)
+            self.set_left_margin(orig)
+
+    pdf = PremiumPDF('P', 'mm', 'Letter')
     pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.set_left_margin(15)
+    pdf.set_right_margin(15)
     pdf.add_page()
 
-    # Title
-    pdf.set_font('Helvetica', 'B', 18)
-    pdf.set_text_color(15, 23, 42)
-    safe_title = doc.get('title', 'Document').encode('latin-1', 'replace').decode('latin-1')
-    pdf.cell(0, 12, safe_title, new_x='LMARGIN', new_y='NEXT')
+    # ---- Title block ----
+    pdf.set_font('Helvetica', 'B', 22)
+    pdf.set_text_color(*S900)
+    pdf.cell(0, 12, safe(doc.get('title', 'Execution Brief')), new_x='LMARGIN', new_y='NEXT')
     if doc.get('subtitle'):
-        pdf.set_font('Helvetica', '', 10)
-        pdf.set_text_color(100, 116, 139)
-        safe_sub = doc['subtitle'].encode('latin-1', 'replace').decode('latin-1')
-        pdf.cell(0, 6, safe_sub, new_x='LMARGIN', new_y='NEXT')
-    pdf.set_font('Helvetica', '', 9)
-    pdf.set_text_color(148, 163, 184)
-    pdf.cell(0, 6, doc.get('date', ''), new_x='LMARGIN', new_y='NEXT')
-    pdf.ln(4)
+        pdf.set_font('Helvetica', '', 11)
+        pdf.set_text_color(*S500)
+        pdf.cell(0, 6, safe(doc['subtitle']), new_x='LMARGIN', new_y='NEXT')
+    pdf.ln(2)
+    pdf.divider()
+    pdf.ln(1)
 
-    pdf.set_draw_color(226, 232, 240)
-    pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
-    pdf.ln(6)
+    usable_w = pdf.w - pdf.l_margin - pdf.r_margin
 
     for section in doc.get('sections', []):
+        sec_type = section.get('type', 'standard')
         heading = section.get('heading', '')
-        safe_heading = heading.encode('latin-1', 'replace').decode('latin-1')
-        pdf.set_font('Helvetica', 'B', 11)
-        pdf.set_text_color(15, 23, 42)
-        pdf.set_fill_color(241, 245, 249)
-        pdf.cell(0, 8, f'  {safe_heading}', fill=True, new_x='LMARGIN', new_y='NEXT')
-        pdf.ln(3)
+        if heading:
+            pdf.section_head(heading)
 
-        if section.get('body'):
-            pdf.set_font('Helvetica', '', 9)
-            pdf.set_text_color(51, 65, 85)
-            safe_body = section['body'].encode('latin-1', 'replace').decode('latin-1')
-            pdf.multi_cell(0, 5, safe_body)
+        # ---------- priority_snapshot ----------
+        if sec_type == 'priority_snapshot':
+            for item in section.get('items', []):
+                prio = item.get('priority', 'medium')
+                clr = PRIO_CLR.get(prio, S500)
+                y = pdf.get_y()
+                pdf.set_fill_color(*clr)
+                pdf.rect(pdf.l_margin + 2, y, 2, 10, 'F')
+                pdf.set_x(pdf.l_margin + 8)
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_text_color(*clr)
+                pdf.cell(22, 5, safe(item.get('label', prio.upper())))
+                pdf.set_font('Helvetica', '', 9)
+                pdf.set_text_color(*S700)
+                pdf.indented_text(30, usable_w - 32, 5, safe(item.get('text', '')))
+                pdf.ln(2)
             pdf.ln(2)
 
-        for i, item in enumerate(section.get('items', []), 1):
-            safe_item = str(item).encode('latin-1', 'replace').decode('latin-1')
-            pdf.set_font('Helvetica', 'B', 9)
-            pdf.set_text_color(20, 184, 166)
-            x = pdf.get_x()
-            pdf.set_x(x + 4)
-            pdf.cell(6, 5, f'{i}.')
-            pdf.set_font('Helvetica', '', 9)
-            pdf.set_text_color(51, 65, 85)
-            pdf.multi_cell(0, 5, f' {safe_item}')
+        # ---------- action_queue ----------
+        elif sec_type == 'action_queue':
+            for group in section.get('groups', []):
+                label = group.get('label', '')
+                clr = PRIO_CLR.get(label.lower(), S500)
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_text_color(*clr)
+                pdf.set_x(pdf.l_margin + 3)
+                pdf.cell(0, 5, safe(label), new_x='LMARGIN', new_y='NEXT')
+                pdf.ln(1)
+                for it in group.get('items', []):
+                    y = pdf.get_y()
+                    pdf.set_fill_color(*clr)
+                    pdf.rect(pdf.l_margin + 5, y + 1.5, 1.5, 1.5, 'F')
+                    pdf.set_font('Helvetica', '', 9)
+                    pdf.set_text_color(*S700)
+                    pdf.indented_text(10, usable_w - 12, 5, safe(it))
+                    pdf.ln(1.5)
+                pdf.ln(2)
             pdf.ln(1)
 
-        pdf.ln(3)
+        # ---------- schedule ----------
+        elif sec_type == 'schedule':
+            # Light header row
+            pdf.set_fill_color(*S100)
+            pdf.set_font('Helvetica', 'B', 8)
+            pdf.set_text_color(*S500)
+            y = pdf.get_y()
+            pdf.rect(pdf.l_margin, y, usable_w, 5.5, 'F')
+            pdf.set_x(pdf.l_margin + 4)
+            pdf.cell(34, 5.5, 'TIME')
+            pdf.cell(0, 5.5, 'BLOCK', new_x='LMARGIN', new_y='NEXT')
+            pdf.ln(1)
+            for blk in section.get('blocks', []):
+                is_ex = blk.get('is_existing', False)
+                pdf.set_x(pdf.l_margin + 4)
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_text_color(*(S400 if is_ex else TEAL))
+                pdf.cell(34, 5, safe(blk.get('time', '')))
+                style = '' if is_ex else 'B'
+                pdf.set_font('Helvetica', style, 9)
+                pdf.set_text_color(*(S400 if is_ex else S700))
+                title_txt = blk.get('title', '')
+                if is_ex:
+                    title_txt += '  [existing]'
+                dur = blk.get('duration', '')
+                if dur:
+                    title_txt += f'  ({dur})'
+                pdf.cell(0, 5, safe(title_txt), new_x='LMARGIN', new_y='NEXT')
+                desc = blk.get('description', '')
+                if desc and not is_ex:
+                    pdf.set_x(pdf.l_margin + 38)
+                    pdf.set_font('Helvetica', 'I', 8)
+                    pdf.set_text_color(*S500)
+                    pdf.indented_text(38, usable_w - 40, 4, safe(desc))
+                pdf.ln(1)
+            pdf.ln(2)
+
+        # ---------- intel (bullets with impact) ----------
+        elif sec_type == 'intel':
+            for item in section.get('items', []):
+                y = pdf.get_y()
+                pdf.set_fill_color(*TEAL_LT)
+                pdf.rect(pdf.l_margin + 3, y + 1.8, 1.8, 1.8, 'F')
+                pdf.set_font('Helvetica', '', 9)
+                pdf.set_text_color(*S700)
+                pdf.indented_text(8, usable_w - 10, 5, safe(item.get('text', '')))
+                if item.get('impact'):
+                    pdf.set_x(pdf.l_margin + 8)
+                    pdf.set_font('Helvetica', 'B', 8)
+                    pdf.set_text_color(*TEAL)
+                    pdf.cell(16, 4, 'Impact: ')
+                    pdf.set_font('Helvetica', 'I', 8)
+                    pdf.set_text_color(*S500)
+                    pdf.indented_text(24, usable_w - 26, 4, safe(item['impact']))
+                pdf.ln(2)
+            pdf.ln(1)
+
+        # ---------- insight (Leo blockquote) ----------
+        elif sec_type == 'insight':
+            text = section.get('text', '')
+            if text:
+                y_start = pdf.get_y()
+                pdf.set_font('Helvetica', 'I', 9.5)
+                pdf.set_text_color(*S700)
+                pdf.indented_text(8, usable_w - 12, 5.5, safe(text))
+                y_end = pdf.get_y()
+                bar_h = max(y_end - y_start, 5)
+                pdf.set_fill_color(*TEAL_LT)
+                pdf.rect(pdf.l_margin + 3, y_start, 2.5, bar_h, 'F')
+                pdf.ln(4)
+
+        # ---------- metrics (checkbox list) ----------
+        elif sec_type == 'metrics':
+            for item in section.get('items', []):
+                y = pdf.get_y()
+                pdf.set_draw_color(*TEAL)
+                pdf.rect(pdf.l_margin + 4, y + 0.5, 3.5, 3.5)
+                pdf.set_font('Helvetica', '', 9)
+                pdf.set_text_color(*S700)
+                pdf.indented_text(11, usable_w - 13, 5, safe(item))
+                pdf.ln(1.5)
+            pdf.ln(2)
+
+        # ---------- outreach example ----------
+        elif sec_type == 'outreach':
+            target = section.get('target', '')
+            subject = section.get('subject', '')
+            body = section.get('body', '')
+            if target:
+                pdf.set_font('Helvetica', '', 8)
+                pdf.set_text_color(*S500)
+                pdf.cell(0, 4, safe(f'Target: {target}'), new_x='LMARGIN', new_y='NEXT')
+                pdf.ln(1)
+            if subject:
+                y = pdf.get_y()
+                pdf.set_fill_color(*S100)
+                pdf.rect(pdf.l_margin + 2, y, usable_w - 4, 6, 'F')
+                pdf.set_x(pdf.l_margin + 5)
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_text_color(*S900)
+                pdf.cell(0, 6, safe(f'Subject: {subject}'), new_x='LMARGIN', new_y='NEXT')
+                pdf.ln(1)
+                pdf.set_font('Helvetica', '', 9)
+                pdf.set_text_color(*S700)
+                pdf.indented_text(5, usable_w - 10, 5, safe(body))
+                pdf.ln(3)
+
+        # ---------- quote ----------
+        elif sec_type == 'quote':
+            pdf.ln(3)
+            pdf.divider()
+            pdf.ln(2)
+            text = section.get('text', '')
+            author = section.get('author', '')
+            pdf.set_font('Helvetica', 'I', 10)
+            pdf.set_text_color(*S500)
+            pdf.multi_cell(0, 6, safe(f'\"{text}\"'), align='C')
+            if author:
+                pdf.set_font('Helvetica', '', 8)
+                pdf.set_text_color(*S400)
+                pdf.cell(0, 5, safe(f'-- {author}'), align='C', new_x='LMARGIN', new_y='NEXT')
+            pdf.ln(4)
+
+        # ---------- standard (backward compat) ----------
+        else:
+            if section.get('body'):
+                pdf.set_font('Helvetica', '', 9.5)
+                pdf.set_text_color(*S700)
+                pdf.multi_cell(0, 5, safe(section['body']))
+                pdf.ln(2)
+            for i, item in enumerate(section.get('items', []), 1):
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_text_color(*TEAL_LT)
+                pdf.set_x(pdf.l_margin + 4)
+                pdf.cell(6, 5, f'{i}.')
+                pdf.set_font('Helvetica', '', 9)
+                pdf.set_text_color(*S700)
+                pdf.multi_cell(0, 5, safe(item))
+                pdf.ln(1)
+            pdf.ln(2)
 
     return pdf.output()
+
+
 
 
 def store_pdf(pdf_bytes, filename):
