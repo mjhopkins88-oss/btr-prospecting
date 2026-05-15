@@ -2821,15 +2821,15 @@ RULES:
 - Return ONLY the JSON object, no other text"""
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.Anthropic(api_key=api_key, timeout=90.0)
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=8000,
+            max_tokens=4000,
             tools=[
                 {
                     "type": "web_search_20250305",
                     "name": "web_search",
-                    "max_uses": 20
+                    "max_uses": 10
                 }
             ],
             messages=[{"role": "user", "content": search_prompt}]
@@ -2875,6 +2875,9 @@ RULES:
                 'gaps': 'Research returned unstructured data.',
             }
 
+    except anthropic.APITimeoutError:
+        logger.error(f"[Leo] Outreach intel TIMEOUT for '{query}'")
+        return {'_error': 'timeout', 'person_name': person, 'company_name': company}
     except Exception as e:
         logger.error(f"[Leo] Outreach intel error for '{query}': {e}")
         return None
@@ -2981,10 +2984,10 @@ RULES:
 - Return ONLY the JSON array"""
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.Anthropic(api_key=api_key, timeout=30.0)
         resp = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=3000,
+            max_tokens=2000,
             messages=[{"role": "user", "content": prompt}]
         )
         reply = resp.content[0].text if resp.content else ''
@@ -7234,7 +7237,16 @@ def _chat_inner():
         query = processed_msg.replace('__research_web__', '').strip()
         if query:
             research = _research_web(query)
-            if research:
+            if research and research.get('_error') == 'timeout':
+                card = {
+                    'type': 'ErrorCard',
+                    'text': f'Research for "{query}" timed out — the web search took too long. Try a more specific query or try again.',
+                    'data': {'error': 'research_timeout', 'query': query},
+                    'actions': [{'id': 'retry_research', 'label': 'Try Again', 'action': 'retry', 'params': {}}],
+                }
+                _persist_chat(last_msg, card, 'research_web', 'analyst')
+                return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'research_web', 'mode': 'analyst'})
+            elif research:
                 intros = _generate_research_intros(query, research)
                 text, card = _build_research_response(query, research, intros)
                 _persist_chat(last_msg, card, 'research_web', 'analyst')
@@ -7242,7 +7254,7 @@ def _chat_inner():
             else:
                 card = {
                     'type': 'ErrorCard',
-                    'text': f'Web research failed for "{query}". Check that ANTHROPIC_API_KEY is set.',
+                    'text': f'Web research failed for "{query}". Try again or check server logs.',
                     'data': {'error': 'research_failed', 'query': query},
                     'actions': [{'id': 'retry_research', 'label': 'Try Again', 'action': 'retry', 'params': {}}],
                 }
@@ -7419,7 +7431,16 @@ def _chat_inner():
         ).strip(' .,!?')
         if query:
             research = _research_web(query)
-            if research:
+            if research and research.get('_error') == 'timeout':
+                card = {
+                    'type': 'ErrorCard',
+                    'text': f'Research for "{query}" timed out — the web search took too long. Try a more specific query or try again.',
+                    'data': {'error': 'research_timeout', 'query': query},
+                    'actions': [{'id': 'retry_research', 'label': 'Try Again', 'action': 'retry', 'params': {}}],
+                }
+                _persist_chat(last_msg, card, 'research_web', 'analyst')
+                return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'research_web', 'mode': 'analyst'})
+            elif research:
                 intros = _generate_research_intros(query, research)
                 text, card = _build_research_response(query, research, intros)
                 _persist_chat(last_msg, card, 'research_web', 'analyst')
@@ -7427,7 +7448,7 @@ def _chat_inner():
             else:
                 card = {
                     'type': 'ErrorCard',
-                    'text': f'Web research failed for "{query}". Check that ANTHROPIC_API_KEY is set.',
+                    'text': f'Web research failed for "{query}". Try again or check server logs.',
                     'data': {'error': 'research_failed', 'query': query},
                     'actions': [{'id': 'retry_research', 'label': 'Try Again', 'action': 'retry', 'params': {}}],
                 }
@@ -7766,7 +7787,7 @@ def _chat_inner():
     api_messages = api_messages[-20:]
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.Anthropic(api_key=api_key, timeout=120.0)
         resp = client.messages.create(
             model='claude-sonnet-4-20250514',
             max_tokens=max_tokens,
