@@ -394,6 +394,24 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS leo_outcome_log (
+            id TEXT PRIMARY KEY,
+            action_type TEXT NOT NULL,
+            channel TEXT,
+            group_id TEXT,
+            contact_id TEXT,
+            signal_used INTEGER DEFAULT 0,
+            signal_age_days INTEGER,
+            touchpoint_count_at_action INTEGER DEFAULT 0,
+            warmth_at_action INTEGER,
+            stage_at_action TEXT,
+            outcome TEXT,
+            outcome_detail TEXT,
+            days_to_outcome INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     # --- Auth & CRM Tables ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS workspaces (
