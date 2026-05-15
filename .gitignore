@@ -52,3 +52,6 @@ btr-prospects-master.csv
 # Permit feed runtime state/output
 permit_feed/permit_state.json
 permit_feed/new_signals.json
+
+# Generated PDF cache
+pdf_cache/

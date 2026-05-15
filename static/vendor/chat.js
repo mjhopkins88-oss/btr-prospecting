@@ -246,8 +246,9 @@ function ensureCardActions(card) {
     }
   }
   if (card.type === 'BriefCard' && card.actions.length === 0) {
+    var briefDate = new Date().toISOString().replace(/[T:]/g, '-').slice(0, 19);
     card.actions = [
-      { id: 'download_brief', label: 'Download PDF', action: 'download', params: { url: '/api/brief/download', fileName: 'BTR_Brief.pdf' } }
+      { id: 'download_brief', label: 'Download PDF', action: 'download', params: { url: '/api/brief/download', fileName: 'BTR_Brief_' + briefDate + '.pdf' } }
     ];
   }
   if (card.type === 'TouchpointLogCard' && card.actions.length === 0) {
@@ -385,16 +386,41 @@ function executeCardAction(act, messages, setMessages, setActionLoading) {
       });
       return;
     }
-    var a = document.createElement('a');
-    a.href = dlUrl;
-    a.download = (act.params && act.params.fileName) || '';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setMessages(function(prev) {
-      return prev.concat([{ role: 'assistant', card: {
-        type: 'ConfirmationCard', text: 'Download started.', data: {}, actions: []
-      }}]);
+    var dlFileName = (act.params && act.params.fileName) || 'download.pdf';
+    fetch(dlUrl).then(function(resp) {
+      if (!resp.ok) {
+        return resp.json().catch(function() { return { error: 'Server error' }; }).then(function(errData) {
+          throw new Error(errData.error || 'Download failed (status ' + resp.status + ')');
+        });
+      }
+      var ct = resp.headers.get('content-type') || '';
+      if (ct.indexOf('application/pdf') === -1 && ct.indexOf('text/csv') === -1 && ct.indexOf('octet-stream') === -1) {
+        throw new Error('Server returned invalid file (not PDF/CSV)');
+      }
+      return resp.blob();
+    }).then(function(blob) {
+      if (!blob || blob.size < 100) {
+        throw new Error('Downloaded file is empty or too small');
+      }
+      var blobUrl = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = dlFileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 5000);
+      setMessages(function(prev) {
+        return prev.concat([{ role: 'assistant', card: {
+          type: 'ConfirmationCard', text: 'Download complete — ' + dlFileName, data: {}, actions: []
+        }}]);
+      });
+    }).catch(function(err) {
+      setMessages(function(prev) {
+        return prev.concat([{ role: 'assistant', card: {
+          type: 'ErrorCard', text: 'PDF download failed: ' + err.message, data: { error: err.message }, actions: []
+        }}]);
+      });
     });
     return;
   }

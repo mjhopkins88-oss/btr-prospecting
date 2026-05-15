@@ -6,7 +6,10 @@ from shared.database import fetch_all, fetch_one
 from datetime import datetime, timedelta
 import io
 import json
+import logging
 import os
+
+logger = logging.getLogger('leo.pdf')
 
 daily_brief_bp = Blueprint('daily_brief', __name__, url_prefix='/api/brief')
 
@@ -362,38 +365,50 @@ def generate_brief():
 @daily_brief_bp.route('/download', methods=['GET'])
 def download_brief():
     """Generate and return the daily brief as a downloadable PDF."""
-    brief = _generate_brief_content()
-    pdf_bytes = _build_pdf(brief)
-
-    date_slug = datetime.utcnow().strftime('%Y-%m-%d')
-    filename = f'BTR-Daily-Brief-{date_slug}.pdf'
-
-    return send_file(
-        io.BytesIO(pdf_bytes),
-        mimetype='application/pdf',
-        as_attachment=True,
-        download_name=filename,
-    )
+    try:
+        brief = _generate_brief_content()
+        pdf_bytes = _build_pdf(brief)
+        if not validate_pdf(pdf_bytes):
+            logger.error("[PDF] Daily brief generated invalid PDF")
+            return jsonify({'success': False, 'error': 'PDF generation failed'}), 500
+        now = datetime.utcnow()
+        filename = f'BTR_Brief_{now.strftime("%Y-%m-%d_%H%M%S")}.pdf'
+        logger.info(f"[PDF] Daily brief generated: {filename} ({len(pdf_bytes)} bytes)")
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename,
+        )
+    except Exception as e:
+        logger.error(f"[PDF] Daily brief generation failed: {e}")
+        return jsonify({'success': False, 'error': f'PDF generation failed: {str(e)}'}), 500
 
 
 @daily_brief_bp.route('/preview', methods=['GET'])
 def preview_brief():
     """Generate and return the daily brief as an inline PDF (for browser preview)."""
-    brief = _generate_brief_content()
-    pdf_bytes = _build_pdf(brief)
-
-    return send_file(
-        io.BytesIO(pdf_bytes),
-        mimetype='application/pdf',
-        as_attachment=False,
-    )
+    try:
+        brief = _generate_brief_content()
+        pdf_bytes = _build_pdf(brief)
+        if not validate_pdf(pdf_bytes):
+            return jsonify({'success': False, 'error': 'PDF generation failed'}), 500
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=False,
+        )
+    except Exception as e:
+        logger.error(f"[PDF] Preview generation failed: {e}")
+        return jsonify({'success': False, 'error': f'PDF generation failed: {str(e)}'}), 500
 
 
 # ---------------------------------------------------------------------------
 # General-purpose PDF generator for Leo documents
 # ---------------------------------------------------------------------------
 
-_pdf_store = {}
+PDF_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'pdf_cache')
+os.makedirs(PDF_DIR, exist_ok=True)
 
 
 def build_doc_pdf(doc):
@@ -688,28 +703,75 @@ def build_doc_pdf(doc):
 
 
 
+def validate_pdf(pdf_bytes):
+    """Check that pdf_bytes is a valid, non-empty PDF."""
+    if not pdf_bytes or len(pdf_bytes) < 100:
+        return False
+    if not pdf_bytes[:5] == b'%PDF-':
+        return False
+    return True
+
+
 def store_pdf(pdf_bytes, filename):
-    """Store PDF bytes in memory, return download ID."""
+    """Store PDF bytes to disk, return download ID."""
     import uuid
+    if not validate_pdf(pdf_bytes):
+        logger.error(f"[PDF] Invalid PDF bytes for {filename}: size={len(pdf_bytes) if pdf_bytes else 0}")
+        raise ValueError("Generated PDF is invalid or empty")
     pdf_id = str(uuid.uuid4())
-    _pdf_store[pdf_id] = {'bytes': pdf_bytes, 'filename': filename, 'created': datetime.utcnow()}
-    # Evict old entries (keep last 20)
-    if len(_pdf_store) > 20:
-        oldest = sorted(_pdf_store.keys(), key=lambda k: _pdf_store[k]['created'])
-        for k in oldest[:len(_pdf_store) - 20]:
-            del _pdf_store[k]
+    path = os.path.join(PDF_DIR, f"{pdf_id}.pdf")
+    meta_path = os.path.join(PDF_DIR, f"{pdf_id}.json")
+    with open(path, 'wb') as f:
+        f.write(pdf_bytes)
+    with open(meta_path, 'w') as f:
+        json.dump({'filename': filename, 'created': datetime.utcnow().isoformat(),
+                   'size': len(pdf_bytes)}, f)
+    logger.info(f"[PDF] Stored {filename} ({len(pdf_bytes)} bytes) as {pdf_id}")
+    _evict_old_pdfs()
     return pdf_id
+
+
+def _evict_old_pdfs():
+    """Keep only the 50 most recent PDFs on disk."""
+    try:
+        meta_files = sorted(
+            [f for f in os.listdir(PDF_DIR) if f.endswith('.json')],
+            key=lambda f: os.path.getmtime(os.path.join(PDF_DIR, f))
+        )
+        if len(meta_files) > 50:
+            for mf in meta_files[:len(meta_files) - 50]:
+                pdf_id = mf.replace('.json', '')
+                for ext in ('.pdf', '.json'):
+                    p = os.path.join(PDF_DIR, pdf_id + ext)
+                    if os.path.exists(p):
+                        os.remove(p)
+    except Exception as e:
+        logger.warning(f"[PDF] Eviction error: {e}")
 
 
 @daily_brief_bp.route('/doc/<pdf_id>', methods=['GET'])
 def download_doc(pdf_id):
     """Download a generated PDF by ID."""
-    entry = _pdf_store.get(pdf_id)
-    if not entry:
+    import re
+    if not re.match(r'^[a-f0-9\-]{36}$', pdf_id):
+        return jsonify({'success': False, 'error': 'Invalid PDF ID'}), 400
+    path = os.path.join(PDF_DIR, f"{pdf_id}.pdf")
+    meta_path = os.path.join(PDF_DIR, f"{pdf_id}.json")
+    if not os.path.exists(path):
+        logger.warning(f"[PDF] Download requested for missing PDF: {pdf_id}")
         return jsonify({'success': False, 'error': 'PDF not found or expired'}), 404
+    filename = f"BTR_Document_{pdf_id[:8]}.pdf"
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path) as f:
+                meta = json.load(f)
+            filename = meta.get('filename', filename)
+        except Exception:
+            pass
+    logger.info(f"[PDF] Serving {filename} ({os.path.getsize(path)} bytes)")
     return send_file(
-        io.BytesIO(entry['bytes']),
+        path,
         mimetype='application/pdf',
         as_attachment=True,
-        download_name=entry['filename'],
+        download_name=filename,
     )

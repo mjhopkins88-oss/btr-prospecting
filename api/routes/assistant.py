@@ -6431,10 +6431,9 @@ def _ensure_card_actions(card):
             card['actions'] = []
 
     if card_type == 'BriefCard' and not card['actions']:
-        brief_date = d.get('date', datetime.utcnow().strftime('%Y-%m-%d'))
         card['actions'] = [
             {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download',
-             'params': {'url': '/api/brief/download', 'fileName': f'BTR_Brief_{brief_date}.pdf'}}
+             'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf"}}
         ]
 
     if card_type == 'MeetingCard' and not card['actions']:
@@ -6850,10 +6849,10 @@ def _chat_inner():
                 'action_items': brief['action_items'][:3],
                 'daily_targets': brief['daily_targets'][:3],
                 'download_url': '/api/brief/download',
-                'fileName': f"BTR_Brief_{brief['date']}.pdf",
+                'fileName': f"BTR_Brief_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf",
             },
             'actions': [
-                {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download', 'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{brief['date']}.pdf"}},
+                {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download', 'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf"}},
             ]
         }
         _persist_chat(last_msg, card, 'brief_pdf', 'execution')
@@ -7264,11 +7263,11 @@ def _chat_inner():
                         'action_items': brief.get('action_items', [])[:3],
                         'daily_targets': brief.get('daily_targets', [])[:3],
                         'download_url': '/api/brief/download',
-                        'fileName': f"BTR_Brief_{brief['date']}.pdf",
+                        'fileName': f"BTR_Brief_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf",
                     },
                     'actions': [
                         {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download',
-                         'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{brief['date']}.pdf"}},
+                         'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf"}},
                     ]
                 }
                 _persist_chat(last_msg, card, 'brief_pdf', 'execution')
@@ -7838,11 +7837,11 @@ def execute_action():
                             'action_items': brief.get('action_items', [])[:3],
                             'daily_targets': brief.get('daily_targets', [])[:3],
                             'download_url': '/api/brief/download',
-                            'fileName': f"BTR_Brief_{brief['date']}.pdf",
+                            'fileName': f"BTR_Brief_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf",
                         },
                         'actions': [
                             {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download',
-                             'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{brief['date']}.pdf"}},
+                             'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf"}},
                         ]
                     }})
                 except Exception as e:
@@ -9350,7 +9349,8 @@ def _generate_doc_pdf(doc_type):
         'execution_plan': ('Execution Brief', 'Prioritized action queue with strategic context'),
     }
     title, subtitle = titles.get(doc_type, ('Execution Brief', 'Daily operator report'))
-    filename = f"{title.replace(' ', '_')}_{date_short}.pdf"
+    timestamp = today.strftime('%H%M%S')
+    filename = f"{title.replace(' ', '_')}_{date_short}_{timestamp}.pdf"
 
     sections = []
 
@@ -9548,6 +9548,9 @@ def _generate_doc_pdf(doc_type):
 
     try:
         pdf_bytes = build_doc_pdf(doc)
+        import logging
+        pdf_logger = logging.getLogger('leo.pdf')
+        pdf_logger.info(f"[PDF] Generated {doc_type}: {len(pdf_bytes)} bytes, {len(sections)} sections")
         pdf_id = store_pdf(pdf_bytes, filename)
         url = f'/api/brief/doc/{pdf_id}'
         card = {
@@ -9556,6 +9559,7 @@ def _generate_doc_pdf(doc_type):
             'data': {
                 'export_type': doc_type, 'url': url, 'fileUrl': url,
                 'fileName': filename, 'filename': filename,
+                'pdf_size': len(pdf_bytes),
             },
             'actions': [
                 {'id': 'download_pdf', 'label': 'Download PDF', 'action': 'download',
@@ -9564,6 +9568,8 @@ def _generate_doc_pdf(doc_type):
         }
         return card, None
     except Exception as e:
+        import logging
+        logging.getLogger('leo.pdf').error(f"[PDF] Generation failed for {doc_type}: {e}")
         return None, str(e)
 
 
