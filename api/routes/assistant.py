@@ -538,6 +538,7 @@ PredictionCard: data: {"company":"...","reply_likelihood":{"score":N,"label":"Hi
 AutomationCard: data: {"patterns":[{"type":"...","detail":"...","frequency":N}],"suggestions":[{"action":"...","impact":"high|medium|low","time_saved_min":N}],"time_savings_est":N}
 MeetingCard: data: {"contact_name":"...","contact_id":"...","group_id":"...","company_name":"...","meeting_date":"YYYY-MM-DD","meeting_time":"HH:MM","duration_min":N,"meeting_type":"general|intro|follow_up|pitch|review|call","title":"...","notes":"...","status":"scheduled"}
 LeoActionPreviewCard: data: {"action_type":"...","target_area":"calendar|performance|crm","description":"...","changes":[{"field":"...","old_value":"...","new_value":"..."}],"affected_record":"..."}
+SchedulePlanCard: data: {"date":"YYYY-MM-DD","date_label":"...","blocks":[{"title":"...","start_time":"HH:MM","end_time":"HH:MM","duration_min":N,"description":"...","meeting_type":"...","is_existing":bool}],"new_block_count":N,"total_minutes":N,"schedule_events":[...]}
 
 ═══════════════════════════════
 INTERNAL REASONING LOOP (never expose)
@@ -6174,6 +6175,36 @@ def chat():
 
     # Schedule meeting intent intercept — try NLP parse, show CalendarConfirmCard
     if intent == 'schedule_meeting':
+        lower_msg = last_msg.lower()
+        # Full-day schedule generation: "schedule my day", "build my day", "plan my day", "build my schedule"
+        is_full_schedule = any(w in lower_msg for w in [
+            'schedule my day', 'build my day', 'plan my day',
+            'build my schedule', 'create my schedule', 'build a schedule',
+            'plan my schedule', 'generate my schedule', 'make my schedule',
+            'schedule for today', 'schedule for tomorrow', 'schedule for saturday',
+            'schedule for sunday', 'schedule for monday', 'schedule for tuesday',
+            'schedule for wednesday', 'schedule for thursday', 'schedule for friday',
+        ])
+        if is_full_schedule:
+            # Parse target date from message
+            target_date = datetime.utcnow().strftime('%Y-%m-%d')
+            date_match = re.search(
+                r'(?:for|on)\s+(today|tomorrow|'
+                r'(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))',
+                last_msg, re.IGNORECASE
+            )
+            if date_match:
+                parsed_date = _parse_relative_date(date_match.group(1))
+                if parsed_date:
+                    target_date = parsed_date
+
+            blocks = _generate_schedule_blocks(target_date)
+            if blocks:
+                card = _build_schedule_plan_card(blocks, target_date)
+                _persist_chat(last_msg, card, 'schedule_plan', 'execution')
+                return jsonify({'role': 'assistant', 'content': card['text'], 'card': card,
+                                'intent': 'schedule_plan', 'mode': 'execution'})
+
         sched_events = _parse_schedule_events(last_msg)
         if sched_events:
             card = _build_calendar_confirm_card(sched_events)
@@ -6523,6 +6554,12 @@ def chat():
                 'type': 'TextCard', 'text': clean,
                 'source': None, 'data': {}, 'actions': []
             }
+
+        # Post-process: detect time-block schedule in LLM text and convert to SchedulePlanCard
+        if card.get('type') == 'TextCard' and card.get('text'):
+            schedule_card = _try_extract_schedule_from_text(card['text'], last_msg)
+            if schedule_card:
+                card = schedule_card
 
         _persist_chat(messages[-1].get('content', ''), card, intent, mode)
 
@@ -7882,6 +7919,303 @@ def _exec_create_calendar_events(params):
         return {'success': False, 'message': 'All events already exist in calendar — nothing to add. ' + '; '.join(skipped)}
 
     return {'success': True, 'message': '. '.join(parts) + '.', 'created': created, 'skipped': skipped}
+
+
+def _generate_schedule_blocks(target_date=None):
+    """Generate structured time-blocked schedule from daily plan + existing calendar.
+    Returns list of event dicts ready for cal_create_events.
+    """
+    today = datetime.utcnow()
+    if target_date:
+        try:
+            date_obj = datetime.strptime(target_date, '%Y-%m-%d')
+        except Exception:
+            date_obj = today
+    else:
+        date_obj = today
+    date_str = date_obj.strftime('%Y-%m-%d')
+
+    blocks = []
+    hour = 9
+    minute = 0
+
+    existing_cal = []
+    try:
+        existing_cal = fetch_all(
+            "SELECT title, meeting_date, meeting_time, duration_min, meeting_type, notes "
+            "FROM calendar_meetings WHERE meeting_date = ? AND status = 'scheduled' "
+            "ORDER BY meeting_time ASC",
+            [date_str]
+        ) or []
+    except Exception:
+        pass
+
+    occupied = set()
+    for m in existing_cal:
+        t = m.get('meeting_time', '')
+        if t:
+            occupied.add(t[:5])
+
+    plan, _ = _generate_daily_plan()
+
+    # Add existing calendar events as blocks first
+    for m in existing_cal:
+        t = m.get('meeting_time', '09:00')
+        dur = m.get('duration_min', 30)
+        blocks.append({
+            'title': m.get('title', 'Meeting'),
+            'date': date_str,
+            'start_time': t[:5] if len(t) >= 5 else t,
+            'end_time': _add_minutes_to_time(t[:5] if len(t) >= 5 else t, dur),
+            'duration_min': dur,
+            'description': m.get('notes', ''),
+            'meeting_type': m.get('meeting_type', 'general'),
+            'created_by': 'existing',
+            'is_existing': True,
+        })
+
+    # Generate execution blocks from daily plan
+    for item in plan[:8]:
+        time_str = f"{hour:02d}:{minute:02d}"
+        while time_str in occupied:
+            minute += 30
+            if minute >= 60:
+                minute = 0
+                hour += 1
+            if hour >= 18:
+                break
+            time_str = f"{hour:02d}:{minute:02d}"
+
+        if hour >= 18:
+            break
+
+        est = item.get('est_minutes', 30)
+        est = max(15, min(60, est))
+        # Round to 15-min increments
+        est = ((est + 14) // 15) * 15
+
+        end_time = _add_minutes_to_time(time_str, est)
+
+        desc_parts = []
+        if item.get('target'):
+            desc_parts.append(f"Target: {item['target']}")
+        if item.get('reason'):
+            desc_parts.append(item['reason'])
+
+        blocks.append({
+            'title': item.get('action', 'Execution Block'),
+            'date': date_str,
+            'start_time': time_str,
+            'end_time': end_time,
+            'duration_min': est,
+            'description': ' | '.join(desc_parts),
+            'meeting_type': 'execution_block',
+            'created_by': 'leo',
+            'is_existing': False,
+            'priority': item.get('priority', 'medium'),
+        })
+
+        occupied.add(time_str)
+        # Advance clock past this block
+        total_min = hour * 60 + minute + est
+        hour = total_min // 60
+        minute = total_min % 60
+
+    # Sort all blocks by start_time
+    blocks.sort(key=lambda b: b.get('start_time', ''))
+    return blocks
+
+
+def _add_minutes_to_time(time_str, minutes):
+    """Add minutes to an HH:MM time string, return HH:MM."""
+    try:
+        parts = time_str.split(':')
+        h = int(parts[0])
+        m = int(parts[1]) if len(parts) > 1 else 0
+        total = h * 60 + m + minutes
+        return f"{(total // 60) % 24:02d}:{total % 60:02d}"
+    except Exception:
+        return time_str
+
+
+def _build_schedule_plan_card(blocks, target_date):
+    """Build a SchedulePlanCard with embedded event data for one-click calendar add."""
+    new_blocks = [b for b in blocks if not b.get('is_existing')]
+    all_blocks = blocks
+
+    # Build display lines
+    lines = []
+    total_min = 0
+    for b in all_blocks:
+        flag = ' [existing]' if b.get('is_existing') else ''
+        lines.append(f"**{b['start_time']}-{b['end_time']}** — {b['title']}{flag}")
+        if b.get('description') and not b.get('is_existing'):
+            lines.append(f"  _{b['description']}_")
+        if not b.get('is_existing'):
+            total_min += b.get('duration_min', 30)
+
+    date_label = target_date
+    try:
+        date_label = datetime.strptime(target_date, '%Y-%m-%d').strftime('%A, %B %d')
+    except Exception:
+        pass
+
+    text = f"**Schedule for {date_label}**\n\n" + '\n'.join(lines)
+    if new_blocks:
+        text += f"\n\n_{len(new_blocks)} new blocks (~{total_min} min). Confirm to add to calendar._"
+
+    # Prepare event summaries for cal_create_events (only new blocks)
+    event_summaries = []
+    for b in new_blocks:
+        event_summaries.append({
+            'date': b['date'],
+            'start_time': b['start_time'],
+            'duration_min': b['duration_min'],
+            'meeting_type': b.get('meeting_type', 'execution_block'),
+            'title': b['title'],
+            'contact_name': '',
+            'contact_id': None,
+            'group_id': None,
+            'description': b.get('description', ''),
+            'priority': b.get('priority', 'normal'),
+            'contact_matched': False,
+        })
+
+    actions = []
+    if event_summaries:
+        actions.append({
+            'id': 'add_full_schedule', 'label': f'Add {len(event_summaries)} Blocks to Calendar',
+            'action': 'leo_execute',
+            'params': {'exec_action': 'cal_create_events', 'exec_params': {'events': event_summaries}},
+        })
+    actions.append({
+        'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}
+    })
+
+    return {
+        'type': 'SchedulePlanCard',
+        'text': text,
+        'data': {
+            'date': target_date,
+            'date_label': date_label,
+            'blocks': all_blocks,
+            'new_block_count': len(new_blocks),
+            'total_minutes': total_min,
+            'schedule_events': event_summaries,
+        },
+        'actions': actions,
+    }
+
+
+def _try_extract_schedule_from_text(text, user_msg):
+    """Detect time-block patterns in LLM text output and convert to SchedulePlanCard.
+    Only triggers when 3+ time blocks are detected (avoids false positives).
+    """
+    # Match patterns like "9:00-9:30 AM: Title" or "9:00 AM - 9:30 AM: Title"
+    # or "**9:00-9:30** — Title" or "9:00am-9:30am: Title"
+    time_block_pat = re.compile(
+        r'(?:\*{0,2})'
+        r'(\d{1,2}:\d{2})\s*(?:am|pm|AM|PM)?\s*'
+        r'[-–—]\s*'
+        r'(\d{1,2}:\d{2})\s*(?:am|pm|AM|PM)?'
+        r'(?:\*{0,2})'
+        r'\s*[:\-–—]\s*'
+        r'(.+?)(?:\n|$)',
+        re.MULTILINE
+    )
+
+    match_iter = list(time_block_pat.finditer(text))
+    if len(match_iter) < 3:
+        return None
+
+    # Parse target date
+    target_date = datetime.utcnow().strftime('%Y-%m-%d')
+    combined = (user_msg + ' ' + text).lower()
+    date_match = re.search(
+        r'(?:for|on|this|next)?\s*'
+        r'(today|tomorrow|'
+        r'(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))',
+        combined, re.IGNORECASE
+    )
+    if date_match:
+        parsed = _parse_relative_date(date_match.group(1))
+        if parsed:
+            target_date = parsed
+
+    blocks = []
+    for m in match_iter:
+        start_str = m.group(1)
+        end_str = m.group(2)
+        title_raw = m.group(3)
+
+        title = re.sub(r'^\*+|\*+$', '', title_raw).strip()
+        title = re.sub(r'^[:\-–—]\s*', '', title).strip()
+        if not title:
+            continue
+
+        # Normalize times to 24h using the matched text context
+        start_h = int(start_str.split(':')[0])
+        end_h = int(end_str.split(':')[0])
+
+        # Use the actual match text to find AM/PM for each time separately
+        match_text = text[m.start():m.end()].upper()
+        # Split on the dash to find AM/PM for start and end times independently
+        dash_idx = match_text.find('-')
+        if dash_idx < 0:
+            dash_idx = len(match_text) // 2
+        start_part = match_text[:dash_idx + 10]
+        end_part = match_text[dash_idx:]
+
+        start_pm = 'PM' in start_part and 'AM' not in start_part
+        start_am = 'AM' in start_part
+        end_pm = 'PM' in end_part
+        end_am = 'AM' in end_part and 'PM' not in end_part
+
+        # Apply AM/PM to start time
+        if start_pm and start_h < 12:
+            start_h += 12
+        elif not start_am and not start_pm:
+            # No explicit AM/PM on start — check if end has PM (e.g., "1:00-1:30 PM")
+            if end_pm and start_h < 12 and start_h != 0:
+                # If start is close to end and end is PM, start is probably PM too
+                if start_h <= end_h or start_h >= 10:
+                    start_h += 12 if start_h < 12 and start_h >= 1 and start_h <= 6 else 0
+            elif start_h >= 1 and start_h <= 6:
+                start_h += 12
+
+        # Apply AM/PM to end time
+        if end_pm and end_h < 12:
+            end_h += 12
+        elif not end_am and not end_pm:
+            if end_h >= 1 and end_h <= 6:
+                end_h += 12
+
+        # Ensure proper zero-padding
+        start_time = f"{start_h:02d}:{start_str.split(':')[1]}"
+        end_time = f"{end_h:02d}:{end_str.split(':')[1]}"
+
+        # Calculate duration
+        s_min = start_h * 60 + int(start_str.split(':')[1])
+        e_min = end_h * 60 + int(end_str.split(':')[1])
+        dur = max(15, e_min - s_min)
+
+        blocks.append({
+            'title': title,
+            'date': target_date,
+            'start_time': start_time,
+            'end_time': end_time,
+            'duration_min': dur,
+            'description': '',
+            'meeting_type': 'execution_block',
+            'created_by': 'leo',
+            'is_existing': False,
+        })
+
+    if len(blocks) < 3:
+        return None
+
+    blocks.sort(key=lambda b: b['start_time'])
+    return _build_schedule_plan_card(blocks, target_date)
 
 
 def _generate_doc_pdf(doc_type):

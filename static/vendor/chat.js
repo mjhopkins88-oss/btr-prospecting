@@ -47,7 +47,8 @@ var CARD_COLORS = {
   BriefCard:              { bg: '#f0f9ff', border: '#bae6fd', accent: '#0c4a6e', icon: '📰' },
   MeetingCard:            { bg: '#f0fdf4', border: '#bbf7d0', accent: '#15803d', icon: '📅' },
   LeoActionPreviewCard:   { bg: '#fffbeb', border: '#fde68a', accent: '#92400e', icon: '🧠' },
-  CalendarConfirmCard:    { bg: '#f0fdf4', border: '#86efac', accent: '#15803d', icon: '📅' }
+  CalendarConfirmCard:    { bg: '#f0fdf4', border: '#86efac', accent: '#15803d', icon: '📅' },
+  SchedulePlanCard:       { bg: '#f0f9ff', border: '#7dd3fc', accent: '#0369a1', icon: '📅' }
 };
 
 var SLASH_HINTS = [
@@ -271,6 +272,13 @@ function ensureCardActions(card) {
     card.actions = [
       { id: 'edit_cal_events', label: 'Edit', action: 'navigate', params: { tab: 'calendar' } },
       { id: 'cancel_cal_events', label: 'Cancel', action: 'cancel', params: {} }
+    ];
+  }
+  if (card.type === 'SchedulePlanCard' && card.actions.length === 0 && d.schedule_events && d.schedule_events.length > 0) {
+    card.actions = [
+      { id: 'add_full_schedule', label: 'Add ' + d.schedule_events.length + ' Blocks to Calendar', action: 'leo_execute',
+        params: { exec_action: 'cal_create_events', exec_params: { events: d.schedule_events } } },
+      { id: 'nav_cal', label: 'Open Calendar', action: 'navigate', params: { tab: 'calendar' } }
     ];
   }
   return card;
@@ -1522,6 +1530,69 @@ function renderCalendarConfirmCard(card, onAction) {
   );
 }
 
+function renderSchedulePlanCard(card, onAction) {
+  var d = card.data || {};
+  var colors = CARD_COLORS.SchedulePlanCard;
+  var blocks = d.blocks || [];
+  var prioColors = { critical: '#dc2626', high: '#f59e0b', medium: '#3b82f6', low: '#94a3b8', normal: '#64748b' };
+
+  var formatTime12 = function(t) {
+    if (!t) return '';
+    var parts = t.split(':');
+    var hr = parseInt(parts[0], 10);
+    var m = parts[1] || '00';
+    var ampm = hr >= 12 ? 'PM' : 'AM';
+    var h12 = hr > 12 ? hr - 12 : (hr === 0 ? 12 : hr);
+    return m === '00' ? h12 + ' ' + ampm : h12 + ':' + m + ' ' + ampm;
+  };
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.6rem', padding: '0.85rem', overflow: 'hidden' } },
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' } },
+      h('div', { style: { fontSize: '0.72rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em' } },
+        colors.icon + ' Schedule — ' + (d.date_label || d.date || 'Today')
+      ),
+      d.new_block_count > 0 ?
+        h('span', { style: { fontSize: '0.58rem', padding: '0.08rem 0.4rem', borderRadius: '1rem', background: '#dbeafe', color: '#1e40af', fontWeight: 600 } },
+          d.new_block_count + ' new block' + (d.new_block_count !== 1 ? 's' : '')
+        ) : null
+    ),
+    d.total_minutes ? h('div', { style: { fontSize: '0.6rem', color: '#64748b', marginBottom: '0.4rem' } }, '~' + d.total_minutes + ' min of execution time') : null,
+    h('div', { style: { background: '#fff', borderRadius: '0.4rem', border: '1px solid ' + colors.border, marginBottom: '0.5rem', overflow: 'hidden' } },
+      blocks.map(function(b, i) {
+        var isExisting = b.is_existing;
+        var pc = prioColors[b.priority] || '#64748b';
+        var leftColor = isExisting ? '#94a3b8' : pc;
+        return h('div', { key: 'b' + i, style: {
+          display: 'flex', alignItems: 'flex-start', gap: '0.5rem',
+          padding: '0.5rem 0.6rem',
+          borderBottom: i < blocks.length - 1 ? '1px solid #f1f5f9' : 'none',
+          borderLeft: '3px solid ' + leftColor,
+          opacity: isExisting ? 0.65 : 1,
+          background: isExisting ? '#f8fafc' : '#fff'
+        } },
+          h('div', { style: { minWidth: '72px', flexShrink: 0 } },
+            h('div', { style: { fontSize: '0.72rem', fontWeight: 700, color: '#0f172a' } }, formatTime12(b.start_time)),
+            h('div', { style: { fontSize: '0.55rem', color: '#94a3b8' } }, b.duration_min + 'min')
+          ),
+          h('div', { style: { flex: 1, minWidth: 0 } },
+            h('div', { style: { fontSize: '0.72rem', fontWeight: 600, color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } },
+              b.title + (isExisting ? ' [existing]' : '')
+            ),
+            b.description && !isExisting ?
+              h('div', { style: { fontSize: '0.58rem', color: '#64748b', marginTop: '0.1rem', fontStyle: 'italic' } }, b.description) : null,
+            !isExisting && b.priority && b.priority !== 'normal' ?
+              h('span', { style: { fontSize: '0.52rem', padding: '0.04rem 0.3rem', borderRadius: '1rem', background: pc + '18', color: pc, fontWeight: 600, marginTop: '0.1rem', display: 'inline-block' } },
+                (b.priority || '').toUpperCase()
+              ) : null
+          ),
+          h('div', { style: { fontSize: '0.58rem', color: '#94a3b8', whiteSpace: 'nowrap', flexShrink: 0 } }, formatTime12(b.end_time))
+        );
+      })
+    ),
+    renderActionButtons(card.actions, onAction)
+  );
+}
+
 // --- Card dispatcher ---
 function renderCard(card, onAction) {
   if (!card) return null;
@@ -1562,6 +1633,7 @@ function renderCard(card, onAction) {
     case 'MeetingCard': return renderMeetingCard(card, onAction);
     case 'LeoActionPreviewCard': return renderLeoActionPreviewCard(card, onAction);
     case 'CalendarConfirmCard': return renderCalendarConfirmCard(card, onAction);
+    case 'SchedulePlanCard': return renderSchedulePlanCard(card, onAction);
     default: return null;
   }
 }
