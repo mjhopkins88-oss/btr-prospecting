@@ -25,6 +25,31 @@ except ImportError:
 assistant_bp = Blueprint('assistant', __name__, url_prefix='/api/assistant')
 
 # ---------------------------------------------------------------------------
+# Pending schedule plan — stores last SchedulePlanCard awaiting user approval
+# ---------------------------------------------------------------------------
+_pending_schedule_plan = {}   # {'events': [...], 'date': '...', 'created': datetime}
+
+_APPROVAL_PHRASES = frozenset([
+    'approved', 'approve', 'proceed', 'yes', 'confirm', 'confirmed',
+    'add these', 'add them', 'go ahead', 'do it', 'looks good',
+    'add to calendar', 'add to my calendar', 'put on calendar',
+    'put on my calendar', 'schedule these', 'schedule them',
+    'book these', 'book them', 'sounds good', 'perfect',
+    'yes please', 'please proceed', 'go for it', 'let\'s do it',
+    'add all', 'confirm all', 'approve all',
+])
+
+def _is_plan_approval(text):
+    """Check if a message is approving a previously shown schedule plan."""
+    lower = text.lower().strip().rstrip('.!,')
+    if lower in _APPROVAL_PHRASES:
+        return True
+    for phrase in _APPROVAL_PHRASES:
+        if phrase in lower and len(lower) < 120:
+            return True
+    return False
+
+# ---------------------------------------------------------------------------
 # Intent classification — expanded
 # ---------------------------------------------------------------------------
 
@@ -6131,6 +6156,37 @@ def chat():
         _persist_chat(last_msg, card, 'schedule_meeting', 'execution')
         return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'schedule_meeting', 'mode': 'execution'})
 
+    # Pending schedule plan approval — execute stored blocks instead of re-asking
+    if _pending_schedule_plan and _is_plan_approval(last_msg):
+        plan = _pending_schedule_plan.copy()
+        _pending_schedule_plan.clear()
+        age_sec = (datetime.utcnow() - plan['created']).total_seconds() if plan.get('created') else 9999
+        if age_sec < 3600:
+            result = _exec_create_calendar_events({'events': plan['events']})
+            if result.get('success'):
+                msg = f"Added {plan['block_count']} schedule blocks to your calendar."
+                card = {
+                    'type': 'ConfirmationCard', 'text': msg,
+                    'data': {'what': 'schedule_plan_approved', 'result': 'success',
+                             'date': plan.get('date', ''), 'count': plan['block_count']},
+                    'actions': [
+                        {'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}},
+                    ],
+                }
+                _persist_chat(last_msg, card, 'schedule_plan', 'execution')
+                return jsonify({'role': 'assistant', 'content': msg, 'card': card,
+                                'intent': 'schedule_plan', 'mode': 'execution',
+                                'calendar_changed': True})
+            else:
+                err_msg = result.get('message', 'Failed to add schedule blocks.')
+                card = {
+                    'type': 'ErrorCard', 'text': err_msg,
+                    'data': {'error': err_msg}, 'actions': []
+                }
+                _persist_chat(last_msg, card, 'schedule_plan', 'execution')
+                return jsonify({'role': 'assistant', 'content': err_msg, 'card': card,
+                                'intent': 'schedule_plan', 'mode': 'execution'})
+
     # Permission guard — block people-management requests early
     allowed, block_reason = _leo_permission_check('_check_text', {'_raw_text': last_msg})
     if not allowed:
@@ -8178,7 +8234,7 @@ def _build_schedule_plan_card(blocks, target_date):
         'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}
     })
 
-    return {
+    card = {
         'type': 'SchedulePlanCard',
         'text': text,
         'data': {
@@ -8191,6 +8247,17 @@ def _build_schedule_plan_card(blocks, target_date):
         },
         'actions': actions,
     }
+
+    if event_summaries:
+        _pending_schedule_plan.clear()
+        _pending_schedule_plan.update({
+            'events': event_summaries,
+            'date': target_date,
+            'block_count': len(new_blocks),
+            'created': datetime.utcnow(),
+        })
+
+    return card
 
 
 def _try_extract_schedule_from_text(text, user_msg):

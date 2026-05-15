@@ -1908,6 +1908,9 @@ function BTRAssistantChat(props) {
           return prev.concat([{ role: 'assistant', content: text, card: card, mode: d.mode, intent: d.intent }]);
         });
         if (d.mode) setLastMode(d.mode);
+        if (d.calendar_changed) {
+          window.dispatchEvent(new CustomEvent('btr-calendar-refresh'));
+        }
         setLoading(false);
       })
       .catch(function() {
