@@ -181,6 +181,8 @@ function sanitizeDisplayText(text) {
   // Strip ```json ... ```
   s = s.replace(/```json\s*/g, '');
   s = s.replace(/```\s*/g, '');
+  // Strip internal card type names that leaked into user-facing text
+  s = s.replace(/\b(?:Text|Confirmation|Draft|Export|Brief|Meeting|FollowUp|Touchpoint|Signal|NextAction|Error|Strategy|Queue|Sprint|Insight|Prediction|Automation|Probability|Relationship|Funnel|Calendar|CrmUpdate|LeoAction|Approval|Batch|Contact|Company|Performance|Execution|Fix|Claude|Ambiguity|Schedule|Outreach|DailyPlan)Card\b/g, 'response');
   // Clean up excess whitespace
   s = s.replace(/\n{3,}/g, '\n\n');
   return s.trim();
@@ -511,22 +513,57 @@ function renderDraftCard(card, onAction, loadingState) {
   var d = card.data || {};
   var colors = CARD_COLORS.DraftCard;
   var channelLabel = { email: 'Email', linkedin: 'LinkedIn', call: 'Call Script' }[d.channel] || d.channel || 'Draft';
+  var variants = d.variants || [];
+  var contactLabel = d.contact_name || d.target_name || d.target || '';
 
   var draftActions = card.actions && card.actions.length > 0 ? card.actions : [
-    { id: 'copy_draft', label: 'Copy', action: 'copy_draft', params: { body: d.body || '', subject: d.subject || '' } }
+    { id: 'copy_draft', label: 'Copy', action: 'copy_text', params: { body: d.body || '', subject: d.subject || '' } }
   ];
 
-  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.6rem 0.7rem' } },
+  var bodyContent = d.body || '';
+  if (!bodyContent && card.text) bodyContent = card.text;
+
+  var children = [
     h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.3rem', marginBottom: '0.3rem', fontSize: '0.68rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.03em' } },
       colors.icon, ' ', channelLabel, ' Draft',
-      d.target_name ? h('span', { style: { fontWeight: 400, color: '#4b5563', textTransform: 'none' } }, ' — ' + d.target_name) : null
-    ),
-    d.subject ? h('div', { style: { fontWeight: 600, color: '#1e293b', marginBottom: '0.25rem', fontSize: '0.74rem' } }, d.subject) : null,
-    h('div', { style: { color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.5, fontSize: '0.72rem', maxHeight: '220px', overflowY: 'auto', background: '#ffffff', borderRadius: '0.35rem', padding: '0.5rem', border: '1px solid ' + colors.border } }, d.body || ''),
-    d.signal_ref ? h('div', { style: { marginTop: '0.25rem', fontSize: '0.63rem', color: '#6b7280', fontStyle: 'italic' } }, '⚡ ' + d.signal_ref) : null,
-    card.source ? h('div', { style: { marginTop: '0.2rem', fontSize: '0.63rem', color: '#6b7280', fontStyle: 'italic' } }, card.source) : null,
-    renderActionButtons(draftActions, onAction, d)
-  );
+      contactLabel ? h('span', { style: { fontWeight: 400, color: '#4b5563', textTransform: 'none' } }, ' — ' + contactLabel) : null
+    )
+  ];
+
+  if (variants.length > 0) {
+    variants.forEach(function(v, i) {
+      children.push(
+        h('div', { key: 'v' + i, style: { marginBottom: '0.5rem', background: '#ffffff', borderRadius: '0.35rem', padding: '0.5rem', border: '1px solid ' + colors.border } },
+          h('div', { style: { fontSize: '0.65rem', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', marginBottom: '0.2rem' } }, v.label || ('Variant ' + (i + 1))),
+          v.subject ? h('div', { style: { fontWeight: 600, color: '#1e293b', marginBottom: '0.2rem', fontSize: '0.72rem' } }, 'Subject: ' + v.subject) : null,
+          h('div', { style: { color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.5, fontSize: '0.72rem' } }, v.body || '')
+        )
+      );
+    });
+  } else {
+    if (d.subject) {
+      children.push(h('div', { style: { fontWeight: 600, color: '#1e293b', marginBottom: '0.25rem', fontSize: '0.74rem' } }, d.subject));
+    }
+    children.push(
+      h('div', { style: { color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.5, fontSize: '0.72rem', maxHeight: '220px', overflowY: 'auto', background: '#ffffff', borderRadius: '0.35rem', padding: '0.5rem', border: '1px solid ' + colors.border } }, bodyContent)
+    );
+  }
+
+  if (d.why_it_works) {
+    children.push(h('div', { style: { marginTop: '0.3rem', fontSize: '0.65rem', color: '#4b5563', fontStyle: 'italic' } }, 'Why: ' + d.why_it_works));
+  }
+  if (d.confidence) {
+    children.push(h('div', { style: { marginTop: '0.15rem', fontSize: '0.63rem', color: '#6b7280' } }, 'Confidence: ' + d.confidence));
+  }
+  if (d.signal_ref) {
+    children.push(h('div', { style: { marginTop: '0.25rem', fontSize: '0.63rem', color: '#6b7280', fontStyle: 'italic' } }, '⚡ ' + d.signal_ref));
+  }
+  if (card.source) {
+    children.push(h('div', { style: { marginTop: '0.2rem', fontSize: '0.63rem', color: '#6b7280', fontStyle: 'italic' } }, card.source));
+  }
+  children.push(renderActionButtons(draftActions, onAction, d));
+
+  return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.6rem 0.7rem' } }, children);
 }
 
 function renderNextActionCard(card, onAction) {
