@@ -29,33 +29,57 @@ def _generate_brief_content():
         'generated_at': today.isoformat(),
     }
 
-    # --- Section 1: Market Snapshot ---
-    market_points = [
-        'Multifamily construction starts declined 8% YoY nationally, tightening future supply and favoring BTR absorption.',
-        'Institutional capital continues rotating from office to residential, with BTR capturing an increasing share of LP allocations.',
-        'Sun Belt metros (DFW, Phoenix, Nashville, Charlotte) lead in BTR permit activity, though land costs are compressing yields.',
-        'Interest rate stabilization is improving deal underwriting certainty — more projects penciling than in late 2024.',
-        'Single-family rental REITs are expanding build-to-rent pipelines, signaling sustained institutional demand.',
-    ]
+    # --- Section 1: Market Snapshot (from real signals) ---
+    market_points = []
+    try:
+        signals = fetch_all(
+            "SELECT title, summary, importance FROM prospecting_signals "
+            "ORDER BY detected_at DESC LIMIT 5", []
+        )
+        for s in (signals or []):
+            point = f"[Signal {s.get('importance', '?')}/10] {s['title']}"
+            if s.get('summary'):
+                point += f" — {s['summary'][:120]}"
+            market_points.append(point)
+    except Exception:
+        pass
+    if not market_points:
+        market_points.append('No recent signals — run signal scan to populate market intelligence.')
     brief['market_snapshot'] = market_points
 
-    # --- Section 2: BTR Intelligence ---
-    btr_intel = [
-        'Horizontal BTR communities (detached single-family rental) outperforming vertical mid-rise in lease-up velocity across secondary markets.',
-        'Developer-operator partnerships increasing as capital partners seek stabilized yield without development risk.',
-        'Land sellers in growth corridors are increasingly pricing BTR use into asks — early movers have a cost advantage.',
-        'Amenity packages trending toward remote-work infrastructure: fiber, co-working lounges, and soundproof pods.',
-    ]
+    # --- Section 2: BTR Intelligence (from pipeline data) ---
+    btr_intel = []
+    try:
+        pipeline = fetch_all(
+            """SELECT relationship_status, COUNT(*) as cnt, AVG(warmth_score) as avg_warmth
+               FROM capital_groups
+               WHERE relationship_status NOT IN ('dormant', 'lost', 'dead')
+               GROUP BY relationship_status ORDER BY cnt DESC LIMIT 5""", []
+        )
+        for p in (pipeline or []):
+            avg_w = round(p.get('avg_warmth', 0) or 0, 1)
+            btr_intel.append(
+                f"{p['relationship_status'].title()}: {p['cnt']} groups, avg warmth {avg_w}/10"
+            )
+    except Exception:
+        pass
+    if not btr_intel:
+        btr_intel.append('Pipeline data not yet populated — add capital groups to see intelligence.')
     brief['btr_intelligence'] = btr_intel
 
-    # --- Section 3: What This Means ---
-    interpretation = (
-        'The supply squeeze combined with stable rates creates a window for well-capitalized operators. '
-        'BTR is no longer a niche — institutional demand is pulling it into mainstream CRE allocation. '
-        'For prospectors, this means capital partners are actively looking for deal flow. '
-        'The competitive advantage is speed: getting in front of LPs before their allocation windows close, '
-        'and sourcing land before BTR-specific pricing becomes standard.'
-    )
+    # --- Section 3: What This Means (dynamic from data) ---
+    total_groups = sum(p.get('cnt', 0) for p in (pipeline if 'pipeline' in dir() else []))
+    if total_groups > 0:
+        interpretation = (
+            f'Your pipeline has {total_groups} active groups. '
+            f'Focus on advancing the highest-warmth relationships while maintaining '
+            f'consistent touchpoints across the funnel. Check signals daily for outreach angles.'
+        )
+    else:
+        interpretation = (
+            'Build your pipeline by adding capital groups and contacts. '
+            'Once populated, this section will surface data-driven market intelligence.'
+        )
     brief['interpretation'] = interpretation
 
     # --- Section 4: Action Items (personalized if data available) ---
