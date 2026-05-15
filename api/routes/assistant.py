@@ -7289,13 +7289,19 @@ def _chat_inner():
             doc_type = 'attack_plan'
 
         if doc_type and not is_brief:
-            try:
-                card, err = _generate_doc_pdf(doc_type)
-                if card:
-                    _persist_chat(last_msg, card, 'doc_pdf', 'execution')
-                    return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'doc_pdf', 'mode': 'execution'})
-            except Exception:
-                pass
+            card, err = _generate_doc_pdf(doc_type)
+            if card:
+                _persist_chat(last_msg, card, 'doc_pdf', 'execution')
+                return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'doc_pdf', 'mode': 'execution'})
+            if err:
+                err_card = {
+                    'type': 'ErrorCard',
+                    'text': f'PDF generation failed: {err}. Try again or ask Leo for a text version.',
+                    'data': {'error': err, 'doc_type': doc_type},
+                    'actions': []
+                }
+                _persist_chat(last_msg, err_card, 'doc_pdf', 'execution')
+                return jsonify({'role': 'assistant', 'content': err_card['text'], 'card': err_card, 'intent': 'doc_pdf', 'mode': 'execution'})
 
         if not is_brief and not doc_type:
             export_type = 'contacts'
@@ -9546,31 +9552,51 @@ def _generate_doc_pdf(doc_type):
 
     doc = {'title': title, 'subtitle': subtitle, 'date': date_str, 'sections': sections}
 
-    try:
-        pdf_bytes = build_doc_pdf(doc)
-        import logging
-        pdf_logger = logging.getLogger('leo.pdf')
+    import logging
+    pdf_logger = logging.getLogger('leo.pdf')
+
+    def _try_generate(doc_data):
+        pdf_bytes = build_doc_pdf(doc_data)
         pdf_logger.info(f"[PDF] Generated {doc_type}: {len(pdf_bytes)} bytes, {len(sections)} sections")
-        pdf_id = store_pdf(pdf_bytes, filename)
-        url = f'/api/brief/doc/{pdf_id}'
-        card = {
+        pid = store_pdf(pdf_bytes, filename)
+        u = f'/api/brief/doc/{pid}'
+        return {
             'type': 'ExportCard',
             'text': f'**{title}** \u2014 {date_str}\n\nYour premium execution brief is ready.',
             'data': {
-                'export_type': doc_type, 'url': url, 'fileUrl': url,
+                'export_type': doc_type, 'url': u, 'fileUrl': u,
                 'fileName': filename, 'filename': filename,
                 'pdf_size': len(pdf_bytes),
             },
             'actions': [
                 {'id': 'download_pdf', 'label': 'Download PDF', 'action': 'download',
-                 'params': {'url': url, 'fileName': filename}},
+                 'params': {'url': u, 'fileName': filename}},
             ]
         }
+
+    try:
+        card = _try_generate(doc)
         return card, None
-    except Exception as e:
-        import logging
-        logging.getLogger('leo.pdf').error(f"[PDF] Generation failed for {doc_type}: {e}")
-        return None, str(e)
+    except Exception as first_err:
+        pdf_logger.warning(f"[PDF] First attempt failed for {doc_type}: {first_err}, retrying with sanitized text")
+        try:
+            from api.routes.daily_brief import sanitize_text
+            def _deep_sanitize(obj):
+                if isinstance(obj, str):
+                    t = sanitize_text(obj)
+                    return t.encode('latin-1', 'replace').decode('latin-1')
+                if isinstance(obj, dict):
+                    return {k: _deep_sanitize(v) for k, v in obj.items()}
+                if isinstance(obj, list):
+                    return [_deep_sanitize(i) for i in obj]
+                return obj
+            sanitized_doc = _deep_sanitize(doc)
+            card = _try_generate(sanitized_doc)
+            pdf_logger.info(f"[PDF] Retry succeeded for {doc_type} with sanitized text")
+            return card, None
+        except Exception as retry_err:
+            pdf_logger.error(f"[PDF] Both attempts failed for {doc_type}: {retry_err}")
+            return None, str(retry_err)
 
 
 
