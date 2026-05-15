@@ -439,22 +439,22 @@ function executeCardAction(act, messages, setMessages, setActionLoading) {
           }}]);
         });
       }
-      // Refresh calendar if a calendar action succeeded
-      if (d.success && act.params && act.params.exec_action &&
-          act.params.exec_action.indexOf('cal_') === 0) {
-        window.dispatchEvent(new CustomEvent('btr-calendar-refresh'));
-      }
-      if (d.success && (act.action === 'schedule_meeting' || act.action === 'log_touchpoint' ||
-          act.action === 'update_stage' || act.action === 'create_followup' || act.action === 'complete_task')) {
+      // Refresh calendar if backend signals a change or if a calendar action succeeded
+      if (d.calendar_changed ||
+          (d.success && act.params && act.params.exec_action &&
+           act.params.exec_action.indexOf('cal_') === 0) ||
+          (d.success && (act.action === 'schedule_meeting' || act.action === 'log_touchpoint' ||
+           act.action === 'update_stage' || act.action === 'create_followup' || act.action === 'complete_task'))) {
         window.dispatchEvent(new CustomEvent('btr-calendar-refresh'));
       }
     })
-    .catch(function() {
+    .catch(function(err) {
       setActionLoading(false);
+      var errMsg = (err && err.message) ? err.message : 'Action failed — check your connection.';
       setMessages(function(prev) {
         return prev.concat([{ role: 'assistant', card: {
-          type: 'ErrorCard', text: 'Action failed — connection error.',
-          data: { error: 'Network error' }, actions: []
+          type: 'ErrorCard', text: errMsg,
+          data: { error: errMsg }, actions: [{ id: 'retry', label: 'Try Again', action: 'retry', params: {} }]
         }}]);
       });
     });
