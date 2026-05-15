@@ -175,8 +175,8 @@ function sanitizeDisplayText(text) {
   // Strip <action>...</action>
   s = s.replace(/<action[^>]*>[\s\S]*?<\/action>/gi, '');
   s = s.replace(/<\/?action[^>]*>/gi, '');
-  // Strip standalone JSON blocks (lines that look like raw JSON)
-  s = s.replace(/^\s*\{[^}]{20,}\}\s*$/gm, '');
+  // Strip standalone JSON blocks (lines that look like raw JSON with quoted keys)
+  s = s.replace(/^\s*\{\s*"[^"]+"\s*:[\s\S]{15,}\}\s*$/gm, '');
   // Strip ```json ... ```
   s = s.replace(/```json\s*/g, '');
   s = s.replace(/```\s*/g, '');
@@ -423,7 +423,7 @@ function executeCardAction(act, messages, setMessages, setActionLoading) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: act.action, params: act.params || {} })
   })
-    .then(function(r) { return r.json(); })
+    .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(function(d) {
       setActionLoading(false);
       if (d.card) {
@@ -1771,7 +1771,7 @@ function BTRAssistantChat(props) {
 
     // Fetch insights
     fetch(getApiBase() + '/api/assistant/insights')
-      .then(function(r) { return r.json(); })
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function(d) {
         var insights = d.insights || [];
         if (insights.length > 0) {
@@ -1795,7 +1795,7 @@ function BTRAssistantChat(props) {
 
     // Fetch daily gameplan
     fetch(getApiBase() + '/api/assistant/gameplan')
-      .then(function(r) { return r.json(); })
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function(d) {
         var plan = d.plan || [];
         if (plan.length > 0) {
@@ -1819,7 +1819,7 @@ function BTRAssistantChat(props) {
   // Proactive: initial badge check on mount + periodic polling
   useEffect(function() {
     fetch(getApiBase() + '/api/assistant/insights')
-      .then(function(r) { return r.json(); })
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function(d) {
         var highImpact = (d.insights || []).filter(function(ins) { return ins.impact >= 80; });
         setInsightBadge(highImpact.length);
@@ -1828,7 +1828,7 @@ function BTRAssistantChat(props) {
 
     var interval = setInterval(function() {
       fetch(getApiBase() + '/api/assistant/insights')
-        .then(function(r) { return r.json(); })
+        .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
         .then(function(d) {
           var highImpact = (d.insights || []).filter(function(ins) { return ins.impact >= 80; });
           setInsightBadge(highImpact.length);
@@ -1846,7 +1846,7 @@ function BTRAssistantChat(props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'start' })
       })
-        .then(function(r) { return r.json(); })
+        .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
         .then(function(d) {
           if (d.sprint) {
             var sp = d.sprint;

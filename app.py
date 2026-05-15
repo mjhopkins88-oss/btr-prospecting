@@ -2488,6 +2488,8 @@ def init_db():
         'CREATE INDEX IF NOT EXISTS idx_crm_touchpoints_lead ON crm_touchpoints(lead_id)',
         'CREATE INDEX IF NOT EXISTS idx_calendar_meetings_date ON calendar_meetings(meeting_date)',
         'CREATE INDEX IF NOT EXISTS idx_calendar_meetings_group ON calendar_meetings(group_id)',
+        'CREATE INDEX IF NOT EXISTS idx_assistant_chat_log_created ON assistant_chat_log(created_at DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_assistant_chat_log_card_type ON assistant_chat_log(card_type)',
     ]:
         try:
             c.safe_execute(idx_sql)

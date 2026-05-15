@@ -8766,6 +8766,13 @@ def _exec_create_calendar_events(params):
         if not meeting_date:
             meeting_date = datetime.utcnow().strftime('%Y-%m-%d')
 
+        if not re.match(r'^\d{4}-\d{2}-\d{2}$', meeting_date):
+            failed.append(f"{title} - invalid date format: {meeting_date}")
+            continue
+
+        if not re.match(r'^\d{2}:\d{2}$', meeting_time):
+            meeting_time = '09:00'
+
         if not contact_id and contact_name:
             clean_name = re.sub(r'\s*\(.*\)$', '', contact_name).strip()
             contact = _resolve_contact(clean_name)
@@ -8778,6 +8785,15 @@ def _exec_create_calendar_events(params):
                 "SELECT id FROM calendar_meetings WHERE contact_id = ? AND meeting_date = ? "
                 "AND meeting_time = ? AND status != 'cancelled'",
                 [contact_id, meeting_date, meeting_time]
+            )
+            if existing:
+                skipped.append(f"{title} ({meeting_date} {meeting_time}) - already exists")
+                continue
+        else:
+            existing = fetch_one(
+                "SELECT id FROM calendar_meetings WHERE title = ? AND meeting_date = ? "
+                "AND meeting_time = ? AND status != 'cancelled'",
+                [title, meeting_date, meeting_time]
             )
             if existing:
                 skipped.append(f"{title} ({meeting_date} {meeting_time}) - already exists")
@@ -9622,12 +9638,21 @@ def track_interaction():
 
 def _persist_chat(user_msg, card, intent='unknown', mode='unknown'):
     try:
+        card_json = json.dumps(card)
+        if len(card_json) > 4000:
+            minimal = {
+                'type': card.get('type', 'TextCard'),
+                'text': (card.get('text', '') or '')[:800],
+                'data': {},
+                'actions': card.get('actions', []),
+            }
+            card_json = json.dumps(minimal)
         execute(
             """INSERT INTO assistant_chat_log (id, user_message, card_type, card_json, created_at)
                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)""",
             [new_id(), user_msg[:500],
              f"{card.get('type', 'TextCard')}|{intent}|{mode}",
-             json.dumps(card)[:4000]]
+             card_json]
         )
     except Exception:
         pass
