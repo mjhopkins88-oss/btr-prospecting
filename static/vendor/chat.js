@@ -697,19 +697,23 @@ function renderExportCard(card, onAction) {
   );
 }
 
-function renderConfirmationCard(card) {
+function renderConfirmationCard(card, onAction) {
   var colors = CARD_COLORS.ConfirmationCard;
+  var hasActions = card.actions && card.actions.length > 0;
   return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.5rem 0.7rem', fontSize: '0.74rem', color: colors.accent, fontWeight: 600 } },
-    colors.icon + ' ' + (card.text || 'Done.')
+    h('div', null, colors.icon + ' ' + (card.text || 'Done.')),
+    hasActions ? renderActionButtons(card.actions, onAction) : null
   );
 }
 
-function renderErrorCard(card) {
+function renderErrorCard(card, onAction) {
   var d = card.data || {};
   var colors = CARD_COLORS.ErrorCard;
+  var hasActions = card.actions && card.actions.length > 0;
   return h('div', { style: { background: colors.bg, border: '1px solid ' + colors.border, borderRadius: '0.5rem', padding: '0.5rem 0.7rem' } },
     h('div', { style: { fontSize: '0.74rem', color: colors.accent, fontWeight: 600 } }, colors.icon + ' ' + (card.text || 'Error')),
-    d.suggestion ? h('div', { style: { fontSize: '0.65rem', color: '#6b7280', marginTop: '0.2rem' } }, d.suggestion) : null
+    d.suggestion ? h('div', { style: { fontSize: '0.65rem', color: '#6b7280', marginTop: '0.2rem' } }, d.suggestion) : null,
+    hasActions ? renderActionButtons(card.actions, onAction) : null
   );
 }
 
@@ -1930,8 +1934,8 @@ function renderCard(card, onAction, loadingState) {
     case 'TouchpointLogCard': return renderTouchpointCard(card, oa);
     case 'FollowUpCard': return renderFollowUpCard(card, oa);
     case 'ExportCard': return renderExportCard(card, oa);
-    case 'ConfirmationCard': return renderConfirmationCard(card);
-    case 'ErrorCard': return renderErrorCard(card);
+    case 'ConfirmationCard': return renderConfirmationCard(card, oa);
+    case 'ErrorCard': return renderErrorCard(card, oa);
     case 'StrategyCard': return renderStrategyCard(card, oa);
     case 'ClaudePromptCard': return renderClaudePromptCard(card, oa);
     case 'ContactInsightCard': return renderContactInsightCard(card, oa);

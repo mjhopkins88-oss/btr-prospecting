@@ -6288,16 +6288,23 @@ def _extract_summary(text, group_name=None, contact_name=None):
 
 
 _CREATE_COMPANY_RE = re.compile(
-    r'(?:create|add|new)\s+(?:a\s+)?(?:company|group|capital\s+group)\s+'
-    r'(?:named?|called)\s+(.+)',
+    r'(?:create|add|new)\s+(?:a\s+)?(?:new\s+)?(?:company|group|capital\s+group|capital\s+partner)'
+    r'(?:\s+(?:in|under|for|to)\s+[^"\']+?)?\s+'
+    r'(?:named?|called|")\s*["\']?(.+?)["\']?\s*$',
     re.IGNORECASE
 )
 _CREATE_COMPANY_SHORT_RE = re.compile(
-    r'(?:add)\s+(.+?)\s+(?:to\s+(?:capital\s+groups|my\s+(?:crm|pipeline|groups)))',
+    r'(?:add|create)\s+["\']?(.+?)["\']?\s+'
+    r'(?:to\s+(?:capital\s+(?:groups|partners)|my\s+(?:crm|pipeline|groups|capital\s+groups)))',
+    re.IGNORECASE
+)
+_CREATE_COMPANY_QUOTED_RE = re.compile(
+    r'(?:create|add|new)\s+.*?(?:company|group|capital\s+(?:group|partner)).*?'
+    r'["“](.+?)["”]',
     re.IGNORECASE
 )
 _CREATE_CONTACT_RE = re.compile(
-    r'(?:create|add|new)\s+(?:a\s+)?contact\s+'
+    r'(?:create|add|new)\s+(?:a\s+)?(?:new\s+)?contact\s+'
     r'(?:named?|called|for)\s+(.+?)(?:\s+(?:at|for|to)\s+(.+))?$',
     re.IGNORECASE
 )
@@ -6316,6 +6323,8 @@ def _try_parse_creation_command(text):
     m = _CREATE_COMPANY_RE.search(text_stripped)
     if not m:
         m = _CREATE_COMPANY_SHORT_RE.search(text_stripped)
+    if not m:
+        m = _CREATE_COMPANY_QUOTED_RE.search(text_stripped)
     if m:
         company_name = m.group(1).strip().strip('"\'')
         if len(company_name) < 2 or company_name.lower() in _PRONOUNS:
@@ -7447,20 +7456,6 @@ def _chat_inner():
             'intent': 'error', 'mode': 'execution'
         }), 400
 
-    api_key = os.getenv('ANTHROPIC_API_KEY')
-    if not api_key:
-        logger.error("ANTHROPIC_API_KEY not set — chat disabled")
-        return jsonify({
-            'role': 'assistant', 'content': '',
-            'card': {
-                'type': 'ErrorCard',
-                'text': 'Leo API configuration missing: ANTHROPIC_API_KEY is not set.',
-                'data': {'error': 'ANTHROPIC_API_KEY not set',
-                         'suggestion': 'Set ANTHROPIC_API_KEY in your environment variables or Railway config.'},
-                'actions': []
-            }
-        }), 503
-
     last_msg = messages[-1].get('content', '') if messages else ''
     processed_msg, extra_ctx = _preprocess_slash(last_msg)
 
@@ -7851,6 +7846,16 @@ def _chat_inner():
         _persist_chat(last_msg, card, 'blocked', 'execution')
         return jsonify({'role': 'assistant', 'content': block_reason, 'card': card, 'intent': 'blocked', 'mode': 'execution'})
 
+    # Early creation intercept — catch "create company/contact" BEFORE intent classification
+    _creation_input = resolved_msg if resolved_refs else last_msg
+    _early_creation = _try_parse_creation_command(_creation_input)
+    if _early_creation:
+        _persist_chat(last_msg, _early_creation, 'crm_update', 'execution')
+        return jsonify({
+            'role': 'assistant', 'content': _early_creation['text'],
+            'card': _early_creation, 'intent': 'crm_update', 'mode': 'execution'
+        })
+
     intent = _classify_intent_contextual(last_msg, conv_state, msg_type)
     mode = INTENT_TO_MODE.get(intent, 'strategic')
     max_tokens = MODE_MAX_TOKENS.get(mode, 2000)
@@ -8083,17 +8088,8 @@ def _chat_inner():
                 else:
                     extra_ctx = (extra_ctx or '') + f"\nTarget company: {g_match['name']} (id={g_match['id'][:8]}, status={g_match.get('relationship_status')}, warmth={g_match.get('warmth_score')})"
 
-    # CRM creation intercept — detect "create company/contact" before parse
     if intent == 'crm_update':
         _crm_input = resolved_msg if resolved_refs else last_msg
-        _creation_card = _try_parse_creation_command(_crm_input)
-        if _creation_card:
-            _persist_chat(last_msg, _creation_card, 'crm_update', 'execution')
-            return jsonify({
-                'role': 'assistant', 'content': _creation_card['text'],
-                'card': _creation_card, 'intent': 'crm_update', 'mode': 'execution'
-            })
-
         parsed = _parse_crm_command(_crm_input)
         if parsed['status'] == 'ok':
             card = _build_preview_card(parsed['ops'], last_msg)
@@ -8335,6 +8331,20 @@ def _chat_inner():
     api_messages.append({'role': 'user', 'content': processed_msg})
     api_messages = api_messages[-20:]
 
+    api_key = os.getenv('ANTHROPIC_API_KEY')
+    if not api_key:
+        logger.error("ANTHROPIC_API_KEY not set — chat disabled")
+        return jsonify({
+            'role': 'assistant', 'content': '',
+            'card': {
+                'type': 'ErrorCard',
+                'text': 'Leo API configuration missing: ANTHROPIC_API_KEY is not set.',
+                'data': {'error': 'ANTHROPIC_API_KEY not set',
+                         'suggestion': 'Set ANTHROPIC_API_KEY in your environment variables or Railway config.'},
+                'actions': []
+            }
+        }), 503
+
     try:
         client = anthropic.Anthropic(api_key=api_key, timeout=120.0)
         resp = client.messages.create(
@@ -8344,9 +8354,7 @@ def _chat_inner():
             messages=api_messages
         )
         reply = resp.content[0].text if resp.content else ''
-        import logging
-        logger = logging.getLogger('leo')
-        logger.info(f"[Leo] intent={intent} mode={mode} reply_len={len(reply)}")
+        logging.getLogger('leo').info(f"[Leo] intent={intent} mode={mode} reply_len={len(reply)}")
 
         if not reply.strip():
             logger.error(f"[Leo] EMPTY REPLY from Claude for intent={intent} msg={last_msg[:80]}")
