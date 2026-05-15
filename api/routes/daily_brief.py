@@ -13,6 +13,55 @@ logger = logging.getLogger('leo.pdf')
 
 daily_brief_bp = Blueprint('daily_brief', __name__, url_prefix='/api/brief')
 
+# ---------------------------------------------------------------------------
+# Unicode font setup — DejaVu Sans for full Unicode support in PDFs
+# ---------------------------------------------------------------------------
+
+_PROJECT_FONT_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'fonts'
+)
+_SYSTEM_FONT_DIR = '/usr/share/fonts/truetype/dejavu'
+
+_FONT_REGULAR = None
+_FONT_BOLD = None
+
+for _dir in (_PROJECT_FONT_DIR, _SYSTEM_FONT_DIR):
+    _r = os.path.join(_dir, 'DejaVuSans.ttf')
+    _b = os.path.join(_dir, 'DejaVuSans-Bold.ttf')
+    if os.path.exists(_r) and os.path.exists(_b):
+        _FONT_REGULAR = _r
+        _FONT_BOLD = _b
+        break
+
+UNICODE_FONTS_AVAILABLE = _FONT_REGULAR is not None
+
+
+def _register_unicode_fonts(pdf):
+    """Register DejaVu Unicode fonts on an FPDF instance. Returns font family name."""
+    if UNICODE_FONTS_AVAILABLE:
+        pdf.add_font('DejaVu', '', _FONT_REGULAR)
+        pdf.add_font('DejaVu', 'B', _FONT_BOLD)
+        pdf.add_font('DejaVu', 'I', _FONT_REGULAR)
+        pdf.add_font('DejaVu', 'BI', _FONT_BOLD)
+        return 'DejaVu'
+    logger.warning("[PDF] DejaVu fonts not found, falling back to Helvetica (Latin-1 only)")
+    return 'Helvetica'
+
+
+def sanitize_text(text):
+    """Normalize Unicode text for maximum PDF compatibility. Fallback sanitizer."""
+    text = str(text)
+    text = text.replace('—', ' - ').replace('–', '-')
+    text = text.replace('‘', "'").replace('’', "'")
+    text = text.replace('“', '"').replace('”', '"')
+    text = text.replace('•', chr(8226)).replace('…', '...')
+    text = text.replace(' ', ' ').replace('​', '')
+    text = text.replace('→', '->').replace('←', '<-')
+    text = text.replace('✓', '[x]').replace('✗', '[ ]')
+    text = text.replace('·', '-')
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    return text
+
 
 # ---------------------------------------------------------------------------
 # Brief content generator
@@ -240,63 +289,68 @@ def _build_pdf(brief):
     """Generate a clean, professional PDF from brief content. Returns bytes."""
     from fpdf import FPDF
 
-    class BriefPDF(FPDF):
+    pdf_obj = FPDF('P', 'mm', 'Letter')
+    F = _register_unicode_fonts(pdf_obj)
+    s = sanitize_text
+
+    class BriefPDF(type(pdf_obj)):
         def header(self):
-            self.set_font('Helvetica', 'B', 10)
+            self.set_font(F, 'B', 10)
             self.set_text_color(100, 116, 139)
             self.cell(0, 8, 'BTR PROSPECTING ENGINE', align='R')
             self.ln(12)
 
         def footer(self):
             self.set_y(-15)
-            self.set_font('Helvetica', 'I', 7)
+            self.set_font(F, 'I', 7)
             self.set_text_color(148, 163, 184)
-            self.cell(0, 10, f'Generated {brief["date"]} | Confidential', align='C')
+            self.cell(0, 10, s(f'Generated {brief["date"]} | Confidential'), align='C')
 
         def section_header(self, text):
-            self.set_font('Helvetica', 'B', 11)
+            self.set_font(F, 'B', 11)
             self.set_text_color(15, 23, 42)
             self.set_fill_color(241, 245, 249)
-            self.cell(0, 8, f'  {text}', fill=True, new_x='LMARGIN', new_y='NEXT')
+            self.cell(0, 8, s(f'  {text}'), fill=True, new_x='LMARGIN', new_y='NEXT')
             self.ln(3)
 
         def body_text(self, text):
-            self.set_font('Helvetica', '', 9)
+            self.set_font(F, '', 9)
             self.set_text_color(51, 65, 85)
-            self.multi_cell(0, 5, text)
+            self.multi_cell(0, 5, s(text))
             self.ln(2)
 
         def bullet(self, text):
-            self.set_font('Helvetica', '', 9)
+            self.set_font(F, '', 9)
             self.set_text_color(51, 65, 85)
             x = self.get_x()
             self.set_x(x + 4)
-            self.cell(4, 5, chr(8226))
-            self.multi_cell(0, 5, f' {text}')
+            self.cell(4, 5, chr(8226) if UNICODE_FONTS_AVAILABLE else '-')
+            self.multi_cell(0, 5, s(f' {text}'))
             self.ln(1)
 
         def numbered(self, num, text):
-            self.set_font('Helvetica', 'B', 9)
+            self.set_font(F, 'B', 9)
             self.set_text_color(20, 184, 166)
             x = self.get_x()
             self.set_x(x + 4)
             self.cell(6, 5, f'{num}.')
-            self.set_font('Helvetica', '', 9)
+            self.set_font(F, '', 9)
             self.set_text_color(51, 65, 85)
-            self.multi_cell(0, 5, f' {text}')
+            self.multi_cell(0, 5, s(f' {text}'))
             self.ln(1)
 
     pdf = BriefPDF('P', 'mm', 'Letter')
+    _register_unicode_fonts(pdf)
     pdf.set_auto_page_break(auto=True, margin=20)
     pdf.add_page()
 
     # Title
-    pdf.set_font('Helvetica', 'B', 18)
+    pdf.set_font(F, 'B', 18)
     pdf.set_text_color(15, 23, 42)
     pdf.cell(0, 12, 'BTR Daily Brief', new_x='LMARGIN', new_y='NEXT')
-    pdf.set_font('Helvetica', '', 10)
+    pdf.set_font(F, '', 10)
     pdf.set_text_color(100, 116, 139)
-    pdf.cell(0, 6, brief['date'], new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 6, s(brief['date']), new_x='LMARGIN', new_y='NEXT')
     pdf.ln(6)
 
     # Divider
@@ -337,9 +391,9 @@ def _build_pdf(brief):
     learning = brief.get('learning_insight', {})
     if learning:
         pdf.section_header('LEARNING INSIGHT')
-        pdf.set_font('Helvetica', 'B', 9)
+        pdf.set_font(F, 'B', 9)
         pdf.set_text_color(15, 23, 42)
-        pdf.cell(0, 6, learning.get('title', ''), new_x='LMARGIN', new_y='NEXT')
+        pdf.cell(0, 6, s(learning.get('title', '')), new_x='LMARGIN', new_y='NEXT')
         pdf.body_text(learning.get('content', ''))
         pdf.ln(2)
 
@@ -435,29 +489,19 @@ def build_doc_pdf(doc):
     BLUE = (37, 99, 235)
     PRIO_CLR = {'critical': RED, 'high': AMBER, 'medium': BLUE, 'low': S500}
 
-    def safe(text):
-        text = str(text)
-        text = text.replace('\u2014', ' - ').replace('\u2013', '-')
-        text = text.replace('\u2018', "'").replace('\u2019', "'")
-        text = text.replace('\u201c', '"').replace('\u201d', '"')
-        text = text.replace('\u2022', '-').replace('\u2026', '...')
-        text = text.replace('\u00a0', ' ').replace('\u200b', '')
-        text = text.replace('\u2192', '->').replace('\u2190', '<-')
-        text = text.replace('\u2713', '[x]').replace('\u2717', '[ ]')
-        text = text.replace('\u00b7', '-')
-        return text.encode('latin-1', 'replace').decode('latin-1')
+    s = sanitize_text
 
     class PremiumPDF(FPDF):
         def header(self):
             self.set_fill_color(*TEAL)
             self.rect(0, 0, self.w, 2.5, 'F')
             self.set_y(7)
-            self.set_font('Helvetica', 'B', 8)
+            self.set_font(F, 'B', 8)
             self.set_text_color(*TEAL)
             self.cell(0, 5, 'BTR PROSPECTING ENGINE', align='L')
-            self.set_font('Helvetica', '', 8)
+            self.set_font(F, '', 8)
             self.set_text_color(*S400)
-            self.cell(0, 5, safe(doc.get('date', '')), align='R')
+            self.cell(0, 5, s(doc.get('date', '')), align='R')
             self.ln(10)
 
         def footer(self):
@@ -465,9 +509,9 @@ def build_doc_pdf(doc):
             self.set_draw_color(*S200)
             self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
             self.set_y(-10)
-            self.set_font('Helvetica', '', 7)
+            self.set_font(F, '', 7)
             self.set_text_color(*S400)
-            self.cell(0, 5, safe(f'Confidential  |  {doc.get("date", "")}  |  Page {self.page_no()}'), align='C')
+            self.cell(0, 5, s(f'Confidential  |  {doc.get("date", "")}  |  Page {self.page_no()}'), align='C')
 
         def section_head(self, text):
             self.ln(2)
@@ -475,9 +519,9 @@ def build_doc_pdf(doc):
             self.set_fill_color(*TEAL)
             self.rect(self.l_margin, y, 3, 7, 'F')
             self.set_x(self.l_margin + 6)
-            self.set_font('Helvetica', 'B', 11)
+            self.set_font(F, 'B', 11)
             self.set_text_color(*S900)
-            self.cell(0, 7, safe(text), new_x='LMARGIN', new_y='NEXT')
+            self.cell(0, 7, s(text), new_x='LMARGIN', new_y='NEXT')
             self.ln(3)
 
         def divider(self):
@@ -493,19 +537,20 @@ def build_doc_pdf(doc):
             self.set_left_margin(orig)
 
     pdf = PremiumPDF('P', 'mm', 'Letter')
+    F = _register_unicode_fonts(pdf)
     pdf.set_auto_page_break(auto=True, margin=20)
     pdf.set_left_margin(15)
     pdf.set_right_margin(15)
     pdf.add_page()
 
     # ---- Title block ----
-    pdf.set_font('Helvetica', 'B', 22)
+    pdf.set_font(F, 'B', 22)
     pdf.set_text_color(*S900)
-    pdf.cell(0, 12, safe(doc.get('title', 'Execution Brief')), new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 12, s(doc.get('title', 'Execution Brief')), new_x='LMARGIN', new_y='NEXT')
     if doc.get('subtitle'):
-        pdf.set_font('Helvetica', '', 11)
+        pdf.set_font(F, '', 11)
         pdf.set_text_color(*S500)
-        pdf.cell(0, 6, safe(doc['subtitle']), new_x='LMARGIN', new_y='NEXT')
+        pdf.cell(0, 6, s(doc['subtitle']), new_x='LMARGIN', new_y='NEXT')
     pdf.ln(2)
     pdf.divider()
     pdf.ln(1)
@@ -527,12 +572,12 @@ def build_doc_pdf(doc):
                 pdf.set_fill_color(*clr)
                 pdf.rect(pdf.l_margin + 2, y, 2, 10, 'F')
                 pdf.set_x(pdf.l_margin + 8)
-                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_font(F, 'B', 9)
                 pdf.set_text_color(*clr)
-                pdf.cell(22, 5, safe(item.get('label', prio.upper())))
-                pdf.set_font('Helvetica', '', 9)
+                pdf.cell(22, 5, s(item.get('label', prio.upper())))
+                pdf.set_font(F, '', 9)
                 pdf.set_text_color(*S700)
-                pdf.indented_text(30, usable_w - 32, 5, safe(item.get('text', '')))
+                pdf.indented_text(30, usable_w - 32, 5, s(item.get('text', '')))
                 pdf.ln(2)
             pdf.ln(2)
 
@@ -541,18 +586,18 @@ def build_doc_pdf(doc):
             for group in section.get('groups', []):
                 label = group.get('label', '')
                 clr = PRIO_CLR.get(label.lower(), S500)
-                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_font(F, 'B', 9)
                 pdf.set_text_color(*clr)
                 pdf.set_x(pdf.l_margin + 3)
-                pdf.cell(0, 5, safe(label), new_x='LMARGIN', new_y='NEXT')
+                pdf.cell(0, 5, s(label), new_x='LMARGIN', new_y='NEXT')
                 pdf.ln(1)
                 for it in group.get('items', []):
                     y = pdf.get_y()
                     pdf.set_fill_color(*clr)
                     pdf.rect(pdf.l_margin + 5, y + 1.5, 1.5, 1.5, 'F')
-                    pdf.set_font('Helvetica', '', 9)
+                    pdf.set_font(F, '', 9)
                     pdf.set_text_color(*S700)
-                    pdf.indented_text(10, usable_w - 12, 5, safe(it))
+                    pdf.indented_text(10, usable_w - 12, 5, s(it))
                     pdf.ln(1.5)
                 pdf.ln(2)
             pdf.ln(1)
@@ -561,7 +606,7 @@ def build_doc_pdf(doc):
         elif sec_type == 'schedule':
             # Light header row
             pdf.set_fill_color(*S100)
-            pdf.set_font('Helvetica', 'B', 8)
+            pdf.set_font(F, 'B', 8)
             pdf.set_text_color(*S500)
             y = pdf.get_y()
             pdf.rect(pdf.l_margin, y, usable_w, 5.5, 'F')
@@ -572,11 +617,11 @@ def build_doc_pdf(doc):
             for blk in section.get('blocks', []):
                 is_ex = blk.get('is_existing', False)
                 pdf.set_x(pdf.l_margin + 4)
-                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_font(F, 'B', 9)
                 pdf.set_text_color(*(S400 if is_ex else TEAL))
-                pdf.cell(34, 5, safe(blk.get('time', '')))
+                pdf.cell(34, 5, s(blk.get('time', '')))
                 style = '' if is_ex else 'B'
-                pdf.set_font('Helvetica', style, 9)
+                pdf.set_font(F, style, 9)
                 pdf.set_text_color(*(S400 if is_ex else S700))
                 title_txt = blk.get('title', '')
                 if is_ex:
@@ -584,13 +629,13 @@ def build_doc_pdf(doc):
                 dur = blk.get('duration', '')
                 if dur:
                     title_txt += f'  ({dur})'
-                pdf.cell(0, 5, safe(title_txt), new_x='LMARGIN', new_y='NEXT')
+                pdf.cell(0, 5, s(title_txt), new_x='LMARGIN', new_y='NEXT')
                 desc = blk.get('description', '')
                 if desc and not is_ex:
                     pdf.set_x(pdf.l_margin + 38)
-                    pdf.set_font('Helvetica', 'I', 8)
+                    pdf.set_font(F, 'I', 8)
                     pdf.set_text_color(*S500)
-                    pdf.indented_text(38, usable_w - 40, 4, safe(desc))
+                    pdf.indented_text(38, usable_w - 40, 4, s(desc))
                 pdf.ln(1)
             pdf.ln(2)
 
@@ -600,17 +645,17 @@ def build_doc_pdf(doc):
                 y = pdf.get_y()
                 pdf.set_fill_color(*TEAL_LT)
                 pdf.rect(pdf.l_margin + 3, y + 1.8, 1.8, 1.8, 'F')
-                pdf.set_font('Helvetica', '', 9)
+                pdf.set_font(F, '', 9)
                 pdf.set_text_color(*S700)
-                pdf.indented_text(8, usable_w - 10, 5, safe(item.get('text', '')))
+                pdf.indented_text(8, usable_w - 10, 5, s(item.get('text', '')))
                 if item.get('impact'):
                     pdf.set_x(pdf.l_margin + 8)
-                    pdf.set_font('Helvetica', 'B', 8)
+                    pdf.set_font(F, 'B', 8)
                     pdf.set_text_color(*TEAL)
                     pdf.cell(16, 4, 'Impact: ')
-                    pdf.set_font('Helvetica', 'I', 8)
+                    pdf.set_font(F, 'I', 8)
                     pdf.set_text_color(*S500)
-                    pdf.indented_text(24, usable_w - 26, 4, safe(item['impact']))
+                    pdf.indented_text(24, usable_w - 26, 4, s(item['impact']))
                 pdf.ln(2)
             pdf.ln(1)
 
@@ -619,9 +664,9 @@ def build_doc_pdf(doc):
             text = section.get('text', '')
             if text:
                 y_start = pdf.get_y()
-                pdf.set_font('Helvetica', 'I', 9.5)
+                pdf.set_font(F, 'I', 9.5)
                 pdf.set_text_color(*S700)
-                pdf.indented_text(8, usable_w - 12, 5.5, safe(text))
+                pdf.indented_text(8, usable_w - 12, 5.5, s(text))
                 y_end = pdf.get_y()
                 bar_h = max(y_end - y_start, 5)
                 pdf.set_fill_color(*TEAL_LT)
@@ -634,9 +679,9 @@ def build_doc_pdf(doc):
                 y = pdf.get_y()
                 pdf.set_draw_color(*TEAL)
                 pdf.rect(pdf.l_margin + 4, y + 0.5, 3.5, 3.5)
-                pdf.set_font('Helvetica', '', 9)
+                pdf.set_font(F, '', 9)
                 pdf.set_text_color(*S700)
-                pdf.indented_text(11, usable_w - 13, 5, safe(item))
+                pdf.indented_text(11, usable_w - 13, 5, s(item))
                 pdf.ln(1.5)
             pdf.ln(2)
 
@@ -646,22 +691,22 @@ def build_doc_pdf(doc):
             subject = section.get('subject', '')
             body = section.get('body', '')
             if target:
-                pdf.set_font('Helvetica', '', 8)
+                pdf.set_font(F, '', 8)
                 pdf.set_text_color(*S500)
-                pdf.cell(0, 4, safe(f'Target: {target}'), new_x='LMARGIN', new_y='NEXT')
+                pdf.cell(0, 4, s(f'Target: {target}'), new_x='LMARGIN', new_y='NEXT')
                 pdf.ln(1)
             if subject:
                 y = pdf.get_y()
                 pdf.set_fill_color(*S100)
                 pdf.rect(pdf.l_margin + 2, y, usable_w - 4, 6, 'F')
                 pdf.set_x(pdf.l_margin + 5)
-                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_font(F, 'B', 9)
                 pdf.set_text_color(*S900)
-                pdf.cell(0, 6, safe(f'Subject: {subject}'), new_x='LMARGIN', new_y='NEXT')
+                pdf.cell(0, 6, s(f'Subject: {subject}'), new_x='LMARGIN', new_y='NEXT')
                 pdf.ln(1)
-                pdf.set_font('Helvetica', '', 9)
+                pdf.set_font(F, '', 9)
                 pdf.set_text_color(*S700)
-                pdf.indented_text(5, usable_w - 10, 5, safe(body))
+                pdf.indented_text(5, usable_w - 10, 5, s(body))
                 pdf.ln(3)
 
         # ---------- quote ----------
@@ -671,30 +716,30 @@ def build_doc_pdf(doc):
             pdf.ln(2)
             text = section.get('text', '')
             author = section.get('author', '')
-            pdf.set_font('Helvetica', 'I', 10)
+            pdf.set_font(F, 'I', 10)
             pdf.set_text_color(*S500)
-            pdf.multi_cell(0, 6, safe(f'\"{text}\"'), align='C')
+            pdf.multi_cell(0, 6, s(f'"{text}"'), align='C')
             if author:
-                pdf.set_font('Helvetica', '', 8)
+                pdf.set_font(F, '', 8)
                 pdf.set_text_color(*S400)
-                pdf.cell(0, 5, safe(f'-- {author}'), align='C', new_x='LMARGIN', new_y='NEXT')
+                pdf.cell(0, 5, s(f'-- {author}'), align='C', new_x='LMARGIN', new_y='NEXT')
             pdf.ln(4)
 
         # ---------- standard (backward compat) ----------
         else:
             if section.get('body'):
-                pdf.set_font('Helvetica', '', 9.5)
+                pdf.set_font(F, '', 9.5)
                 pdf.set_text_color(*S700)
-                pdf.multi_cell(0, 5, safe(section['body']))
+                pdf.multi_cell(0, 5, s(section['body']))
                 pdf.ln(2)
             for i, item in enumerate(section.get('items', []), 1):
-                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_font(F, 'B', 9)
                 pdf.set_text_color(*TEAL_LT)
                 pdf.set_x(pdf.l_margin + 4)
                 pdf.cell(6, 5, f'{i}.')
-                pdf.set_font('Helvetica', '', 9)
+                pdf.set_font(F, '', 9)
                 pdf.set_text_color(*S700)
-                pdf.multi_cell(0, 5, safe(item))
+                pdf.multi_cell(0, 5, s(item))
                 pdf.ln(1)
             pdf.ln(2)
 
