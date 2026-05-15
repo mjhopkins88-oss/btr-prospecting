@@ -412,6 +412,11 @@ function executeCardAction(act, messages, setMessages, setActionLoading) {
           }}]);
         });
       }
+      // Refresh calendar if a calendar action succeeded
+      if (d.success && act.params && act.params.exec_action &&
+          act.params.exec_action.indexOf('cal_') === 0) {
+        window.dispatchEvent(new CustomEvent('btr-calendar-refresh'));
+      }
     })
     .catch(function() {
       setActionLoading(false);

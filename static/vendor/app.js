@@ -17136,6 +17136,13 @@ function CalendarPage({ user }) {
 
   useEffect(() => { loadMeetings(); loadPendingReview(); }, [currentDate, view]);
 
+  // Listen for Leo calendar refresh events
+  useEffect(() => {
+    var handler = function() { loadMeetings(); loadPendingReview(); };
+    window.addEventListener('btr-calendar-refresh', handler);
+    return function() { window.removeEventListener('btr-calendar-refresh', handler); };
+  }, [currentDate, view]);
+
   const navigateDate = (dir) => {
     const d = new Date(currentDate);
     d.setDate(d.getDate() + (view === 'week' ? 7 * dir : dir));

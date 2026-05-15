@@ -58,10 +58,13 @@ INTENT_KEYWORDS = {
                          'accelerate', 'fast track', 'close the loop', 'drive forward',
                          'push them', 'push this', 'take to next level'],
     'schedule_meeting':  ['schedule meeting', 'book meeting', 'set up meeting', 'meeting with',
-                         'schedule a call', 'set meeting', 'book a call',
+                         'schedule a call', 'set meeting', 'book a call', 'schedule a meeting',
+                         'book a meeting', 'add a meeting', 'add meeting',
                          'schedule time', 'block time', 'meeting request',
                          'schedule my day', 'build my day', 'plan my day',
-                         'add to calendar', 'add to my calendar', 'put on calendar'],
+                         'add to calendar', 'add to my calendar', 'put on calendar',
+                         'put on my calendar', 'my calendar', 'set up a call',
+                         'set up a meeting', 'arrange a meeting', 'arrange meeting'],
     'update_calendar':  ['move meeting', 'reschedule', 'change meeting', 'update meeting',
                          'add notes to meeting', 'prep notes', 'cancel meeting',
                          'move my meeting', 'shift meeting'],
@@ -140,6 +143,13 @@ def _classify_intent(text):
         if score > best_score:
             best_score = score
             best_intent = intent
+
+    # Action intents (scheduling, CRM updates, logging) should trigger on a single keyword match
+    # because their keywords are already specific multi-word phrases
+    action_intents = {'schedule_meeting', 'update_calendar', 'log_update_crm', 'crm_update',
+                      'update_performance', 'export_report', 'push_forward'}
+    if best_score >= 1 and best_intent in action_intents:
+        return best_intent
 
     if best_score < 2:
         return 'normal_chat'
@@ -6039,6 +6049,18 @@ def chat():
             card = _build_calendar_confirm_card(sched_events)
             _persist_chat(last_msg, card, 'schedule_meeting', 'execution')
             return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'schedule_meeting', 'mode': 'execution'})
+        # Fallback: could not parse details — ask user, never fall through to LLM
+        fallback_card = {
+            'type': 'TextCard',
+            'text': "I can add that to your calendar. Who's the meeting with, and when?\n\n"
+                    "Try: **schedule a call with [name] [date] at [time]**",
+            'data': {}, 'actions': [
+                {'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}}
+            ]
+        }
+        _persist_chat(last_msg, fallback_card, 'schedule_meeting', 'execution')
+        return jsonify({'role': 'assistant', 'content': fallback_card['text'], 'card': fallback_card,
+                        'intent': 'schedule_meeting', 'mode': 'execution'})
 
     # Draft outreach intercept — extract contact, inject context for LLM draft
     if intent == 'draft_outreach':
