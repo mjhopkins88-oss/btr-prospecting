@@ -252,10 +252,15 @@ INTENT_KEYWORDS = {
                           'set focus', 'daily focus', 'add touchpoint', 'touchpoints',
                           'update revenue', 'revenue', 'monthly target', 'set target',
                           'log workout', 'did squats', 'completed workout'],
-    'export_report':    ['export', 'download', 'csv', 'report', 'spreadsheet', 'pull data',
-                         'brief', 'daily brief', 'my brief', 'generate brief', 'create brief',
-                         'intelligence brief', 'morning brief', 'build my brief', 'pdf',
-                         'attack plan', 'strategy plan', 'execution plan', 'market brief',
+    'market_intel':     ['intel report', 'market report', 'market analysis', 'market intel',
+                         'intelligence report', 'market intelligence', 'build me a report',
+                         'write me a report', 'generate report', 'create report',
+                         'signal report', 'market overview', 'market brief',
+                         'intel on', 'report on', 'report for', 'analysis of',
+                         'btr report', 'real estate report'],
+    'export_report':    ['export', 'download', 'csv', 'spreadsheet', 'pull data',
+                         'daily brief', 'my brief', 'morning brief', 'build my brief', 'pdf',
+                         'attack plan', 'strategy plan', 'execution plan',
                          'generate plan', 'create plan', 'build plan', 'build schedule',
                          'generate schedule', 'create schedule', 'daily schedule',
                          'my attack', 'my strategy', 'my schedule', 'my plan',
@@ -264,7 +269,7 @@ INTENT_KEYWORDS = {
                          'create an execution', 'generate a plan', 'build a plan'],
     'research_web':     ['research', 'look up', 'find out about', 'google',
                          'search for', 'search online', 'web search', 'dig into',
-                         'background on', 'intel on', 'look into'],
+                         'background on', 'look into'],
     'troubleshoot':     ['error', 'broken', 'not working', 'bug', 'issue', 'wrong',
                          'fix', 'help with app', 'problem'],
     'coach':            ['how am i doing', 'performance', 'momentum', 'cadence', 'habit',
@@ -281,6 +286,7 @@ INTENT_TO_MODE = {
     'explain_metrics':  'analyst',
     'analyze_contact':  'analyst',
     'analyze_company':  'analyst',
+    'market_intel':     'strategic',
     'recommend_action': 'execution',
     'log_update_crm':   'execution',
     'crm_update':       'execution',
@@ -296,7 +302,7 @@ INTENT_TO_MODE = {
 
 MODE_MAX_TOKENS = {
     'conversational': 2000,
-    'strategic': 3000,
+    'strategic': 4000,
     'execution': 1500,
     'analyst':   2500,
     'builder':   2500,
@@ -339,7 +345,8 @@ def _classify_intent(text):
     # Action intents (scheduling, CRM updates, logging) should trigger on a single keyword match
     # because their keywords are already specific multi-word phrases
     action_intents = {'schedule_meeting', 'update_calendar', 'log_update_crm', 'crm_update',
-                      'update_performance', 'export_report', 'push_forward', 'research_web'}
+                      'update_performance', 'export_report', 'push_forward', 'research_web',
+                      'market_intel'}
     if best_score >= 1 and best_intent in action_intents:
         return best_intent
 
@@ -692,6 +699,25 @@ When suggesting outreach to a contact or company:
 When no research is available and you're suggesting outreach:
 - Note what research would help: "I'd research their recent fund activity before reaching out — want me to look that up?"
 - Offer to run web research via /research before drafting.
+
+═══════════════════════════════
+V17 DYNAMIC INTELLIGENCE REPORTS (never expose)
+═══════════════════════════════
+
+When the user requests a report, intel brief, or market analysis:
+- NEVER use a template. Every report must be uniquely generated from reasoning + data.
+- Extract the specific geography, market, company, or topic from the request.
+- Use any WEB RESEARCH RESULTS in context as primary source material.
+- Use CRM data (signals, contacts, groups) relevant to that geography/topic.
+- Structure reports dynamically — vary section headings, order, and emphasis based on what matters for the specific topic.
+
+Report quality rules:
+- Every insight must be location-specific or topic-specific. "BTR is growing" is generic. "Indiana's BTR pipeline is concentrated in Indianapolis suburbs with 3 major communities in lease-up" is specific.
+- Include WHY each insight matters for the user's prospecting/capital placement work.
+- Surface actionable angles: "Here's how to use this for outreach" not just "here's what's happening."
+- If research data is available, synthesize it — don't summarize. Extract the 3-5 insights that create outreach angles.
+- If no research data is available, reason from your BTR domain knowledge and CRM context, clearly labeling inferences.
+- Two reports for different geographies must look and feel different — different structure, different insights, different angles.
 
 ═══════════════════════════════
 UNCERTAINTY MODEL
@@ -6405,10 +6431,9 @@ def _ensure_card_actions(card):
             card['actions'] = []
 
     if card_type == 'BriefCard' and not card['actions']:
-        brief_date = d.get('date', datetime.utcnow().strftime('%Y-%m-%d'))
         card['actions'] = [
             {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download',
-             'params': {'url': '/api/brief/download', 'fileName': f'BTR_Brief_{brief_date}.pdf'}}
+             'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf"}}
         ]
 
     if card_type == 'MeetingCard' and not card['actions']:
@@ -6824,10 +6849,10 @@ def _chat_inner():
                 'action_items': brief['action_items'][:3],
                 'daily_targets': brief['daily_targets'][:3],
                 'download_url': '/api/brief/download',
-                'fileName': f"BTR_Brief_{brief['date']}.pdf",
+                'fileName': f"BTR_Brief_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf",
             },
             'actions': [
-                {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download', 'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{brief['date']}.pdf"}},
+                {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download', 'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf"}},
             ]
         }
         _persist_chat(last_msg, card, 'brief_pdf', 'execution')
@@ -7189,11 +7214,42 @@ def _chat_inner():
                     'card': card, 'intent': 'push_forward', 'mode': 'execution'
                 })
 
+    # Market intel report — dynamically generated via Claude with optional web research
+    if intent == 'market_intel':
+        topic = re.sub(
+            r'\b(intel|report|market|analysis|intelligence|build me|write me|generate|create|give me|'
+            r'btr|real estate|a|an|the|for|on|about|of|me|my)\b',
+            '', last_msg, flags=re.IGNORECASE
+        ).strip(' .,!?')
+        research_ctx = ''
+        if topic:
+            try:
+                research = _research_web(f"BTR build-to-rent real estate {topic} market 2025 2026")
+                if research and research.get('summary'):
+                    research_ctx = (
+                        f"\n\nWEB RESEARCH RESULTS for '{topic}':\n"
+                        f"{research['summary'][:2000]}\n"
+                    )
+                    if research.get('sources'):
+                        research_ctx += "Sources: " + ", ".join(
+                            s.get('url', '') for s in research['sources'][:5]
+                        )
+            except Exception:
+                pass
+        extra_ctx = (extra_ctx or '') + research_ctx
+        extra_ctx += (
+            f"\n\nINTEL REPORT REQUEST: The user wants a dynamic intelligence report about: {topic or last_msg}. "
+            f"Generate a unique, deeply reasoned market intelligence report. "
+            f"DO NOT use generic BTR talking points. "
+            f"Focus on what specifically matters about THIS market/geography for BTR prospecting and capital placement. "
+            f"Include: market positioning, competitive landscape, specific opportunities, risks, and actionable angles. "
+            f"Every section must contain location-specific insights, not boilerplate."
+        )
+
     # Export/brief intercept — produce actionable card instead of LLM text
     if intent == 'export_report':
         lower_msg = last_msg.lower()
-        is_market_brief = any(w in lower_msg for w in ['market brief', 'market report', 'market intel', 'signal report'])
-        is_brief = not is_market_brief and any(w in lower_msg for w in ['brief', 'intelligence', 'daily brief', 'morning brief', 'my brief'])
+        is_brief = any(w in lower_msg for w in ['daily brief', 'my brief', 'morning brief'])
         if is_brief:
             try:
                 from api.routes.daily_brief import _generate_brief_content
@@ -7207,11 +7263,11 @@ def _chat_inner():
                         'action_items': brief.get('action_items', [])[:3],
                         'daily_targets': brief.get('daily_targets', [])[:3],
                         'download_url': '/api/brief/download',
-                        'fileName': f"BTR_Brief_{brief['date']}.pdf",
+                        'fileName': f"BTR_Brief_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf",
                     },
                     'actions': [
                         {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download',
-                         'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{brief['date']}.pdf"}},
+                         'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf"}},
                     ]
                 }
                 _persist_chat(last_msg, card, 'brief_pdf', 'execution')
@@ -7219,16 +7275,14 @@ def _chat_inner():
             except Exception:
                 pass
 
-        # PDF document intercept — attack plan, strategy, schedule, market brief, execution plan
+        # PDF document intercept — attack plan, strategy, schedule, execution plan (NOT market intel)
         doc_type = None
         if any(w in lower_msg for w in ['attack plan', 'attack']):
             doc_type = 'attack_plan'
-        elif any(w in lower_msg for w in ['strategy plan', 'strategy doc', 'strategy report']):
+        elif any(w in lower_msg for w in ['strategy plan', 'strategy doc']):
             doc_type = 'strategy'
         elif any(w in lower_msg for w in ['schedule', 'daily schedule', 'time block', 'build my day', 'plan my day']):
             doc_type = 'schedule'
-        elif any(w in lower_msg for w in ['market brief', 'market report', 'market intel', 'signal report']):
-            doc_type = 'market_brief'
         elif any(w in lower_msg for w in ['execution plan', 'action plan', 'action queue']):
             doc_type = 'execution_plan'
         elif 'pdf' in lower_msg and any(w in lower_msg for w in ['plan', 'strategy', 'schedule']):
@@ -7304,7 +7358,7 @@ def _chat_inner():
     combined_extra = (extra_ctx or '') + page_extra
 
     # Conversational entity awareness — silently pull context when user mentions names
-    if intent == 'normal_chat':
+    if intent in ('normal_chat', 'market_intel'):
         mentioned_groups = _find_groups_fuzzy(last_msg)
         mentioned_contacts = _find_contacts_fuzzy(last_msg)
         entity_ctx_parts = []
@@ -7783,11 +7837,11 @@ def execute_action():
                             'action_items': brief.get('action_items', [])[:3],
                             'daily_targets': brief.get('daily_targets', [])[:3],
                             'download_url': '/api/brief/download',
-                            'fileName': f"BTR_Brief_{brief['date']}.pdf",
+                            'fileName': f"BTR_Brief_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf",
                         },
                         'actions': [
                             {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download',
-                             'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{brief['date']}.pdf"}},
+                             'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf"}},
                         ]
                     }})
                 except Exception as e:
@@ -9295,7 +9349,8 @@ def _generate_doc_pdf(doc_type):
         'execution_plan': ('Execution Brief', 'Prioritized action queue with strategic context'),
     }
     title, subtitle = titles.get(doc_type, ('Execution Brief', 'Daily operator report'))
-    filename = f"{title.replace(' ', '_')}_{date_short}.pdf"
+    timestamp = today.strftime('%H%M%S')
+    filename = f"{title.replace(' ', '_')}_{date_short}_{timestamp}.pdf"
 
     sections = []
 
@@ -9367,9 +9422,9 @@ def _generate_doc_pdf(doc_type):
         est = max(15, min(60, p.get('est_minutes', 30)))
         est = ((est + 14) // 15) * 15
         end_t = _add_minutes_to_time(ts, est)
-        desc = p.get('target', '')
+        desc = p.get('target') or ''
         if p.get('reason') and '?' not in p.get('reason', ''):
-            desc += f" | {p['reason']}" if desc else p['reason']
+            desc = f"{desc} | {p['reason']}" if desc else p['reason']
         sched_blocks.append({
             'time': f"{ts} \u2013 {end_t}", 'title': p.get('action', 'Execution Block'),
             'duration': f"{est}min", 'description': desc, 'is_existing': False,
@@ -9381,38 +9436,25 @@ def _generate_doc_pdf(doc_type):
     if sched_blocks:
         sections.append({'type': 'schedule', 'heading': 'DAILY SCHEDULE', 'blocks': sched_blocks})
 
-    # ---- 4. Market Intelligence ----
-    market_items = [
-        {'text': 'Multifamily construction starts declined 8% YoY nationally, tightening future supply and favoring BTR absorption.',
-         'impact': 'Less competing supply means faster lease-up for new BTR communities.'},
-        {'text': 'Institutional capital rotating from office to residential with BTR capturing increasing LP allocation share.',
-         'impact': 'More capital partners actively seeking BTR deal flow. Outreach timing is optimal.'},
-        {'text': 'Sun Belt metros lead BTR permit activity, though land costs are compressing yields in primary markets.',
-         'impact': 'Secondary market operators have a cost advantage. Pivot outreach to emerging metros.'},
-    ]
+    # ---- 4. Market Intelligence (data-driven, not hardcoded) ----
+    market_items = []
     try:
         signals = fetch_all(
-            "SELECT title, summary, importance FROM prospecting_signals ORDER BY detected_at DESC LIMIT 2", []
+            "SELECT title, summary, importance FROM prospecting_signals ORDER BY detected_at DESC LIMIT 5", []
         )
         for s in (signals or []):
             market_items.append({
                 'text': f"[Signal {s.get('importance', '?')}/10] {s['title']}",
-                'impact': (s.get('summary', '') or '')[:100] or 'Review and act on this signal.',
+                'impact': (s.get('summary', '') or '')[:120] or 'Review and act on this signal.',
             })
     except Exception:
         pass
-    sections.append({'type': 'intel', 'heading': 'MARKET INTELLIGENCE', 'items': market_items[:5]})
-
-    # ---- 5. Legislative & Macro ----
-    leg_items = [
-        {'text': 'Interest rate stabilization improving deal underwriting certainty. More projects penciling than late 2024.',
-         'impact': 'Capital partners re-entering the market. Strike while allocation windows are open.'},
-        {'text': 'Several states considering rent stabilization measures that could affect BTR operating models.',
-         'impact': 'Monitor regulatory environment in target markets. Position BTR as workforce housing.'},
-        {'text': 'SFR REIT earnings show expanding BTR pipelines, signaling sustained institutional demand through 2026.',
-         'impact': 'Institutional validation strengthens the BTR thesis for LP conversations.'},
-    ]
-    sections.append({'type': 'intel', 'heading': 'LEGISLATIVE & MACRO', 'items': leg_items})
+    if not market_items:
+        market_items.append({
+            'text': 'No recent signals detected — run signal scan or check data sources.',
+            'impact': 'Fresh signals drive better outreach timing. Prioritize signal collection.',
+        })
+    sections.append({'type': 'intel', 'heading': 'SIGNAL INTELLIGENCE', 'items': market_items[:5]})
 
     # ---- 6. Leo Strategic Insight ----
     insight_parts = []
@@ -9506,6 +9548,9 @@ def _generate_doc_pdf(doc_type):
 
     try:
         pdf_bytes = build_doc_pdf(doc)
+        import logging
+        pdf_logger = logging.getLogger('leo.pdf')
+        pdf_logger.info(f"[PDF] Generated {doc_type}: {len(pdf_bytes)} bytes, {len(sections)} sections")
         pdf_id = store_pdf(pdf_bytes, filename)
         url = f'/api/brief/doc/{pdf_id}'
         card = {
@@ -9514,6 +9559,7 @@ def _generate_doc_pdf(doc_type):
             'data': {
                 'export_type': doc_type, 'url': url, 'fileUrl': url,
                 'fileName': filename, 'filename': filename,
+                'pdf_size': len(pdf_bytes),
             },
             'actions': [
                 {'id': 'download_pdf', 'label': 'Download PDF', 'action': 'download',
@@ -9522,6 +9568,8 @@ def _generate_doc_pdf(doc_type):
         }
         return card, None
     except Exception as e:
+        import logging
+        logging.getLogger('leo.pdf').error(f"[PDF] Generation failed for {doc_type}: {e}")
         return None, str(e)
 
 

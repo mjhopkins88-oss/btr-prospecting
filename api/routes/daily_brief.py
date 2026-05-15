@@ -6,7 +6,10 @@ from shared.database import fetch_all, fetch_one
 from datetime import datetime, timedelta
 import io
 import json
+import logging
 import os
+
+logger = logging.getLogger('leo.pdf')
 
 daily_brief_bp = Blueprint('daily_brief', __name__, url_prefix='/api/brief')
 
@@ -29,33 +32,57 @@ def _generate_brief_content():
         'generated_at': today.isoformat(),
     }
 
-    # --- Section 1: Market Snapshot ---
-    market_points = [
-        'Multifamily construction starts declined 8% YoY nationally, tightening future supply and favoring BTR absorption.',
-        'Institutional capital continues rotating from office to residential, with BTR capturing an increasing share of LP allocations.',
-        'Sun Belt metros (DFW, Phoenix, Nashville, Charlotte) lead in BTR permit activity, though land costs are compressing yields.',
-        'Interest rate stabilization is improving deal underwriting certainty — more projects penciling than in late 2024.',
-        'Single-family rental REITs are expanding build-to-rent pipelines, signaling sustained institutional demand.',
-    ]
+    # --- Section 1: Market Snapshot (from real signals) ---
+    market_points = []
+    try:
+        signals = fetch_all(
+            "SELECT title, summary, importance FROM prospecting_signals "
+            "ORDER BY detected_at DESC LIMIT 5", []
+        )
+        for s in (signals or []):
+            point = f"[Signal {s.get('importance', '?')}/10] {s['title']}"
+            if s.get('summary'):
+                point += f" — {s['summary'][:120]}"
+            market_points.append(point)
+    except Exception:
+        pass
+    if not market_points:
+        market_points.append('No recent signals — run signal scan to populate market intelligence.')
     brief['market_snapshot'] = market_points
 
-    # --- Section 2: BTR Intelligence ---
-    btr_intel = [
-        'Horizontal BTR communities (detached single-family rental) outperforming vertical mid-rise in lease-up velocity across secondary markets.',
-        'Developer-operator partnerships increasing as capital partners seek stabilized yield without development risk.',
-        'Land sellers in growth corridors are increasingly pricing BTR use into asks — early movers have a cost advantage.',
-        'Amenity packages trending toward remote-work infrastructure: fiber, co-working lounges, and soundproof pods.',
-    ]
+    # --- Section 2: BTR Intelligence (from pipeline data) ---
+    btr_intel = []
+    try:
+        pipeline = fetch_all(
+            """SELECT relationship_status, COUNT(*) as cnt, AVG(warmth_score) as avg_warmth
+               FROM capital_groups
+               WHERE relationship_status NOT IN ('dormant', 'lost', 'dead')
+               GROUP BY relationship_status ORDER BY cnt DESC LIMIT 5""", []
+        )
+        for p in (pipeline or []):
+            avg_w = round(p.get('avg_warmth', 0) or 0, 1)
+            btr_intel.append(
+                f"{p['relationship_status'].title()}: {p['cnt']} groups, avg warmth {avg_w}/10"
+            )
+    except Exception:
+        pass
+    if not btr_intel:
+        btr_intel.append('Pipeline data not yet populated — add capital groups to see intelligence.')
     brief['btr_intelligence'] = btr_intel
 
-    # --- Section 3: What This Means ---
-    interpretation = (
-        'The supply squeeze combined with stable rates creates a window for well-capitalized operators. '
-        'BTR is no longer a niche — institutional demand is pulling it into mainstream CRE allocation. '
-        'For prospectors, this means capital partners are actively looking for deal flow. '
-        'The competitive advantage is speed: getting in front of LPs before their allocation windows close, '
-        'and sourcing land before BTR-specific pricing becomes standard.'
-    )
+    # --- Section 3: What This Means (dynamic from data) ---
+    total_groups = sum(p.get('cnt', 0) for p in (pipeline if 'pipeline' in dir() else []))
+    if total_groups > 0:
+        interpretation = (
+            f'Your pipeline has {total_groups} active groups. '
+            f'Focus on advancing the highest-warmth relationships while maintaining '
+            f'consistent touchpoints across the funnel. Check signals daily for outreach angles.'
+        )
+    else:
+        interpretation = (
+            'Build your pipeline by adding capital groups and contacts. '
+            'Once populated, this section will surface data-driven market intelligence.'
+        )
     brief['interpretation'] = interpretation
 
     # --- Section 4: Action Items (personalized if data available) ---
@@ -338,38 +365,50 @@ def generate_brief():
 @daily_brief_bp.route('/download', methods=['GET'])
 def download_brief():
     """Generate and return the daily brief as a downloadable PDF."""
-    brief = _generate_brief_content()
-    pdf_bytes = _build_pdf(brief)
-
-    date_slug = datetime.utcnow().strftime('%Y-%m-%d')
-    filename = f'BTR-Daily-Brief-{date_slug}.pdf'
-
-    return send_file(
-        io.BytesIO(pdf_bytes),
-        mimetype='application/pdf',
-        as_attachment=True,
-        download_name=filename,
-    )
+    try:
+        brief = _generate_brief_content()
+        pdf_bytes = _build_pdf(brief)
+        if not validate_pdf(pdf_bytes):
+            logger.error("[PDF] Daily brief generated invalid PDF")
+            return jsonify({'success': False, 'error': 'PDF generation failed'}), 500
+        now = datetime.utcnow()
+        filename = f'BTR_Brief_{now.strftime("%Y-%m-%d_%H%M%S")}.pdf'
+        logger.info(f"[PDF] Daily brief generated: {filename} ({len(pdf_bytes)} bytes)")
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename,
+        )
+    except Exception as e:
+        logger.error(f"[PDF] Daily brief generation failed: {e}")
+        return jsonify({'success': False, 'error': f'PDF generation failed: {str(e)}'}), 500
 
 
 @daily_brief_bp.route('/preview', methods=['GET'])
 def preview_brief():
     """Generate and return the daily brief as an inline PDF (for browser preview)."""
-    brief = _generate_brief_content()
-    pdf_bytes = _build_pdf(brief)
-
-    return send_file(
-        io.BytesIO(pdf_bytes),
-        mimetype='application/pdf',
-        as_attachment=False,
-    )
+    try:
+        brief = _generate_brief_content()
+        pdf_bytes = _build_pdf(brief)
+        if not validate_pdf(pdf_bytes):
+            return jsonify({'success': False, 'error': 'PDF generation failed'}), 500
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=False,
+        )
+    except Exception as e:
+        logger.error(f"[PDF] Preview generation failed: {e}")
+        return jsonify({'success': False, 'error': f'PDF generation failed: {str(e)}'}), 500
 
 
 # ---------------------------------------------------------------------------
 # General-purpose PDF generator for Leo documents
 # ---------------------------------------------------------------------------
 
-_pdf_store = {}
+PDF_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'pdf_cache')
+os.makedirs(PDF_DIR, exist_ok=True)
 
 
 def build_doc_pdf(doc):
@@ -664,28 +703,75 @@ def build_doc_pdf(doc):
 
 
 
+def validate_pdf(pdf_bytes):
+    """Check that pdf_bytes is a valid, non-empty PDF."""
+    if not pdf_bytes or len(pdf_bytes) < 100:
+        return False
+    if not pdf_bytes[:5] == b'%PDF-':
+        return False
+    return True
+
+
 def store_pdf(pdf_bytes, filename):
-    """Store PDF bytes in memory, return download ID."""
+    """Store PDF bytes to disk, return download ID."""
     import uuid
+    if not validate_pdf(pdf_bytes):
+        logger.error(f"[PDF] Invalid PDF bytes for {filename}: size={len(pdf_bytes) if pdf_bytes else 0}")
+        raise ValueError("Generated PDF is invalid or empty")
     pdf_id = str(uuid.uuid4())
-    _pdf_store[pdf_id] = {'bytes': pdf_bytes, 'filename': filename, 'created': datetime.utcnow()}
-    # Evict old entries (keep last 20)
-    if len(_pdf_store) > 20:
-        oldest = sorted(_pdf_store.keys(), key=lambda k: _pdf_store[k]['created'])
-        for k in oldest[:len(_pdf_store) - 20]:
-            del _pdf_store[k]
+    path = os.path.join(PDF_DIR, f"{pdf_id}.pdf")
+    meta_path = os.path.join(PDF_DIR, f"{pdf_id}.json")
+    with open(path, 'wb') as f:
+        f.write(pdf_bytes)
+    with open(meta_path, 'w') as f:
+        json.dump({'filename': filename, 'created': datetime.utcnow().isoformat(),
+                   'size': len(pdf_bytes)}, f)
+    logger.info(f"[PDF] Stored {filename} ({len(pdf_bytes)} bytes) as {pdf_id}")
+    _evict_old_pdfs()
     return pdf_id
+
+
+def _evict_old_pdfs():
+    """Keep only the 50 most recent PDFs on disk."""
+    try:
+        meta_files = sorted(
+            [f for f in os.listdir(PDF_DIR) if f.endswith('.json')],
+            key=lambda f: os.path.getmtime(os.path.join(PDF_DIR, f))
+        )
+        if len(meta_files) > 50:
+            for mf in meta_files[:len(meta_files) - 50]:
+                pdf_id = mf.replace('.json', '')
+                for ext in ('.pdf', '.json'):
+                    p = os.path.join(PDF_DIR, pdf_id + ext)
+                    if os.path.exists(p):
+                        os.remove(p)
+    except Exception as e:
+        logger.warning(f"[PDF] Eviction error: {e}")
 
 
 @daily_brief_bp.route('/doc/<pdf_id>', methods=['GET'])
 def download_doc(pdf_id):
     """Download a generated PDF by ID."""
-    entry = _pdf_store.get(pdf_id)
-    if not entry:
+    import re
+    if not re.match(r'^[a-f0-9\-]{36}$', pdf_id):
+        return jsonify({'success': False, 'error': 'Invalid PDF ID'}), 400
+    path = os.path.join(PDF_DIR, f"{pdf_id}.pdf")
+    meta_path = os.path.join(PDF_DIR, f"{pdf_id}.json")
+    if not os.path.exists(path):
+        logger.warning(f"[PDF] Download requested for missing PDF: {pdf_id}")
         return jsonify({'success': False, 'error': 'PDF not found or expired'}), 404
+    filename = f"BTR_Document_{pdf_id[:8]}.pdf"
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path) as f:
+                meta = json.load(f)
+            filename = meta.get('filename', filename)
+        except Exception:
+            pass
+    logger.info(f"[PDF] Serving {filename} ({os.path.getsize(path)} bytes)")
     return send_file(
-        io.BytesIO(entry['bytes']),
+        path,
         mimetype='application/pdf',
         as_attachment=True,
-        download_name=entry['filename'],
+        download_name=filename,
     )
