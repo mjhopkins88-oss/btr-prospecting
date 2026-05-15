@@ -15,6 +15,7 @@ import anthropic
 import json
 import re
 import logging
+import threading
 from urllib.parse import urlparse
 
 logger = logging.getLogger('leo')
@@ -31,6 +32,7 @@ assistant_bp = Blueprint('assistant', __name__, url_prefix='/api/assistant')
 # Pending action system — DB-backed, survives server restarts
 # ---------------------------------------------------------------------------
 _pending_action_cache = {}  # in-memory cache for fast access
+_state_lock = threading.Lock()
 
 _APPROVAL_PHRASES = frozenset([
     'approved', 'approve', 'proceed', 'yes', 'confirm', 'confirmed',
@@ -75,25 +77,27 @@ def _set_pending_action(action_type, payload, description, user_message=''):
         )
     except Exception:
         logger.warning("Failed to persist pending action to DB", exc_info=True)
-    _pending_action_cache.clear()
-    _pending_action_cache.update({
-        'id': action_id,
-        'type': action_type,
-        'payload': payload,
-        'description': description,
-        'created': datetime.utcnow(),
-    })
+    with _state_lock:
+        _pending_action_cache.clear()
+        _pending_action_cache.update({
+            'id': action_id,
+            'type': action_type,
+            'payload': payload,
+            'description': description,
+            'created': datetime.utcnow(),
+        })
 
 def _consume_pending_action():
     """Retrieve the latest pending action. Returns None if expired (>1h) or empty."""
-    if _pending_action_cache:
-        age = (datetime.utcnow() - _pending_action_cache.get('created', datetime.utcnow())).total_seconds()
-        if age < 3600:
-            action = dict(_pending_action_cache)
+    with _state_lock:
+        if _pending_action_cache:
+            age = (datetime.utcnow() - _pending_action_cache.get('created', datetime.utcnow())).total_seconds()
+            if age < 3600:
+                action = dict(_pending_action_cache)
+                _pending_action_cache.clear()
+                _mark_pending_action(action.get('id'), 'confirmed')
+                return action
             _pending_action_cache.clear()
-            _mark_pending_action(action.get('id'), 'confirmed')
-            return action
-        _pending_action_cache.clear()
 
     try:
         one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
@@ -230,6 +234,400 @@ def _execute_pending_action(action):
         return None
 
     return None
+
+# ---------------------------------------------------------------------------
+# Conversation State System — context-aware tracking across turns
+# ---------------------------------------------------------------------------
+
+_PRONOUN_MAP = {
+    'him': 'person', 'her': 'person', 'them': 'entity', 'they': 'entity',
+    'he': 'person', 'she': 'person',
+    'it': 'thing', 'this': 'thing', 'that': 'thing',
+    'these': 'things', 'those': 'things',
+    'the company': 'company', 'the group': 'company', 'the contact': 'person',
+}
+
+_CONTINUATION_PHRASES = frozenset([
+    'do that', 'do it', 'do this', 'go ahead', 'make it', 'change it',
+    'use that', 'use this', 'use it', 'apply it', 'apply that',
+    'more direct', 'more casual', 'more formal', 'shorter', 'longer',
+    'make it more', 'make that more', 'try again', 'redo',
+    'also', 'and also', 'next', 'what about', 'now do',
+    'for him', 'for her', 'for them', 'about him', 'about her', 'about them',
+    'write outreach', 'draft outreach', 'draft email', 'write email',
+])
+
+_MODIFICATION_PHRASES = frozenset([
+    'change', 'modify', 'update', 'adjust', 'tweak', 'revise', 'edit',
+    'make it', 'make that', 'more direct', 'more casual', 'more formal',
+    'shorter', 'longer', 'less', 'instead', 'but change', 'but make',
+    'tone down', 'ramp up', 'soften', 'stronger',
+])
+
+
+def _build_conversation_state(messages):
+    """
+    Derive conversation state from message history.
+    Returns a dict with active entities, last intent, last outputs, and context.
+    Stateless — computed fresh each request from the messages array.
+    Uses lightweight text matching for historical messages (no DB queries),
+    and only does DB lookups for the current user message.
+    """
+    state = {
+        'people': [],
+        'companies': [],
+        'last_intent': None,
+        'last_mode': None,
+        'last_card_type': None,
+        'last_action_target': None,
+        'last_research_subject': None,
+        'last_draft_target': None,
+        'last_draft_content': None,
+        'last_output_text': None,
+        'turn_count': 0,
+    }
+
+    for msg in messages:
+        role = msg.get('role', '')
+        content = msg.get('content', '')
+        card = msg.get('card')
+        intent = msg.get('intent')
+        mode = msg.get('mode')
+
+        if role == 'user':
+            state['turn_count'] += 1
+            _extract_entities_lightweight(content, state)
+
+        elif role == 'assistant':
+            if intent:
+                state['last_intent'] = intent
+            if mode:
+                state['last_mode'] = mode
+            if card:
+                state['last_card_type'] = card.get('type')
+                state['last_output_text'] = card.get('text', '')[:500]
+                _extract_entities_from_card(card, state)
+
+    return state
+
+
+def _extract_entities_lightweight(text, state):
+    """
+    Check if any already-known entity names re-appear in user text.
+    No DB queries — pure string matching against state.
+    This handles re-mentions without the cost of fuzzy DB lookups.
+    """
+    text_lower = text.lower()
+    for entity in state['companies'] + state['people']:
+        name = entity.get('name', '')
+        if name and len(name) > 2 and name.lower() in text_lower:
+            entity['source'] = 'user_message'
+
+
+def _extract_entities_from_current_msg(text, state):
+    """
+    Full DB-backed entity extraction — only called once for the CURRENT user message.
+    """
+    groups = _find_groups_fuzzy(text)
+    contacts = _find_contacts_fuzzy(text)
+
+    for g in groups[:2]:
+        entry = {'id': g['id'], 'name': g['name'], 'source': 'user_message'}
+        if not any(e['id'] == g['id'] for e in state['companies']):
+            state['companies'].append(entry)
+        else:
+            state['companies'] = [e if e['id'] != g['id'] else entry for e in state['companies']]
+
+    for c in contacts[:2]:
+        full_name = f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
+        entry = {
+            'id': c['id'], 'name': full_name,
+            'group_id': c.get('group_id'), 'source': 'user_message',
+        }
+        if not any(e['id'] == c['id'] for e in state['people']):
+            state['people'].append(entry)
+        else:
+            state['people'] = [e if e['id'] != c['id'] else entry for e in state['people']]
+
+    state['companies'] = state['companies'][-5:]
+    state['people'] = state['people'][-5:]
+
+
+def _extract_entities_from_card(card, state):
+    """Extract entities from assistant response cards."""
+    d = card.get('data', {})
+    card_type = card.get('type', '')
+
+    # Research results
+    if card_type == 'OutreachIntelCard':
+        person = d.get('person_name', '')
+        company = d.get('company_name', '')
+        if person:
+            state['last_research_subject'] = person
+            entry = {'id': f'research_{person}', 'name': person, 'source': 'research'}
+            if not any(e['name'].lower() == person.lower() for e in state['people']):
+                state['people'].append(entry)
+        if company:
+            entry = {'id': f'research_{company}', 'name': company, 'source': 'research'}
+            if not any(e['name'].lower() == company.lower() for e in state['companies']):
+                state['companies'].append(entry)
+
+    # Draft targets — also capture content for modification flow
+    if card_type == 'DraftCard':
+        contact = d.get('contact_name', '')
+        target = d.get('target', '')
+        if contact:
+            state['last_draft_target'] = contact
+        if target and not any(e['name'].lower() == target.lower() for e in state['companies']):
+            state['companies'].append({'id': d.get('target_id', ''), 'name': target, 'source': 'draft'})
+        state['last_draft_content'] = {
+            'subject': d.get('subject', ''),
+            'body': d.get('body', ''),
+            'variants': d.get('variants', []),
+            'contact_name': contact,
+            'target': target,
+        }
+
+    # CRM confirmations
+    if card_type == 'ConfirmationCard':
+        what = d.get('what', '')
+        name = d.get('name', '')
+        if 'company' in what and name:
+            entry = {'id': d.get('entity_id', ''), 'name': name, 'source': 'created'}
+            state['companies'].append(entry)
+        elif 'contact' in what and name:
+            entry = {'id': d.get('entity_id', ''), 'name': name, 'source': 'created'}
+            state['people'].append(entry)
+        state['last_action_target'] = name or what
+
+    # Batch drafts — extract contacts
+    if card_type == 'BatchDraftCard':
+        for draft in (d.get('drafts') or [])[:3]:
+            cn = draft.get('contact_name', '')
+            if cn and not any(e['name'].lower() == cn.lower() for e in state['people']):
+                state['people'].append({'id': draft.get('contact_id', ''), 'name': cn, 'source': 'batch_draft'})
+
+    # Queue items — extract targets
+    if card_type == 'QueueCard':
+        for item in (d.get('items') or [])[:3]:
+            tgt = item.get('target', '')
+            if tgt and not any(e['name'].lower() == tgt.lower() for e in state['companies']):
+                state['companies'].append({'id': '', 'name': tgt, 'source': 'queue'})
+
+    # Company/Contact summaries
+    if card_type in ('CompanySummaryCard', 'ProbabilityCard', 'RelationshipCard', 'PredictionCard'):
+        name = d.get('company', d.get('name', ''))
+        cid = d.get('company_id', d.get('id', ''))
+        if name:
+            entry = {'id': cid, 'name': name, 'source': 'summary'}
+            if not any(e['name'].lower() == name.lower() for e in state['companies']):
+                state['companies'].append(entry)
+
+    if card_type in ('ContactSummaryCard', 'ContactInsightCard'):
+        name = d.get('name', '')
+        cid = d.get('id', '')
+        if name:
+            entry = {'id': cid, 'name': name, 'source': 'summary'}
+            if not any(e['name'].lower() == name.lower() for e in state['people']):
+                state['people'].append(entry)
+
+    state['companies'] = state['companies'][-5:]
+    state['people'] = state['people'][-5:]
+
+
+def _resolve_references(text, state):
+    """
+    Replace pronouns and references with actual entity names from state.
+    Returns (resolved_text, resolved_entities) where resolved_entities
+    is a dict of what was resolved.
+    """
+    resolved = {}
+    result = text
+    text_lower = text.lower()
+
+    last_person = state['people'][-1] if state['people'] else None
+    last_company = state['companies'][-1] if state['companies'] else None
+
+    # Resolve person pronouns
+    person_pronouns = re.compile(
+        r'\b(him|her|he|she|the contact)\b', re.IGNORECASE
+    )
+    if last_person and person_pronouns.search(text_lower):
+        resolved['person'] = last_person
+        result = person_pronouns.sub(last_person['name'], result)
+
+    # Resolve entity pronouns (could be person or company — prefer company if ambiguous)
+    entity_pronouns = re.compile(
+        r'\b(them|they|the company|the group|the firm)\b', re.IGNORECASE
+    )
+    if entity_pronouns.search(text_lower):
+        if last_company:
+            resolved['company'] = last_company
+            result = entity_pronouns.sub(last_company['name'], result)
+        elif last_person:
+            resolved['person'] = last_person
+            result = entity_pronouns.sub(last_person['name'], result)
+
+    # Resolve "it"/"this"/"that" — only substitute after prepositions to avoid false positives
+    prep_thing = re.compile(r'\b(for|about|on|at|with)\s+(it|this|that)\b', re.IGNORECASE)
+    if prep_thing.search(text_lower):
+        if state.get('last_intent') == 'research_web' and state.get('last_research_subject'):
+            resolved['research_subject'] = state['last_research_subject']
+            result = prep_thing.sub(lambda m: f'{m.group(1)} {state["last_research_subject"]}', result)
+        elif state.get('last_intent') == 'draft_outreach' and state.get('last_draft_target'):
+            resolved['draft_target'] = state['last_draft_target']
+        elif last_company:
+            resolved['company'] = last_company
+            result = prep_thing.sub(lambda m: f'{m.group(1)} {last_company["name"]}', result)
+        elif last_person:
+            resolved['person'] = last_person
+            result = prep_thing.sub(lambda m: f'{m.group(1)} {last_person["name"]}', result)
+    elif re.search(r'\b(it|this|that)\b', text_lower):
+        if state.get('last_intent') == 'research_web' and state.get('last_research_subject'):
+            resolved['research_subject'] = state['last_research_subject']
+        elif state.get('last_intent') == 'draft_outreach' and state.get('last_draft_target'):
+            resolved['draft_target'] = state['last_draft_target']
+
+    return result, resolved
+
+
+def _detect_message_type(text, state):
+    """
+    Determine if this message is a new request, continuation, modification, or approval.
+    Returns: 'new', 'continuation', 'modification', or 'approval'
+    """
+    text_lower = text.lower().strip().rstrip('.!?,')
+
+    _action_card_types = {'ConfirmationCard', 'CrmUpdatePreviewCard', 'SchedulePlanCard',
+                          'DailyPlanCard', 'LeoActionPreviewCard', 'CalendarConfirmCard'}
+    if _is_approval(text):
+        if _pending_action_cache:
+            return 'approval'
+        if state.get('last_card_type') in _action_card_types:
+            return 'approval'
+
+    for phrase in _MODIFICATION_PHRASES:
+        if phrase in text_lower:
+            if state.get('last_intent') and state.get('last_output_text'):
+                return 'modification'
+
+    if state.get('last_intent'):
+        for phrase in _CONTINUATION_PHRASES:
+            if phrase in text_lower:
+                return 'continuation'
+        # Short messages after an action are likely continuations
+        if len(text_lower.split()) <= 4 and state.get('last_card_type') not in (None, 'TextCard'):
+            has_pronoun = any(p in text_lower for p in _PRONOUN_MAP)
+            if has_pronoun:
+                return 'continuation'
+
+    return 'new'
+
+
+def _classify_intent_contextual(text, state, msg_type):
+    """
+    Context-aware intent classification. Uses conversation state to resolve
+    ambiguous intents and carry forward context from previous turns.
+    """
+    # Always run base classification first
+    base_intent = _classify_intent(text)
+
+    if msg_type == 'approval':
+        return state.get('last_intent', base_intent)
+
+    if msg_type == 'modification':
+        return state.get('last_intent', base_intent)
+
+    if msg_type == 'continuation':
+        text_lower = text.lower()
+        last = state.get('last_intent')
+
+        # "write outreach" / "draft email" after research → draft_outreach
+        if last == 'research_web' and any(kw in text_lower for kw in
+                ['write outreach', 'draft', 'write email', 'outreach', 'reach out',
+                 'email', 'message', 'intro']):
+            return 'draft_outreach'
+
+        # "research" after identifying a contact → research_web
+        if last in ('analyze_contact', 'analyze_company', 'crm_update') and \
+                any(kw in text_lower for kw in ['research', 'look up', 'dig into', 'look into']):
+            return 'research_web'
+
+        # "push forward"/"advance" after analysis → push_forward
+        if last in ('analyze_company', 'analyze_contact', 'research_web') and \
+                any(kw in text_lower for kw in ['push', 'advance', 'move forward', 'push forward']):
+            return 'push_forward'
+
+        # "log"/"record" after any action → crm_update
+        if last in ('draft_outreach', 'push_forward', 'schedule_meeting') and \
+                any(kw in text_lower for kw in ['log', 'record', 'note', 'save']):
+            return 'crm_update'
+
+        # "schedule"/"meeting" after research/draft → schedule_meeting
+        if last in ('research_web', 'draft_outreach', 'analyze_contact') and \
+                any(kw in text_lower for kw in ['schedule', 'meeting', 'call', 'book']):
+            return 'schedule_meeting'
+
+        # Generic continuation — keep last intent if base didn't classify strongly
+        if base_intent == 'normal_chat' and last:
+            return last
+
+    return base_intent
+
+
+def _build_state_context_block(state, resolved, msg_type=None):
+    """
+    Build a context string to inject into the system prompt so Claude
+    knows about the conversation state and resolved references.
+    """
+    parts = []
+
+    if state.get('turn_count', 0) > 0:
+        parts.append(f"CONVERSATION TURN: {state['turn_count']}")
+
+    if msg_type and msg_type != 'new':
+        parts.append(f"MESSAGE TYPE: {msg_type}")
+        if msg_type == 'modification' and state.get('last_output_text'):
+            parts.append(f"USER WANTS TO MODIFY PREVIOUS OUTPUT:")
+            parts.append(f"  {state['last_output_text'][:300]}")
+        elif msg_type == 'continuation':
+            parts.append(f"USER IS CONTINUING FROM PREVIOUS INTENT: {state.get('last_intent', '?')}")
+
+    if state['people']:
+        names = [f"{p['name']} (source: {p.get('source', '?')})" for p in state['people'][-3:]]
+        parts.append(f"ACTIVE PEOPLE IN CONVERSATION: {', '.join(names)}")
+
+    if state['companies']:
+        names = [f"{c['name']} (source: {c.get('source', '?')})" for c in state['companies'][-3:]]
+        parts.append(f"ACTIVE COMPANIES IN CONVERSATION: {', '.join(names)}")
+
+    if state.get('last_intent'):
+        parts.append(f"PREVIOUS INTENT: {state['last_intent']}")
+
+    if state.get('last_action_target'):
+        parts.append(f"LAST ACTION TARGET: {state['last_action_target']}")
+
+    if state.get('last_research_subject'):
+        parts.append(f"LAST RESEARCH SUBJECT: {state['last_research_subject']}")
+
+    if state.get('last_draft_target'):
+        parts.append(f"LAST DRAFT TARGET: {state['last_draft_target']}")
+
+    if resolved:
+        res_parts = []
+        if resolved.get('person'):
+            res_parts.append(f"'him/her/he/she' = {resolved['person']['name']}")
+        if resolved.get('company'):
+            res_parts.append(f"'them/they' = {resolved['company']['name']}")
+        if resolved.get('research_subject'):
+            res_parts.append(f"'it/this/that' = research on {resolved['research_subject']}")
+        if resolved.get('draft_target'):
+            res_parts.append(f"'it/this/that' = draft for {resolved['draft_target']}")
+        if res_parts:
+            parts.append(f"RESOLVED REFERENCES: {'; '.join(res_parts)}")
+
+    return '\n'.join(parts)
+
 
 # ---------------------------------------------------------------------------
 # Intent classification — expanded
@@ -1304,6 +1702,10 @@ RULES
 23. Never fake learning or memory. If you don't have behavioral data, don't pretend you do.
 24. Never fake outcomes or predictions. Ground everything in data or clearly label as reasoning.
 25. Self-correct when you find a better angle — don't fake self-correction for theater.
+26. Use CONVERSATION STATE context when provided. If the user says "him", "them", "it", "that" —
+    check the RESOLVED REFERENCES and ACTIVE PEOPLE/COMPANIES sections. Never ask "who?" when
+    the conversation state already identifies the entity. Never re-research or re-ask about
+    entities that were already discussed in the thread.
 
 ═══════════════════════════════
 SLASH COMMANDS
@@ -2102,6 +2504,7 @@ def _generate_sprint_tasks(count=5):
 # ---------------------------------------------------------------------------
 
 _approval_queue = {}
+_approval_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -7061,6 +7464,12 @@ def _chat_inner():
     last_msg = messages[-1].get('content', '') if messages else ''
     processed_msg, extra_ctx = _preprocess_slash(last_msg)
 
+    # Build conversation state from message history
+    conv_state = _build_conversation_state(messages[:-1])
+    _extract_entities_from_current_msg(last_msg, conv_state)
+    resolved_msg, resolved_refs = _resolve_references(last_msg, conv_state)
+    msg_type = _detect_message_type(last_msg, conv_state)
+
     # V6 intercepts — handle execution queue commands locally
     if processed_msg == '__v6_queue__':
         items = _generate_execution_queue(limit=10)
@@ -7442,9 +7851,13 @@ def _chat_inner():
         _persist_chat(last_msg, card, 'blocked', 'execution')
         return jsonify({'role': 'assistant', 'content': block_reason, 'card': card, 'intent': 'blocked', 'mode': 'execution'})
 
-    intent = _classify_intent(last_msg)
+    intent = _classify_intent_contextual(last_msg, conv_state, msg_type)
     mode = INTENT_TO_MODE.get(intent, 'strategic')
     max_tokens = MODE_MAX_TOKENS.get(mode, 2000)
+    logger.info(f"[Leo] state: msg_type={msg_type} intent={intent} "
+                f"people={[p['name'] for p in conv_state['people'][-2:]]} "
+                f"companies={[c['name'] for c in conv_state['companies'][-2:]]} "
+                f"last_intent={conv_state.get('last_intent')}")
 
     # Performance action intercept — parse NLP, show preview card
     if intent == 'update_performance':
@@ -7526,6 +7939,7 @@ def _chat_inner():
 
     # Web research intent — extract query and redirect to research handler
     if intent == 'research_web' and not processed_msg.startswith('__'):
+        _research_input = resolved_msg if resolved_refs else last_msg
         query = re.sub(
             r'\b(research|look up|find out about|google|search for|search online|'
             r'web search|dig into|background on|intel on|look into|and write me an? intro'
@@ -7533,8 +7947,13 @@ def _chat_inner():
             r'|find the best approach to reach out|find the best approach|best way to reach'
             r'|best approach to reach out|how to reach|and find|online|to reach out'
             r'|write outreach using)\b',
-            '', last_msg, flags=re.IGNORECASE
+            '', _research_input, flags=re.IGNORECASE
         ).strip(' .,!?')
+        if not query or len(query) < 2:
+            if conv_state['people']:
+                query = conv_state['people'][-1]['name']
+            elif conv_state['companies']:
+                query = conv_state['companies'][-1]['name']
         if query:
             research = _research_web(query)
             if research and research.get('_error') == 'timeout':
@@ -7562,11 +7981,19 @@ def _chat_inner():
 
     # V16: Draft outreach intercept — generate 3 variants locally when contact found
     if intent == 'draft_outreach':
+        # Use resolved_msg for pronoun resolution, fall back to last_msg
+        _draft_input = resolved_msg if resolved_refs else last_msg
         target = re.sub(
             r'\b(draft|write|compose|create|send|email|message|linkedin|outreach|reach out|follow up)\b',
-            '', last_msg, flags=re.IGNORECASE
+            '', _draft_input, flags=re.IGNORECASE
         ).strip(' .,!?')
         target = re.sub(r'\b(to|for|an?|the|with|about)\b', '', target, flags=re.IGNORECASE).strip(' .,!?')
+        # If target is empty/too short, try conversation state entities
+        if not target or len(target) < 2:
+            if conv_state['people']:
+                target = conv_state['people'][-1]['name']
+            elif conv_state['companies']:
+                target = conv_state['companies'][-1]['name']
         if target:
             mentioned_contacts = _find_contacts_fuzzy(target)
             mentioned_groups = _find_groups_fuzzy(target)
@@ -7658,7 +8085,8 @@ def _chat_inner():
 
     # CRM creation intercept — detect "create company/contact" before parse
     if intent == 'crm_update':
-        _creation_card = _try_parse_creation_command(last_msg)
+        _crm_input = resolved_msg if resolved_refs else last_msg
+        _creation_card = _try_parse_creation_command(_crm_input)
         if _creation_card:
             _persist_chat(last_msg, _creation_card, 'crm_update', 'execution')
             return jsonify({
@@ -7666,7 +8094,7 @@ def _chat_inner():
                 'card': _creation_card, 'intent': 'crm_update', 'mode': 'execution'
             })
 
-        parsed = _parse_crm_command(last_msg)
+        parsed = _parse_crm_command(_crm_input)
         if parsed['status'] == 'ok':
             card = _build_preview_card(parsed['ops'], last_msg)
             _persist_chat(last_msg, card, 'crm_update', 'execution')
@@ -7685,10 +8113,14 @@ def _chat_inner():
 
     # Push forward intercept — build multi-step chain locally
     if intent == 'push_forward':
+        _pf_input = resolved_msg if resolved_refs else last_msg
         target = re.sub(
             r'\b(push forward|advance|move forward|progress|accelerate|fast track|push)\b',
-            '', last_msg, flags=re.IGNORECASE
+            '', _pf_input, flags=re.IGNORECASE
         ).strip(' .,!?')
+        if not target or len(target) < 2:
+            if conv_state['companies']:
+                target = conv_state['companies'][-1]['name']
         if target:
             card = _build_push_forward_chain(target)
             if card:
@@ -7889,7 +8321,10 @@ def _chat_inner():
         combined_extra if combined_extra.strip() else None,
         lightweight=(intent == 'normal_chat')
     )
+    state_ctx = _build_state_context_block(conv_state, resolved_refs, msg_type)
     system = SYSTEM_PROMPT + "\n\n--- CURRENT DATA CONTEXT ---\n" + context
+    if state_ctx:
+        system += "\n\n--- CONVERSATION STATE ---\n" + state_ctx
 
     api_messages = []
     for m in messages[:-1]:
