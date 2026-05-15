@@ -340,15 +340,32 @@ function executeCardAction(act, messages, setMessages, setActionLoading) {
   trackInteraction('action_clicked', act.action, act.id);
 
   if (act.action === 'copy_text' || act.action === 'copy_draft') {
-    if (act.params && act.params.body && navigator.clipboard) {
-      var copyText = (act.params.subject ? 'Subject: ' + act.params.subject + '\n\n' : '') + act.params.body;
-      navigator.clipboard.writeText(copyText);
+    var copyText = '';
+    if (act.params && act.params.body) {
+      copyText = (act.params.subject ? 'Subject: ' + act.params.subject + '\n\n' : '') + act.params.body;
     }
-    setMessages(function(prev) {
-      return prev.concat([{ role: 'assistant', card: {
-        type: 'ConfirmationCard', text: 'Copied to clipboard.', data: {}, actions: []
-      }}]);
-    });
+    if (copyText && navigator.clipboard) {
+      navigator.clipboard.writeText(copyText).then(function() {
+        setMessages(function(prev) {
+          return prev.concat([{ role: 'assistant', card: {
+            type: 'ConfirmationCard', text: 'Copied to clipboard.', data: {}, actions: []
+          }}]);
+        });
+      }).catch(function() {
+        setMessages(function(prev) {
+          return prev.concat([{ role: 'assistant', card: {
+            type: 'ErrorCard', text: 'Could not copy — try selecting and copying manually.',
+            data: { error: 'clipboard_failed' }, actions: []
+          }}]);
+        });
+      });
+    } else if (!copyText) {
+      setMessages(function(prev) {
+        return prev.concat([{ role: 'assistant', card: {
+          type: 'ErrorCard', text: 'No draft content to copy.', data: { error: 'empty_draft' }, actions: []
+        }}]);
+      });
+    }
     return;
   }
 
@@ -425,6 +442,10 @@ function executeCardAction(act, messages, setMessages, setActionLoading) {
           act.params.exec_action.indexOf('cal_') === 0) {
         window.dispatchEvent(new CustomEvent('btr-calendar-refresh'));
       }
+      if (d.success && (act.action === 'schedule_meeting' || act.action === 'log_touchpoint' ||
+          act.action === 'update_stage' || act.action === 'create_followup' || act.action === 'complete_task')) {
+        window.dispatchEvent(new CustomEvent('btr-calendar-refresh'));
+      }
     })
     .catch(function() {
       setActionLoading(false);
@@ -439,7 +460,7 @@ function executeCardAction(act, messages, setMessages, setActionLoading) {
 
 // --- Card renderers ---
 
-function renderDraftCard(card, onAction) {
+function renderDraftCard(card, onAction, loadingState) {
   var d = card.data || {};
   var colors = CARD_COLORS.DraftCard;
   var channelLabel = { email: 'Email', linkedin: 'LinkedIn', call: 'Call Script' }[d.channel] || d.channel || 'Draft';
@@ -577,7 +598,9 @@ function renderExportCard(card, onAction) {
   var exportType = d.export_type || 'Data';
 
   if (!fileUrl && (!card.actions || card.actions.length === 0)) {
-    return null;
+    return h('div', { style: { background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '0.5rem', padding: '0.5rem 0.7rem', fontSize: '0.74rem', color: '#dc2626', fontWeight: 600 } },
+      '⚠ Export failed — no file was generated. Try again or ask Leo to regenerate.'
+    );
   }
 
   var displayName = fileName || (exportType + ' export');
@@ -1391,15 +1414,19 @@ function renderBriefCard(card, onAction) {
   );
 }
 
-function renderActionButtons(actions, onAction, draftData) {
+function renderActionButtons(actions, onAction, draftData, currentLoading) {
   if (!actions || actions.length === 0) return null;
 
   return h('div', { style: { display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.4rem' } },
     actions.map(function(act) {
       var isCopy = act.action === 'copy_text' || act.action === 'copy_draft';
+      var isLoading = currentLoading && (currentLoading === true || currentLoading === act.id);
+      var isDisabled = !!currentLoading;
       return h('button', {
         key: act.id,
+        disabled: isDisabled,
         onClick: function() {
+          if (isDisabled) return;
           if (isCopy && draftData) {
             var text = (draftData.subject ? 'Subject: ' + draftData.subject + '\n\n' : '') + (draftData.body || '');
             if (navigator.clipboard) {
@@ -1409,18 +1436,19 @@ function renderActionButtons(actions, onAction, draftData) {
           onAction(act);
         },
         style: {
-          background: isCopy ? '#15803d' : 'transparent',
+          background: isCopy ? '#15803d' : isLoading ? '#e5e7eb' : 'transparent',
           border: isCopy ? 'none' : '1px solid #d1d5db',
-          color: isCopy ? '#ffffff' : '#374151',
+          color: isCopy ? '#ffffff' : isDisabled ? '#9ca3af' : '#374151',
           padding: '0.25rem 0.55rem',
           borderRadius: '0.3rem',
           fontSize: '0.68rem',
           fontWeight: 600,
-          cursor: 'pointer',
+          cursor: isDisabled ? 'not-allowed' : 'pointer',
           fontFamily: "'Inter', sans-serif",
-          transition: 'all 0.15s'
+          transition: 'all 0.15s',
+          opacity: isDisabled && !isLoading ? 0.6 : 1
         }
-      }, act.label);
+      }, isLoading ? 'Working...' : act.label);
     })
   );
 }
@@ -1447,7 +1475,7 @@ function renderMeetingCard(card, onAction) {
   );
 }
 
-function renderLeoActionPreviewCard(card, onAction) {
+function renderLeoActionPreviewCard(card, onAction, loadingState) {
   var d = card.data || {};
   var colors = CARD_COLORS.LeoActionPreviewCard;
   var changes = d.changes || [];
@@ -1471,11 +1499,11 @@ function renderLeoActionPreviewCard(card, onAction) {
         );
       })
     ) : null,
-    renderActionButtons(card.actions, onAction)
+    renderActionButtons(card.actions, onAction, null, loadingState)
   );
 }
 
-function renderCalendarConfirmCard(card, onAction) {
+function renderCalendarConfirmCard(card, onAction, loadingState) {
   var d = card.data || {};
   var colors = CARD_COLORS.CalendarConfirmCard;
   var events = d.events || [];
@@ -1526,11 +1554,11 @@ function renderCalendarConfirmCard(card, onAction) {
       h('div', { style: { fontSize: '0.6rem', color: '#92400e', background: '#fef3c7', padding: '0.3rem 0.5rem', borderRadius: '0.3rem', marginBottom: '0.4rem' } },
         '\u{26A0}\u{FE0F} Some contacts could not be matched to CRM records. Meetings will be created without a CRM link.'
       ) : null,
-    renderActionButtons(card.actions, onAction)
+    renderActionButtons(card.actions, onAction, null, loadingState)
   );
 }
 
-function renderSchedulePlanCard(card, onAction) {
+function renderSchedulePlanCard(card, onAction, loadingState) {
   var d = card.data || {};
   var colors = CARD_COLORS.SchedulePlanCard;
   var blocks = d.blocks || [];
@@ -1589,52 +1617,57 @@ function renderSchedulePlanCard(card, onAction) {
         );
       })
     ),
-    renderActionButtons(card.actions, onAction)
+    renderActionButtons(card.actions, onAction, null, loadingState)
   );
 }
 
 // --- Card dispatcher ---
-function renderCard(card, onAction) {
+function renderCard(card, onAction, loadingState) {
   if (!card) return null;
   var type = card.type || 'TextCard';
+  var oa = function(act) { return onAction(act); };
 
   switch (type) {
-    case 'DraftCard': return renderDraftCard(card, onAction);
-    case 'NextActionCard': return renderNextActionCard(card, onAction);
-    case 'SignalCard': return renderSignalCard(card, onAction);
+    case 'DraftCard': return renderDraftCard(card, oa, loadingState);
+    case 'NextActionCard': return renderNextActionCard(card, oa);
+    case 'SignalCard': return renderSignalCard(card, oa);
     case 'ContactSummaryCard':
-    case 'CompanySummaryCard': return renderSummaryCard(card, onAction);
-    case 'TouchpointLogCard': return renderTouchpointCard(card, onAction);
-    case 'FollowUpCard': return renderFollowUpCard(card, onAction);
-    case 'ExportCard': return renderExportCard(card, onAction);
+    case 'CompanySummaryCard': return renderSummaryCard(card, oa);
+    case 'TouchpointLogCard': return renderTouchpointCard(card, oa);
+    case 'FollowUpCard': return renderFollowUpCard(card, oa);
+    case 'ExportCard': return renderExportCard(card, oa);
     case 'ConfirmationCard': return renderConfirmationCard(card);
     case 'ErrorCard': return renderErrorCard(card);
-    case 'StrategyCard': return renderStrategyCard(card, onAction);
-    case 'ClaudePromptCard': return renderClaudePromptCard(card, onAction);
-    case 'ContactInsightCard': return renderContactInsightCard(card, onAction);
-    case 'SignalInsightCard': return renderSignalInsightCard(card, onAction);
-    case 'PerformanceInsightCard': return renderPerformanceInsightCard(card, onAction);
-    case 'ExecutionPlanCard': return renderExecutionPlanCard(card, onAction);
-    case 'FixCard': return renderFixCard(card, onAction);
-    case 'CrmUpdatePreviewCard': return renderCrmUpdatePreviewCard(card, onAction);
-    case 'AmbiguityCard': return renderAmbiguityCard(card, onAction);
-    case 'DailyPlanCard': return renderDailyPlanCard(card, onAction);
-    case 'SprintCard': return renderSprintCard(card, onAction);
-    case 'InsightCard': return renderInsightCard(card, onAction);
-    case 'QueueCard': return renderQueueCard(card, onAction);
-    case 'BatchDraftCard': return renderBatchDraftCard(card, onAction);
-    case 'ApprovalQueueCard': return renderApprovalQueueCard(card, onAction);
-    case 'ProbabilityCard': return renderProbabilityCard(card, onAction);
-    case 'RelationshipCard': return renderRelationshipCard(card, onAction);
-    case 'FunnelCard': return renderFunnelCard(card, onAction);
-    case 'PredictionCard': return renderPredictionCard(card, onAction);
-    case 'AutomationCard': return renderAutomationCard(card, onAction);
-    case 'BriefCard': return renderBriefCard(card, onAction);
-    case 'MeetingCard': return renderMeetingCard(card, onAction);
-    case 'LeoActionPreviewCard': return renderLeoActionPreviewCard(card, onAction);
-    case 'CalendarConfirmCard': return renderCalendarConfirmCard(card, onAction);
-    case 'SchedulePlanCard': return renderSchedulePlanCard(card, onAction);
-    default: return null;
+    case 'StrategyCard': return renderStrategyCard(card, oa);
+    case 'ClaudePromptCard': return renderClaudePromptCard(card, oa);
+    case 'ContactInsightCard': return renderContactInsightCard(card, oa);
+    case 'SignalInsightCard': return renderSignalInsightCard(card, oa);
+    case 'PerformanceInsightCard': return renderPerformanceInsightCard(card, oa);
+    case 'ExecutionPlanCard': return renderExecutionPlanCard(card, oa);
+    case 'FixCard': return renderFixCard(card, oa);
+    case 'CrmUpdatePreviewCard': return renderCrmUpdatePreviewCard(card, oa);
+    case 'AmbiguityCard': return renderAmbiguityCard(card, oa);
+    case 'DailyPlanCard': return renderDailyPlanCard(card, oa);
+    case 'SprintCard': return renderSprintCard(card, oa);
+    case 'InsightCard': return renderInsightCard(card, oa);
+    case 'QueueCard': return renderQueueCard(card, oa);
+    case 'BatchDraftCard': return renderBatchDraftCard(card, oa);
+    case 'ApprovalQueueCard': return renderApprovalQueueCard(card, oa);
+    case 'ProbabilityCard': return renderProbabilityCard(card, oa);
+    case 'RelationshipCard': return renderRelationshipCard(card, oa);
+    case 'FunnelCard': return renderFunnelCard(card, oa);
+    case 'PredictionCard': return renderPredictionCard(card, oa);
+    case 'AutomationCard': return renderAutomationCard(card, oa);
+    case 'BriefCard': return renderBriefCard(card, oa);
+    case 'MeetingCard': return renderMeetingCard(card, oa);
+    case 'LeoActionPreviewCard': return renderLeoActionPreviewCard(card, oa, loadingState);
+    case 'CalendarConfirmCard': return renderCalendarConfirmCard(card, oa, loadingState);
+    case 'SchedulePlanCard': return renderSchedulePlanCard(card, oa, loadingState);
+    default:
+      if (card.text) {
+        return h('div', { style: { fontSize: '0.74rem', color: '#334155', whiteSpace: 'pre-wrap', lineHeight: 1.5 } }, card.text);
+      }
+      return null;
   }
 }
 
@@ -1761,9 +1794,23 @@ function BTRAssistantChat(props) {
             setMessages(function(prev) {
               return prev.concat([{ role: 'assistant', card: sprintCard, mode: 'execution' }]);
             });
+          } else {
+            setMessages(function(prev) {
+              return prev.concat([{ role: 'assistant', card: {
+                type: 'ErrorCard', text: d.error || 'Could not start sprint — no tasks available.',
+                data: { error: 'sprint_failed' }, actions: []
+              }}]);
+            });
           }
         })
-        .catch(function() {});
+        .catch(function() {
+          setMessages(function(prev) {
+            return prev.concat([{ role: 'assistant', card: {
+              type: 'ErrorCard', text: 'Sprint failed — connection error.',
+              data: { error: 'network' }, actions: []
+            }}]);
+          });
+        });
       return;
     }
 
@@ -1784,7 +1831,14 @@ function BTRAssistantChat(props) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'complete_task', task_id: taskId, original_task_id: act.params && act.params.original_task_id })
-      }).catch(function() {});
+      }).catch(function() {
+        setMessages(function(prev) {
+          return prev.concat([{ role: 'assistant', card: {
+            type: 'ErrorCard', text: 'Task marked locally but failed to sync — it will retry on next action.',
+            data: { error: 'sprint_sync' }, actions: []
+          }}]);
+        });
+      });
 
       var progressCard = {
         type: 'SprintCard',
@@ -2247,7 +2301,7 @@ function BTRAssistantChat(props) {
             ) : null,
 
             // Structured card
-            hasCard ? renderCard(m.card, handleAction) : null,
+            hasCard ? renderCard(m.card, handleAction, actionLoading) : null,
 
             // Text bubble — frosted glass style
             showTextBubble ? h('div', {

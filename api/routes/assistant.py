@@ -5730,8 +5730,8 @@ def _sanitize_reply_text(text):
                    r'Probability|Relationship|Funnel|Calendar|CrmUpdate|LeoAction|Approval|'
                    r'Batch|Contact|Company|Performance|Execution|Fix|Claude|Ambiguity|Text)Card\s*/?>',
                    '', clean, flags=re.IGNORECASE)
-    # Strip standalone JSON blocks (lines that are just {...})
-    clean = re.sub(r'^\s*\{[^}]{20,}\}\s*$', '', clean, flags=re.MULTILINE)
+    # Strip standalone JSON blocks only if they look like card/action data (contain "type" key)
+    clean = re.sub(r'^\s*\{[^}]*"type"\s*:[^}]{10,}\}\s*$', '', clean, flags=re.MULTILINE)
     # Strip common internal prefixes
     clean = re.sub(r'^\s*```json\s*', '', clean)
     clean = re.sub(r'\s*```\s*$', '', clean)
@@ -6703,10 +6703,13 @@ def execute_action():
         if action == 'update_stage':
             return _exec_update_stage(params)
         if action in ('draft_message', 'draft_outreach', 'copy_text'):
+            body = params.get('body', params.get('text', ''))
+            subject = params.get('subject', '')
             return jsonify({'success': True, 'card': {
                 'type': 'ConfirmationCard',
-                'text': 'Draft copied to clipboard.',
-                'data': {'what': 'copy', 'result': 'success'}, 'actions': []
+                'text': 'Draft ready.' if body else 'No draft content available.',
+                'data': {'what': 'copy', 'result': 'success', 'body': body, 'subject': subject},
+                'actions': []
             }})
         if action == 'create_followup':
             return _exec_create_followup(params)
@@ -6905,16 +6908,32 @@ def _exec_log_touchpoint(params):
             'data': {'error': 'contact_id or group_id required'}, 'actions': []
         }}), 400
 
+    if contact_id:
+        contact = fetch_one("SELECT id, name FROM prospecting_contacts WHERE id = ?", [contact_id])
+        if not contact:
+            return jsonify({'success': False, 'card': {
+                'type': 'ErrorCard', 'text': 'Contact not found — it may have been deleted.',
+                'data': {'error': 'contact_id not found'}, 'actions': []
+            }}), 400
+    if group_id:
+        group = fetch_one("SELECT id, name FROM capital_groups WHERE id = ?", [group_id])
+        if not group:
+            return jsonify({'success': False, 'card': {
+                'type': 'ErrorCard', 'text': 'Company not found — it may have been deleted.',
+                'data': {'error': 'group_id not found'}, 'actions': []
+            }}), 400
+
+    channel = params.get('channel', 'note')
+    direction = params.get('direction', 'outbound')
+    summary = params.get('summary', params.get('notes', ''))
+
     tp_id = new_id()
     execute(
         """INSERT INTO prospecting_touchpoints
            (id, contact_id, group_id, channel, direction, subject, summary, occurred_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
-        [tp_id, contact_id, group_id,
-         params.get('channel', 'note'),
-         params.get('direction', 'outbound'),
-         params.get('subject', ''),
-         params.get('summary', params.get('notes', ''))]
+        [tp_id, contact_id, group_id, channel, direction,
+         params.get('subject', ''), summary]
     )
     if contact_id:
         execute("UPDATE prospecting_contacts SET last_touch_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -6926,23 +6945,24 @@ def _exec_log_touchpoint(params):
         execute(
             """INSERT INTO capital_group_touchpoints (id, capital_group_id, type, notes, outcome, occurred_at)
                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
-            [tp2, group_id, params.get('channel', 'note'),
-             params.get('summary', params.get('notes', '')), '']
+            [tp2, group_id, channel, summary, '']
         )
 
-    # V13: Record outcome for learning
-    direction = params.get('direction', 'outbound')
-    if direction == 'inbound' and group_id:
-        _record_outcome('reply_received', params.get('channel', 'note'),
-                        group_id, contact_id, outcome='reply',
-                        outcome_detail=params.get('summary', '')[:100])
+    if group_id:
+        _record_outcome('touchpoint_logged', channel,
+                        group_id, contact_id, outcome='reply' if direction == 'inbound' else 'outreach',
+                        outcome_detail=summary[:100])
 
-    entity_name = params.get('summary', params.get('notes', ''))[:50]
-    feedback = _action_feedback('log_touchpoint', entity_name,
-                                f"{params.get('channel', 'note')} touchpoint logged")
+    entity_name = summary[:50]
+    feedback = _action_feedback('log_touchpoint', entity_name, f"{channel} touchpoint logged")
     confirm_text = 'Touchpoint logged successfully.'
     if feedback:
         confirm_text += f" {feedback}"
+
+    _log_leo_action('log_touchpoint', 'crm', confirm_text,
+                    {'channel': channel, 'direction': direction, 'contact_id': contact_id, 'group_id': group_id},
+                    {'touchpoint_id': tp_id})
+
     return jsonify({'success': True, 'card': {
         'type': 'ConfirmationCard',
         'text': confirm_text,
@@ -6956,15 +6976,33 @@ def _exec_update_stage(params):
     new_stage = params.get('new_stage')
     contact_id = params.get('contact_id')
 
+    VALID_CONTACT_STAGES = {'prospect', 'engaged', 'qualified', 'active', 'inactive', 'lost'}
+    VALID_GROUP_STAGES = {'prospect', 'engaged', 'active', 'closing', 'won', 'dormant', 'lost', 'dead'}
+
     if contact_id and not group_id:
+        if not new_stage:
+            return jsonify({'success': False, 'card': {
+                'type': 'ErrorCard', 'text': 'No stage specified.',
+                'data': {'error': 'new_stage required'}, 'actions': []
+            }}), 400
+        contact = fetch_one("SELECT id, name, relationship_stage FROM prospecting_contacts WHERE id = ?", [contact_id])
+        if not contact:
+            return jsonify({'success': False, 'card': {
+                'type': 'ErrorCard', 'text': 'Contact not found.',
+                'data': {'error': 'contact_id not found'}, 'actions': []
+            }}), 400
+        old_stage = contact.get('relationship_stage', '')
         execute(
             "UPDATE prospecting_contacts SET relationship_stage = ? WHERE id = ?",
             [new_stage, contact_id]
         )
-        feedback = _action_feedback('update_stage', '', f"Contact stage → {new_stage}")
-        text = f'Contact stage updated to {new_stage}.'
+        feedback = _action_feedback('update_stage', contact.get('name', ''), f"Stage: {old_stage} → {new_stage}")
+        text = f"Contact stage updated to {new_stage}."
         if feedback:
             text += f" {feedback}"
+        _log_leo_action('update_stage', 'contact', text,
+                        {'contact_id': contact_id, 'old_stage': old_stage, 'new_stage': new_stage},
+                        {'success': True})
         return jsonify({'success': True, 'card': {
             'type': 'ConfirmationCard', 'text': text,
             'data': {'what': 'stage', 'result': new_stage, 'entity_id': contact_id},
@@ -6973,17 +7011,29 @@ def _exec_update_stage(params):
 
     if not group_id or not new_stage:
         return jsonify({'success': False, 'card': {
-            'type': 'ErrorCard', 'text': 'Missing group_id or new_stage.',
-            'data': {'error': 'Incomplete params'}, 'actions': []
+            'type': 'ErrorCard', 'text': 'Missing company or stage.',
+            'data': {'error': 'group_id and new_stage required'}, 'actions': []
         }}), 400
+    group = fetch_one("SELECT id, name, relationship_status FROM capital_groups WHERE id = ?", [group_id])
+    if not group:
+        return jsonify({'success': False, 'card': {
+            'type': 'ErrorCard', 'text': 'Company not found.',
+            'data': {'error': 'group_id not found'}, 'actions': []
+        }}), 400
+    old_stage = group.get('relationship_status', '')
     execute(
         "UPDATE capital_groups SET relationship_status = ? WHERE id = ?",
         [new_stage, group_id]
     )
-    feedback = _action_feedback('update_stage', '', f"Stage → {new_stage}")
-    text = f'Stage updated to {new_stage}.'
+    feedback = _action_feedback('update_stage', group.get('name', ''), f"Stage: {old_stage} → {new_stage}")
+    text = f"Stage updated to {new_stage}."
     if feedback:
         text += f" {feedback}"
+    _log_leo_action('update_stage', 'group', text,
+                    {'group_id': group_id, 'old_stage': old_stage, 'new_stage': new_stage},
+                    {'success': True})
+    if old_stage and old_stage != new_stage:
+        _record_pattern('stage_progression', stage_from=old_stage, stage_to=new_stage)
     return jsonify({'success': True, 'card': {
         'type': 'ConfirmationCard', 'text': text,
         'data': {'what': 'stage', 'result': new_stage, 'entity_id': group_id},
@@ -6996,17 +7046,28 @@ def _exec_create_followup(params):
     due_date = params.get('due_date')
     if not due_date:
         due_date = (datetime.utcnow() + timedelta(days=3)).strftime('%Y-%m-%d')
+    group_id = params.get('group_id')
+    if group_id:
+        group = fetch_one("SELECT id, name FROM capital_groups WHERE id = ?", [group_id])
+        if not group:
+            return jsonify({'success': False, 'card': {
+                'type': 'ErrorCard', 'text': 'Company not found for follow-up.',
+                'data': {'error': 'group_id not found'}, 'actions': []
+            }}), 400
     task_id = new_id()
     execute(
         """INSERT INTO prospecting_tasks
            (id, capital_group_id, type, title, status, priority, due_at, created_at)
            VALUES (?, ?, 'follow_up', ?, 'pending', 7, ?, CURRENT_TIMESTAMP)""",
-        [task_id, params.get('group_id'), title, due_date]
+        [task_id, group_id, title, due_date]
     )
     feedback = _action_feedback('create_followup', title, f"Due {due_date}")
     confirm_text = f'Follow-up created: "{title}" due {due_date}.'
     if feedback:
         confirm_text += f" {feedback}"
+    _log_leo_action('create_followup', 'tasks', confirm_text,
+                    {'title': title, 'due_date': due_date, 'group_id': group_id},
+                    {'task_id': task_id})
     return jsonify({'success': True, 'card': {
         'type': 'ConfirmationCard',
         'text': confirm_text,
@@ -7022,12 +7083,27 @@ def _exec_complete_task(params):
             'type': 'ErrorCard', 'text': 'No task ID provided.',
             'data': {'error': 'task_id required'}, 'actions': []
         }}), 400
+    task = fetch_one("SELECT id, title, status FROM prospecting_tasks WHERE id = ?", [task_id])
+    if not task:
+        return jsonify({'success': False, 'card': {
+            'type': 'ErrorCard', 'text': 'Task not found — it may have been deleted.',
+            'data': {'error': 'task_id not found'}, 'actions': []
+        }}), 400
+    if task.get('status') == 'completed':
+        return jsonify({'success': True, 'card': {
+            'type': 'ConfirmationCard', 'text': f'Task "{task.get("title", "")}" was already completed.',
+            'data': {'what': 'task', 'result': 'already_completed', 'entity_id': task_id},
+            'actions': []
+        }})
     execute(
         "UPDATE prospecting_tasks SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?",
         [task_id]
     )
+    task_title = task.get('title', 'Task')
+    _log_leo_action('complete_task', 'tasks', f'Completed: {task_title}',
+                    {'task_id': task_id}, {'success': True})
     return jsonify({'success': True, 'card': {
-        'type': 'ConfirmationCard', 'text': 'Task marked complete.',
+        'type': 'ConfirmationCard', 'text': f'Task completed: "{task_title}".',
         'data': {'what': 'task', 'result': 'completed', 'entity_id': task_id},
         'actions': []
     }})
@@ -7865,6 +7941,7 @@ def _exec_create_calendar_events(params):
     now = datetime.utcnow().isoformat()
     created = []
     skipped = []
+    failed = []
 
     for ev in events:
         contact_id = ev.get('contact_id')
@@ -7876,6 +7953,9 @@ def _exec_create_calendar_events(params):
         title = ev.get('title', 'Meeting')
         description = ev.get('description', '')
         contact_name = ev.get('contact_name', '')
+
+        if not meeting_date:
+            meeting_date = datetime.utcnow().strftime('%Y-%m-%d')
 
         if not contact_id and contact_name:
             clean_name = re.sub(r'\s*\(.*\)$', '', contact_name).strip()
@@ -7891,32 +7971,38 @@ def _exec_create_calendar_events(params):
                 [contact_id, meeting_date, meeting_time]
             )
             if existing:
-                skipped.append(f"{title} ({meeting_date} {meeting_time}) — already exists")
+                skipped.append(f"{title} ({meeting_date} {meeting_time}) - already exists")
                 continue
 
-        mid = str(uuid.uuid4())
-        execute(
-            "INSERT INTO calendar_meetings (id, contact_id, group_id, meeting_date, meeting_time, "
-            "duration_min, meeting_type, title, notes, status, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?)",
-            [mid, contact_id, group_id, meeting_date, meeting_time,
-             duration_min, meeting_type, title, description, now, now]
-        )
-        created.append({'id': mid, 'title': title, 'date': meeting_date, 'time': meeting_time})
+        try:
+            mid = str(uuid.uuid4())
+            execute(
+                "INSERT INTO calendar_meetings (id, contact_id, group_id, meeting_date, meeting_time, "
+                "duration_min, meeting_type, title, notes, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?)",
+                [mid, contact_id, group_id, meeting_date, meeting_time,
+                 duration_min, meeting_type, title, description, now, now]
+            )
+            created.append({'id': mid, 'title': title, 'date': meeting_date, 'time': meeting_time})
+        except Exception as e:
+            failed.append(f"{title} ({meeting_date} {meeting_time}) - {str(e)[:60]}")
 
     _log_leo_action('cal_create_events', 'calendar',
-                    f'Created {len(created)} calendar events ({len(skipped)} skipped)',
-                    {'events': [e['title'] for e in created], 'skipped': skipped},
-                    {'created_count': len(created), 'skipped_count': len(skipped)})
+                    f'Created {len(created)}, skipped {len(skipped)}, failed {len(failed)}',
+                    {'events': [e['title'] for e in created], 'skipped': skipped, 'failed': failed},
+                    {'created_count': len(created), 'skipped_count': len(skipped), 'failed_count': len(failed)})
 
     parts = []
     if created:
         parts.append(f"Added {len(created)} event{'s' if len(created) != 1 else ''} to your calendar")
     if skipped:
         parts.append(f"{len(skipped)} skipped (duplicates)")
+    if failed:
+        parts.append(f"{len(failed)} failed")
 
-    if not created and skipped:
-        return {'success': False, 'message': 'All events already exist in calendar — nothing to add. ' + '; '.join(skipped)}
+    if not created:
+        detail = '; '.join(skipped + failed)
+        return {'success': False, 'message': f'No events added. {detail}'}
 
     return {'success': True, 'message': '. '.join(parts) + '.', 'created': created, 'skipped': skipped}
 
