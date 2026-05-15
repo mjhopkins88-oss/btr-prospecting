@@ -9355,10 +9355,43 @@ def _generate_doc_pdf(doc_type):
         'execution_plan': ('Execution Brief', 'Prioritized action queue with strategic context'),
     }
     title, subtitle = titles.get(doc_type, ('Execution Brief', 'Daily operator report'))
+    import uuid
+    short_id = str(uuid.uuid4())[:8]
     timestamp = today.strftime('%H%M%S')
-    filename = f"{title.replace(' ', '_')}_{date_short}_{timestamp}.pdf"
+    filename = f"{title.replace(' ', '_')}_{date_short}_{timestamp}_{short_id}.pdf"
 
     sections = []
+
+    # ---- 0. Executive Summary ----
+    summary_parts = []
+    total_pipe = sum(s.get('cnt', 0) for s in pipeline_stats)
+    active_pipe = sum(
+        s.get('cnt', 0) for s in pipeline_stats
+        if s.get('relationship_status') in ('active', 'engaged', 'closing')
+    )
+    if total_pipe:
+        summary_parts.append(f"Pipeline: {total_pipe} groups, {active_pipe} in active stages.")
+    plan_count = len(plan)
+    crit_count = sum(1 for p in plan if p.get('priority') == 'critical')
+    if plan_count:
+        summary_parts.append(
+            f"Today: {plan_count} planned actions"
+            + (f" ({crit_count} critical)" if crit_count else "")
+            + f", ~{total_minutes}min estimated."
+        )
+    if ranked:
+        top = ranked[0]
+        summary_parts.append(
+            f"Top opportunity: {top['group']['name']} "
+            f"(score {top.get('score', '?')}, {top.get('days_silent', '?')}d silent)."
+        )
+    if cal_events:
+        summary_parts.append(f"{len(cal_events)} meeting{'s' if len(cal_events) != 1 else ''} scheduled today.")
+    if summary_parts:
+        sections.append({
+            'type': 'insight', 'heading': 'EXECUTIVE SUMMARY',
+            'text': ' '.join(summary_parts)
+        })
 
     # ---- 1. Priority Snapshot (top 3 moves) ----
     critical = [p for p in plan if p.get('priority') == 'critical']
@@ -9462,6 +9495,22 @@ def _generate_doc_pdf(doc_type):
         })
     sections.append({'type': 'intel', 'heading': 'SIGNAL INTELLIGENCE', 'items': market_items[:5]})
 
+    # ---- 5. Pipeline Overview (data-driven) ----
+    if pipeline_stats:
+        pipe_items = []
+        for ps in pipeline_stats[:6]:
+            status = ps.get('relationship_status', '?').title()
+            cnt = ps.get('cnt', 0)
+            avg_w = round(ps.get('avg_warmth', 0) or 0, 1)
+            pipe_items.append({
+                'text': f"{status}: {cnt} group{'s' if cnt != 1 else ''}, avg warmth {avg_w}/10",
+                'impact': (
+                    'Conversion zone — protect with consistent touches.' if status.lower() in ('active', 'engaged', 'closing')
+                    else 'Growth potential — identify signals to warm these up.'
+                ),
+            })
+        sections.append({'type': 'intel', 'heading': 'PIPELINE OVERVIEW', 'items': pipe_items})
+
     # ---- 6. Leo Strategic Insight ----
     insight_parts = []
     total_pipeline = sum(s.get('cnt', 0) for s in pipeline_stats)
@@ -9557,8 +9606,11 @@ def _generate_doc_pdf(doc_type):
 
     def _try_generate(doc_data):
         pdf_bytes = build_doc_pdf(doc_data)
-        pdf_logger.info(f"[PDF] Generated {doc_type}: {len(pdf_bytes)} bytes, {len(sections)} sections")
-        pid = store_pdf(pdf_bytes, filename)
+        pdf_logger.info(
+            f"[PDF] Generated report_type={doc_type} filename={filename} "
+            f"size={len(pdf_bytes)}b sections={len(sections)}"
+        )
+        pid = store_pdf(pdf_bytes, filename, report_type=doc_type)
         u = f'/api/brief/doc/{pid}'
         return {
             'type': 'ExportCard',

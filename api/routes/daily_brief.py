@@ -289,11 +289,10 @@ def _build_pdf(brief):
     """Generate a clean, professional PDF from brief content. Returns bytes."""
     from fpdf import FPDF
 
-    pdf_obj = FPDF('P', 'mm', 'Letter')
-    F = _register_unicode_fonts(pdf_obj)
+    F = 'DejaVu' if UNICODE_FONTS_AVAILABLE else 'Helvetica'
     s = sanitize_text
 
-    class BriefPDF(type(pdf_obj)):
+    class BriefPDF(FPDF):
         def header(self):
             self.set_font(F, 'B', 10)
             self.set_text_color(100, 116, 139)
@@ -757,7 +756,7 @@ def validate_pdf(pdf_bytes):
     return True
 
 
-def store_pdf(pdf_bytes, filename):
+def store_pdf(pdf_bytes, filename, report_type='unknown'):
     """Store PDF bytes to disk, return download ID."""
     import uuid
     if not validate_pdf(pdf_bytes):
@@ -769,9 +768,15 @@ def store_pdf(pdf_bytes, filename):
     with open(path, 'wb') as f:
         f.write(pdf_bytes)
     with open(meta_path, 'w') as f:
-        json.dump({'filename': filename, 'created': datetime.utcnow().isoformat(),
-                   'size': len(pdf_bytes)}, f)
-    logger.info(f"[PDF] Stored {filename} ({len(pdf_bytes)} bytes) as {pdf_id}")
+        json.dump({
+            'filename': filename, 'created': datetime.utcnow().isoformat(),
+            'size': len(pdf_bytes), 'report_type': report_type,
+            'pdf_id': pdf_id, 'path': path,
+        }, f)
+    logger.info(
+        f"[PDF] Stored report_type={report_type} filename={filename} "
+        f"size={len(pdf_bytes)}b pdf_id={pdf_id[:12]} path={path}"
+    )
     _evict_old_pdfs()
     return pdf_id
 
@@ -794,26 +799,60 @@ def _evict_old_pdfs():
         logger.warning(f"[PDF] Eviction error: {e}")
 
 
-@daily_brief_bp.route('/doc/<pdf_id>', methods=['GET'])
-def download_doc(pdf_id):
-    """Download a generated PDF by ID."""
+def _resolve_pdf(pdf_id):
+    """Validate pdf_id and return (path, filename, meta) or raise ValueError."""
     import re
     if not re.match(r'^[a-f0-9\-]{36}$', pdf_id):
-        return jsonify({'success': False, 'error': 'Invalid PDF ID'}), 400
+        raise ValueError('Invalid PDF ID')
     path = os.path.join(PDF_DIR, f"{pdf_id}.pdf")
-    meta_path = os.path.join(PDF_DIR, f"{pdf_id}.json")
     if not os.path.exists(path):
-        logger.warning(f"[PDF] Download requested for missing PDF: {pdf_id}")
-        return jsonify({'success': False, 'error': 'PDF not found or expired'}), 404
-    filename = f"BTR_Document_{pdf_id[:8]}.pdf"
+        raise FileNotFoundError(f'PDF {pdf_id} not found or expired')
+    size = os.path.getsize(path)
+    if size < 100:
+        raise ValueError(f'PDF {pdf_id} is corrupt (size={size})')
+    meta = {}
+    meta_path = os.path.join(PDF_DIR, f"{pdf_id}.json")
     if os.path.exists(meta_path):
         try:
             with open(meta_path) as f:
                 meta = json.load(f)
-            filename = meta.get('filename', filename)
         except Exception:
             pass
-    logger.info(f"[PDF] Serving {filename} ({os.path.getsize(path)} bytes)")
+    filename = meta.get('filename', f"BTR_Document_{pdf_id[:8]}.pdf")
+    return path, filename, meta, size
+
+
+@daily_brief_bp.route('/doc/<pdf_id>/verify', methods=['GET'])
+def verify_doc(pdf_id):
+    """Verify a PDF exists and is valid before download."""
+    try:
+        path, filename, meta, size = _resolve_pdf(pdf_id)
+        with open(path, 'rb') as f:
+            header = f.read(5)
+        if header != b'%PDF-':
+            return jsonify({'valid': False, 'error': 'File is not a valid PDF'}), 500
+        return jsonify({
+            'valid': True, 'filename': filename, 'size': size,
+            'created': meta.get('created', ''), 'content_type': 'application/pdf',
+        })
+    except (ValueError, FileNotFoundError) as e:
+        return jsonify({'valid': False, 'error': str(e)}), 404
+
+
+@daily_brief_bp.route('/doc/<pdf_id>', methods=['GET'])
+def download_doc(pdf_id):
+    """Download a generated PDF by ID."""
+    try:
+        path, filename, meta, size = _resolve_pdf(pdf_id)
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Invalid PDF ID'}), 400
+    except FileNotFoundError:
+        logger.warning(f"[PDF] Download requested for missing PDF: {pdf_id}")
+        return jsonify({'success': False, 'error': 'PDF not found or expired'}), 404
+    logger.info(
+        f"[PDF] Serving pdf_id={pdf_id[:12]} filename={filename} "
+        f"path={path} size={size}b type={meta.get('report_type', '?')}"
+    )
     return send_file(
         path,
         mimetype='application/pdf',
