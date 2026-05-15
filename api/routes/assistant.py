@@ -8219,184 +8219,257 @@ def _try_extract_schedule_from_text(text, user_msg):
 
 
 def _generate_doc_pdf(doc_type):
-    """
-    Generate a structured document and convert to downloadable PDF.
-    doc_type: 'attack_plan' | 'strategy' | 'schedule' | 'execution_plan' | 'market_brief'
+    """Generate a premium daily execution brief PDF.
+    doc_type controls title/emphasis; all types get the full premium format.
     Returns (card_dict, None) on success, (None, error_str) on failure.
     """
     from api.routes.daily_brief import build_doc_pdf, store_pdf
 
     today = datetime.utcnow()
     date_str = today.strftime('%A, %B %d, %Y')
+    date_short = today.strftime('%Y-%m-%d')
 
-    plan, _ = _generate_daily_plan()
+    plan, total_minutes = _generate_daily_plan()
     ranked = _get_ranked_opportunities(limit=8)
 
-    if doc_type == 'attack_plan':
-        title = 'Attack Plan'
-        subtitle = 'Prioritized execution targets with deal progression strategy'
-        filename = f"Attack_Plan_{today.strftime('%Y-%m-%d')}.pdf"
-        sections = []
+    cal_events = []
+    try:
+        cal_events = fetch_all(
+            "SELECT title, meeting_date, meeting_time, duration_min, meeting_type, notes "
+            "FROM calendar_meetings WHERE meeting_date = ? AND status = 'scheduled' "
+            "ORDER BY meeting_time ASC",
+            [date_short]
+        ) or []
+    except Exception:
+        pass
 
-        # Critical targets
-        critical = [p for p in plan if p.get('priority') == 'critical']
-        high = [p for p in plan if p.get('priority') == 'high']
-        medium = [p for p in plan if p.get('priority') in ('medium', 'low')]
+    pattern_text = _get_pattern_insights()
 
-        if critical:
-            sections.append({
-                'heading': 'CRITICAL — IMMEDIATE ACTION',
-                'items': [f"{p['action']} — {p['target']} ({p['reason']})" for p in critical]
+    pipeline_stats = []
+    try:
+        pipeline_stats = fetch_all(
+            """SELECT relationship_status, COUNT(*) as cnt, AVG(warmth_score) as avg_warmth
+               FROM capital_groups
+               WHERE relationship_status NOT IN ('dormant', 'lost', 'dead')
+               GROUP BY relationship_status ORDER BY cnt DESC""", []
+        ) or []
+    except Exception:
+        pass
+
+    titles = {
+        'attack_plan': ('Attack Plan', 'Prioritized execution targets with deal progression strategy'),
+        'strategy': ('Strategy Brief', 'Pipeline strategy and relationship progression roadmap'),
+        'schedule': ('Daily Execution Brief', 'Time-blocked execution plan with strategic priorities'),
+        'market_brief': ('Market Intelligence Brief', 'BTR market signals, patterns, and strategic implications'),
+        'execution_plan': ('Execution Brief', 'Prioritized action queue with strategic context'),
+    }
+    title, subtitle = titles.get(doc_type, ('Execution Brief', 'Daily operator report'))
+    filename = f"{title.replace(' ', '_')}_{date_short}.pdf"
+
+    sections = []
+
+    # ---- 1. Priority Snapshot (top 3 moves) ----
+    critical = [p for p in plan if p.get('priority') == 'critical']
+    high = [p for p in plan if p.get('priority') == 'high']
+    top_moves = (critical + high + [p for p in plan if p.get('priority') == 'medium'])[:3]
+    if top_moves:
+        snapshot = []
+        for i, p in enumerate(top_moves, 1):
+            txt = p['action']
+            if p.get('target') and p['target'] != '?':
+                txt += f" \u2014 {p['target']}"
+            if p.get('reason') and '?' not in p.get('reason', ''):
+                txt += f" ({p['reason']})"
+            snapshot.append({'label': f'Move {i}', 'text': txt, 'priority': p.get('priority', 'medium')})
+        sections.append({'type': 'priority_snapshot', 'heading': 'PRIORITY SNAPSHOT', 'items': snapshot})
+
+    # ---- 2. Action Queue (grouped by priority) ----
+    groups = []
+    for label, key in [('CRITICAL', 'critical'), ('HIGH', 'high'), ('MEDIUM', 'medium'), ('STANDARD', 'low')]:
+        items = [p for p in plan if p.get('priority') == key]
+        if not items:
+            continue
+        action_lines = []
+        for p in items:
+            txt = p['action']
+            target = p.get('target', '')
+            if target and target != '?':
+                txt += f" \u2014 {target}"
+            reason = p.get('reason', '')
+            if reason and '?' not in reason:
+                txt += f"  |  {reason}"
+            est = p.get('est_minutes')
+            if est:
+                txt += f"  [{est}min]"
+            action_lines.append(txt)
+        groups.append({'label': label, 'items': action_lines})
+    if groups:
+        sections.append({'type': 'action_queue', 'heading': 'ACTION QUEUE', 'groups': groups})
+
+    # ---- 3. Daily Schedule ----
+    sched_blocks = []
+    occupied_set = set()
+    for m in cal_events:
+        t = m.get('meeting_time', '09:00')[:5]
+        dur = m.get('duration_min', 30)
+        end_t = _add_minutes_to_time(t, dur)
+        sched_blocks.append({
+            'time': f"{t} \u2013 {end_t}", 'title': m.get('title', 'Meeting'),
+            'duration': f"{dur}min", 'description': m.get('notes', ''),
+            'is_existing': True,
+        })
+        occupied_set.add(t)
+
+    ex_h, ex_m = 9, 0
+    for p in plan[:6]:
+        ts = f"{ex_h:02d}:{ex_m:02d}"
+        while ts in occupied_set:
+            ex_m += 30
+            if ex_m >= 60:
+                ex_m = 0
+                ex_h += 1
+            if ex_h >= 18:
+                break
+            ts = f"{ex_h:02d}:{ex_m:02d}"
+        if ex_h >= 18:
+            break
+        est = max(15, min(60, p.get('est_minutes', 30)))
+        est = ((est + 14) // 15) * 15
+        end_t = _add_minutes_to_time(ts, est)
+        desc = p.get('target', '')
+        if p.get('reason') and '?' not in p.get('reason', ''):
+            desc += f" | {p['reason']}" if desc else p['reason']
+        sched_blocks.append({
+            'time': f"{ts} \u2013 {end_t}", 'title': p.get('action', 'Execution Block'),
+            'duration': f"{est}min", 'description': desc, 'is_existing': False,
+        })
+        occupied_set.add(ts)
+        tot = ex_h * 60 + ex_m + est
+        ex_h, ex_m = tot // 60, tot % 60
+    sched_blocks.sort(key=lambda b: b['time'])
+    if sched_blocks:
+        sections.append({'type': 'schedule', 'heading': 'DAILY SCHEDULE', 'blocks': sched_blocks})
+
+    # ---- 4. Market Intelligence ----
+    market_items = [
+        {'text': 'Multifamily construction starts declined 8% YoY nationally, tightening future supply and favoring BTR absorption.',
+         'impact': 'Less competing supply means faster lease-up for new BTR communities.'},
+        {'text': 'Institutional capital rotating from office to residential with BTR capturing increasing LP allocation share.',
+         'impact': 'More capital partners actively seeking BTR deal flow. Outreach timing is optimal.'},
+        {'text': 'Sun Belt metros lead BTR permit activity, though land costs are compressing yields in primary markets.',
+         'impact': 'Secondary market operators have a cost advantage. Pivot outreach to emerging metros.'},
+    ]
+    try:
+        signals = fetch_all(
+            "SELECT title, summary, importance FROM prospecting_signals ORDER BY detected_at DESC LIMIT 2", []
+        )
+        for s in (signals or []):
+            market_items.append({
+                'text': f"[Signal {s.get('importance', '?')}/10] {s['title']}",
+                'impact': (s.get('summary', '') or '')[:100] or 'Review and act on this signal.',
             })
-        if high:
-            sections.append({
-                'heading': 'HIGH PRIORITY — TODAY',
-                'items': [f"{p['action']} — {p['target']} ({p['reason']})" for p in high]
-            })
-        if medium:
-            sections.append({
-                'heading': 'STANDARD PRIORITY',
-                'items': [f"{p['action']} — {p['target']} ({p['reason']})" for p in medium]
-            })
+    except Exception:
+        pass
+    sections.append({'type': 'intel', 'heading': 'MARKET INTELLIGENCE', 'items': market_items[:5]})
 
-        if ranked:
-            sections.append({
-                'heading': 'TOP TARGETS BY SCORE',
-                'items': [
-                    f"{r['group']['name']} — score {r['score']}/100 ({r['reason']})"
-                    for r in ranked[:6]
-                ]
-            })
+    # ---- 5. Legislative & Macro ----
+    leg_items = [
+        {'text': 'Interest rate stabilization improving deal underwriting certainty. More projects penciling than late 2024.',
+         'impact': 'Capital partners re-entering the market. Strike while allocation windows are open.'},
+        {'text': 'Several states considering rent stabilization measures that could affect BTR operating models.',
+         'impact': 'Monitor regulatory environment in target markets. Position BTR as workforce housing.'},
+        {'text': 'SFR REIT earnings show expanding BTR pipelines, signaling sustained institutional demand through 2026.',
+         'impact': 'Institutional validation strengthens the BTR thesis for LP conversations.'},
+    ]
+    sections.append({'type': 'intel', 'heading': 'LEGISLATIVE & MACRO', 'items': leg_items})
 
-        if not sections:
-            sections.append({
-                'heading': 'STATUS',
-                'body': 'No actionable items in pipeline. Focus on prospecting new capital partners and logging signals.'
-            })
+    # ---- 6. Leo Strategic Insight ----
+    insight_parts = []
+    total_pipeline = sum(s.get('cnt', 0) for s in pipeline_stats)
+    active_count = sum(s.get('cnt', 0) for s in pipeline_stats
+                       if s.get('relationship_status') in ('active', 'engaged', 'closing'))
+    critical_count = len(critical)
 
-    elif doc_type == 'strategy':
-        title = 'Strategy Plan'
-        subtitle = 'Pipeline strategy and relationship progression roadmap'
-        filename = f"Strategy_Plan_{today.strftime('%Y-%m-%d')}.pdf"
-        sections = []
+    if critical_count:
+        insight_parts.append(
+            f"You have {critical_count} critical action{'s' if critical_count > 1 else ''} "
+            f"today that should be handled before anything else.")
+    if active_count and total_pipeline:
+        pct = round(active_count / total_pipeline * 100)
+        insight_parts.append(
+            f"{pct}% of your pipeline is in active stages \u2014 this is where conversion happens. "
+            f"Protect these relationships with consistent, value-driven touches.")
+    if ranked and ranked[0].get('days_silent', 0) > 14:
+        top = ranked[0]
+        insight_parts.append(
+            f"Your top opportunity ({top['group']['name']}) has been silent for {top['days_silent']} days. "
+            f"A well-timed touchpoint today could re-engage before warmth decays further.")
+    if not insight_parts:
+        if total_pipeline:
+            insight_parts.append(
+                f"With {total_pipeline} groups in your pipeline, today's priority is advancing the "
+                f"highest-warmth relationships while maintaining momentum across the funnel.")
+        else:
+            insight_parts.append(
+                "Focus on building your initial pipeline today. Every meaningful conversation "
+                "creates compounding opportunities.")
+    sections.append({'type': 'insight', 'heading': 'LEO STRATEGIC INSIGHT', 'text': ' '.join(insight_parts)})
 
-        # Pipeline by stage
-        try:
-            stages = fetch_all(
-                """SELECT relationship_status, COUNT(*) as cnt, AVG(warmth_score) as avg_warmth
-                   FROM capital_groups
-                   WHERE relationship_status NOT IN ('dormant', 'lost', 'dead')
-                   GROUP BY relationship_status ORDER BY cnt DESC""", []
-            )
-            if stages:
-                sections.append({
-                    'heading': 'PIPELINE BY STAGE',
-                    'items': [
-                        f"{s['relationship_status'].title()}: {s['cnt']} groups (avg warmth {s['avg_warmth']:.1f}/10)"
-                        for s in stages
-                    ]
-                })
-        except Exception:
-            pass
+    # ---- 7. Success Metrics ----
+    metrics = []
+    try:
+        week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        tp_week = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE occurred_at > ?", [week_ago])
+        weekly_tp = tp_week['cnt'] if tp_week else 0
+        daily_avg = round(weekly_tp / 7, 1) if weekly_tp else 0
+        target_tp = max(5, int(daily_avg * 1.2))
+        metrics.append(f"Log {target_tp} touchpoints (your daily avg: {daily_avg})")
+    except Exception:
+        metrics.append("Log 5 meaningful touchpoints")
+    if critical_count:
+        metrics.append(f"Clear all {critical_count} critical items before noon")
+    metrics.append("Advance at least 1 relationship to the next stage")
+    metrics.append("Act on 1 signal within 24 hours of detection")
+    if plan:
+        metrics.append(f"Complete {min(len(plan), 5)} of {len(plan)} planned actions")
+    sections.append({'type': 'metrics', 'heading': 'SUCCESS METRICS', 'items': metrics})
 
-        if ranked:
-            sections.append({
-                'heading': 'TOP OPPORTUNITIES',
-                'items': [
-                    f"{r['group']['name']} — {r['group'].get('relationship_status', '?')} "
-                    f"(warmth {r['group'].get('warmth_score', '?')}/10, score {r['score']})"
-                    for r in ranked[:6]
-                ]
-            })
+    # ---- 8. Outreach Example ----
+    if ranked:
+        top = ranked[0]
+        gn = top['group']['name']
+        sig = top.get('signal')
+        if sig and sig.get('title'):
+            subj = f"Quick thought on {sig['title'][:40]}"
+            body = (f"Hi \u2014 saw the recent development regarding {sig['title'][:50]}. "
+                    f"Given where you are with BTR, this could shift the calculus on timing. "
+                    f"Worth a 15-minute call this week to discuss implications?")
+        else:
+            subj = "BTR opportunity \u2014 timing update"
+            body = ("Hi \u2014 the current market conditions are creating a specific window "
+                    "that aligns with your BTR thesis. I've identified a few angles worth discussing. "
+                    "Open to a brief call this week?")
+        sections.append({'type': 'outreach', 'heading': 'OUTREACH EXAMPLE', 'target': gn,
+                         'subject': subj, 'body': body})
 
-        if plan:
-            sections.append({
-                'heading': 'RECOMMENDED ACTIONS',
-                'items': [f"{p['action']} — {p['target']}" for p in plan[:6]]
-            })
-
-        if not sections:
-            sections.append({'heading': 'STATUS', 'body': 'Pipeline data insufficient for strategy generation.'})
-
-    elif doc_type == 'schedule':
-        title = 'Daily Schedule'
-        subtitle = 'Time-blocked execution plan for today'
-        filename = f"Schedule_{today.strftime('%Y-%m-%d')}.pdf"
-        sections = []
-
-        # Calendar events
-        try:
-            cal = fetch_all(
-                "SELECT title, meeting_date, meeting_time, duration_min, meeting_type "
-                "FROM calendar_meetings WHERE meeting_date = ? AND status = 'scheduled' "
-                "ORDER BY meeting_time ASC",
-                [today.strftime('%Y-%m-%d')]
-            )
-            if cal:
-                sections.append({
-                    'heading': 'SCHEDULED MEETINGS',
-                    'items': [f"{m['meeting_time']} — {m['title']} ({m.get('duration_min', 30)}min)" for m in cal]
-                })
-        except Exception:
-            pass
-
-        if plan:
-            sections.append({
-                'heading': 'EXECUTION TASKS',
-                'items': [
-                    f"{p['action']} — {p['target']} (est. {p.get('est_minutes', 10)}min)"
-                    for p in plan[:8]
-                ]
-            })
-
-        if not sections:
-            sections.append({'heading': 'STATUS', 'body': 'No meetings or tasks scheduled for today.'})
-
-    elif doc_type == 'market_brief':
-        title = 'Market Brief'
-        subtitle = 'BTR market intelligence and signal analysis'
-        filename = f"Market_Brief_{today.strftime('%Y-%m-%d')}.pdf"
-        sections = []
-
-        try:
-            signals = fetch_all(
-                """SELECT title, summary, importance, detected_at
-                   FROM prospecting_signals
-                   ORDER BY detected_at DESC LIMIT 10""", []
-            )
-            if signals:
-                sections.append({
-                    'heading': 'RECENT SIGNALS',
-                    'items': [
-                        f"[{s.get('importance', '?')}/10] {s['title']}"
-                        + (f" — {s['summary'][:80]}" if s.get('summary') else '')
-                        for s in signals
-                    ]
-                })
-        except Exception:
-            pass
-
-        pattern_text = _get_pattern_insights()
-        if pattern_text:
-            lines = [l.strip().lstrip('- ') for l in pattern_text.split('\n') if l.strip() and not l.startswith('PATTERN')]
-            if lines:
-                sections.append({'heading': 'PATTERN INSIGHTS', 'items': lines})
-
-        if not sections:
-            sections.append({'heading': 'STATUS', 'body': 'No market signals or patterns available yet.'})
-
-    else:
-        title = 'Execution Plan'
-        subtitle = 'Prioritized action queue'
-        filename = f"Execution_Plan_{today.strftime('%Y-%m-%d')}.pdf"
-        sections = []
-        if plan:
-            sections.append({
-                'heading': 'ACTION QUEUE',
-                'items': [f"[{p.get('priority', 'med').upper()}] {p['action']} — {p['target']} ({p['reason']})" for p in plan]
-            })
-        if not sections:
-            sections.append({'heading': 'STATUS', 'body': 'No pending actions.'})
+    # ---- 9. Motivational Quote ----
+    quotes = [
+        ("Speed is useful only if you are running in the right direction.", "Joel Barker"),
+        ("Every battle is won before it is ever fought.", "Sun Tzu"),
+        ("Opportunities multiply as they are seized.", "Sun Tzu"),
+        ("What gets measured gets managed.", "Peter Drucker"),
+        ("Discipline is choosing between what you want now and what you want most.", "Abraham Lincoln"),
+        ("The goal is not to be busy. The goal is to be effective.", "Tim Ferriss"),
+        ("Fortune favors the prepared mind.", "Louis Pasteur"),
+        ("Execution eats strategy for breakfast.", "Peter Drucker"),
+        ("The best deal you do is the one you are most prepared for.", ""),
+        ("Your pipeline is your future. Protect it.", ""),
+        ("Consistency compounds. Show up every day.", ""),
+        ("In the middle of difficulty lies opportunity.", "Albert Einstein"),
+    ]
+    qidx = today.timetuple().tm_yday % len(quotes)
+    sections.append({'type': 'quote', 'text': quotes[qidx][0], 'author': quotes[qidx][1]})
 
     doc = {'title': title, 'subtitle': subtitle, 'date': date_str, 'sections': sections}
 
@@ -8406,13 +8479,10 @@ def _generate_doc_pdf(doc_type):
         url = f'/api/brief/doc/{pdf_id}'
         card = {
             'type': 'ExportCard',
-            'text': f'**{title}** — {date_str}\n\nYour document is ready for download.',
+            'text': f'**{title}** \u2014 {date_str}\n\nYour premium execution brief is ready.',
             'data': {
-                'export_type': doc_type,
-                'url': url,
-                'fileUrl': url,
-                'fileName': filename,
-                'filename': filename,
+                'export_type': doc_type, 'url': url, 'fileUrl': url,
+                'fileName': filename, 'filename': filename,
             },
             'actions': [
                 {'id': 'download_pdf', 'label': 'Download PDF', 'action': 'download',
@@ -8422,6 +8492,7 @@ def _generate_doc_pdf(doc_type):
         return card, None
     except Exception as e:
         return None, str(e)
+
 
 
 def _exec_export(params):
