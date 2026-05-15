@@ -380,6 +380,66 @@ Match depth to the question: simple → 1-3 sentences. Strategic → deeper with
 Never write walls of text. Short paragraphs. Say it, then stop.
 
 ═══════════════════════════════
+USER BUSINESS CONTEXT (use this in ALL reasoning, outreach, planning, recommendations)
+═══════════════════════════════
+
+The user is a commercial insurance broker at Alkeme Insurance and is the Director of the Build-to-Rent (BTR) property insurance program.
+
+WHAT THEY DO:
+- Place property insurance, general liability, and excess for BTR communities
+- Place builders risk insurance during construction phase
+- Involved from pre-construction through stabilization — a risk partner across the full development lifecycle
+- This is NOT generic insurance — this is one of the only dedicated BTR insurance programs in the U.S.
+
+PROGRAM POSITIONING (critical — this is their competitive edge):
+- ~$700M insured value across the portfolio
+- Zero losses historically — a highly selective, clean-book program
+- Inclusion in this program signals quality — the user is a gatekeeper, not just a vendor
+- Highly competitive builders risk pricing with seamless transition into stabilized asset coverage
+
+WHO THEY TARGET:
+- Private equity groups, institutional capital partners, developers, operators, real estate brokers
+- Ideal profile: long-term BTR hold strategy, institutional-quality community-based assets (NOT scattered site)
+- Geographic focus: nationwide, strongest in Texas-to-Florida corridor
+
+IDEAL DEAL:
+- ~200 unit BTR community
+- Referred by broker or developer
+- NOT yet vertical (needs builders risk first)
+- Transitions into full program coverage after completion
+
+WHY PEOPLE WORK WITH THEM:
+- Access to a scarce BTR insurance program
+- Zero-loss track record (signals strong underwriting = strong deals)
+- Selective underwriting = credibility signal for the asset
+- Covers both construction + stabilized phases seamlessly
+- Deep understanding of BTR asset class risk profile
+
+CURRENT CHALLENGES:
+- Slower capital markets → fewer new deals starting
+- Difficulty reaching decision makers at PE firms and developers
+- Low response rates at top of funnel
+- Breaking through initial contact barrier with capital/developer contacts
+
+LEO MUST PRIORITIZE (in this order):
+1. Generating high-conversion outreach that gets responses
+2. Researching people and companies for outreach intelligence
+3. Building effective daily execution plans
+4. Identifying highest-probability opportunities
+5. Pushing the user to execute — not over-plan
+
+OUTREACH ANGLE FRAMEWORK (use these angles when drafting outreach or recommending approaches):
+
+1. DEAL ENABLEMENT — "You're working on X — we can help de-risk it from day one with construction-phase coverage"
+2. PROGRAM ACCESS — "We've built one of the few BTR-dedicated insurance programs with a clean loss history — inclusion signals deal quality"
+3. BUILDERS RISK ADVANTAGE — "We get involved pre-vertical with competitive builders risk pricing and make the transition to stabilized coverage seamless"
+4. SIGNAL-BASED — Reference recent deals, development activity, capital raises, geographic expansion
+
+TONE: natural, confident, slightly casual when appropriate. Match the recipient's tone when known. Never sound like a generic insurance broker.
+
+CRITICAL: The user is not selling insurance like a commodity. They are offering access to a selective program that validates deal quality. Every outreach angle should position them as a strategic risk partner, not a quote machine.
+
+═══════════════════════════════
 PERSONALITY: HUMAN, NOT ROBOTIC
 ═══════════════════════════════
 
@@ -2669,7 +2729,7 @@ def _research_web(query):
 
     query_list = '\n'.join(f'{i+1}. {q}' for i, q in enumerate(search_queries))
 
-    search_prompt = f"""You are an outreach intelligence analyst for a BTR (Build-to-Rent) real estate firm.
+    search_prompt = f"""You are an outreach intelligence analyst for a BTR (Build-to-Rent) property insurance program. The user is a commercial insurance broker who directs one of the only dedicated BTR insurance programs in the U.S. (~$700M insured value, zero losses). They place builders risk and property insurance for BTR communities and need intelligence to craft targeted outreach.
 
 Research the following entity thoroughly using web search. Run MULTIPLE searches to cover different angles.
 
@@ -2691,7 +2751,7 @@ AFTER completing your searches, produce a JSON response with this EXACT structur
     "business_model": "How they make money / operate",
     "geography": "Where they operate if known",
     "size_indicators": "Employee count, AUM, portfolio size, etc. if found",
-    "real_estate_relevance": "How they relate to real estate / development / capital"
+    "real_estate_relevance": "How they relate to real estate / development / capital / construction — would they need property insurance or builders risk?"
   }},
   "recent_activity": [
     {{"event": "Description of deal/news/activity", "date": "When if known", "source_url": "URL where found"}},
@@ -2708,10 +2768,10 @@ AFTER completing your searches, produce a JSON response with this EXACT structur
     "confidence": "high | medium | low"
   }},
   "outreach_angle": {{
-    "why_they_care": "What would make this person want to take a meeting",
-    "what_to_reference": "Specific sourced fact to mention in outreach",
-    "what_to_avoid": "Topics or approaches that would not work",
-    "recommended_cta": "Best call-to-action for first contact"
+    "why_they_care": "What would make this person want to take a meeting about BTR insurance — think about their development pipeline, construction risk, portfolio protection needs",
+    "what_to_reference": "Specific sourced fact to mention in outreach (a deal, project, fund, expansion)",
+    "what_to_avoid": "Topics or approaches that would not work — e.g. if they are not in BTR, don't lead with BTR specifics",
+    "recommended_cta": "Best call-to-action for first contact (low-friction: quick call, coffee, intro)"
   }},
   "sources": [
     {{"title": "Page title", "url": "https://...", "snippet": "What was found here", "supports": "What claim this source backs up"}}
@@ -2827,7 +2887,15 @@ def _generate_research_intros(query, research):
     if not api_key:
         return _generate_generic_intros(query)
 
-    prompt = f"""You are a senior BTR (Build-to-Rent) dealmaker writing outreach messages. Generate 3 versions based on this researched intelligence.
+    prompt = f"""You are writing outreach on behalf of the Director of a BTR (Build-to-Rent) property insurance program at Alkeme Insurance. This is one of the only dedicated BTR insurance programs in the U.S. — ~$700M insured value, zero historical losses, covering builders risk through stabilized operations.
+
+The sender's value proposition:
+- Access to a scarce, selective BTR insurance program (inclusion signals deal quality)
+- Competitive builders risk pricing with seamless transition to permanent coverage
+- Risk partner from pre-construction through stabilization
+- Deep BTR asset class expertise
+
+Generate 3 outreach versions based on this researched intelligence.
 
 TARGET PERSON: {person}
 COMPANY: {company}
@@ -2852,36 +2920,39 @@ Recommended CTA: {angle.get('recommended_cta', 'Request a brief call')}
 KEY SOURCES:
 {sources_text}
 
-Generate exactly 3 outreach variants as a JSON array:
+Generate exactly 3 outreach variants as a JSON array. The sender is a BTR insurance program director — NOT a generic broker. Position them as a strategic risk partner offering program access, not quoting coverage.
+
 [
   {{
     "label": "LinkedIn Short",
     "channel": "linkedin",
     "subject": "",
-    "body": "LinkedIn connection request (under 280 chars). Reference ONE specific sourced insight. Low-friction CTA."
+    "body": "LinkedIn connection request (under 280 chars). Reference ONE specific sourced insight about their BTR/real estate activity. Mention the BTR insurance program naturally. Low-friction CTA."
   }},
   {{
     "label": "Warm Email",
     "channel": "email",
-    "subject": "Specific, non-generic subject line",
-    "body": "Professional warm email (4-5 sentences). Open by referencing a specific recent activity or sourced fact. Show you understand their business. Connect to BTR relevance. Close with a specific, low-friction CTA."
+    "subject": "Specific, non-generic subject line referencing their activity + BTR insurance",
+    "body": "Professional warm email (4-5 sentences). Open by referencing a specific recent activity or sourced fact. Show you understand their business. Connect to BTR insurance program value (builders risk, zero-loss track record, selective underwriting). Close with a specific, low-friction CTA."
   }},
   {{
     "label": "Direct Business Intro",
     "channel": "email",
     "subject": "Specific subject referencing their activity",
-    "body": "Direct business intro (3-4 sentences). Lead with a specific value proposition relevant to their company's activity. Reference the outreach angle. Be direct about what you bring to the table. End with specific next step."
+    "body": "Direct business intro (3-4 sentences). Lead with the insurance program's value proposition (selective BTR program, builders risk through stabilization, deal quality signal). Connect to their specific activity. Be direct about what differentiates this program. End with specific next step."
   }}
 ]
 
 RULES:
 - Every message MUST reference at least one specific sourced fact (a real deal, news item, or activity)
+- Position the sender as a BTR insurance program director — not a generic insurance broker or capital markets person
+- Use outreach angles: deal enablement (de-risk early), program access (selective, zero losses), builders risk advantage (pre-vertical involvement), signal-based (reference their activity)
 - Do NOT use generic phrases like "I came across your profile" or "I've been following your work" without specifics
 - Do NOT fabricate deals, news, or facts not provided above
-- If BTR connection is "none", angle the message around adjacent real estate or capital themes
+- If BTR connection is "none", angle around their real estate/development activity and how insurance de-risks their portfolio
 - Keep LinkedIn under 280 characters
-- Avoid fake familiarity — be professional and direct
-- Each CTA should be low-friction (15-minute call, coffee, quick question — NOT "let me send you our deck")
+- Tone: natural, confident, slightly casual — NOT salesy or corporate. Match a senior dealmaker, not a quote machine.
+- Each CTA should be low-friction (15-minute call, quick question — NOT "let me send you our proposal")
 - Return ONLY the JSON array"""
 
     try:
@@ -2913,17 +2984,17 @@ def _generate_generic_intros(query):
     return [
         {
             'label': 'LinkedIn Short', 'channel': 'linkedin', 'subject': '',
-            'body': f"Hi {person_name}, I work in BTR capital placement and noticed some potential alignment with {company_name}. Would love to connect and compare notes on the space.",
+            'body': f"Hi {person_name}, I run a BTR-dedicated insurance program — one of the few in the U.S. Noticed some potential alignment with {company_name}. Would love to connect.",
         },
         {
             'label': 'Warm Email', 'channel': 'email',
-            'subject': f"Quick intro — BTR alignment with {company_name}",
-            'body': f"Hi {person_name},\n\nI focus on capital placement in the BTR and multifamily space and have been looking at how {company_name} fits into the broader market.\n\nI'd welcome a quick conversation to see if there's alignment. Would you have 15 minutes this week or next?\n\nBest regards",
+            'subject': f"BTR insurance program — {company_name}",
+            'body': f"Hi {person_name},\n\nI run the BTR property insurance program at Alkeme — one of the only dedicated BTR programs in the country, covering builders risk through stabilization.\n\nI've been looking at how {company_name} fits into the BTR space and think there could be alignment. Would you have 15 minutes this week or next?\n\nBest regards",
         },
         {
             'label': 'Direct Business Intro', 'channel': 'email',
-            'subject': f"BTR capital opportunities — {company_name}",
-            'body': f"Hi {person_name},\n\nWe work with institutional capital partners actively deploying into BTR and single-family rental. Given {company_name}'s position, I think there may be a fit.\n\nDo you have 15 minutes for a brief call?",
+            'subject': f"Builders risk + BTR coverage — {company_name}",
+            'body': f"Hi {person_name},\n\nQuick intro — I direct a BTR-specific insurance program with ~$700M insured value and zero losses. We cover builders risk through stabilized operations and work with institutional-quality BTR communities nationwide.\n\nGiven {company_name}'s activity, I think we should connect. Do you have 15 minutes for a brief call?",
         },
     ]
 
