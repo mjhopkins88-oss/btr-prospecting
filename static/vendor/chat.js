@@ -1848,20 +1848,22 @@ function BTRAssistantChat(props) {
     document.head.appendChild(style);
   }, []);
 
-  // Pixel cat SVG data URI (10x10 pixel art black cat, V12: sharper edges, neon eyes)
-  var catSvg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' shape-rendering='crispEdges'%3E" +
-    "%3Cdefs%3E%3Cfilter id='g'%3E%3CfeGaussianBlur stdDeviation='0.3'/%3E%3C/filter%3E%3C/defs%3E" +
-    // ears (row 0-1)
+  // Pixel cat SVG data URI (12x12 pixel art black cat, V15: sharper 8-bit, bright teal eyes, subtle glow)
+  var catSvg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' shape-rendering='crispEdges'%3E" +
+    "%3Cdefs%3E%3Cfilter id='g'%3E%3CfeGaussianBlur stdDeviation='0.35'/%3E%3C/filter%3E%3C/defs%3E" +
+    // ears (row 0-1) — sharp triangular ears
     "%3Crect x='1' y='0' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='2' y='0' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='7' y='0' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='8' y='0' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='2' y='0' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='9' y='0' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='10' y='0' width='1' height='1' fill='%230f172a'/%3E" +
     "%3Crect x='0' y='1' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='1' y='1' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='2' y='1' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='7' y='1' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='8' y='1' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='9' y='1' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='1' y='1' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='2' y='1' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='3' y='1' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='8' y='1' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='9' y='1' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='10' y='1' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='11' y='1' width='1' height='1' fill='%230f172a'/%3E" +
     // head top (row 2)
     "%3Crect x='0' y='2' width='1' height='1' fill='%230f172a'/%3E" +
     "%3Crect x='1' y='2' width='1' height='1' fill='%231e293b'/%3E" +
@@ -1872,78 +1874,112 @@ function BTRAssistantChat(props) {
     "%3Crect x='6' y='2' width='1' height='1' fill='%231e293b'/%3E" +
     "%3Crect x='7' y='2' width='1' height='1' fill='%231e293b'/%3E" +
     "%3Crect x='8' y='2' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='9' y='2' width='1' height='1' fill='%230f172a'/%3E" +
-    // eyes row (row 3) - bright neon green/teal eyes with highlight
+    "%3Crect x='9' y='2' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='10' y='2' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='11' y='2' width='1' height='1' fill='%230f172a'/%3E" +
+    // brow (row 3)
     "%3Crect x='0' y='3' width='1' height='1' fill='%230f172a'/%3E" +
     "%3Crect x='1' y='3' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='2' y='3' width='1' height='1' fill='%2300ffaa'/%3E" +
-    "%3Crect x='3' y='3' width='1' height='1' fill='%2300e89d'/%3E" +
+    "%3Crect x='2' y='3' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='3' y='3' width='1' height='1' fill='%231e293b'/%3E" +
     "%3Crect x='4' y='3' width='1' height='1' fill='%231e293b'/%3E" +
     "%3Crect x='5' y='3' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='6' y='3' width='1' height='1' fill='%2300ffaa'/%3E" +
-    "%3Crect x='7' y='3' width='1' height='1' fill='%2300e89d'/%3E" +
+    "%3Crect x='6' y='3' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='7' y='3' width='1' height='1' fill='%231e293b'/%3E" +
     "%3Crect x='8' y='3' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='9' y='3' width='1' height='1' fill='%230f172a'/%3E" +
-    // eye glow
-    "%3Crect x='2' y='3' width='2' height='1' fill='%2300ffaa' filter='url(%23g)' opacity='0.4'/%3E" +
-    "%3Crect x='6' y='3' width='2' height='1' fill='%2300ffaa' filter='url(%23g)' opacity='0.4'/%3E" +
-    // nose/mouth (row 4)
+    "%3Crect x='9' y='3' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='10' y='3' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='11' y='3' width='1' height='1' fill='%230f172a'/%3E" +
+    // eyes row (row 4) — bright teal with pupil and highlight
     "%3Crect x='0' y='4' width='1' height='1' fill='%230f172a'/%3E" +
     "%3Crect x='1' y='4' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='2' y='4' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='3' y='4' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='4' y='4' width='1' height='1' fill='%23475569'/%3E" +
-    "%3Crect x='5' y='4' width='1' height='1' fill='%23475569'/%3E" +
+    "%3Crect x='2' y='4' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='3' y='4' width='1' height='1' fill='%2300ffaa'/%3E" +
+    "%3Crect x='4' y='4' width='1' height='1' fill='%2300e0a0'/%3E" +
+    "%3Crect x='5' y='4' width='1' height='1' fill='%231e293b'/%3E" +
     "%3Crect x='6' y='4' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='7' y='4' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='8' y='4' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='9' y='4' width='1' height='1' fill='%230f172a'/%3E" +
-    // chin (row 5)
-    "%3Crect x='1' y='5' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='7' y='4' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='8' y='4' width='1' height='1' fill='%2300ffaa'/%3E" +
+    "%3Crect x='9' y='4' width='1' height='1' fill='%2300e0a0'/%3E" +
+    "%3Crect x='10' y='4' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='11' y='4' width='1' height='1' fill='%230f172a'/%3E" +
+    // eye glow overlay
+    "%3Crect x='3' y='4' width='2' height='1' fill='%2300ffaa' filter='url(%23g)' opacity='0.45'/%3E" +
+    "%3Crect x='8' y='4' width='2' height='1' fill='%2300ffaa' filter='url(%23g)' opacity='0.45'/%3E" +
+    // nose/mouth (row 5)
+    "%3Crect x='0' y='5' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='1' y='5' width='1' height='1' fill='%231e293b'/%3E" +
     "%3Crect x='2' y='5' width='1' height='1' fill='%231e293b'/%3E" +
     "%3Crect x='3' y='5' width='1' height='1' fill='%231e293b'/%3E" +
     "%3Crect x='4' y='5' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='5' y='5' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='6' y='5' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='5' y='5' width='1' height='1' fill='%23334155'/%3E" +
+    "%3Crect x='6' y='5' width='1' height='1' fill='%23334155'/%3E" +
     "%3Crect x='7' y='5' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='8' y='5' width='1' height='1' fill='%230f172a'/%3E" +
-    // body (row 6)
+    "%3Crect x='8' y='5' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='9' y='5' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='10' y='5' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='11' y='5' width='1' height='1' fill='%230f172a'/%3E" +
+    // chin (row 6)
     "%3Crect x='1' y='6' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='2' y='6' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='3' y='6' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='4' y='6' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='5' y='6' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='6' y='6' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='7' y='6' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='8' y='6' width='1' height='1' fill='%230f172a'/%3E" +
-    // body lower (row 7)
+    "%3Crect x='2' y='6' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='3' y='6' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='4' y='6' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='5' y='6' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='6' y='6' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='7' y='6' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='8' y='6' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='9' y='6' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='10' y='6' width='1' height='1' fill='%230f172a'/%3E" +
+    // neck (row 7)
     "%3Crect x='2' y='7' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='3' y='7' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='4' y='7' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='5' y='7' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='6' y='7' width='1' height='1' fill='%231e293b'/%3E" +
-    "%3Crect x='7' y='7' width='1' height='1' fill='%230f172a'/%3E" +
-    // paws (row 8)
+    "%3Crect x='3' y='7' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='4' y='7' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='5' y='7' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='6' y='7' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='7' y='7' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='8' y='7' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='9' y='7' width='1' height='1' fill='%230f172a'/%3E" +
+    // body (row 8)
     "%3Crect x='2' y='8' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='3' y='8' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='6' y='8' width='1' height='1' fill='%230f172a'/%3E" +
-    "%3Crect x='7' y='8' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='3' y='8' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='4' y='8' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='5' y='8' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='6' y='8' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='7' y='8' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='8' y='8' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='9' y='8' width='1' height='1' fill='%230f172a'/%3E" +
+    // lower body (row 9)
+    "%3Crect x='2' y='9' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='3' y='9' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='4' y='9' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='5' y='9' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='6' y='9' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='7' y='9' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='8' y='9' width='1' height='1' fill='%231e293b'/%3E" +
+    "%3Crect x='9' y='9' width='1' height='1' fill='%230f172a'/%3E" +
+    // paws (row 10)
+    "%3Crect x='2' y='10' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='3' y='10' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='4' y='10' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='7' y='10' width='1' height='1' fill='%230f172a'/%3E" +
+    "%3Crect x='8' y='10' width='1' height='1' fill='%23141e30'/%3E" +
+    "%3Crect x='9' y='10' width='1' height='1' fill='%230f172a'/%3E" +
     "%3C/svg%3E";
 
-  // Pixel cat avatar badge with circular frame and glow
+  // Pixel cat avatar badge with circular frame, glow, centered (V15: cleaner, stronger glow)
   var catAvatar = function(size, glow) {
     var s = size || 28;
     return h('div', { style: {
       width: s, height: s, borderRadius: '50%', flexShrink: 0,
-      background: 'radial-gradient(circle at 50% 40%, rgba(0,255,170,0.08) 0%, rgba(15,23,42,0.95) 70%)',
-      backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-      border: glow ? '1.5px solid rgba(0,255,170,0.35)' : '1.5px solid rgba(255,255,255,0.2)',
+      background: 'radial-gradient(circle at 50% 38%, rgba(0,255,170,0.10) 0%, rgba(15,23,42,0.97) 65%)',
+      backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+      border: glow ? '1.5px solid rgba(0,255,170,0.4)' : '1.5px solid rgba(255,255,255,0.15)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       boxShadow: glow
-        ? '0 0 16px rgba(0,255,170,0.35), 0 0 4px rgba(0,255,170,0.2), inset 0 0 8px rgba(0,255,170,0.05)'
-        : '0 0 6px rgba(0,255,170,0.1)'
+        ? '0 0 20px rgba(0,255,170,0.4), 0 0 6px rgba(0,255,170,0.25), inset 0 0 10px rgba(0,255,170,0.06)'
+        : '0 0 8px rgba(0,255,170,0.12)'
     } },
-      h('img', { src: catSvg, style: { width: s * 0.62, height: s * 0.62, imageRendering: 'pixelated' } })
+      h('img', { src: catSvg, style: { width: s * 0.6, height: s * 0.6, imageRendering: 'pixelated' } })
     );
   };
 
@@ -2065,9 +2101,9 @@ function BTRAssistantChat(props) {
           fontFamily: "'Orbitron', sans-serif", letterSpacing: '0.03em',
           background: 'linear-gradient(135deg, #00ffaa, #14b8a6, #38bdf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
         } }, 'LEO'),
-        h('div', { style: { fontSize: '0.72rem', fontWeight: 500, marginBottom: '0.15rem', color: '#475569' } }, 'BTR Intelligence Engine'),
+        h('div', { style: { fontSize: '0.72rem', fontWeight: 500, marginBottom: '0.15rem', color: '#475569' } }, 'Thinking Partner'),
         h('div', { style: { fontSize: '0.65rem', lineHeight: 1.6, marginBottom: '0.75rem', color: '#94a3b8' } },
-          'Strategy, outreach, deal intelligence, actions — ask me anything.'
+          'Strategy, outreach, deal intelligence — I think before I speak.'
         ),
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.3rem' } },
           [
