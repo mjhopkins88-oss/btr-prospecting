@@ -1933,8 +1933,8 @@ function BTRAssistantChat(props) {
         return t;
       });
       var doneCount = updatedTasks.filter(function(t) { return t.status === 'done'; }).length;
-      var nextPending = updatedTasks.find(function(t) { return t.status === 'pending'; });
-      if (nextPending) nextPending.status = 'current';
+      var nextPendingIdx = updatedTasks.findIndex(function(t) { return t.status === 'pending'; });
+      if (nextPendingIdx !== -1) updatedTasks[nextPendingIdx] = Object.assign({}, updatedTasks[nextPendingIdx], { status: 'current' });
       var updatedSprint = Object.assign({}, sprint, { tasks: updatedTasks, completed: doneCount });
       setSprint(updatedSprint);
 
@@ -1973,6 +1973,18 @@ function BTRAssistantChat(props) {
         setMessages(function(prev) {
           return prev.concat([{ role: 'assistant', card: { type: 'NextActionCard', text: 'Top Opportunities — ranked by composite score', data: { recommendations: recs }, actions: [] }, mode: 'analyst' }]);
         });
+      }
+      return;
+    }
+
+    if (act.action === 'retry') {
+      var lastUserMsg = null;
+      for (var ri = messages.length - 1; ri >= 0; ri--) {
+        if (messages[ri].role === 'user') { lastUserMsg = messages[ri].content; break; }
+      }
+      if (lastUserMsg) {
+        setInput(lastUserMsg);
+        setMessages(messages.slice(0, -2));
       }
       return;
     }
@@ -2314,7 +2326,7 @@ function BTRAssistantChat(props) {
       h('div', { style: { display: 'flex', alignItems: 'center', gap: '0.15rem', position: 'relative', zIndex: 1 } },
         h('button', {
           className: 'leo-header-btn',
-          onClick: function() { setMessages([]); setLastMode(null); },
+          onClick: function() { setMessages([]); setLastMode(null); setSprint(null); setProactiveFetched(false); setInsightBadge(0); },
           title: 'Clear chat',
           style: {
             background: 'rgba(255,255,255,0.06)', border: 'none', color: '#94a3b8', fontSize: '0.65rem',

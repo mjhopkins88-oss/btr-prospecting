@@ -54,8 +54,9 @@ def sanitize_text(text):
     text = text.replace('—', ' - ').replace('–', '-')
     text = text.replace('‘', "'").replace('’', "'")
     text = text.replace('“', '"').replace('”', '"')
-    text = text.replace('•', chr(8226)).replace('…', '...')
+    text = text.replace('…', '...')
     text = text.replace(' ', ' ').replace('​', '')
+    text = text.replace('•', '-')
     text = text.replace('→', '->').replace('←', '<-')
     text = text.replace('✓', '[x]').replace('✗', '[ ]')
     text = text.replace('·', '-')
@@ -93,8 +94,8 @@ def _generate_brief_content():
             if s.get('summary'):
                 point += f" — {s['summary'][:120]}"
             market_points.append(point)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"[Brief] Market snapshot query failed: {e}")
     if not market_points:
         market_points.append('No recent signals — run signal scan to populate market intelligence.')
     brief['market_snapshot'] = market_points
@@ -113,14 +114,21 @@ def _generate_brief_content():
             btr_intel.append(
                 f"{p['relationship_status'].title()}: {p['cnt']} groups, avg warmth {avg_w}/10"
             )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"[Brief] Pipeline query failed: {e}")
     if not btr_intel:
         btr_intel.append('Pipeline data not yet populated — add capital groups to see intelligence.')
     brief['btr_intelligence'] = btr_intel
 
     # --- Section 3: What This Means (dynamic from data) ---
-    total_groups = sum(p.get('cnt', 0) for p in (pipeline if 'pipeline' in dir() else []))
+    try:
+        _pipe_rows = fetch_all(
+            """SELECT COUNT(*) as cnt FROM capital_groups
+               WHERE relationship_status NOT IN ('dormant', 'lost', 'dead')""", []
+        )
+        total_groups = _pipe_rows[0]['cnt'] if _pipe_rows else 0
+    except Exception:
+        total_groups = 0
     if total_groups > 0:
         interpretation = (
             f'Your pipeline has {total_groups} active groups. '
@@ -215,8 +223,8 @@ def _build_action_items():
         for s in (signals or []):
             actions.append(f"Act on signal: {s['title'][:50]}" + (f" ({s.get('group_name', '')})" if s.get('group_name') else ''))
 
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"[Brief] Action items query failed: {e}")
 
     # Fill with generic actions if not enough personalized ones
     generic = [
@@ -289,8 +297,8 @@ def _build_pdf(brief):
     """Generate a clean, professional PDF from brief content. Returns bytes."""
     from fpdf import FPDF
 
-    F = 'DejaVu' if UNICODE_FONTS_AVAILABLE else 'Helvetica'
     s = sanitize_text
+    F = 'DejaVu' if UNICODE_FONTS_AVAILABLE else 'Helvetica'
 
     class BriefPDF(FPDF):
         def header(self):
@@ -339,7 +347,7 @@ def _build_pdf(brief):
             self.ln(1)
 
     pdf = BriefPDF('P', 'mm', 'Letter')
-    _register_unicode_fonts(pdf)
+    F = _register_unicode_fonts(pdf)
     pdf.set_auto_page_break(auto=True, margin=20)
     pdf.add_page()
 
@@ -411,8 +419,12 @@ def _build_pdf(brief):
 @daily_brief_bp.route('/generate', methods=['GET'])
 def generate_brief():
     """Generate the daily brief content as JSON."""
-    brief = _generate_brief_content()
-    return jsonify(brief)
+    try:
+        brief = _generate_brief_content()
+        return jsonify(brief)
+    except Exception as e:
+        logger.error(f"[Brief] Generate failed: {e}")
+        return jsonify({'success': False, 'error': 'Brief generation failed'}), 500
 
 
 @daily_brief_bp.route('/download', methods=['GET'])
@@ -435,7 +447,7 @@ def download_brief():
         )
     except Exception as e:
         logger.error(f"[PDF] Daily brief generation failed: {e}")
-        return jsonify({'success': False, 'error': f'PDF generation failed: {str(e)}'}), 500
+        return jsonify({'success': False, 'error': 'PDF generation failed'}), 500
 
 
 @daily_brief_bp.route('/preview', methods=['GET'])
@@ -453,7 +465,7 @@ def preview_brief():
         )
     except Exception as e:
         logger.error(f"[PDF] Preview generation failed: {e}")
-        return jsonify({'success': False, 'error': f'PDF generation failed: {str(e)}'}), 500
+        return jsonify({'success': False, 'error': 'PDF generation failed'}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -828,8 +840,8 @@ def verify_doc(pdf_id):
     try:
         path, filename, meta, size = _resolve_pdf(pdf_id)
         with open(path, 'rb') as f:
-            header = f.read(5)
-        if header != b'%PDF-':
+            header_bytes = f.read(100)
+        if not validate_pdf(header_bytes):
             return jsonify({'valid': False, 'error': 'File is not a valid PDF'}), 500
         return jsonify({
             'valid': True, 'filename': filename, 'size': size,

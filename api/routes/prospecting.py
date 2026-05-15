@@ -6,6 +6,7 @@ Summary, Schedule, Feed, Groups, Sequences.
 """
 import csv
 import io
+import json
 from flask import Blueprint, request, jsonify, make_response
 
 from datetime import datetime, timedelta
@@ -87,7 +88,7 @@ def create_sequence():
         "INSERT INTO prospecting_sequences (id, name, description, status, total_steps, step_definitions, created_at, updated_at) "
         "VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
         [sid, data.get('name', 'Untitled'), data.get('description', ''), data.get('status', 'draft'),
-         len(steps), str(steps) if steps else '[]']
+         len(steps), json.dumps(steps) if steps else '[]']
     )
     return jsonify({'id': sid}), 201
 

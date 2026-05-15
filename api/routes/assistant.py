@@ -14,7 +14,9 @@ import uuid
 import anthropic
 import json
 import re
-import math
+import logging
+
+logger = logging.getLogger('leo')
 
 try:
     from services.proactive_suggestions import get_proactive_suggestions
@@ -71,7 +73,7 @@ def _set_pending_action(action_type, payload, description, user_message=''):
             [action_id, action_type, json.dumps(payload), description, user_message[:500] if user_message else '', now, now]
         )
     except Exception:
-        pass
+        logger.warning("Failed to persist pending action to DB", exc_info=True)
     _pending_action_cache.clear()
     _pending_action_cache.update({
         'id': action_id,
@@ -108,7 +110,7 @@ def _consume_pending_action():
                 'description': row.get('description', ''),
             }
     except Exception:
-        pass
+        logger.warning("Failed to fetch pending action from DB", exc_info=True)
     return None
 
 def _mark_pending_action(action_id, status):
@@ -121,7 +123,7 @@ def _mark_pending_action(action_id, status):
             [status, datetime.utcnow().isoformat(), action_id]
         )
     except Exception:
-        pass
+        logger.warning("Failed to mark pending action %s as %s", action_id, status, exc_info=True)
 
 def _execute_pending_action(action):
     """Dispatch a pending action by type. Returns a Flask response or None."""
@@ -3078,7 +3080,7 @@ def _generate_execution_queue(limit=10):
 
     items.sort(key=lambda x: x.get('priority_score', 0), reverse=True)
     items = items[:limit]
-    _filter_plan_tasks(items)
+    items = _filter_plan_tasks(items) or items
 
     for i, item in enumerate(items):
         item['rank'] = i + 1
@@ -5764,6 +5766,10 @@ def _preprocess_slash(text):
 
     if cmd == '/draft':
         if arg:
+            m = re.match(r'^top\s+(\d+)', arg.strip(), re.IGNORECASE)
+            if m:
+                count = int(m.group(1))
+                return f'__v6_batch_draft__{count}', extra_ctx
             contact = _find_contact(arg)
             if contact:
                 signal = _latest_signal_for(contact.get('group_id'), contact.get('id'))
@@ -5903,12 +5909,6 @@ def _preprocess_slash(text):
         if arg:
             return f'__schedule_meeting__{arg}', extra_ctx
         return "Who would you like to meet with? Use /meeting [contact name].", extra_ctx
-
-    if cmd == '/draft' and arg:
-        m = re.match(r'^top\s+(\d+)', arg.strip(), re.IGNORECASE)
-        if m:
-            count = int(m.group(1))
-            return f'__v6_batch_draft__{count}', extra_ctx
 
     return text, extra_ctx
 
@@ -6593,8 +6593,7 @@ def _chat_inner():
 
     api_key = os.getenv('ANTHROPIC_API_KEY')
     if not api_key:
-        import logging
-        logging.getLogger('leo').error("[Leo] ANTHROPIC_API_KEY not set — chat disabled")
+        logger.error("ANTHROPIC_API_KEY not set — chat disabled")
         return jsonify({
             'role': 'assistant', 'content': '',
             'card': {
@@ -6604,7 +6603,7 @@ def _chat_inner():
                          'suggestion': 'Set ANTHROPIC_API_KEY in your environment variables or Railway config.'},
                 'actions': []
             }
-        })
+        }), 503
 
     last_msg = messages[-1].get('content', '') if messages else ''
     processed_msg, extra_ctx = _preprocess_slash(last_msg)
@@ -6710,7 +6709,10 @@ def _chat_inner():
         return jsonify({'role': 'assistant', 'content': card.get('text', ''), 'card': card, 'intent': 'probability', 'mode': 'analyst'})
 
     if processed_msg.startswith('__v6_batch_draft__'):
-        count = int(processed_msg.replace('__v6_batch_draft__', ''))
+        try:
+            count = int(processed_msg.replace('__v6_batch_draft__', ''))
+        except (ValueError, TypeError):
+            count = 5
         drafts = _generate_batch_drafts(count=count)
         if not drafts:
             card = {'type': 'TextCard', 'text': 'No contacts found for drafting. Add contacts to your pipeline first.', 'data': {}, 'actions': []}

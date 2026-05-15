@@ -5,6 +5,7 @@ Personal performance tracking — daily checklist, workouts, revenue, micro-logs
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
 import json
+import re
 
 from shared.database import fetch_all, fetch_one, execute, new_id
 
@@ -320,7 +321,6 @@ def _get_monthly_target():
 
 
 def _extract_number(text):
-    import re
     m = re.search(r'(\d+(?:\.\d+)?)', text)
     if m:
         val = float(m.group(1))
