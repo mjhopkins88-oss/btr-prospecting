@@ -25,41 +25,56 @@ except ImportError:
 assistant_bp = Blueprint('assistant', __name__, url_prefix='/api/assistant')
 
 # ---------------------------------------------------------------------------
-# V16: Generalized pending action system — stores last action awaiting approval
+# Pending action system — DB-backed, survives server restarts
 # ---------------------------------------------------------------------------
-_pending_action = {}
-# Structure: {
-#   'type': 'schedule_plan' | 'daily_plan' | 'outreach_draft' | 'pdf_export',
-#   'payload': { ... action-specific data ... },
-#   'description': str,    # human-readable summary
-#   'created': datetime,
-# }
+_pending_action_cache = {}  # in-memory cache for fast access
 
 _APPROVAL_PHRASES = frozenset([
     'approved', 'approve', 'proceed', 'yes', 'confirm', 'confirmed',
     'add these', 'add them', 'go ahead', 'do it', 'looks good',
     'add to calendar', 'add to my calendar', 'put on calendar',
     'put on my calendar', 'schedule these', 'schedule them',
+    'schedule it', 'send it', 'send them',
     'book these', 'book them', 'sounds good', 'perfect',
     'yes please', 'please proceed', 'go for it', 'let\'s do it',
     'add all', 'confirm all', 'approve all', 'execute',
     'do it all', 'make it happen', 'lock it in',
 ])
 
+_APPROVAL_NEGATORS = frozenset(['but', 'however', 'change', 'instead', 'wait', 'except', 'modify', 'actually', 'hold on', 'not yet'])
+
 def _is_approval(text):
     """Check if a message is approving a previously shown pending action."""
     lower = text.lower().strip().rstrip('.!,')
     if lower in _APPROVAL_PHRASES:
         return True
+    for neg in _APPROVAL_NEGATORS:
+        if neg in lower:
+            return False
     for phrase in _APPROVAL_PHRASES:
         if phrase in lower and len(lower) < 120:
             return True
     return False
 
-def _set_pending_action(action_type, payload, description):
-    """Store a pending action awaiting user approval."""
-    _pending_action.clear()
-    _pending_action.update({
+def _set_pending_action(action_type, payload, description, user_message=''):
+    """Store a pending action in DB + memory cache."""
+    action_id = new_id()
+    now = datetime.utcnow().isoformat()
+    try:
+        execute(
+            "UPDATE leo_pending_actions SET status = 'superseded', updated_at = ? WHERE status = 'pending'",
+            [now]
+        )
+        execute(
+            """INSERT INTO leo_pending_actions (id, action_type, payload_json, description, status, user_message, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)""",
+            [action_id, action_type, json.dumps(payload), description, user_message[:500] if user_message else '', now, now]
+        )
+    except Exception:
+        pass
+    _pending_action_cache.clear()
+    _pending_action_cache.update({
+        'id': action_id,
         'type': action_type,
         'payload': payload,
         'description': description,
@@ -67,22 +82,52 @@ def _set_pending_action(action_type, payload, description):
     })
 
 def _consume_pending_action():
-    """Retrieve and clear the pending action. Returns None if expired (>1h) or empty."""
-    if not _pending_action:
-        return None
-    age = (datetime.utcnow() - _pending_action.get('created', datetime.utcnow())).total_seconds()
-    if age > 3600:
-        _pending_action.clear()
-        return None
-    action = dict(_pending_action)
-    _pending_action.clear()
-    return action
+    """Retrieve the latest pending action. Returns None if expired (>1h) or empty."""
+    if _pending_action_cache:
+        age = (datetime.utcnow() - _pending_action_cache.get('created', datetime.utcnow())).total_seconds()
+        if age < 3600:
+            action = dict(_pending_action_cache)
+            _pending_action_cache.clear()
+            _mark_pending_action(action.get('id'), 'confirmed')
+            return action
+        _pending_action_cache.clear()
+
+    try:
+        one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+        row = fetch_one(
+            "SELECT id, action_type, payload_json, description FROM leo_pending_actions "
+            "WHERE status = 'pending' AND created_at > ? ORDER BY created_at DESC LIMIT 1",
+            [one_hour_ago]
+        )
+        if row:
+            _mark_pending_action(row['id'], 'confirmed')
+            return {
+                'id': row['id'],
+                'type': row['action_type'],
+                'payload': json.loads(row['payload_json']),
+                'description': row.get('description', ''),
+            }
+    except Exception:
+        pass
+    return None
+
+def _mark_pending_action(action_id, status):
+    """Update pending action status in DB."""
+    if not action_id:
+        return
+    try:
+        execute(
+            "UPDATE leo_pending_actions SET status = ?, updated_at = ? WHERE id = ?",
+            [status, datetime.utcnow().isoformat(), action_id]
+        )
+    except Exception:
+        pass
 
 def _execute_pending_action(action):
     """Dispatch a pending action by type. Returns a Flask response or None."""
     atype = action.get('type')
     payload = action.get('payload', {})
-    desc = action.get('description', '')
+    action_id = action.get('id')
 
     if atype in ('schedule_plan', 'daily_plan'):
         events = payload.get('events', [])
@@ -91,6 +136,7 @@ def _execute_pending_action(action):
         result = _exec_create_calendar_events({'events': events})
         count = payload.get('block_count', len(events))
         if result.get('success'):
+            _mark_pending_action(action_id, 'executed')
             msg = f"Added {count} schedule blocks to your calendar."
             card = {
                 'type': 'ConfirmationCard', 'text': msg,
@@ -104,6 +150,7 @@ def _execute_pending_action(action):
             return jsonify({'role': 'assistant', 'content': msg, 'card': card,
                             'intent': atype, 'mode': 'execution', 'calendar_changed': True})
         else:
+            _mark_pending_action(action_id, 'failed')
             err_msg = result.get('message', 'Failed to add schedule blocks.')
             card = {
                 'type': 'ErrorCard', 'text': err_msg,
@@ -130,6 +177,7 @@ def _execute_pending_action(action):
                 'signal_ref': d.get('signal_ref', ''),
                 'created_at': datetime.utcnow().isoformat(),
             }
+        _mark_pending_action(action_id, 'executed')
         msg = f"Queued {len(drafts)} outreach drafts for sending."
         card = {
             'type': 'ConfirmationCard', 'text': msg,
@@ -139,6 +187,20 @@ def _execute_pending_action(action):
         _persist_chat('(approved)', card, 'outreach_draft', 'execution')
         return jsonify({'role': 'assistant', 'content': msg, 'card': card,
                         'intent': 'outreach_draft', 'mode': 'execution'})
+
+    if atype == 'pdf_export':
+        doc_type = payload.get('doc_type', 'attack_plan')
+        try:
+            card, err = _generate_doc_pdf(doc_type)
+            if card:
+                _mark_pending_action(action_id, 'executed')
+                _persist_chat('(approved)', card, 'doc_pdf', 'execution')
+                return jsonify({'role': 'assistant', 'content': card['text'], 'card': card,
+                                'intent': 'doc_pdf', 'mode': 'execution'})
+        except Exception:
+            pass
+        _mark_pending_action(action_id, 'failed')
+        return None
 
     return None
 
@@ -1122,49 +1184,25 @@ def _days_since(date_str):
 def _score_opportunity(group, signal=None, contact=None, overdue_task=None):
     """
     Score an opportunity (0-100) based on multiple factors.
-    Higher = more urgent / higher leverage.
+    Returns total score and component breakdown.
 
-    Factors:
-      - warmth_score (0-10 from CRM)           → 0-25 pts
-      - recency of touch (recent = lower score) → 0-20 pts (inactivity risk)
-      - signal freshness (recent signal)        → 0-20 pts
-      - engagement level (touchpoint count)     → 0-15 pts
-      - overdue task attached                   → 0-10 pts
-      - deal stage momentum                     → 0-10 pts
+    Components (weights):
+      - warmth_score   (0.25) — CRM warmth 0-10
+      - engagement     (0.20) — touchpoint depth
+      - signal_score   (0.20) — signal freshness + importance
+      - overdue_score  (0.20) — inactivity risk + overdue tasks
+      - decay_risk     (0.15) — warmth-based decay half-life
     """
-    score = 0.0
-
-    # Warmth (0-25)
     warmth = group.get('warmth_score') or 0
-    score += min(warmth / 10.0, 1.0) * 25
-
-    # Inactivity risk (0-20): longer silence on warm contacts = higher urgency
     days_silent = _days_since(group.get('last_contacted_at'))
-    if warmth >= 5:
-        if days_silent > 30:
-            score += 20
-        elif days_silent > 14:
-            score += 15
-        elif days_silent > 7:
-            score += 10
-        elif days_silent > 3:
-            score += 5
 
-    # Signal freshness (0-20)
-    if signal:
-        sig_age = _days_since(signal.get('detected_at'))
-        importance = signal.get('importance') or 5
-        if sig_age <= 3:
-            score += min(importance / 10.0, 1.0) * 20
-        elif sig_age <= 7:
-            score += min(importance / 10.0, 1.0) * 14
-        elif sig_age <= 14:
-            score += min(importance / 10.0, 1.0) * 8
+    # Warmth component (0-100 normalized)
+    warmth_norm = min(warmth / 10.0, 1.0) * 100
 
-    # Engagement level (0-15): more touchpoints = more invested
+    # Engagement component (0-100 normalized)
+    tp_count = 0
     if contact:
         tp_count = contact.get('touchpoint_count', 0)
-        score += min(tp_count / 10.0, 1.0) * 15
     else:
         try:
             tp_row = fetch_one(
@@ -1172,23 +1210,76 @@ def _score_opportunity(group, signal=None, contact=None, overdue_task=None):
                 [group['id']]
             )
             tp_count = tp_row['cnt'] if tp_row else 0
-            score += min(tp_count / 10.0, 1.0) * 15
         except Exception:
             pass
-
-    # Overdue task (0-10)
-    if overdue_task:
-        score += 10
-
-    # Deal stage momentum (0-10)
     stage = group.get('relationship_status', '').lower()
     stage_scores = {
-        'closing': 10, 'active': 8, 'warm': 6, 'engaged': 7,
-        'qualified': 5, 'contacted': 3, 'new': 2, 'cold': 0
+        'closing': 40, 'active': 32, 'engaged': 28, 'warm': 24,
+        'qualified': 20, 'contacted': 12, 'new': 8, 'cold': 0,
     }
-    score += stage_scores.get(stage, 1)
+    engagement_norm = min(tp_count / 10.0, 1.0) * 60 + stage_scores.get(stage, 4)
 
-    return round(min(score, 100), 1)
+    # Signal component (0-100 normalized)
+    signal_norm = 0.0
+    if signal:
+        sig_age = _days_since(signal.get('detected_at'))
+        importance = signal.get('importance') or 5
+        freshness = max(0, 1.0 - sig_age / 14.0)  # linear decay over 14 days
+        signal_norm = min(importance / 10.0, 1.0) * freshness * 100
+
+    # Overdue / urgency component (0-100 normalized)
+    overdue_norm = 0.0
+    if overdue_task:
+        overdue_norm += 50
+    if warmth >= 5:
+        if days_silent > 30:
+            overdue_norm += 50
+        elif days_silent > 14:
+            overdue_norm += 38
+        elif days_silent > 7:
+            overdue_norm += 25
+        elif days_silent > 3:
+            overdue_norm += 12
+
+    # Decay risk component (0-100 normalized)
+    if warmth >= 7:
+        half_life = 7
+    elif warmth >= 4:
+        half_life = 14
+    else:
+        half_life = 30
+    decay_norm = min(days_silent / half_life * 100, 100) if half_life > 0 else 0
+
+    # Weighted total
+    total = (
+        warmth_norm * 0.25 +
+        engagement_norm * 0.20 +
+        signal_norm * 0.20 +
+        overdue_norm * 0.20 +
+        decay_norm * 0.15
+    )
+
+    # Decay risk label
+    if days_silent <= 7:
+        decay_label = 'low'
+    elif days_silent <= 14:
+        decay_label = 'medium'
+    elif days_silent <= 21:
+        decay_label = 'high'
+    else:
+        decay_label = 'critical'
+
+    return {
+        'score': round(min(total, 100), 1),
+        'warmth_score': round(warmth_norm, 1),
+        'engagement_score': round(engagement_norm, 1),
+        'signal_score': round(signal_norm, 1),
+        'overdue_score': round(overdue_norm, 1),
+        'decay_risk': round(decay_norm, 1),
+        'decay_label': decay_label,
+        'days_silent': days_silent,
+        'touchpoint_count': tp_count,
+    }
 
 
 def _deal_probability(group):
@@ -1343,7 +1434,7 @@ def _get_ranked_opportunities(limit=10):
             [g['id'], datetime.utcnow().strftime('%Y-%m-%d')]
         )
         sc = _score_opportunity(g, signal=signal, overdue_task=overdue)
-        days_silent = _days_since(g.get('last_contacted_at'))
+        days_silent = sc['days_silent']
 
         reason_parts = []
         if (g.get('warmth_score') or 0) >= 7:
@@ -1357,10 +1448,13 @@ def _get_ranked_opportunities(limit=10):
         stage = g.get('relationship_status', '')
         if stage in ('active', 'closing', 'engaged'):
             reason_parts.append(f'{stage} stage')
+        if sc['decay_label'] in ('high', 'critical'):
+            reason_parts.append(f"decay: {sc['decay_label']}")
 
         scored.append({
             'group': g,
-            'score': sc,
+            'score': sc['score'],
+            'score_breakdown': sc,
             'signal': signal,
             'overdue_task': overdue,
             'days_silent': days_silent,
