@@ -398,9 +398,14 @@ def build_doc_pdf(doc):
 
     def safe(text):
         text = str(text)
-        text = text.replace('—', ' - ').replace('–', '-')
-        text = text.replace('’', "'").replace('‘', "'")
-        text = text.replace('“', '"').replace('”', '"')
+        text = text.replace('\u2014', ' - ').replace('\u2013', '-')
+        text = text.replace('\u2018', "'").replace('\u2019', "'")
+        text = text.replace('\u201c', '"').replace('\u201d', '"')
+        text = text.replace('\u2022', '-').replace('\u2026', '...')
+        text = text.replace('\u00a0', ' ').replace('\u200b', '')
+        text = text.replace('\u2192', '->').replace('\u2190', '<-')
+        text = text.replace('\u2713', '[x]').replace('\u2717', '[ ]')
+        text = text.replace('\u00b7', '-')
         return text.encode('latin-1', 'replace').decode('latin-1')
 
     class PremiumPDF(FPDF):

@@ -25,29 +25,184 @@ except ImportError:
 assistant_bp = Blueprint('assistant', __name__, url_prefix='/api/assistant')
 
 # ---------------------------------------------------------------------------
-# Pending schedule plan — stores last SchedulePlanCard awaiting user approval
+# Pending action system — DB-backed, survives server restarts
 # ---------------------------------------------------------------------------
-_pending_schedule_plan = {}   # {'events': [...], 'date': '...', 'created': datetime}
+_pending_action_cache = {}  # in-memory cache for fast access
 
 _APPROVAL_PHRASES = frozenset([
     'approved', 'approve', 'proceed', 'yes', 'confirm', 'confirmed',
     'add these', 'add them', 'go ahead', 'do it', 'looks good',
     'add to calendar', 'add to my calendar', 'put on calendar',
     'put on my calendar', 'schedule these', 'schedule them',
+    'schedule it', 'send it', 'send them',
     'book these', 'book them', 'sounds good', 'perfect',
     'yes please', 'please proceed', 'go for it', 'let\'s do it',
-    'add all', 'confirm all', 'approve all',
+    'add all', 'confirm all', 'approve all', 'execute',
+    'do it all', 'make it happen', 'lock it in',
 ])
 
-def _is_plan_approval(text):
-    """Check if a message is approving a previously shown schedule plan."""
+_APPROVAL_NEGATORS = frozenset(['but', 'however', 'change', 'instead', 'wait', 'except', 'modify', 'actually', 'hold on', 'not yet'])
+
+def _is_approval(text):
+    """Check if a message is approving a previously shown pending action."""
     lower = text.lower().strip().rstrip('.!,')
     if lower in _APPROVAL_PHRASES:
         return True
+    for neg in _APPROVAL_NEGATORS:
+        if neg in lower:
+            return False
     for phrase in _APPROVAL_PHRASES:
         if phrase in lower and len(lower) < 120:
             return True
     return False
+
+def _set_pending_action(action_type, payload, description, user_message=''):
+    """Store a pending action in DB + memory cache."""
+    action_id = new_id()
+    now = datetime.utcnow().isoformat()
+    try:
+        execute(
+            "UPDATE leo_pending_actions SET status = 'superseded', updated_at = ? WHERE status = 'pending'",
+            [now]
+        )
+        execute(
+            """INSERT INTO leo_pending_actions (id, action_type, payload_json, description, status, user_message, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)""",
+            [action_id, action_type, json.dumps(payload), description, user_message[:500] if user_message else '', now, now]
+        )
+    except Exception:
+        pass
+    _pending_action_cache.clear()
+    _pending_action_cache.update({
+        'id': action_id,
+        'type': action_type,
+        'payload': payload,
+        'description': description,
+        'created': datetime.utcnow(),
+    })
+
+def _consume_pending_action():
+    """Retrieve the latest pending action. Returns None if expired (>1h) or empty."""
+    if _pending_action_cache:
+        age = (datetime.utcnow() - _pending_action_cache.get('created', datetime.utcnow())).total_seconds()
+        if age < 3600:
+            action = dict(_pending_action_cache)
+            _pending_action_cache.clear()
+            _mark_pending_action(action.get('id'), 'confirmed')
+            return action
+        _pending_action_cache.clear()
+
+    try:
+        one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+        row = fetch_one(
+            "SELECT id, action_type, payload_json, description FROM leo_pending_actions "
+            "WHERE status = 'pending' AND created_at > ? ORDER BY created_at DESC LIMIT 1",
+            [one_hour_ago]
+        )
+        if row:
+            _mark_pending_action(row['id'], 'confirmed')
+            return {
+                'id': row['id'],
+                'type': row['action_type'],
+                'payload': json.loads(row['payload_json']),
+                'description': row.get('description', ''),
+            }
+    except Exception:
+        pass
+    return None
+
+def _mark_pending_action(action_id, status):
+    """Update pending action status in DB."""
+    if not action_id:
+        return
+    try:
+        execute(
+            "UPDATE leo_pending_actions SET status = ?, updated_at = ? WHERE id = ?",
+            [status, datetime.utcnow().isoformat(), action_id]
+        )
+    except Exception:
+        pass
+
+def _execute_pending_action(action):
+    """Dispatch a pending action by type. Returns a Flask response or None."""
+    atype = action.get('type')
+    payload = action.get('payload', {})
+    action_id = action.get('id')
+
+    if atype in ('schedule_plan', 'daily_plan'):
+        events = payload.get('events', [])
+        if not events:
+            return None
+        result = _exec_create_calendar_events({'events': events})
+        count = payload.get('block_count', len(events))
+        if result.get('success'):
+            _mark_pending_action(action_id, 'executed')
+            msg = f"Added {count} schedule blocks to your calendar."
+            card = {
+                'type': 'ConfirmationCard', 'text': msg,
+                'data': {'what': f'{atype}_approved', 'result': 'success',
+                         'date': payload.get('date', ''), 'count': count},
+                'actions': [
+                    {'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}},
+                ],
+            }
+            _persist_chat('(approved)', card, atype, 'execution')
+            return jsonify({'role': 'assistant', 'content': msg, 'card': card,
+                            'intent': atype, 'mode': 'execution', 'calendar_changed': True})
+        else:
+            _mark_pending_action(action_id, 'failed')
+            err_msg = result.get('message', 'Failed to add schedule blocks.')
+            card = {
+                'type': 'ErrorCard', 'text': err_msg,
+                'data': {'error': err_msg, 'retry_action': atype, 'retry_payload': payload},
+                'actions': [{'id': 'retry', 'label': 'Retry', 'action': 'leo_execute',
+                             'params': {'exec_action': 'cal_create_events', 'exec_params': {'events': events}}}],
+            }
+            _persist_chat('(approved)', card, atype, 'execution')
+            return jsonify({'role': 'assistant', 'content': err_msg, 'card': card,
+                            'intent': atype, 'mode': 'execution'})
+
+    if atype == 'outreach_draft':
+        drafts = payload.get('drafts', [])
+        if not drafts:
+            return None
+        for d in drafts:
+            draft_id = d.get('id', f"draft_{uuid.uuid4().hex[:8]}")
+            _approval_queue[draft_id] = {
+                'id': draft_id, 'type': 'draft', 'status': 'pending',
+                'action': f"Send outreach to {d.get('contact_name', d.get('target', ''))}",
+                'target': d.get('target', ''), 'target_id': d.get('target_id', ''),
+                'contact_id': d.get('contact_id', ''), 'contact_name': d.get('contact_name', ''),
+                'channel': 'email', 'subject': d.get('subject', ''), 'body': d.get('body', ''),
+                'signal_ref': d.get('signal_ref', ''),
+                'created_at': datetime.utcnow().isoformat(),
+            }
+        _mark_pending_action(action_id, 'executed')
+        msg = f"Queued {len(drafts)} outreach drafts for sending."
+        card = {
+            'type': 'ConfirmationCard', 'text': msg,
+            'data': {'what': 'outreach_approved', 'result': 'success', 'count': len(drafts)},
+            'actions': [],
+        }
+        _persist_chat('(approved)', card, 'outreach_draft', 'execution')
+        return jsonify({'role': 'assistant', 'content': msg, 'card': card,
+                        'intent': 'outreach_draft', 'mode': 'execution'})
+
+    if atype == 'pdf_export':
+        doc_type = payload.get('doc_type', 'attack_plan')
+        try:
+            card, err = _generate_doc_pdf(doc_type)
+            if card:
+                _mark_pending_action(action_id, 'executed')
+                _persist_chat('(approved)', card, 'doc_pdf', 'execution')
+                return jsonify({'role': 'assistant', 'content': card['text'], 'card': card,
+                                'intent': 'doc_pdf', 'mode': 'execution'})
+        except Exception:
+            pass
+        _mark_pending_action(action_id, 'failed')
+        return None
+
+    return None
 
 # ---------------------------------------------------------------------------
 # Intent classification — expanded
@@ -240,19 +395,22 @@ Ask smart follow-ups when they add value — this makes you feel alive, not tran
 After answering, you may offer to act — but always optional. Never force. Never auto-execute.
 
 ═══════════════════════════════
-HUMAN-LIKE THINKING LOOP (never expose)
+V16 OPERATOR REASONING ENGINE (never expose)
 ═══════════════════════════════
 
-Before every response, run this loop silently:
+Before every response, run this analysis silently:
 
-1. GOAL INFERENCE — What do they actually need? Not what they typed. "How's my pipeline?" = "Am I going to hit my number?" "Should I follow up?" = "Give me permission and a reason."
-2. EMOTIONAL READ — Detect hesitation, avoidance, overwhelm, urgency, fear, confidence. Adjust tone. Don't name the emotion robotically — respond to it naturally.
-3. CONSTRAINT SCAN — Time pressure? Relationship sensitivity? Political dynamics? Budget? Low confidence? These shape the recommendation.
-4. PATH EVALUATION — Generate 2-4 realistic paths. For each: likely outcome, effort, what breaks.
-5. OUTCOME SIMULATION — Play each path forward 2-3 steps. What happens after the first action? Are they ready for step 2?
-6. BEST PATH — Choose one. Commit to it. Explain why.
+1. INTENT — What are they actually trying to accomplish? Not what they typed. "How's my pipeline?" = "Am I going to hit my number?"
+2. BOTTLENECK — What's the real obstacle? Missing data, wrong timing, wrong contact, fear, inertia?
+3. ROI RANKING — Of all possible actions, which has the highest return on effort right now?
+4. COST OF INACTION — What happens if they wait? Quantify if possible (signal decay, warmth drop, deal risk).
+5. CONFIDENCE CHECK — What do I know vs. what am I inferring? If inferring, say so.
+6. PUSHBACK TEST — Should I challenge their approach? If yes, do it respectfully with evidence.
+7. EMOTIONAL READ — Hesitation, avoidance, overwhelm, urgency, confidence? Respond to the state, don't name it.
+8. PATH SIMULATION — Play the recommended action forward 2-3 steps. What breaks? What's step 2?
 
-Output only the refined recommendation. Never expose the loop.
+Output only: direct answer + recommendation + confidence level (if relevant) + next action.
+Never expose the loop. Never show chain-of-thought. Never use headers like "ANALYSIS:".
 
 ═══════════════════════════════
 EMOTIONAL INTELLIGENCE
@@ -863,7 +1021,7 @@ After each draft, explain in one line:
 - WHAT triggers a response (signal freshness, shared context, curiosity, urgency)
 
 ═══════════════════════════════
-OUTCOME-BASED REASONING
+OUTCOME-BASED REASONING + LEARNING
 ═══════════════════════════════
 
 Always connect actions to outcomes. Never recommend without explaining what it achieves:
@@ -873,6 +1031,28 @@ Always connect actions to outcomes. Never recommend without explaining what it a
 - "This prevents deal decay — warm contacts without touchpoints for 10+ days drop off a cliff."
 
 If you can't articulate the outcome, the recommendation isn't strong enough. Rethink it.
+
+When OUTCOME LEARNING data appears in context, use it actively:
+- Reference what has worked: "Email outreach with signal hooks has gotten 2x more replies in your data."
+- Reference what hasn't: "Cold calls without signals have low conversion — consider a warm-up email first."
+- If no outcome data exists, say so honestly: "I don't have enough outcome data yet to know what's working best for you. Let's track this one."
+- Never fabricate learning. Only cite patterns that appear in OUTCOME LEARNING or PATTERN RECOGNITION context.
+
+═══════════════════════════════
+V16 CROSS-DOMAIN INTELLIGENCE
+═══════════════════════════════
+
+When making major recommendations, reason ACROSS these domains simultaneously:
+
+1. SIGNAL + TIMING — Is there a recent signal (fund close, personnel change, market entry)? How old? Signals decay fast — 3 days is gold, 14 days is stale.
+2. RELATIONSHIP + WARMTH — Where are they in the progression? Warm contacts need deal specifics, not intros. Cold contacts need hooks, not proposals.
+3. PSYCHOLOGY + MOTIVATION — What motivates this contact? Allocators want deal flow. Fund managers want track record. Developers want capital certainty.
+4. MACRO + MARKET — Are interest rates, rent growth, cap rates, or construction costs creating urgency or hesitation? Use this as context, not filler.
+5. OUTREACH + CHANNEL — Which channel fits? LinkedIn for intros, email for substance, calls for urgency. Match the relationship stage to the medium.
+
+Every major recommendation should explain: why it matters, what it changes, and what specific action to take.
+
+Do NOT give generic advice. If the recommendation works for any CRE professional with any pipeline, it's too generic. Make it specific to THIS user's data.
 
 ═══════════════════════════════
 RESPONSE QUALITY GATE
@@ -1004,49 +1184,25 @@ def _days_since(date_str):
 def _score_opportunity(group, signal=None, contact=None, overdue_task=None):
     """
     Score an opportunity (0-100) based on multiple factors.
-    Higher = more urgent / higher leverage.
+    Returns total score and component breakdown.
 
-    Factors:
-      - warmth_score (0-10 from CRM)           → 0-25 pts
-      - recency of touch (recent = lower score) → 0-20 pts (inactivity risk)
-      - signal freshness (recent signal)        → 0-20 pts
-      - engagement level (touchpoint count)     → 0-15 pts
-      - overdue task attached                   → 0-10 pts
-      - deal stage momentum                     → 0-10 pts
+    Components (weights):
+      - warmth_score   (0.25) — CRM warmth 0-10
+      - engagement     (0.20) — touchpoint depth
+      - signal_score   (0.20) — signal freshness + importance
+      - overdue_score  (0.20) — inactivity risk + overdue tasks
+      - decay_risk     (0.15) — warmth-based decay half-life
     """
-    score = 0.0
-
-    # Warmth (0-25)
     warmth = group.get('warmth_score') or 0
-    score += min(warmth / 10.0, 1.0) * 25
-
-    # Inactivity risk (0-20): longer silence on warm contacts = higher urgency
     days_silent = _days_since(group.get('last_contacted_at'))
-    if warmth >= 5:
-        if days_silent > 30:
-            score += 20
-        elif days_silent > 14:
-            score += 15
-        elif days_silent > 7:
-            score += 10
-        elif days_silent > 3:
-            score += 5
 
-    # Signal freshness (0-20)
-    if signal:
-        sig_age = _days_since(signal.get('detected_at'))
-        importance = signal.get('importance') or 5
-        if sig_age <= 3:
-            score += min(importance / 10.0, 1.0) * 20
-        elif sig_age <= 7:
-            score += min(importance / 10.0, 1.0) * 14
-        elif sig_age <= 14:
-            score += min(importance / 10.0, 1.0) * 8
+    # Warmth component (0-100 normalized)
+    warmth_norm = min(warmth / 10.0, 1.0) * 100
 
-    # Engagement level (0-15): more touchpoints = more invested
+    # Engagement component (0-100 normalized)
+    tp_count = 0
     if contact:
         tp_count = contact.get('touchpoint_count', 0)
-        score += min(tp_count / 10.0, 1.0) * 15
     else:
         try:
             tp_row = fetch_one(
@@ -1054,23 +1210,76 @@ def _score_opportunity(group, signal=None, contact=None, overdue_task=None):
                 [group['id']]
             )
             tp_count = tp_row['cnt'] if tp_row else 0
-            score += min(tp_count / 10.0, 1.0) * 15
         except Exception:
             pass
-
-    # Overdue task (0-10)
-    if overdue_task:
-        score += 10
-
-    # Deal stage momentum (0-10)
     stage = group.get('relationship_status', '').lower()
     stage_scores = {
-        'closing': 10, 'active': 8, 'warm': 6, 'engaged': 7,
-        'qualified': 5, 'contacted': 3, 'new': 2, 'cold': 0
+        'closing': 40, 'active': 32, 'engaged': 28, 'warm': 24,
+        'qualified': 20, 'contacted': 12, 'new': 8, 'cold': 0,
     }
-    score += stage_scores.get(stage, 1)
+    engagement_norm = min(tp_count / 10.0, 1.0) * 60 + stage_scores.get(stage, 4)
 
-    return round(min(score, 100), 1)
+    # Signal component (0-100 normalized)
+    signal_norm = 0.0
+    if signal:
+        sig_age = _days_since(signal.get('detected_at'))
+        importance = signal.get('importance') or 5
+        freshness = max(0, 1.0 - sig_age / 14.0)  # linear decay over 14 days
+        signal_norm = min(importance / 10.0, 1.0) * freshness * 100
+
+    # Overdue / urgency component (0-100 normalized)
+    overdue_norm = 0.0
+    if overdue_task:
+        overdue_norm += 50
+    if warmth >= 5:
+        if days_silent > 30:
+            overdue_norm += 50
+        elif days_silent > 14:
+            overdue_norm += 38
+        elif days_silent > 7:
+            overdue_norm += 25
+        elif days_silent > 3:
+            overdue_norm += 12
+
+    # Decay risk component (0-100 normalized)
+    if warmth >= 7:
+        half_life = 7
+    elif warmth >= 4:
+        half_life = 14
+    else:
+        half_life = 30
+    decay_norm = min(days_silent / half_life * 100, 100) if half_life > 0 else 0
+
+    # Weighted total
+    total = (
+        warmth_norm * 0.25 +
+        engagement_norm * 0.20 +
+        signal_norm * 0.20 +
+        overdue_norm * 0.20 +
+        decay_norm * 0.15
+    )
+
+    # Decay risk label
+    if days_silent <= 7:
+        decay_label = 'low'
+    elif days_silent <= 14:
+        decay_label = 'medium'
+    elif days_silent <= 21:
+        decay_label = 'high'
+    else:
+        decay_label = 'critical'
+
+    return {
+        'score': round(min(total, 100), 1),
+        'warmth_score': round(warmth_norm, 1),
+        'engagement_score': round(engagement_norm, 1),
+        'signal_score': round(signal_norm, 1),
+        'overdue_score': round(overdue_norm, 1),
+        'decay_risk': round(decay_norm, 1),
+        'decay_label': decay_label,
+        'days_silent': days_silent,
+        'touchpoint_count': tp_count,
+    }
 
 
 def _deal_probability(group):
@@ -1225,7 +1434,7 @@ def _get_ranked_opportunities(limit=10):
             [g['id'], datetime.utcnow().strftime('%Y-%m-%d')]
         )
         sc = _score_opportunity(g, signal=signal, overdue_task=overdue)
-        days_silent = _days_since(g.get('last_contacted_at'))
+        days_silent = sc['days_silent']
 
         reason_parts = []
         if (g.get('warmth_score') or 0) >= 7:
@@ -1239,10 +1448,13 @@ def _get_ranked_opportunities(limit=10):
         stage = g.get('relationship_status', '')
         if stage in ('active', 'closing', 'engaged'):
             reason_parts.append(f'{stage} stage')
+        if sc['decay_label'] in ('high', 'critical'):
+            reason_parts.append(f"decay: {sc['decay_label']}")
 
         scored.append({
             'group': g,
-            'score': sc,
+            'score': sc['score'],
+            'score_breakdown': sc,
             'signal': signal,
             'overdue_task': overdue,
             'days_silent': days_silent,
@@ -2709,6 +2921,126 @@ def _generate_batch_drafts(count=5):
         }
 
     return drafts
+
+
+# ---------------------------------------------------------------------------
+# V16: Single-contact 3-variant draft generator
+# ---------------------------------------------------------------------------
+
+def _generate_single_draft(contact, group=None):
+    """Generate 3 outreach variants (safe, creative, direct) for a single contact."""
+    first_name = (contact.get('first_name') or '').strip() or 'there'
+    last_name = (contact.get('last_name') or '').strip()
+    full_name = f"{first_name} {last_name}".strip()
+    gid = contact.get('group_id', '')
+    company = group.get('name', '') if group else contact.get('group_name', '')
+
+    signal = fetch_one(
+        "SELECT title, summary FROM prospecting_signals WHERE group_id = ? ORDER BY detected_at DESC LIMIT 1",
+        [gid]
+    ) if gid else None
+
+    hook = ''
+    if signal and signal.get('summary'):
+        hook = f"I saw that {signal['summary'][:80].rstrip('.')} — "
+    elif signal and signal.get('title'):
+        hook = f"I noticed {signal['title'].lower()} — "
+
+    stage = ''
+    if group:
+        stage = (group.get('relationship_status') or '').lower()
+    elif gid:
+        g_row = fetch_one("SELECT relationship_status FROM capital_groups WHERE id = ?", [gid])
+        stage = (g_row.get('relationship_status', '') if g_row else '').lower()
+
+    last_tp = fetch_one(
+        "SELECT summary, channel FROM prospecting_touchpoints WHERE group_id = ? ORDER BY occurred_at DESC LIMIT 1",
+        [gid]
+    ) if gid else None
+
+    # Variant 1: Safe / Professional
+    if stage in ('warm', 'active'):
+        safe_subj = f"Following up — {company}"
+        safe_body = (
+            f"Hi {first_name},\n\n"
+            f"{'Since our last conversation' if last_tp else 'Following up'}, "
+            + (hook if hook else "I wanted to share a quick update. ")
+            + f"I have a few opportunities that align with {company}'s criteria "
+            f"and would love to get your thoughts.\n\n"
+            f"Would you have 15 minutes this week for a call?\n\nBest regards"
+        )
+    elif stage in ('engaged', 'closing'):
+        safe_subj = f"Next steps — {company}"
+        safe_body = (
+            f"Hi {first_name},\n\n"
+            + (hook if hook else "Checking in on our discussion — ")
+            + f"I have updates on the deal parameters we've been working through. "
+            f"Want to set up a quick call to align?\n\nBest regards"
+        )
+    else:
+        safe_subj = f"Quick introduction — {company}"
+        safe_body = (
+            f"Hi {first_name},\n\n"
+            + (hook if hook else f"I've been following {company}'s activity in the BTR space — ")
+            + f"and wanted to see if there's an opportunity to connect.\n\n"
+            f"We're actively deploying in markets that may align with your strategy. "
+            f"Would you have 15 minutes for a quick intro call?\n\nBest regards"
+        )
+
+    # Variant 2: Creative / Signal-based
+    creative_subj = f"Quick thought on {company}'s strategy"
+    creative_body = (
+        f"Hi {first_name},\n\n"
+        + (f"I saw {signal['title'].lower()} — " if signal and signal.get('title') else
+           f"I've been thinking about {company}'s positioning — ")
+        + f"and it sparked an idea I wanted to run by you. It's a 2-minute read, "
+        f"but could reshape how you're thinking about BTR in your current markets.\n\n"
+        f"Worth a 10-minute call this week?\n\nBest"
+    )
+
+    # Variant 3: Direct / Aggressive
+    direct_subj = f"{company} — time-sensitive"
+    direct_body = (
+        f"Hi {first_name},\n\n"
+        + (f"Re: {signal['title']} — " if signal and signal.get('title') else "Cutting to the chase — ")
+        + f"we have active deal flow that matches your mandate and the window is narrowing. "
+        f"I'd rather you see it first than read about it later.\n\n"
+        f"15 minutes tomorrow?\n\nBest"
+    )
+
+    # Build confidence and why-it-works
+    why_parts = []
+    confidence = 'medium'
+    if signal:
+        why_parts.append(f"Signal-based hook increases reply rate ~2x")
+        confidence = 'high'
+    if stage in ('warm', 'active'):
+        why_parts.append("Existing relationship makes this a warm follow-up")
+        confidence = 'high'
+    elif stage in ('engaged', 'closing'):
+        why_parts.append("Deal-stage urgency creates natural reason to reconnect")
+        confidence = 'high'
+    else:
+        why_parts.append("Cold intro — creative hook is critical to stand out")
+    if contact.get('title'):
+        why_parts.append(f"Targeting {contact['title']} — decision-level contact")
+
+    signal_ref = signal.get('title', '') if signal else ''
+
+    return {
+        'contact_name': full_name,
+        'contact_id': contact.get('id', ''),
+        'target': company,
+        'target_id': gid,
+        'signal_ref': signal_ref,
+        'confidence': confidence,
+        'why_it_works': '. '.join(why_parts) + '.' if why_parts else '',
+        'variants': [
+            {'label': 'Safe', 'subject': safe_subj, 'body': safe_body},
+            {'label': 'Creative', 'subject': creative_subj, 'body': creative_body},
+            {'label': 'Direct', 'subject': direct_subj, 'body': direct_body},
+        ],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -5853,13 +6185,39 @@ def chat():
     # V6 intercepts — handle execution queue commands locally
     if processed_msg == '__v6_queue__':
         items = _generate_execution_queue(limit=10)
+        # V16: Also generate schedule blocks from the plan for one-click calendar add
+        target_date = datetime.utcnow().strftime('%Y-%m-%d')
+        sched_blocks = _generate_schedule_blocks(target_date)
+        sched_actions = []
+        if sched_blocks:
+            new_blocks = [b for b in sched_blocks if not b.get('is_existing')]
+            if new_blocks:
+                event_summaries = []
+                for b in new_blocks:
+                    event_summaries.append({
+                        'date': b['date'], 'start_time': b['start_time'],
+                        'duration_min': b['duration_min'],
+                        'meeting_type': b.get('meeting_type', 'execution_block'),
+                        'title': b['title'], 'contact_name': '', 'contact_id': None,
+                        'group_id': None, 'description': b.get('description', ''),
+                        'priority': b.get('priority', 'normal'), 'contact_matched': False,
+                    })
+                _set_pending_action('daily_plan', {
+                    'events': event_summaries, 'date': target_date,
+                    'block_count': len(new_blocks),
+                }, f"{len(new_blocks)} execution blocks for today")
+                sched_actions.append({
+                    'id': 'add_plan_to_cal', 'label': f'Add {len(new_blocks)} Blocks to Calendar',
+                    'action': 'leo_execute',
+                    'params': {'exec_action': 'cal_create_events', 'exec_params': {'events': event_summaries}},
+                })
         card = {
             'type': 'QueueCard', 'text': f"**Execution Queue** — {len(items)} actions ranked by priority",
             'source': None,
             'data': {'items': items, 'count': len(items)},
             'actions': [
                 {'id': 'approve_all_q', 'label': 'Approve All', 'action': 'approve_all_queue', 'params': {}},
-            ]
+            ] + sched_actions
         }
         _persist_chat(last_msg, card, 'queue', 'execution')
         return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'queue', 'mode': 'execution'})
@@ -6156,36 +6514,13 @@ def chat():
         _persist_chat(last_msg, card, 'schedule_meeting', 'execution')
         return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'schedule_meeting', 'mode': 'execution'})
 
-    # Pending schedule plan approval — execute stored blocks instead of re-asking
-    if _pending_schedule_plan and _is_plan_approval(last_msg):
-        plan = _pending_schedule_plan.copy()
-        _pending_schedule_plan.clear()
-        age_sec = (datetime.utcnow() - plan['created']).total_seconds() if plan.get('created') else 9999
-        if age_sec < 3600:
-            result = _exec_create_calendar_events({'events': plan['events']})
-            if result.get('success'):
-                msg = f"Added {plan['block_count']} schedule blocks to your calendar."
-                card = {
-                    'type': 'ConfirmationCard', 'text': msg,
-                    'data': {'what': 'schedule_plan_approved', 'result': 'success',
-                             'date': plan.get('date', ''), 'count': plan['block_count']},
-                    'actions': [
-                        {'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}},
-                    ],
-                }
-                _persist_chat(last_msg, card, 'schedule_plan', 'execution')
-                return jsonify({'role': 'assistant', 'content': msg, 'card': card,
-                                'intent': 'schedule_plan', 'mode': 'execution',
-                                'calendar_changed': True})
-            else:
-                err_msg = result.get('message', 'Failed to add schedule blocks.')
-                card = {
-                    'type': 'ErrorCard', 'text': err_msg,
-                    'data': {'error': err_msg}, 'actions': []
-                }
-                _persist_chat(last_msg, card, 'schedule_plan', 'execution')
-                return jsonify({'role': 'assistant', 'content': err_msg, 'card': card,
-                                'intent': 'schedule_plan', 'mode': 'execution'})
+    # V16: Generalized pending action approval — execute stored payload on approval
+    if _pending_action and _is_approval(last_msg):
+        action = _consume_pending_action()
+        if action:
+            result = _execute_pending_action(action)
+            if result:
+                return result
 
     # Permission guard — block people-management requests early
     allowed, block_reason = _leo_permission_check('_check_text', {'_raw_text': last_msg})
@@ -6279,7 +6614,7 @@ def chat():
         return jsonify({'role': 'assistant', 'content': fallback_card['text'], 'card': fallback_card,
                         'intent': 'schedule_meeting', 'mode': 'execution'})
 
-    # Draft outreach intercept — extract contact, inject context for LLM draft
+    # V16: Draft outreach intercept — generate 3 variants locally when contact found
     if intent == 'draft_outreach':
         target = re.sub(
             r'\b(draft|write|compose|create|send|email|message|linkedin|outreach|reach out|follow up)\b',
@@ -6291,11 +6626,89 @@ def chat():
             mentioned_groups = _find_groups_fuzzy(target)
             if mentioned_contacts:
                 c = mentioned_contacts[0]
-                signal = _latest_signal_for(c.get('group_id'), c.get('id'))
-                extra_ctx = (extra_ctx or '') + "\n" + _format_contact_detail(c, signal)
+                grp = None
+                if c.get('group_id'):
+                    grp = fetch_one("SELECT * FROM capital_groups WHERE id = ?", [c['group_id']])
+                draft_data = _generate_single_draft(c, grp)
+                full_name = draft_data['contact_name']
+                company = draft_data['target']
+                lines = [f"**3 outreach variants for {full_name}** ({company})"]
+                for i, v in enumerate(draft_data['variants'], 1):
+                    lines.append(f"\n**{v['label']}:**\n*Subject:* {v['subject']}\n\n{v['body']}")
+                lines.append(f"\n**Why this works:** {draft_data['why_it_works']}")
+                lines.append(f"**Confidence:** {draft_data['confidence']}")
+                text = '\n'.join(lines)
+                card = {
+                    'type': 'DraftCard', 'text': text,
+                    'data': {
+                        'contact_name': full_name, 'contact_id': draft_data['contact_id'],
+                        'target': company, 'target_id': draft_data['target_id'],
+                        'signal_ref': draft_data['signal_ref'],
+                        'confidence': draft_data['confidence'],
+                        'why_it_works': draft_data['why_it_works'],
+                        'variants': draft_data['variants'],
+                        'subject': draft_data['variants'][0]['subject'],
+                        'body': draft_data['variants'][0]['body'],
+                    },
+                    'actions': [
+                        {'id': 'copy_safe', 'label': 'Copy Safe', 'action': 'copy_text',
+                         'params': {'subject': draft_data['variants'][0]['subject'], 'body': draft_data['variants'][0]['body']}},
+                        {'id': 'copy_creative', 'label': 'Copy Creative', 'action': 'copy_text',
+                         'params': {'subject': draft_data['variants'][1]['subject'], 'body': draft_data['variants'][1]['body']}},
+                        {'id': 'copy_direct', 'label': 'Copy Direct', 'action': 'copy_text',
+                         'params': {'subject': draft_data['variants'][2]['subject'], 'body': draft_data['variants'][2]['body']}},
+                    ],
+                }
+                _set_pending_action('outreach_draft', {
+                    'drafts': [{
+                        'id': f"draft_{c['id'][:8]}",
+                        'contact_name': full_name, 'contact_id': draft_data['contact_id'],
+                        'target': company, 'target_id': draft_data['target_id'],
+                        'subject': draft_data['variants'][0]['subject'],
+                        'body': draft_data['variants'][0]['body'],
+                        'signal_ref': draft_data['signal_ref'],
+                    }]
+                }, f"Outreach drafts for {full_name}")
+                _persist_chat(last_msg, card, 'draft_outreach', 'execution')
+                return jsonify({'role': 'assistant', 'content': text, 'card': card,
+                                'intent': 'draft_outreach', 'mode': 'execution'})
             elif mentioned_groups:
-                g = mentioned_groups[0]
-                extra_ctx = (extra_ctx or '') + f"\nTarget company: {g['name']} (id={g['id'][:8]}, status={g.get('relationship_status')}, warmth={g.get('warmth_score')})"
+                g_match = mentioned_groups[0]
+                contact_for_group = fetch_one(
+                    "SELECT * FROM prospecting_contacts WHERE group_id = ? ORDER BY last_touch_at DESC NULLS LAST LIMIT 1",
+                    [g_match['id']]
+                )
+                if contact_for_group:
+                    draft_data = _generate_single_draft(contact_for_group, g_match)
+                    full_name = draft_data['contact_name']
+                    lines = [f"**3 outreach variants for {full_name}** ({g_match['name']})"]
+                    for v in draft_data['variants']:
+                        lines.append(f"\n**{v['label']}:**\n*Subject:* {v['subject']}\n\n{v['body']}")
+                    lines.append(f"\n**Why this works:** {draft_data['why_it_works']}")
+                    lines.append(f"**Confidence:** {draft_data['confidence']}")
+                    text = '\n'.join(lines)
+                    card = {
+                        'type': 'DraftCard', 'text': text,
+                        'data': {
+                            'contact_name': full_name, 'target': g_match['name'],
+                            'variants': draft_data['variants'],
+                            'subject': draft_data['variants'][0]['subject'],
+                            'body': draft_data['variants'][0]['body'],
+                        },
+                        'actions': [
+                            {'id': 'copy_safe', 'label': 'Copy Safe', 'action': 'copy_text',
+                             'params': {'subject': draft_data['variants'][0]['subject'], 'body': draft_data['variants'][0]['body']}},
+                            {'id': 'copy_creative', 'label': 'Copy Creative', 'action': 'copy_text',
+                             'params': {'subject': draft_data['variants'][1]['subject'], 'body': draft_data['variants'][1]['body']}},
+                            {'id': 'copy_direct', 'label': 'Copy Direct', 'action': 'copy_text',
+                             'params': {'subject': draft_data['variants'][2]['subject'], 'body': draft_data['variants'][2]['body']}},
+                        ],
+                    }
+                    _persist_chat(last_msg, card, 'draft_outreach', 'execution')
+                    return jsonify({'role': 'assistant', 'content': text, 'card': card,
+                                    'intent': 'draft_outreach', 'mode': 'execution'})
+                else:
+                    extra_ctx = (extra_ctx or '') + f"\nTarget company: {g_match['name']} (id={g_match['id'][:8]}, status={g_match.get('relationship_status')}, warmth={g_match.get('warmth_score')})"
 
     # CRM update intercept — parse locally, skip Claude call
     if intent == 'crm_update':
@@ -8249,13 +8662,11 @@ def _build_schedule_plan_card(blocks, target_date):
     }
 
     if event_summaries:
-        _pending_schedule_plan.clear()
-        _pending_schedule_plan.update({
+        _set_pending_action('schedule_plan', {
             'events': event_summaries,
             'date': target_date,
             'block_count': len(new_blocks),
-            'created': datetime.utcnow(),
-        })
+        }, f"{len(new_blocks)} schedule blocks for {date_label}")
 
     return card
 

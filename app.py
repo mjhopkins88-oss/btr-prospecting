@@ -2462,6 +2462,23 @@ def init_db():
     except Exception:
         pass
 
+    c.safe_execute('''
+        CREATE TABLE IF NOT EXISTS leo_pending_actions (
+            id TEXT PRIMARY KEY,
+            action_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            description TEXT,
+            status TEXT DEFAULT 'pending',
+            user_message TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_leo_pending_status ON leo_pending_actions(status, created_at DESC)')
+    except Exception:
+        pass
+
     # Performance indexes on hot query columns
     for idx_sql in [
         'CREATE INDEX IF NOT EXISTS idx_capital_groups_warmth ON capital_groups(warmth_score DESC)',
