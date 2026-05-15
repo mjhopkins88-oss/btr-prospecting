@@ -69,7 +69,11 @@ def _safe_ts(val):
     return str(val)
 
 
-CORS(app, supports_credentials=True)
+_allowed_origins = [o.strip() for o in os.getenv('ALLOWED_ORIGINS', '').split(',') if o.strip()]
+if _allowed_origins:
+    CORS(app, origins=_allowed_origins, supports_credentials=True)
+else:
+    CORS(app, supports_credentials=True)
 
 # --- SignalStack module (LinkedIn sales intelligence + messaging) ---
 try:
@@ -2458,6 +2462,21 @@ def init_db():
     except Exception:
         pass
 
+    # Performance indexes on hot query columns
+    for idx_sql in [
+        'CREATE INDEX IF NOT EXISTS idx_capital_groups_warmth ON capital_groups(warmth_score DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_prospecting_touchpoints_occurred ON prospecting_touchpoints(occurred_at DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_prospecting_signals_detected ON prospecting_signals(detected_at DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_prospecting_tasks_type ON prospecting_tasks(type)',
+        'CREATE INDEX IF NOT EXISTS idx_crm_touchpoints_lead ON crm_touchpoints(lead_id)',
+        'CREATE INDEX IF NOT EXISTS idx_calendar_meetings_date ON calendar_meetings(meeting_date)',
+        'CREATE INDEX IF NOT EXISTS idx_calendar_meetings_group ON calendar_meetings(group_id)',
+    ]:
+        try:
+            c.safe_execute(idx_sql)
+        except Exception:
+            pass
+
     conn.commit()
     conn.close()
 
@@ -2536,6 +2555,39 @@ app.register_blueprint(assistant_bp)
 app.register_blueprint(performance_bp)
 app.register_blueprint(daily_brief_bp)
 app.register_blueprint(calendar_bp)
+
+# ---------------------------------------------------------------------------
+# Global authentication middleware for all Blueprint API routes
+# ---------------------------------------------------------------------------
+_AUTH_EXEMPT_PREFIXES = (
+    '/api/auth/login', '/api/auth/bootstrap', '/api/auth/has-users',
+    '/api/auth/logout', '/api/auth/me',
+    '/health', '/api/health',
+)
+
+@app.before_request
+def _enforce_auth():
+    """Require a valid session for all /api/ routes except auth & health."""
+    path = request.path
+    if not path.startswith('/api/'):
+        return  # static files, HTML pages — no auth needed
+    for exempt in _AUTH_EXEMPT_PREFIXES:
+        if path == exempt or path.startswith(exempt + '/'):
+            return
+    if not _has_users():
+        g.user = None
+        g.workspace_id = None
+        return
+    user, workspace_id = _get_session_user()
+    if not user:
+        return jsonify({
+            'success': False, 'ok': False,
+            'message': 'Authentication required',
+            'error': 'Authentication required',
+            'auth_required': True
+        }), 401
+    g.user = user
+    g.workspace_id = workspace_id
 
 # ===================================================================
 # DASHBOARD — Weather endpoint (WeatherAPI.com)
