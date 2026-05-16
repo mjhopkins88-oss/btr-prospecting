@@ -303,10 +303,16 @@ def _build_conversation_state(messages):
                 state['last_intent'] = intent
             if mode:
                 state['last_mode'] = mode
+            # Track the last output text from either card or content
+            output_text = ''
             if card:
                 state['last_card_type'] = card.get('type')
-                state['last_output_text'] = card.get('text', '')[:500]
+                output_text = card.get('text', '')
                 _extract_entities_from_card(card, state)
+            if not output_text:
+                output_text = content
+            if output_text:
+                state['last_output_text'] = output_text[:500]
 
     return state
 
@@ -493,10 +499,18 @@ def _resolve_references(text, state):
 
 def _detect_message_type(text, state):
     """
-    Determine if this message is a new request, continuation, modification, or approval.
-    Returns: 'new', 'continuation', 'modification', or 'approval'
+    Determine if this message is a new request, continuation, modification, approval, or greeting.
+    Returns: 'greeting', 'approval', 'modification', 'continuation', or 'new'
     """
     text_lower = text.lower().strip().rstrip('.!?,')
+
+    _GREETING_PATTERNS = {
+        'hey', 'hi', 'hello', 'yo', 'sup', 'hey leo', 'hi leo', 'hello leo',
+        'hey there', 'hi there', 'what\'s up', 'whats up', 'howdy', 'good morning',
+        'good afternoon', 'good evening', 'morning', 'afternoon', 'evening',
+    }
+    if text_lower in _GREETING_PATTERNS or (len(text_lower.split()) <= 3 and text_lower.startswith(('hey', 'hi ', 'hello', 'yo ', 'sup'))):
+        return 'greeting'
 
     _action_card_types = {'ConfirmationCard', 'CrmUpdatePreviewCard', 'SchedulePlanCard',
                           'DailyPlanCard', 'LeoActionPreviewCard', 'CalendarConfirmCard'}
@@ -531,6 +545,9 @@ def _classify_intent_contextual(text, state, msg_type):
     """
     # Always run base classification first
     base_intent = _classify_intent(text)
+
+    if msg_type == 'greeting':
+        return 'greeting'
 
     if msg_type == 'approval':
         return state.get('last_intent', base_intent)
@@ -604,6 +621,14 @@ def _build_state_context_block(state, resolved, msg_type=None):
     if state.get('last_intent'):
         parts.append(f"PREVIOUS INTENT: {state['last_intent']}")
 
+    if state.get('last_card_type'):
+        parts.append(f"LAST CARD TYPE: {state['last_card_type']}")
+
+    if state.get('last_output_text'):
+        summary = state['last_output_text'][:200].replace('\n', ' ')
+        parts.append(f"LAST OUTPUT SUMMARY: {summary}")
+        parts.append("REPEAT CHECK: If your response would be substantially similar to the above, do NOT repeat it. Reference it briefly instead.")
+
     if state.get('last_action_target'):
         parts.append(f"LAST ACTION TARGET: {state['last_action_target']}")
 
@@ -627,6 +652,103 @@ def _build_state_context_block(state, resolved, msg_type=None):
             parts.append(f"RESOLVED REFERENCES: {'; '.join(res_parts)}")
 
     return '\n'.join(parts)
+
+
+def _handle_greeting(conv_state):
+    """
+    Generate a conversational greeting with one high-value CRM insight.
+    Never returns a task list or structured block — just a human response.
+    """
+    import random
+
+    insights = []
+
+    # Check for cooling opportunities
+    try:
+        cooling = fetch_all(
+            """SELECT name, warmth_score, last_contacted_at FROM capital_groups
+               WHERE warmth_score >= 5 AND last_contacted_at IS NOT NULL
+               AND last_contacted_at < datetime('now', '-7 days')
+               ORDER BY warmth_score DESC LIMIT 5""", []
+        )
+        if cooling:
+            count = len(cooling)
+            top = cooling[0]['name']
+            insights.append(
+                f"you've got {count} warm relationship{'s' if count != 1 else ''} starting to go quiet — "
+                f"**{top}** being the hottest. Want me to prioritize those or something else?"
+            )
+    except Exception:
+        pass
+
+    # Check for overdue follow-ups
+    try:
+        overdue = fetch_all(
+            """SELECT title, due_date FROM follow_ups
+               WHERE status = 'pending' AND due_date < date('now')
+               ORDER BY due_date ASC LIMIT 5""", []
+        )
+        if overdue:
+            count = len(overdue)
+            insights.append(
+                f"you have {count} overdue follow-up{'s' if count != 1 else ''}. "
+                f"Want me to knock those out or focus on something fresh?"
+            )
+    except Exception:
+        pass
+
+    # Check for recent signals
+    try:
+        recent_signals = fetch_all(
+            """SELECT title FROM signals
+               WHERE created_at > datetime('now', '-3 days')
+               ORDER BY created_at DESC LIMIT 3""", []
+        )
+        if recent_signals:
+            count = len(recent_signals)
+            insights.append(
+                f"picked up {count} new signal{'s' if count != 1 else ''} in the last few days. "
+                f"Want me to dig into those or work your pipeline?"
+            )
+    except Exception:
+        pass
+
+    # Check for contacts needing attention
+    try:
+        untouched = fetch_all(
+            """SELECT c.first_name, c.last_name, g.name as group_name
+               FROM prospecting_contacts c
+               JOIN capital_groups g ON c.group_id = g.id
+               WHERE c.last_touch_at IS NULL OR c.last_touch_at < datetime('now', '-14 days')
+               ORDER BY g.warmth_score DESC LIMIT 5""", []
+        )
+        if untouched:
+            count = len(untouched)
+            insights.append(
+                f"{count} contact{'s' if count != 1 else ''} "
+                + ("haven't" if count != 1 else "hasn't")
+                + " been touched in a while. Want me to pull up the "
+                + ("best ones?" if count != 1 else "details?")
+            )
+    except Exception:
+        pass
+
+    greetings = [
+        "Hey —", "What's up —", "Hey there —", "Yo —",
+    ]
+    opener = random.choice(greetings)
+
+    if insights:
+        insight = random.choice(insights)
+        return f"{opener} quick heads up, {insight}"
+    else:
+        prompts = [
+            "what are we working on today?",
+            "what do you want to focus on?",
+            "what's on your plate?",
+            "ready when you are — what's the play?",
+        ]
+        return f"{opener} {random.choice(prompts)}"
 
 
 # ---------------------------------------------------------------------------
@@ -710,6 +832,7 @@ INTENT_KEYWORDS = {
 }
 
 INTENT_TO_MODE = {
+    'greeting':         'conversational',
     'normal_chat':      'conversational',
     'brainstorm':       'strategic',
     'diagnose':         'analyst',
@@ -1706,6 +1829,39 @@ RULES
     check the RESOLVED REFERENCES and ACTIVE PEOPLE/COMPANIES sections. Never ask "who?" when
     the conversation state already identifies the entity. Never re-research or re-ask about
     entities that were already discussed in the thread.
+
+═══════════════════════════════
+CONVERSATIONAL INTELLIGENCE (CRITICAL — governs ALL responses)
+═══════════════════════════════
+
+RESPONSE MODE:
+Your DEFAULT mode is conversational — respond like a sharp colleague, not a report generator.
+Only produce structured outputs (task lists, plans, ranked blocks) when the user EXPLICITLY asks.
+"Hey", "what's up", "yo" = greeting → respond naturally, do NOT produce a task list or plan.
+"What should I do today" = explicit request → produce a structured plan.
+
+REPEAT DETECTION — before EVERY response, check:
+1. Is this response similar to what was just shown? If the CONVERSATION STATE includes LAST OUTPUT SUMMARY, compare.
+2. Am I about to repeat a task list, plan, or structured block that was already displayed?
+If YES to either: DO NOT repeat. Instead, summarize briefly ("Those priorities haven't changed"), refine, or ask what direction to go.
+
+CONTEXT-AWARE REFERENCING:
+If information is already visible in the conversation history:
+→ Reference it ("The Moda and Quinn touches are still your top 2")
+→ Do NOT re-output the full list
+→ Only re-display if explicitly asked ("show me the list again")
+
+RESPONSE STRUCTURE for most messages:
+1. Acknowledge (1 sentence)
+2. One high-value insight (optional — only if genuinely useful)
+3. Direction or question (what to do next)
+
+HUMANIZATION:
+- Vary your openings. Never start two consecutive replies the same way.
+- Mix sentence lengths. Short punch + longer thought.
+- No filler phrases: "Absolutely!", "Great question!", "Of course!", "Sure thing!" — skip all of these.
+- Never produce identical phrasing across replies. If you wrote "Here's what I'd focus on:" last time, say it differently.
+- If the user just chatted casually, match that energy. Don't shift to operator mode unless they do.
 
 ═══════════════════════════════
 SLASH COMMANDS
@@ -7941,6 +8097,16 @@ def _chat_inner():
                 f"people={[p['name'] for p in conv_state['people'][-2:]]} "
                 f"companies={[c['name'] for c in conv_state['companies'][-2:]]} "
                 f"last_intent={conv_state.get('last_intent')}")
+
+    # Greeting handler — respond conversationally, never dump task lists
+    if intent == 'greeting':
+        greeting_resp = _handle_greeting(conv_state)
+        card = {'type': 'TextCard', 'text': greeting_resp, 'data': {}, 'actions': []}
+        _persist_chat(last_msg, card, 'greeting', 'conversational')
+        return jsonify({
+            'role': 'assistant', 'content': greeting_resp,
+            'card': card, 'intent': 'greeting', 'mode': 'conversational'
+        })
 
     # Performance action intercept — parse NLP, show preview card
     if intent == 'update_performance':
