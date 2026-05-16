@@ -650,6 +650,392 @@ def _classify_intent_contextual(text, state, msg_type):
     return base_intent
 
 
+# ---------------------------------------------------------------------------
+# Intent Router — Central routing system
+# ---------------------------------------------------------------------------
+
+_MOTIVATION_PATTERNS = frozenset([
+    'motivate', 'pump me up', 'fire me up', 'hype me', 'pep talk',
+    'cheer me up', 'get me going', 'need a push', 'need motivation',
+    'give me a push', 'inspire me',
+])
+
+_EMOTIONAL_PATTERNS = frozenset([
+    'stuck', 'overwhelmed', 'frustrated', 'worried', 'nervous',
+    'scared', 'confused', 'lost', 'anxious', 'stressed', 'burned out',
+    'burnout', 'exhausted', 'defeated', 'hopeless',
+])
+
+_STRATEGY_PATTERNS = frozenset([
+    'what do you think', 'your take', 'your thoughts', 'thoughts on',
+    'opinion', 'how should', 'what would you', 'should i',
+    'weigh in', 'perspective', 'honest opinion', 'real talk',
+    'level with me', 'straight talk', 'be honest',
+])
+
+_FEEDBACK_PATTERNS = frozenset([
+    'that sucked', 'terrible', 'not helpful', 'bad advice', 'wrong',
+    'off base', 'useless', 'that was bad', 'not what i meant',
+    'no that', 'nah', 'meh', 'that missed', 'way off', 'try again',
+])
+
+
+def _classify_fine_intent(text, msg_type, base_intent, conv_state):
+    """Map base intent + message type to one of 15 fine-grained intents."""
+    text_lower = text.lower()
+
+    if msg_type == 'greeting':
+        return 'greeting'
+    if msg_type == 'approval':
+        return 'approval_confirmation'
+    if msg_type == 'modification':
+        return 'modification_request'
+    if msg_type == 'continuation':
+        return 'clarification'
+
+    if msg_type == 'conversational' or base_intent in ('normal_chat', 'conversational'):
+        if any(p in text_lower for p in _MOTIVATION_PATTERNS):
+            return 'motivation'
+        if any(p in text_lower for p in _EMOTIONAL_PATTERNS):
+            return 'emotional_support'
+        if any(p in text_lower for p in _STRATEGY_PATTERNS):
+            return 'strategy_reasoning'
+        if any(p in text_lower for p in _FEEDBACK_PATTERNS):
+            return 'feedback'
+        return 'casual_chat'
+
+    if base_intent in ('analyze_company', 'analyze_contact', 'explain_metrics'):
+        return 'domain_question'
+    if base_intent == 'brainstorm':
+        return 'brainstorming'
+    if base_intent in ('diagnose', 'recommend_action', 'coach'):
+        return 'strategy_reasoning'
+    if base_intent == 'research_web':
+        return 'research_request'
+    if base_intent == 'draft_outreach':
+        return 'outreach_request'
+    if base_intent == 'schedule_meeting' and any(
+        p in text_lower for p in ['plan my day', 'schedule my day', 'build my day']
+    ):
+        return 'daily_plan_request'
+    if base_intent == 'export_report':
+        if any(p in text_lower for p in ['daily brief', 'morning brief', 'my brief']):
+            return 'daily_plan_request'
+        return 'execution_command'
+    if base_intent in ('crm_update', 'log_update_crm', 'push_forward', 'schedule_meeting',
+                        'update_calendar', 'update_performance', 'market_intel'):
+        return 'execution_command'
+
+    if conv_state.get('last_output_text') and len(text.split()) <= 6:
+        if any(p in text_lower for p in _FEEDBACK_PATTERNS):
+            return 'feedback'
+
+    return 'casual_chat'
+
+
+def _compute_routing_confidence(text, msg_type, base_intent, fine_intent, conv_state):
+    """Score 0.0-1.0 for how confident the router is in the classification."""
+    text_lower = text.lower()
+
+    if msg_type == 'greeting':
+        return 0.98
+    if msg_type == 'approval':
+        return 0.95 if _pending_action_cache else 0.55
+    if msg_type == 'modification':
+        return 0.90 if conv_state.get('last_output_text') else 0.60
+    if msg_type == 'continuation':
+        return 0.85
+
+    scores = {}
+    for intent_name, keywords in INTENT_KEYWORDS.items():
+        score = sum(1 for kw in keywords if kw in text_lower)
+        if score > 0:
+            scores[intent_name] = score
+
+    if not scores:
+        if msg_type == 'conversational':
+            return 0.85
+        return 0.50
+
+    sorted_vals = sorted(scores.values(), reverse=True)
+    top = sorted_vals[0]
+    second = sorted_vals[1] if len(sorted_vals) > 1 else 0
+
+    if top >= 3:
+        confidence = 0.95
+    elif top == 2:
+        confidence = 0.85
+    elif top == 1:
+        confidence = 0.72
+    else:
+        confidence = 0.50
+
+    _action_set = {'schedule_meeting', 'update_calendar', 'log_update_crm', 'crm_update',
+                    'update_performance', 'export_report', 'push_forward', 'research_web',
+                    'market_intel', 'draft_outreach'}
+    if second > 0 and top - second <= 1:
+        top_intents = [i for i, s in scores.items() if s == top]
+        all_action = all(i in _action_set for i in top_intents)
+        if not all_action:
+            confidence -= 0.15
+
+    if base_intent in _action_set and top >= 1:
+        confidence = max(confidence, 0.80)
+
+    if msg_type == 'conversational':
+        confidence = max(confidence, 0.82)
+
+    return min(0.99, max(0.30, round(confidence, 2)))
+
+
+_RESEARCH_SIGNALS = frozenset([
+    'research', 'look up', 'find out', 'dig into', 'background on',
+    'look into', 'search', 'google', 'web search',
+])
+
+_OUTREACH_SIGNALS = frozenset([
+    'draft', 'write email', 'write an email', 'outreach', 'reach out',
+    'message to', 'intro', 'cold email', 'linkedin message',
+])
+
+_DOMAIN_SIGNALS = frozenset([
+    'company', 'capital', 'fund', 'firm', 'btr', 'market', 'pipeline',
+    'warmth', 'relationship', 'deal',
+])
+
+
+def _detect_hybrid_needs(text, base_intent):
+    """Detect if a message requires multiple processing layers."""
+    text_lower = text.lower()
+    needs = {
+        'research': any(kw in text_lower for kw in _RESEARCH_SIGNALS),
+        'outreach': any(kw in text_lower for kw in _OUTREACH_SIGNALS),
+        'domain': any(kw in text_lower for kw in _DOMAIN_SIGNALS),
+    }
+    needs['count'] = sum(1 for v in needs.values() if v)
+    needs['is_hybrid'] = needs['count'] >= 2
+    return needs
+
+
+def _determine_route(fine_intent, confidence, hybrid_needs, pending_action_id):
+    """Pick the primary route for a message."""
+    if fine_intent == 'approval_confirmation' and pending_action_id:
+        return 'execution'
+
+    if hybrid_needs.get('is_hybrid') and confidence >= 0.75:
+        return 'hybrid'
+
+    if confidence < 0.75 and fine_intent in (
+        'execution_command', 'outreach_request', 'daily_plan_request'
+    ):
+        return 'clarify'
+
+    _ROUTE_MAP = {
+        'greeting':              'conversation',
+        'casual_chat':           'conversation',
+        'motivation':            'conversation',
+        'emotional_support':     'conversation',
+        'feedback':              'conversation',
+        'strategy_reasoning':    'conversation',
+        'brainstorming':         'conversation',
+        'domain_question':       'domain',
+        'research_request':      'research',
+        'outreach_request':      'execution',
+        'daily_plan_request':    'execution',
+        'execution_command':     'execution',
+        'approval_confirmation': 'conversation',
+        'modification_request':  'conversation',
+        'clarification':         'conversation',
+    }
+    return _ROUTE_MAP.get(fine_intent, 'conversation')
+
+
+def _determine_response_mode(fine_intent, route):
+    """Pick the response style for the final output."""
+    _MODE_MAP = {
+        'greeting':              'casual',
+        'casual_chat':           'casual',
+        'motivation':            'motivational',
+        'emotional_support':     'motivational',
+        'feedback':              'casual',
+        'strategy_reasoning':    'strategic',
+        'brainstorming':         'strategic',
+        'domain_question':       'structured',
+        'research_request':      'structured',
+        'outreach_request':      'structured',
+        'daily_plan_request':    'structured',
+        'execution_command':     'execution_confirmation',
+        'approval_confirmation': 'execution_confirmation',
+        'modification_request':  'casual',
+        'clarification':         'casual',
+    }
+    return _MODE_MAP.get(fine_intent, 'casual')
+
+
+def _build_routing_explanation(fine_intent, route, confidence, base_intent):
+    """Human-readable one-liner explaining the routing decision."""
+    if route == 'clarify':
+        return f"Low confidence ({confidence}) on {fine_intent} — asking for clarification"
+    if route == 'hybrid':
+        return f"Multi-layer request detected — {fine_intent} with combined processing"
+    return f"{fine_intent} → {route} (confidence={confidence}, base={base_intent})"
+
+
+def _route_message(text, messages, conv_state, msg_type, page_context=None):
+    """
+    Central intent router. Collects all context, classifies with confidence,
+    determines routing, and returns a structured result.
+
+    Returns dict with: route, intent, execution_intent, confidence,
+    requires_execution, requires_research, use_domain_context,
+    pending_action_id, referenced_entities, response_mode, explanation
+    """
+    pending_id = _pending_action_cache.get('id') if _pending_action_cache else None
+
+    base_intent = _classify_intent_contextual(text, conv_state, msg_type)
+    fine_intent = _classify_fine_intent(text, msg_type, base_intent, conv_state)
+    confidence = _compute_routing_confidence(text, msg_type, base_intent, fine_intent, conv_state)
+    hybrid = _detect_hybrid_needs(text, base_intent)
+    route = _determine_route(fine_intent, confidence, hybrid, pending_id)
+    resp_mode = _determine_response_mode(fine_intent, route)
+
+    entities = []
+    for p in conv_state.get('people', [])[-3:]:
+        entities.append({'type': 'contact', 'name': p.get('name', ''), 'id': p.get('id')})
+    for c in conv_state.get('companies', [])[-3:]:
+        entities.append({'type': 'company', 'name': c.get('name', ''), 'id': c.get('id')})
+
+    return {
+        'route': route,
+        'intent': fine_intent,
+        'execution_intent': base_intent,
+        'confidence': confidence,
+        'requires_execution': route in ('execution', 'hybrid'),
+        'requires_research': base_intent == 'research_web' or hybrid.get('research', False),
+        'use_domain_context': base_intent in (
+            'analyze_company', 'analyze_contact', 'explain_metrics',
+            'brainstorm', 'diagnose', 'market_intel'
+        ),
+        'pending_action_id': pending_id,
+        'referenced_entities': entities,
+        'response_mode': resp_mode,
+        'explanation': _build_routing_explanation(fine_intent, route, confidence, base_intent),
+        'hybrid_needs': hybrid,
+    }
+
+
+def _handle_low_confidence_clarification(text, router, conv_state):
+    """When confidence is too low for execution, ask one clarifying question."""
+    fine = router['intent']
+    if fine in ('outreach_request', 'research_request'):
+        return ("That could go a few ways — are you looking for me to research that, "
+                "draft outreach, or just talk through a strategy?")
+    if fine == 'daily_plan_request':
+        return ("Want me to build out a full schedule for you, or are you more "
+                "looking for priorities and recommendations?")
+    if fine == 'execution_command':
+        return ("I want to make sure I do the right thing here — are you asking me to "
+                "take action on this, or just thinking it through?")
+    return ("That could go a few ways — do you want me to actually do something specific, "
+            "or are you looking for strategy advice?")
+
+
+def _handle_hybrid_route(text, messages, conv_state, router, page_context, extra_ctx):
+    """Handle multi-layer messages (e.g., research + outreach synthesis)."""
+    hybrid = router.get('hybrid_needs', {})
+    research_ctx = ''
+
+    if hybrid.get('research'):
+        query = re.sub(
+            r'\b(research|look up|find out about|google|search for|search online|'
+            r'web search|dig into|background on|look into|and write|and draft|'
+            r'draft|outreach|write email|intro|reach out|write to|write me)\b',
+            '', text, flags=re.IGNORECASE
+        ).strip(' .,!?')
+        if not query or len(query) < 3:
+            if conv_state.get('companies'):
+                query = conv_state['companies'][-1]['name']
+            elif conv_state.get('people'):
+                query = conv_state['people'][-1]['name']
+        if query:
+            try:
+                research = _research_web(query)
+                if research and research.get('summary'):
+                    research_ctx = (
+                        f"\n\nRESEARCH RESULTS for '{query}':\n"
+                        f"{research['summary'][:2000]}"
+                    )
+                    if research.get('sources'):
+                        research_ctx += "\nSources: " + ", ".join(
+                            s.get('url', '') for s in research['sources'][:3]
+                        )
+            except Exception:
+                pass
+
+    combined = (extra_ctx or '') + research_ctx
+    if hybrid.get('outreach'):
+        combined += (
+            "\n\nHYBRID REQUEST: The user asked for both research and outreach. "
+            "Synthesize the research conversationally. If outreach was requested, "
+            "SUGGEST drafting it — say something like 'Want me to draft outreach based on this?' "
+            "Do NOT auto-generate drafts or structured output."
+        )
+    elif hybrid.get('domain'):
+        combined += (
+            "\n\nHYBRID REQUEST: The user combined research with domain questions. "
+            "Synthesize the findings with BTR domain context. Be specific and actionable."
+        )
+
+    brain_resp = _handle_conversational_brain(
+        text, messages, conv_state, router['execution_intent'], combined
+    )
+    card = {'type': 'TextCard', 'text': brain_resp, 'data': {}, 'actions': []}
+    _persist_chat(text, card, router['execution_intent'], 'hybrid')
+    try:
+        _extract_memory_from_exchange(text, brain_resp, router['execution_intent'])
+        _extract_persistent_memories(text, brain_resp, router['execution_intent'], conv_state)
+    except Exception:
+        pass
+    return jsonify({
+        'role': 'assistant', 'content': brain_resp,
+        'card': card, 'intent': router['execution_intent'], 'mode': 'hybrid',
+    })
+
+
+def _is_repeat_response(response, messages, threshold=0.65):
+    """Check if response word-overlaps too heavily with recent Leo responses."""
+    if not response or len(response.split()) < 8:
+        return False
+    recent = []
+    for msg in reversed(messages[-10:]):
+        if msg.get('role') == 'assistant':
+            content = msg.get('content', '')
+            if content:
+                recent.append(content)
+            if len(recent) >= 3:
+                break
+    resp_words = set(response.lower().split())
+    for prev in recent:
+        prev_words = set(prev.lower().split())
+        if len(resp_words) < 5 or len(prev_words) < 5:
+            continue
+        overlap = len(resp_words & prev_words) / max(len(resp_words), len(prev_words))
+        if overlap > threshold:
+            return True
+    return False
+
+
+def _reframe_response(response, text, messages, conv_state):
+    """Append a reframe prompt when repeat is detected."""
+    reframes = [
+        "\n\nLet me take a different angle — what specifically are you wrestling with?",
+        "\n\nI don't want to keep circling the same ground. What's the one thing that would move the needle right now?",
+        "\n\nLet me push deeper — what's the real blocker here?",
+    ]
+    import random as _rand
+    return response.rstrip() + _rand.choice(reframes)
+
+
 def _build_state_context_block(state, resolved, msg_type=None):
     """
     Build a context string to inject into the system prompt so Claude
@@ -1182,7 +1568,9 @@ INTENT_KEYWORDS = {
                          'add a company', 'create a group', 'add group', 'new group',
                          'add a group', 'create group', 'add to capital groups',
                          'add contact', 'add a contact', 'create contact', 'new contact',
-                         'create a contact', 'add them to'],
+                         'create a contact', 'add them to',
+                         'add phone', 'add email', 'update contact', 'add number',
+                         'update phone', 'update email', 'change phone', 'change email'],
     'push_forward':     ['push forward', 'advance', 'move forward', 'progress',
                          'accelerate', 'fast track', 'close the loop', 'drive forward',
                          'push them', 'push this', 'take to next level'],
@@ -8784,13 +9172,38 @@ def _chat_inner():
             'card': _early_creation, 'intent': 'crm_update', 'mode': 'execution'
         })
 
-    intent = _classify_intent_contextual(last_msg, conv_state, msg_type)
+    router = _route_message(last_msg, messages, conv_state, msg_type, page_context)
+    intent = router['execution_intent']
     mode = INTENT_TO_MODE.get(intent, 'strategic')
     max_tokens = MODE_MAX_TOKENS.get(mode, 2000)
-    logger.info(f"[Leo] state: msg_type={msg_type} intent={intent} "
+    logger.info(f"[Leo] router: route={router['route']} intent={router['intent']} "
+                f"confidence={router['confidence']:.2f} exec_intent={intent} "
+                f"requires_exec={router['requires_execution']} "
                 f"people={[p['name'] for p in conv_state['people'][-2:]]} "
                 f"companies={[c['name'] for c in conv_state['companies'][-2:]]} "
                 f"last_intent={conv_state.get('last_intent')}")
+
+    # Confidence safety — low confidence on execution routes triggers clarification
+    if router['route'] == 'clarify' and msg_type == 'new':
+        clarify_resp = _handle_low_confidence_clarification(last_msg, router, conv_state)
+        card = {'type': 'TextCard', 'text': clarify_resp, 'data': {}, 'actions': []}
+        _persist_chat(last_msg, card, 'clarification', 'conversational')
+        return jsonify({
+            'role': 'assistant', 'content': clarify_resp,
+            'card': card, 'intent': 'clarification', 'mode': 'conversational'
+        })
+
+    # Hybrid routing — multi-layer messages (e.g., research + outreach synthesis)
+    if router['route'] == 'hybrid':
+        page_extra = ""
+        if page_context.get('active_tab'):
+            page_extra += f"\nUser is on the '{page_context['active_tab']}' page."
+        hybrid_result = _handle_hybrid_route(
+            last_msg, messages, conv_state, router, page_context,
+            (extra_ctx or '') + page_extra
+        )
+        if hybrid_result:
+            return hybrid_result
 
     # Greeting handler — respond conversationally, never dump task lists
     if intent == 'greeting':
@@ -9225,6 +9638,9 @@ def _chat_inner():
         brain_resp = _handle_conversational_brain(
             last_msg, messages, conv_state, intent, combined_extra
         )
+        # Repeat prevention — reframe if too similar to recent responses
+        if _is_repeat_response(brain_resp, messages):
+            brain_resp = _reframe_response(brain_resp, last_msg, messages, conv_state)
         card = {'type': 'TextCard', 'text': brain_resp, 'data': {}, 'actions': []}
         _persist_chat(last_msg, card, intent, 'conversational')
         try:
