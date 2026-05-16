@@ -36,6 +36,7 @@ _state_lock = threading.Lock()
 
 _APPROVAL_PHRASES = frozenset([
     'approved', 'approve', 'proceed', 'yes', 'confirm', 'confirmed',
+    'sure', 'okay', 'ok', 'yep', 'yup', 'cool',
     'add these', 'add them', 'go ahead', 'do it', 'looks good',
     'add to calendar', 'add to my calendar', 'put on calendar',
     'put on my calendar', 'schedule these', 'schedule them',
@@ -44,6 +45,7 @@ _APPROVAL_PHRASES = frozenset([
     'yes please', 'please proceed', 'go for it', 'let\'s do it',
     'add all', 'confirm all', 'approve all', 'execute',
     'do it all', 'make it happen', 'lock it in',
+    'works for me', 'that works', 'good to go', 'all good',
 ])
 
 _APPROVAL_NEGATORS = frozenset(['but', 'however', 'change', 'instead', 'wait', 'except', 'modify', 'actually', 'hold on', 'not yet'])
@@ -545,13 +547,14 @@ def _detect_message_type(text, state):
         'add contact', 'add a contact', 'adding a contact', 'adding contact',
         'create contact', 'create a contact',
         'add company', 'add a company', 'adding a company', 'adding company',
-        'create company', 'create a company',
-        'add group', 'add a group', 'create group', 'create a group',
+        'create company', 'create a company', 'creating a company', 'creating company',
+        'add group', 'add a group', 'create group', 'create a group', 'creating a group', 'creating group',
         'add to capital', 'add to my',
         'schedule meeting', 'schedule a meeting', 'book meeting', 'book a meeting',
         'schedule a call', 'set up a meeting',
         'draft email', 'draft outreach', 'draft a', 'write email', 'write an email',
-        'reach out to', 'send email', 'send a message',
+        'reach out to', 'send email', 'send a message', 'reply to', 'respond to',
+        'write outreach', 'cold email', 'linkedin message',
         'log touchpoint', 'log a call', 'log call', 'update stage', 'set warmth',
         'add note', 'add a note',
         'research', 'look up', 'look into',
@@ -576,7 +579,13 @@ def _detect_message_type(text, state):
             'should i be worried', 'am i doing okay', 'how am i doing',
             'i feel like', 'i\'m not sure', 'i don\'t want to',
             'convince me', 'why should i', 'is it worth',
-            'pep talk', 'cheer me up', 'i\'m frustrated',
+            'pep talk', 'cheer me up', 'i\'m frustrated', 'i am frustrated', 'im frustrated',
+            'give me advice', 'tell me more', 'go deeper',
+            'break it down', 'what else', 'keep going',
+            'i\'m worried', 'im worried', 'i am worried',
+            'i\'m confused', 'im confused', 'i am confused',
+            'what would you do', 'honest opinion', 'real talk',
+            'be honest', 'level with me', 'straight talk',
         ]
         if any(p in text_lower for p in _CONVERSATIONAL_PATTERNS):
             return 'conversational'
@@ -639,6 +648,392 @@ def _classify_intent_contextual(text, state, msg_type):
             return last
 
     return base_intent
+
+
+# ---------------------------------------------------------------------------
+# Intent Router — Central routing system
+# ---------------------------------------------------------------------------
+
+_MOTIVATION_PATTERNS = frozenset([
+    'motivate', 'pump me up', 'fire me up', 'hype me', 'pep talk',
+    'cheer me up', 'get me going', 'need a push', 'need motivation',
+    'give me a push', 'inspire me',
+])
+
+_EMOTIONAL_PATTERNS = frozenset([
+    'stuck', 'overwhelmed', 'frustrated', 'worried', 'nervous',
+    'scared', 'confused', 'lost', 'anxious', 'stressed', 'burned out',
+    'burnout', 'exhausted', 'defeated', 'hopeless',
+])
+
+_STRATEGY_PATTERNS = frozenset([
+    'what do you think', 'your take', 'your thoughts', 'thoughts on',
+    'opinion', 'how should', 'what would you', 'should i',
+    'weigh in', 'perspective', 'honest opinion', 'real talk',
+    'level with me', 'straight talk', 'be honest',
+])
+
+_FEEDBACK_PATTERNS = frozenset([
+    'that sucked', 'terrible', 'not helpful', 'bad advice', 'wrong',
+    'off base', 'useless', 'that was bad', 'not what i meant',
+    'no that', 'nah', 'meh', 'that missed', 'way off', 'try again',
+])
+
+
+def _classify_fine_intent(text, msg_type, base_intent, conv_state):
+    """Map base intent + message type to one of 15 fine-grained intents."""
+    text_lower = text.lower()
+
+    if msg_type == 'greeting':
+        return 'greeting'
+    if msg_type == 'approval':
+        return 'approval_confirmation'
+    if msg_type == 'modification':
+        return 'modification_request'
+    if msg_type == 'continuation':
+        return 'clarification'
+
+    if msg_type == 'conversational' or base_intent in ('normal_chat', 'conversational'):
+        if any(p in text_lower for p in _MOTIVATION_PATTERNS):
+            return 'motivation'
+        if any(p in text_lower for p in _EMOTIONAL_PATTERNS):
+            return 'emotional_support'
+        if any(p in text_lower for p in _STRATEGY_PATTERNS):
+            return 'strategy_reasoning'
+        if any(p in text_lower for p in _FEEDBACK_PATTERNS):
+            return 'feedback'
+        return 'casual_chat'
+
+    if base_intent in ('analyze_company', 'analyze_contact', 'explain_metrics'):
+        return 'domain_question'
+    if base_intent == 'brainstorm':
+        return 'brainstorming'
+    if base_intent in ('diagnose', 'recommend_action', 'coach'):
+        return 'strategy_reasoning'
+    if base_intent == 'research_web':
+        return 'research_request'
+    if base_intent == 'draft_outreach':
+        return 'outreach_request'
+    if base_intent == 'schedule_meeting' and any(
+        p in text_lower for p in ['plan my day', 'schedule my day', 'build my day']
+    ):
+        return 'daily_plan_request'
+    if base_intent == 'export_report':
+        if any(p in text_lower for p in ['daily brief', 'morning brief', 'my brief']):
+            return 'daily_plan_request'
+        return 'execution_command'
+    if base_intent in ('crm_update', 'log_update_crm', 'push_forward', 'schedule_meeting',
+                        'update_calendar', 'update_performance', 'market_intel'):
+        return 'execution_command'
+
+    if conv_state.get('last_output_text') and len(text.split()) <= 6:
+        if any(p in text_lower for p in _FEEDBACK_PATTERNS):
+            return 'feedback'
+
+    return 'casual_chat'
+
+
+def _compute_routing_confidence(text, msg_type, base_intent, fine_intent, conv_state):
+    """Score 0.0-1.0 for how confident the router is in the classification."""
+    text_lower = text.lower()
+
+    if msg_type == 'greeting':
+        return 0.98
+    if msg_type == 'approval':
+        return 0.95 if _pending_action_cache else 0.55
+    if msg_type == 'modification':
+        return 0.90 if conv_state.get('last_output_text') else 0.60
+    if msg_type == 'continuation':
+        return 0.85
+
+    scores = {}
+    for intent_name, keywords in INTENT_KEYWORDS.items():
+        score = sum(1 for kw in keywords if kw in text_lower)
+        if score > 0:
+            scores[intent_name] = score
+
+    if not scores:
+        if msg_type == 'conversational':
+            return 0.85
+        return 0.50
+
+    sorted_vals = sorted(scores.values(), reverse=True)
+    top = sorted_vals[0]
+    second = sorted_vals[1] if len(sorted_vals) > 1 else 0
+
+    if top >= 3:
+        confidence = 0.95
+    elif top == 2:
+        confidence = 0.85
+    elif top == 1:
+        confidence = 0.72
+    else:
+        confidence = 0.50
+
+    _action_set = {'schedule_meeting', 'update_calendar', 'log_update_crm', 'crm_update',
+                    'update_performance', 'export_report', 'push_forward', 'research_web',
+                    'market_intel', 'draft_outreach'}
+    if second > 0 and top - second <= 1:
+        top_intents = [i for i, s in scores.items() if s == top]
+        all_action = all(i in _action_set for i in top_intents)
+        if not all_action:
+            confidence -= 0.15
+
+    if base_intent in _action_set and top >= 1:
+        confidence = max(confidence, 0.80)
+
+    if msg_type == 'conversational':
+        confidence = max(confidence, 0.82)
+
+    return min(0.99, max(0.30, round(confidence, 2)))
+
+
+_RESEARCH_SIGNALS = frozenset([
+    'research', 'look up', 'find out', 'dig into', 'background on',
+    'look into', 'search', 'google', 'web search',
+])
+
+_OUTREACH_SIGNALS = frozenset([
+    'draft', 'write email', 'write an email', 'outreach', 'reach out',
+    'message to', 'intro', 'cold email', 'linkedin message',
+])
+
+_DOMAIN_SIGNALS = frozenset([
+    'company', 'capital', 'fund', 'firm', 'btr', 'market', 'pipeline',
+    'warmth', 'relationship', 'deal',
+])
+
+
+def _detect_hybrid_needs(text, base_intent):
+    """Detect if a message requires multiple processing layers."""
+    text_lower = text.lower()
+    needs = {
+        'research': any(kw in text_lower for kw in _RESEARCH_SIGNALS),
+        'outreach': any(kw in text_lower for kw in _OUTREACH_SIGNALS),
+        'domain': any(kw in text_lower for kw in _DOMAIN_SIGNALS),
+    }
+    needs['count'] = sum(1 for v in needs.values() if v)
+    needs['is_hybrid'] = needs['count'] >= 2
+    return needs
+
+
+def _determine_route(fine_intent, confidence, hybrid_needs, pending_action_id):
+    """Pick the primary route for a message."""
+    if fine_intent == 'approval_confirmation' and pending_action_id:
+        return 'execution'
+
+    if hybrid_needs.get('is_hybrid') and confidence >= 0.75:
+        return 'hybrid'
+
+    if confidence < 0.75 and fine_intent in (
+        'execution_command', 'outreach_request', 'daily_plan_request'
+    ):
+        return 'clarify'
+
+    _ROUTE_MAP = {
+        'greeting':              'conversation',
+        'casual_chat':           'conversation',
+        'motivation':            'conversation',
+        'emotional_support':     'conversation',
+        'feedback':              'conversation',
+        'strategy_reasoning':    'conversation',
+        'brainstorming':         'conversation',
+        'domain_question':       'domain',
+        'research_request':      'research',
+        'outreach_request':      'execution',
+        'daily_plan_request':    'execution',
+        'execution_command':     'execution',
+        'approval_confirmation': 'conversation',
+        'modification_request':  'conversation',
+        'clarification':         'conversation',
+    }
+    return _ROUTE_MAP.get(fine_intent, 'conversation')
+
+
+def _determine_response_mode(fine_intent, route):
+    """Pick the response style for the final output."""
+    _MODE_MAP = {
+        'greeting':              'casual',
+        'casual_chat':           'casual',
+        'motivation':            'motivational',
+        'emotional_support':     'motivational',
+        'feedback':              'casual',
+        'strategy_reasoning':    'strategic',
+        'brainstorming':         'strategic',
+        'domain_question':       'structured',
+        'research_request':      'structured',
+        'outreach_request':      'structured',
+        'daily_plan_request':    'structured',
+        'execution_command':     'execution_confirmation',
+        'approval_confirmation': 'execution_confirmation',
+        'modification_request':  'casual',
+        'clarification':         'casual',
+    }
+    return _MODE_MAP.get(fine_intent, 'casual')
+
+
+def _build_routing_explanation(fine_intent, route, confidence, base_intent):
+    """Human-readable one-liner explaining the routing decision."""
+    if route == 'clarify':
+        return f"Low confidence ({confidence}) on {fine_intent} — asking for clarification"
+    if route == 'hybrid':
+        return f"Multi-layer request detected — {fine_intent} with combined processing"
+    return f"{fine_intent} → {route} (confidence={confidence}, base={base_intent})"
+
+
+def _route_message(text, messages, conv_state, msg_type, page_context=None):
+    """
+    Central intent router. Collects all context, classifies with confidence,
+    determines routing, and returns a structured result.
+
+    Returns dict with: route, intent, execution_intent, confidence,
+    requires_execution, requires_research, use_domain_context,
+    pending_action_id, referenced_entities, response_mode, explanation
+    """
+    pending_id = _pending_action_cache.get('id') if _pending_action_cache else None
+
+    base_intent = _classify_intent_contextual(text, conv_state, msg_type)
+    fine_intent = _classify_fine_intent(text, msg_type, base_intent, conv_state)
+    confidence = _compute_routing_confidence(text, msg_type, base_intent, fine_intent, conv_state)
+    hybrid = _detect_hybrid_needs(text, base_intent)
+    route = _determine_route(fine_intent, confidence, hybrid, pending_id)
+    resp_mode = _determine_response_mode(fine_intent, route)
+
+    entities = []
+    for p in conv_state.get('people', [])[-3:]:
+        entities.append({'type': 'contact', 'name': p.get('name', ''), 'id': p.get('id')})
+    for c in conv_state.get('companies', [])[-3:]:
+        entities.append({'type': 'company', 'name': c.get('name', ''), 'id': c.get('id')})
+
+    return {
+        'route': route,
+        'intent': fine_intent,
+        'execution_intent': base_intent,
+        'confidence': confidence,
+        'requires_execution': route in ('execution', 'hybrid'),
+        'requires_research': base_intent == 'research_web' or hybrid.get('research', False),
+        'use_domain_context': base_intent in (
+            'analyze_company', 'analyze_contact', 'explain_metrics',
+            'brainstorm', 'diagnose', 'market_intel'
+        ),
+        'pending_action_id': pending_id,
+        'referenced_entities': entities,
+        'response_mode': resp_mode,
+        'explanation': _build_routing_explanation(fine_intent, route, confidence, base_intent),
+        'hybrid_needs': hybrid,
+    }
+
+
+def _handle_low_confidence_clarification(text, router, conv_state):
+    """When confidence is too low for execution, ask one clarifying question."""
+    fine = router['intent']
+    if fine in ('outreach_request', 'research_request'):
+        return ("That could go a few ways — are you looking for me to research that, "
+                "draft outreach, or just talk through a strategy?")
+    if fine == 'daily_plan_request':
+        return ("Want me to build out a full schedule for you, or are you more "
+                "looking for priorities and recommendations?")
+    if fine == 'execution_command':
+        return ("I want to make sure I do the right thing here — are you asking me to "
+                "take action on this, or just thinking it through?")
+    return ("That could go a few ways — do you want me to actually do something specific, "
+            "or are you looking for strategy advice?")
+
+
+def _handle_hybrid_route(text, messages, conv_state, router, page_context, extra_ctx):
+    """Handle multi-layer messages (e.g., research + outreach synthesis)."""
+    hybrid = router.get('hybrid_needs', {})
+    research_ctx = ''
+
+    if hybrid.get('research'):
+        query = re.sub(
+            r'\b(research|look up|find out about|google|search for|search online|'
+            r'web search|dig into|background on|look into|and write|and draft|'
+            r'draft|outreach|write email|intro|reach out|write to|write me)\b',
+            '', text, flags=re.IGNORECASE
+        ).strip(' .,!?')
+        if not query or len(query) < 3:
+            if conv_state.get('companies'):
+                query = conv_state['companies'][-1]['name']
+            elif conv_state.get('people'):
+                query = conv_state['people'][-1]['name']
+        if query:
+            try:
+                research = _research_web(query)
+                if research and research.get('summary'):
+                    research_ctx = (
+                        f"\n\nRESEARCH RESULTS for '{query}':\n"
+                        f"{research['summary'][:2000]}"
+                    )
+                    if research.get('sources'):
+                        research_ctx += "\nSources: " + ", ".join(
+                            s.get('url', '') for s in research['sources'][:3]
+                        )
+            except Exception:
+                pass
+
+    combined = (extra_ctx or '') + research_ctx
+    if hybrid.get('outreach'):
+        combined += (
+            "\n\nHYBRID REQUEST: The user asked for both research and outreach. "
+            "Synthesize the research conversationally. If outreach was requested, "
+            "SUGGEST drafting it — say something like 'Want me to draft outreach based on this?' "
+            "Do NOT auto-generate drafts or structured output."
+        )
+    elif hybrid.get('domain'):
+        combined += (
+            "\n\nHYBRID REQUEST: The user combined research with domain questions. "
+            "Synthesize the findings with BTR domain context. Be specific and actionable."
+        )
+
+    brain_resp = _handle_conversational_brain(
+        text, messages, conv_state, router['execution_intent'], combined
+    )
+    card = {'type': 'TextCard', 'text': brain_resp, 'data': {}, 'actions': []}
+    _persist_chat(text, card, router['execution_intent'], 'hybrid')
+    try:
+        _extract_memory_from_exchange(text, brain_resp, router['execution_intent'])
+        _extract_persistent_memories(text, brain_resp, router['execution_intent'], conv_state)
+    except Exception:
+        pass
+    return jsonify({
+        'role': 'assistant', 'content': brain_resp,
+        'card': card, 'intent': router['execution_intent'], 'mode': 'hybrid',
+    })
+
+
+def _is_repeat_response(response, messages, threshold=0.65):
+    """Check if response word-overlaps too heavily with recent Leo responses."""
+    if not response or len(response.split()) < 8:
+        return False
+    recent = []
+    for msg in reversed(messages[-10:]):
+        if msg.get('role') == 'assistant':
+            content = msg.get('content', '')
+            if content:
+                recent.append(content)
+            if len(recent) >= 3:
+                break
+    resp_words = set(response.lower().split())
+    for prev in recent:
+        prev_words = set(prev.lower().split())
+        if len(resp_words) < 5 or len(prev_words) < 5:
+            continue
+        overlap = len(resp_words & prev_words) / max(len(resp_words), len(prev_words))
+        if overlap > threshold:
+            return True
+    return False
+
+
+def _reframe_response(response, text, messages, conv_state):
+    """Append a reframe prompt when repeat is detected."""
+    reframes = [
+        "\n\nLet me take a different angle — what specifically are you wrestling with?",
+        "\n\nI don't want to keep circling the same ground. What's the one thing that would move the needle right now?",
+        "\n\nLet me push deeper — what's the real blocker here?",
+    ]
+    import random as _rand
+    return response.rstrip() + _rand.choice(reframes)
 
 
 def _build_state_context_block(state, resolved, msg_type=None):
@@ -752,6 +1147,18 @@ When the user is chatting, brainstorming, venting, strategizing, asking for opin
 → Ground advice in their specific pipeline when relevant
 → Ask smart follow-ups when you need clarity
 
+RESPONSE LENGTH:
+→ Greeting/casual: 1-2 sentences
+→ Motivation/emotional: 2-4 sentences (one key insight, one push)
+→ Strategy/analysis: 3-6 sentences (reasoning + recommendation)
+→ Deep brainstorming: up to 2 short paragraphs
+→ Never exceed 2 paragraphs unless the user explicitly asks for depth
+
+AMBIGUOUS REQUESTS:
+→ If the user's intent is unclear, respond conversationally AND ask one clarifying question
+→ "That could go a few ways — are you looking for strategy advice or want me to actually draft something?"
+→ Never guess wrong and auto-execute. When in doubt, stay conversational.
+
 When you think an action would help:
 → SUGGEST it naturally: "Want me to draft that?" / "I can schedule that if you give me a time."
 → NEVER auto-execute or produce structured output
@@ -785,6 +1192,19 @@ You have the user's CRM data in the context below. Use it to:
 But NEVER dump data. Weave it in naturally:
 GOOD: "LionKnox is your warmest right now at 7/10 — haven't talked to them in 12 days though."
 BAD: "PIPELINE DATA: LionKnox — warmth_score=7, last_contacted_at=2025-05-04..."
+
+═══════════════════════════════
+PERSISTENT MEMORY
+═══════════════════════════════
+
+You have persistent memory — facts, preferences, and context that carry across sessions.
+When memory is provided below, USE it to personalize your responses:
+- Reference past conversations naturally: "Last time we talked about LionKnox..."
+- Apply learned preferences: if Max prefers relationship-first, don't suggest cold pitches
+- Use contact/company memories to ground advice in history
+- Items marked [unconfirmed] are low-confidence — don't state them as fact
+
+If memory contradicts current data, trust the current CRM data over old memories.
 
 ═══════════════════════════════
 REPEAT PROTECTION
@@ -911,6 +1331,11 @@ def _handle_conversational_brain(text, messages, conv_state, intent='conversatio
         pass
 
     system = CONVERSATIONAL_BRAIN_PROMPT
+
+    memory_ctx = _get_relevant_memories(text, conv_state)
+    if memory_ctx:
+        system += "\n\n--- PERSISTENT MEMORY ---\n" + memory_ctx
+
     if context_parts:
         system += "\n\n--- CONVERSATION STATE ---\n" + "\n".join(context_parts)
     if crm_parts:
@@ -971,10 +1396,40 @@ def _handle_conversational_fallback(text, conv_state):
         ]
         return random.choice(responses)
 
-    if any(w in text_lower for w in ['think', 'opinion', 'take', 'thoughts']):
-        return "Give me something specific and I'll give you a real opinion. What are you weighing?"
+    if any(w in text_lower for w in ['think', 'opinion', 'take', 'thoughts', 'honest', 'level with']):
+        responses = [
+            "Give me something specific and I'll give you a real opinion. What are you weighing?",
+            "Happy to weigh in — what's the situation?",
+            "I'll shoot straight. What's on your mind?",
+        ]
+        return random.choice(responses)
 
-    return "I'm here. What are you working through?"
+    if any(w in text_lower for w in ['strateg', 'approach', 'brainstorm', 'idea', 'how could', 'what if']):
+        responses = [
+            "Let's think through this. What angle are you coming from right now?",
+            "Good — strategy mode. Give me the setup and I'll riff with you.",
+            "I've got some thoughts. What are you working with so far?",
+        ]
+        return random.choice(responses)
+
+    if any(w in text_lower for w in ['worried', 'nervous', 'scared', 'confused', 'frustrated']):
+        responses = [
+            "Let's break it down. What's the biggest thing eating at you right now?",
+            "One thing at a time. Tell me what's going on and we'll figure it out.",
+            "Take a breath. What happened — give me the short version.",
+        ]
+        return random.choice(responses)
+
+    if any(w in text_lower for w in ['explain', 'what does', 'what is', 'how does', 'define', 'mean']):
+        return "Sure — what concept or metric are you trying to understand?"
+
+    general_responses = [
+        "I'm here. What are you working through?",
+        "What's on your mind?",
+        "Talk to me — what's going on?",
+        "I'm listening. What do you need?",
+    ]
+    return random.choice(general_responses)
 
 
 def _handle_greeting(conv_state):
@@ -1061,6 +1516,11 @@ def _handle_greeting(conv_state):
     ]
     opener = random.choice(greetings)
 
+    proactive = _check_proactive_alerts()
+    if proactive:
+        for alert in proactive[:2]:
+            insights.append(alert)
+
     if insights:
         insight = random.choice(insights)
         return f"{opener} quick heads up, {insight}"
@@ -1086,8 +1546,8 @@ INTENT_KEYWORDS = {
                          'low', 'behind', 'stuck', 'bottleneck', 'what went wrong'],
     'build_prompt':     ['build prompt', 'write prompt', 'create prompt', 'prompt for',
                          'claude prompt', 'ai prompt', 'system design', 'architect'],
-    'draft_outreach':   ['draft', 'write email', 'outreach', 'message to', 'reach out',
-                         'cold email', 'linkedin message', 'write to'],
+    'draft_outreach':   ['draft', 'write email', 'write an email', 'outreach', 'message to', 'reach out',
+                         'cold email', 'linkedin message', 'write to', 'send email', 'send an email'],
     'explain_metrics':  ['explain', 'what does', 'what is', 'how does', 'mean by',
                          'metric', 'score', 'warmth', 'define'],
     'analyze_contact':  ['about this contact', 'tell me about', 'who is', 'contact info',
@@ -1108,7 +1568,9 @@ INTENT_KEYWORDS = {
                          'add a company', 'create a group', 'add group', 'new group',
                          'add a group', 'create group', 'add to capital groups',
                          'add contact', 'add a contact', 'create contact', 'new contact',
-                         'create a contact', 'add them to'],
+                         'create a contact', 'add them to',
+                         'add phone', 'add email', 'update contact', 'add number',
+                         'update phone', 'update email', 'change phone', 'change email'],
     'push_forward':     ['push forward', 'advance', 'move forward', 'progress',
                          'accelerate', 'fast track', 'close the loop', 'drive forward',
                          'push them', 'push this', 'take to next level'],
@@ -1215,17 +1677,16 @@ def _classify_intent(text):
 
     best_intent = 'normal_chat'
     best_score = 0
+    action_intents = {'schedule_meeting', 'update_calendar', 'log_update_crm', 'crm_update',
+                      'update_performance', 'export_report', 'push_forward', 'research_web',
+                      'market_intel', 'draft_outreach'}
     for intent, keywords in INTENT_KEYWORDS.items():
         score = sum(1 for kw in keywords if kw in text_lower)
-        if score > best_score:
+        if score > best_score or (score == best_score and score > 0
+                                   and intent in action_intents and best_intent not in action_intents):
             best_score = score
             best_intent = intent
 
-    # Action intents (scheduling, CRM updates, logging) should trigger on a single keyword match
-    # because their keywords are already specific multi-word phrases
-    action_intents = {'schedule_meeting', 'update_calendar', 'log_update_crm', 'crm_update',
-                      'update_performance', 'export_report', 'push_forward', 'research_web',
-                      'market_intel'}
     if best_score >= 1 and best_intent in action_intents:
         return best_intent
 
@@ -5096,8 +5557,305 @@ def _extract_memory_from_exchange(user_msg, reply_text, intent):
 
 
 # ---------------------------------------------------------------------------
-# V9: Real-time event awareness — track and surface CRM events
+# Persistent Memory System — cross-session intelligence
 # ---------------------------------------------------------------------------
+
+def _store_memory(memory_type, content, entity_id=None, entity_name=None,
+                  category=None, source='conversation', confidence=0.8):
+    """Store a persistent memory. Deduplicates against existing similar memories."""
+    content = content.strip()
+    if not content or len(content) < 5:
+        return
+    try:
+        if entity_id:
+            existing = fetch_one(
+                "SELECT id, content FROM leo_memory WHERE memory_type = ? AND entity_id = ? AND content = ?",
+                [memory_type, entity_id, content[:500]]
+            )
+        else:
+            existing = fetch_one(
+                "SELECT id, content FROM leo_memory WHERE memory_type = ? AND content = ? AND entity_id IS NULL",
+                [memory_type, content[:500]]
+            )
+        if existing:
+            execute(
+                "UPDATE leo_memory SET access_count = access_count + 1, updated_at = CURRENT_TIMESTAMP, confidence = MIN(1.0, confidence + 0.05) WHERE id = ?",
+                [existing['id']]
+            )
+            return
+        execute(
+            """INSERT INTO leo_memory (id, memory_type, category, entity_id, entity_name, content, source, confidence, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
+            [new_id(), memory_type, category, entity_id, entity_name, content[:500], source, confidence]
+        )
+    except Exception:
+        logger.debug("Failed to store memory", exc_info=True)
+
+
+def _get_memories(memory_type=None, entity_id=None, limit=10, min_confidence=0.3):
+    """Retrieve persistent memories with optional filters."""
+    try:
+        conditions = ["confidence >= ?"]
+        params = [min_confidence]
+        if memory_type:
+            conditions.append("memory_type = ?")
+            params.append(memory_type)
+        if entity_id:
+            conditions.append("entity_id = ?")
+            params.append(entity_id)
+        where = " AND ".join(conditions)
+        params.append(limit)
+        rows = fetch_all(
+            f"SELECT * FROM leo_memory WHERE {where} ORDER BY updated_at DESC LIMIT ?",
+            params
+        )
+        return rows or []
+    except Exception:
+        return []
+
+
+def _get_user_profile_memories():
+    """Retrieve Max's profile memories for prompt injection."""
+    memories = _get_memories(memory_type='user_profile', limit=15)
+    preferences = _get_memories(memory_type='preference', limit=10)
+    if not memories and not preferences:
+        return ""
+    parts = []
+    if memories:
+        parts.append("WHAT LEO KNOWS ABOUT MAX:")
+        for m in memories:
+            conf_tag = "" if m['confidence'] >= 0.8 else " [unconfirmed]"
+            parts.append(f"  - {m['content']}{conf_tag}")
+    if preferences:
+        parts.append("MAX'S PREFERENCES:")
+        for p in preferences:
+            conf_tag = "" if p['confidence'] >= 0.8 else " [unconfirmed]"
+            parts.append(f"  - {p['content']}{conf_tag}")
+    return "\n".join(parts)
+
+
+def _get_entity_memories(entity_id=None, entity_name=None, memory_type=None):
+    """Retrieve memories about a specific contact or company."""
+    if entity_id:
+        memories = _get_memories(memory_type=memory_type, entity_id=entity_id, limit=8)
+        if memories:
+            return memories
+    if entity_name:
+        try:
+            rows = fetch_all(
+                """SELECT * FROM leo_memory
+                   WHERE entity_name IS NOT NULL AND LOWER(entity_name) = ?
+                   AND confidence >= 0.3
+                   ORDER BY updated_at DESC LIMIT 8""",
+                [entity_name.lower()]
+            )
+            return rows or []
+        except Exception:
+            return []
+    return []
+
+
+def _get_relevant_memories(text, conv_state, limit=12):
+    """Retrieve memories relevant to the current message — smart retrieval."""
+    parts = []
+
+    profile = _get_user_profile_memories()
+    if profile:
+        parts.append(profile)
+
+    try:
+        mentioned_groups = _find_groups_fuzzy(text)
+        for g in mentioned_groups[:2]:
+            mems = _get_entity_memories(entity_id=g['id'], memory_type='company')
+            if mems:
+                parts.append(f"MEMORIES ABOUT {g['name'].upper()}:")
+                for m in mems[:4]:
+                    conf_tag = "" if m['confidence'] >= 0.8 else " [unconfirmed]"
+                    parts.append(f"  - {m['content']}{conf_tag}")
+
+        mentioned_contacts = _find_contacts_fuzzy(text)
+        for c in mentioned_contacts[:2]:
+            mems = _get_entity_memories(entity_id=c['id'], memory_type='contact')
+            if mems:
+                cname = f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
+                parts.append(f"MEMORIES ABOUT {cname.upper()}:")
+                for m in mems[:4]:
+                    conf_tag = "" if m['confidence'] >= 0.8 else " [unconfirmed]"
+                    parts.append(f"  - {m['content']}{conf_tag}")
+    except Exception:
+        pass
+
+    if conv_state.get('companies'):
+        for comp in conv_state['companies'][-2:]:
+            try:
+                mems = _get_entity_memories(entity_name=comp['name'], memory_type='company')
+                if mems:
+                    parts.append(f"MEMORIES ABOUT {comp['name'].upper()}:")
+                    for m in mems[:3]:
+                        conf_tag = "" if m['confidence'] >= 0.8 else " [unconfirmed]"
+                        parts.append(f"  - {m['content']}{conf_tag}")
+            except Exception:
+                pass
+    if conv_state.get('people'):
+        for person in conv_state['people'][-2:]:
+            try:
+                mems = _get_entity_memories(entity_name=person['name'], memory_type='contact')
+                if mems:
+                    parts.append(f"MEMORIES ABOUT {person['name'].upper()}:")
+                    for m in mems[:3]:
+                        conf_tag = "" if m['confidence'] >= 0.8 else " [unconfirmed]"
+                        parts.append(f"  - {m['content']}{conf_tag}")
+            except Exception:
+                pass
+
+    recent_conv = _get_memories(memory_type='conversation', limit=5)
+    if recent_conv:
+        parts.append("RECENT CONVERSATION CONTEXT:")
+        for m in recent_conv:
+            age = _days_since(m.get('created_at'))
+            when = "today" if age == 0 else f"{age}d ago"
+            parts.append(f"  - ({when}) {m['content']}")
+
+    return "\n".join(parts) if parts else ""
+
+
+def _extract_persistent_memories(user_msg, reply_text, intent, conv_state):
+    """
+    After each exchange, extract and persist noteworthy memories.
+    Saves: contact insights, company observations, preferences, strategic decisions.
+    Skips: casual noise, duplicate facts, low-value exchanges.
+    """
+    msg_lower = user_msg.lower()
+    reply_lower = (reply_text or '').lower()
+
+    if len(user_msg) < 10 and intent in ('greeting', 'conversational'):
+        return
+
+    try:
+        mentioned_groups = _find_groups_fuzzy(user_msg)
+        for g in mentioned_groups[:2]:
+            group_context = []
+            if any(w in msg_lower for w in ['relationship', 'warm', 'cold', 'reached out', 'met with',
+                                             'talked to', 'connected', 'responded', 'replied']):
+                group_context.append(user_msg[:200])
+            if any(w in msg_lower for w in ['angle', 'approach', 'strategy for', 'positioning',
+                                             'pitch', 'how to reach', 'best way']):
+                if reply_text:
+                    clean = re.sub(r'<[^>]+>[\s\S]*?</[^>]+>', '', reply_text)
+                    clean = re.sub(r'\*\*', '', clean).strip()
+                    first_para = clean.split('\n\n')[0][:200] if clean else ''
+                    if first_para:
+                        group_context.append(f"Outreach strategy discussed: {first_para}")
+
+            for ctx in group_context:
+                _store_memory('company', ctx, entity_id=g['id'], entity_name=g['name'],
+                              category='relationship', source='conversation', confidence=0.7)
+
+        mentioned_contacts = _find_contacts_fuzzy(user_msg)
+        for c in mentioned_contacts[:2]:
+            cname = f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
+            if any(w in msg_lower for w in ['title', 'role', 'position', 'works at', 'moved to',
+                                             'promoted', 'left', 'joined', 'personality', 'preference']):
+                _store_memory('contact', user_msg[:200], entity_id=c['id'], entity_name=cname,
+                              category='insight', source='conversation', confidence=0.7)
+    except Exception:
+        pass
+
+    _PREFERENCE_SIGNALS = {
+        'tone': ['tone', 'casual', 'formal', 'professional', 'friendly', 'direct'],
+        'style': ['style', 'approach', 'way I like', 'prefer', 'always do', 'never do', 'my way'],
+        'workflow': ['workflow', 'process', 'routine', 'first thing', 'end of day', 'how I work'],
+    }
+    for cat, keywords in _PREFERENCE_SIGNALS.items():
+        if any(kw in msg_lower for kw in keywords):
+            if any(w in msg_lower for w in ['i prefer', 'i like', 'i want', 'i always', 'i never',
+                                             'my style', 'my approach', 'my way', 'don\'t like']):
+                _store_memory('preference', user_msg[:200], category=cat,
+                              source='explicit', confidence=0.9)
+                break
+
+    _DECISION_SIGNALS = ['decided', 'going to', 'let\'s go with', 'moving forward',
+                          'the plan is', 'we\'re doing', 'i\'ll do', 'committed to']
+    if any(s in msg_lower for s in _DECISION_SIGNALS):
+        entities = [g['name'] for g in (mentioned_groups if 'mentioned_groups' in dir() else [])][:3]
+        _store_memory('conversation', user_msg[:200], category='decision',
+                      source='conversation', confidence=0.8)
+
+    _STRATEGY_SIGNALS = ['strategy', 'approach', 'we should', 'focus on', 'priority',
+                          'next quarter', 'this month', 'pipeline']
+    if sum(1 for s in _STRATEGY_SIGNALS if s in msg_lower) >= 2:
+        summary = user_msg[:100]
+        if reply_text:
+            clean = re.sub(r'<[^>]+>[\s\S]*?</[^>]+>', '', reply_text)
+            first_line = clean.strip().split('\n')[0][:100]
+            if first_line:
+                summary = f"{user_msg[:80]} → {first_line}"
+        _store_memory('conversation', summary, category='strategy',
+                      source='conversation', confidence=0.7)
+
+
+def _check_proactive_alerts():
+    """
+    Check for high-value proactive alerts. Returns a list of alert strings.
+    Only surfaces genuinely important items — no spam.
+    """
+    alerts = []
+    try:
+        cooling = fetch_all(
+            """SELECT name, warmth_score, last_contacted_at FROM capital_groups
+               WHERE warmth_score >= 6 AND last_contacted_at IS NOT NULL
+               AND last_contacted_at < datetime('now', '-10 days')
+               AND relationship_status NOT IN ('dormant', 'cold')
+               ORDER BY warmth_score DESC LIMIT 3""", []
+        )
+        for g in cooling:
+            days = _days_since(g.get('last_contacted_at'))
+            alerts.append(f"**{g['name']}** (warmth {g['warmth_score']}/10) has been quiet for {days} days — worth a check-in")
+    except Exception:
+        pass
+
+    try:
+        overdue = fetch_all(
+            """SELECT f.title, f.due_date, g.name as group_name
+               FROM follow_ups f
+               LEFT JOIN capital_groups g ON f.entity_id = g.id
+               WHERE f.status = 'pending' AND f.due_date < date('now', '-2 days')
+               ORDER BY f.due_date ASC LIMIT 3""", []
+        )
+        for f in overdue:
+            days = _days_since(f.get('due_date'))
+            group_note = f" ({f['group_name']})" if f.get('group_name') else ""
+            alerts.append(f"Overdue follow-up: **{f['title']}**{group_note} — {days} days past due")
+    except Exception:
+        pass
+
+    try:
+        new_signals = fetch_all(
+            """SELECT s.title, s.importance, g.name as group_name
+               FROM prospecting_signals s
+               LEFT JOIN capital_groups g ON s.group_id = g.id
+               WHERE s.importance >= 7 AND s.created_at > datetime('now', '-3 days')
+               ORDER BY s.importance DESC, s.created_at DESC LIMIT 2""", []
+        )
+        for s in new_signals:
+            group_note = f" for **{s['group_name']}**" if s.get('group_name') else ""
+            alerts.append(f"High-priority signal{group_note}: {s['title']}")
+    except Exception:
+        pass
+
+    try:
+        untouched_warm = fetch_one(
+            """SELECT COUNT(*) as cnt FROM prospecting_contacts c
+               JOIN capital_groups g ON c.group_id = g.id
+               WHERE g.warmth_score >= 5
+               AND (c.last_touch_at IS NULL OR c.last_touch_at < datetime('now', '-21 days'))""", []
+        )
+        if untouched_warm and untouched_warm['cnt'] >= 3:
+            alerts.append(f"{untouched_warm['cnt']} warm contacts haven't been touched in 3+ weeks")
+    except Exception:
+        pass
+
+    return alerts[:4]
 
 def _record_event(event_type, entity_type=None, entity_id=None, entity_name=None, detail=None):
     """Record a CRM event for Leo's awareness."""
@@ -8414,13 +9172,38 @@ def _chat_inner():
             'card': _early_creation, 'intent': 'crm_update', 'mode': 'execution'
         })
 
-    intent = _classify_intent_contextual(last_msg, conv_state, msg_type)
+    router = _route_message(last_msg, messages, conv_state, msg_type, page_context)
+    intent = router['execution_intent']
     mode = INTENT_TO_MODE.get(intent, 'strategic')
     max_tokens = MODE_MAX_TOKENS.get(mode, 2000)
-    logger.info(f"[Leo] state: msg_type={msg_type} intent={intent} "
+    logger.info(f"[Leo] router: route={router['route']} intent={router['intent']} "
+                f"confidence={router['confidence']:.2f} exec_intent={intent} "
+                f"requires_exec={router['requires_execution']} "
                 f"people={[p['name'] for p in conv_state['people'][-2:]]} "
                 f"companies={[c['name'] for c in conv_state['companies'][-2:]]} "
                 f"last_intent={conv_state.get('last_intent')}")
+
+    # Confidence safety — low confidence on execution routes triggers clarification
+    if router['route'] == 'clarify' and msg_type == 'new':
+        clarify_resp = _handle_low_confidence_clarification(last_msg, router, conv_state)
+        card = {'type': 'TextCard', 'text': clarify_resp, 'data': {}, 'actions': []}
+        _persist_chat(last_msg, card, 'clarification', 'conversational')
+        return jsonify({
+            'role': 'assistant', 'content': clarify_resp,
+            'card': card, 'intent': 'clarification', 'mode': 'conversational'
+        })
+
+    # Hybrid routing — multi-layer messages (e.g., research + outreach synthesis)
+    if router['route'] == 'hybrid':
+        page_extra = ""
+        if page_context.get('active_tab'):
+            page_extra += f"\nUser is on the '{page_context['active_tab']}' page."
+        hybrid_result = _handle_hybrid_route(
+            last_msg, messages, conv_state, router, page_context,
+            (extra_ctx or '') + page_extra
+        )
+        if hybrid_result:
+            return hybrid_result
 
     # Greeting handler — respond conversationally, never dump task lists
     if intent == 'greeting':
@@ -8855,10 +9638,14 @@ def _chat_inner():
         brain_resp = _handle_conversational_brain(
             last_msg, messages, conv_state, intent, combined_extra
         )
+        # Repeat prevention — reframe if too similar to recent responses
+        if _is_repeat_response(brain_resp, messages):
+            brain_resp = _reframe_response(brain_resp, last_msg, messages, conv_state)
         card = {'type': 'TextCard', 'text': brain_resp, 'data': {}, 'actions': []}
         _persist_chat(last_msg, card, intent, 'conversational')
         try:
             _extract_memory_from_exchange(last_msg, brain_resp, intent)
+            _extract_persistent_memories(last_msg, brain_resp, intent, conv_state)
         except Exception:
             pass
         try:
@@ -8919,6 +9706,9 @@ def _chat_inner():
     )
     state_ctx = _build_state_context_block(conv_state, resolved_refs, msg_type)
     system = SYSTEM_PROMPT + "\n\n--- CURRENT DATA CONTEXT ---\n" + context
+    exec_memory = _get_relevant_memories(last_msg, conv_state)
+    if exec_memory:
+        system += "\n\n--- PERSISTENT MEMORY ---\n" + exec_memory
     if state_ctx:
         system += "\n\n--- CONVERSATION STATE ---\n" + state_ctx
 
@@ -9108,6 +9898,7 @@ def _chat_inner():
         # V9: Extract and store conversation memory
         try:
             _extract_memory_from_exchange(last_msg, card.get('text', ''), intent)
+            _extract_persistent_memories(last_msg, card.get('text', ''), intent, conv_state)
         except Exception:
             pass
 
