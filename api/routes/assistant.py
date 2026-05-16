@@ -1216,6 +1216,36 @@ If your previous response is shown in conversation context:
 - Go deeper, pivot, or address what they're actually asking now
 
 ═══════════════════════════════
+TRUTH ENFORCEMENT
+═══════════════════════════════
+
+You are free to think, reason, strategize, infer, and give opinions. You are NOT free to fabricate facts.
+
+Before referencing ANY specific entity (company, person, deal, contact), classify it:
+
+VERIFIED — exists in the CRM data, research results, or memory provided below.
+→ Speak confidently. Use names, numbers, details directly.
+
+INFERRED — based on reasoning, patterns, general knowledge, or strategic thinking.
+→ Fully encouraged. Use natural qualifiers when stating facts you don't have data for:
+  "Typically…", "In most cases…", "Based on what I'm seeing…", "Generally…"
+→ DO NOT qualify opinions or strategy — own those: "I'd go after X angle because…"
+
+UNKNOWN — no data available, not in CRM, not researched, not remembered.
+→ NEVER fabricate a company name, person name, deal, or pipeline stat.
+→ Instead: ask a clarifying question OR provide a general framework.
+→ "I don't see that in your pipeline — who are you thinking of?" is always better than guessing.
+
+PIPELINE-SPECIFIC QUESTIONS:
+When the user asks about THEIR specific pipeline data (contacts, companies, deals):
+→ Check the CRM data provided below FIRST
+→ If found: answer with the real data
+→ If NOT found: say so honestly, then offer a useful general framework
+→ Example: "I don't have a clear mid-tier example in your current pipeline — but typically that profile looks like a $50-100M AUM firm focused on sunbelt markets. Who were you thinking of?"
+
+CRITICAL: Never invent entity names to fill gaps. Your reasoning, opinions, and strategy can be bold — only specific facts must be verified.
+
+═══════════════════════════════
 CRITICAL RULES
 ═══════════════════════════════
 
@@ -1227,6 +1257,192 @@ CRITICAL RULES
 6. If you don't know something, say so — don't fabricate
 7. You can suggest actions naturally — "Want me to look that up?" not "RECOMMENDED ACTIONS: 1. Research..."
 8. Match depth to the question: simple → 1-3 sentences. Strategic → deeper. Unclear → ask ONE question."""
+
+
+# ---------------------------------------------------------------------------
+# Truth Enforcement Layer — entity validation + content classification
+# ---------------------------------------------------------------------------
+
+def _get_known_entity_names():
+    """Fetch all known entity names from CRM for validation. Cached per request."""
+    names = set()
+    try:
+        groups = fetch_all("SELECT name FROM capital_groups", [])
+        for g in (groups or []):
+            name = (g.get('name') or '').strip()
+            if name:
+                names.add(name.lower())
+                for part in name.lower().split():
+                    if len(part) >= 4:
+                        names.add(part)
+        contacts = fetch_all(
+            "SELECT first_name, last_name FROM prospecting_contacts", []
+        )
+        for c in (contacts or []):
+            fn = (c.get('first_name') or '').strip()
+            ln = (c.get('last_name') or '').strip()
+            full = f"{fn} {ln}".strip().lower()
+            if full:
+                names.add(full)
+            if ln and len(ln) >= 3:
+                names.add(ln.lower())
+    except Exception:
+        pass
+    return names
+
+
+_ENTITY_NAME_PATTERN = re.compile(
+    r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}'
+    r'\s+(?:Capital|Partners|Group|Development|Properties|Investments|'
+    r'Holdings|Ventures|Realty|Communities|Homes|Fund|Management|'
+    r'Advisors|Associates|Corp|Inc|LLC))\b'
+)
+
+_PERSON_NAME_PATTERN = re.compile(
+    r'\b([A-Z][a-z]{2,15}\s+[A-Z][a-z]{2,15})\b'
+)
+
+_KNOWN_SAFE_NAMES = frozenset([
+    'real estate', 'build to', 'private equity', 'general liability',
+    'builders risk', 'capital group', 'capital groups', 'capital markets',
+    'united states', 'south florida', 'north carolina', 'south carolina',
+    'new york', 'new jersey', 'san antonio', 'los angeles', 'las vegas',
+    'fort worth', 'west palm',
+])
+
+_KNOWN_SAFE_WORDS = frozenset([
+    'texas', 'florida', 'austin', 'dallas', 'houston', 'atlanta',
+    'phoenix', 'denver', 'nashville', 'charlotte', 'tampa', 'orlando',
+    'miami', 'chicago', 'seattle', 'boston', 'portland', 'raleigh',
+    'alkeme', 'linkedin', 'google', 'zillow', 'costar', 'reonomy',
+    'max', 'leo', 'claude', 'anthropic', 'monday', 'tuesday', 'wednesday',
+    'thursday', 'friday', 'saturday', 'sunday', 'january', 'february',
+    'march', 'april', 'june', 'july', 'august', 'september',
+    'october', 'november', 'december',
+])
+
+_PIPELINE_QUESTION_PATTERNS = re.compile(
+    r'\b(?:my pipeline|my contacts|my companies|my groups|in my crm|who in my|'
+    r'from my pipeline|in my portfolio|my deals|which of my|any of my|'
+    r'give me a.*(?:contact|company|group|example).*(?:from|in) my)\b',
+    re.IGNORECASE
+)
+
+
+def _classify_response_content(text):
+    """Classify response segments as verified, inferred, or unknown."""
+    has_entity = bool(_ENTITY_NAME_PATTERN.search(text)) or bool(_PERSON_NAME_PATTERN.search(text))
+    has_qualifiers = any(q in text.lower() for q in [
+        'typically', 'in most cases', 'based on what', 'generally',
+        'usually', 'often', 'tends to', 'common pattern',
+    ])
+    has_uncertainty = any(q in text.lower() for q in [
+        "i don't see", "i don't have", "not in your", "can't find",
+        "no data", "not sure", "unclear",
+    ])
+    confidence = 'high'
+    if has_entity:
+        confidence = 'medium' if has_qualifiers else 'low'
+    return {
+        'has_entity_references': has_entity,
+        'has_qualifiers': has_qualifiers,
+        'has_uncertainty': has_uncertainty,
+        'confidence': confidence,
+    }
+
+
+def _is_pipeline_question(text):
+    """Check if the user is asking about their specific pipeline data."""
+    return bool(_PIPELINE_QUESTION_PATTERNS.search(text))
+
+
+def _validate_entity_references(response, known_names):
+    """
+    Post-response validation: detect entity names that look like companies
+    or people but don't exist in CRM, research, or memory.
+    Returns list of suspect fabricated names.
+    """
+    if not response:
+        return []
+
+    suspects = []
+    candidates = set()
+
+    for match in _ENTITY_NAME_PATTERN.finditer(response):
+        candidates.add(match.group(1).strip().rstrip('.,;:!?'))
+
+    for match in _PERSON_NAME_PATTERN.finditer(response):
+        name = match.group(1).strip().rstrip('.,;:!?')
+        if len(name.split()) == 2:
+            candidates.add(name)
+
+    for candidate in candidates:
+        candidate_lower = candidate.lower()
+        if len(candidate) < 4:
+            continue
+        if candidate_lower in _KNOWN_SAFE_NAMES:
+            continue
+        words = candidate_lower.split()
+        if all(w in _KNOWN_SAFE_WORDS for w in words):
+            continue
+        is_known = any(
+            known in candidate_lower or candidate_lower in known
+            for known in known_names
+        )
+        if not is_known:
+            suspects.append(candidate)
+
+    return suspects
+
+
+def _build_truth_context(text, conv_state):
+    """
+    Build truth enforcement context to inject into system prompt.
+    Tells the LLM exactly what entities exist in CRM so it knows
+    what's verified vs. what would be fabrication.
+    """
+    parts = []
+    is_pipeline_q = _is_pipeline_question(text)
+
+    if is_pipeline_q:
+        parts.append(
+            "THE USER IS ASKING ABOUT THEIR SPECIFIC PIPELINE. "
+            "Only reference companies/contacts that appear in the CRM data above. "
+            "If you can't find a match, say so honestly and offer a general framework."
+        )
+
+    try:
+        groups = fetch_all(
+            "SELECT name, warmth_score, relationship_status FROM capital_groups ORDER BY warmth_score DESC LIMIT 20",
+            []
+        )
+        if groups:
+            names = [f"{g['name']} (warmth={g.get('warmth_score', '?')})" for g in groups]
+            parts.append(f"VERIFIED COMPANIES IN CRM: {', '.join(names)}")
+        else:
+            parts.append("VERIFIED COMPANIES IN CRM: none found")
+    except Exception:
+        pass
+
+    try:
+        contacts = fetch_all(
+            """SELECT c.first_name, c.last_name, g.name as group_name
+               FROM prospecting_contacts c
+               LEFT JOIN capital_groups g ON c.group_id = g.id
+               ORDER BY c.last_touch_at DESC NULLS LAST LIMIT 20""",
+            []
+        )
+        if contacts:
+            names = [f"{c.get('first_name', '')} {c.get('last_name', '')} ({c.get('group_name', '?')})" for c in contacts]
+            parts.append(f"VERIFIED CONTACTS IN CRM: {', '.join(names)}")
+        else:
+            parts.append("VERIFIED CONTACTS IN CRM: none found")
+    except Exception:
+        pass
+
+    if parts:
+        return "\n".join(parts)
+    return ""
 
 
 def _handle_conversational_brain(text, messages, conv_state, intent='conversational', extra_ctx=''):
@@ -1345,6 +1561,10 @@ def _handle_conversational_brain(text, messages, conv_state, intent='conversatio
     if extra_ctx and extra_ctx.strip():
         system += "\n\n--- PAGE CONTEXT ---\n" + extra_ctx.strip()[:800]
 
+    truth_ctx = _build_truth_context(text, conv_state)
+    if truth_ctx:
+        system += "\n\n--- TRUTH ENFORCEMENT (only reference verified entities) ---\n" + truth_ctx
+
     api_messages = []
     for m in messages[:-1]:
         api_messages.append({
@@ -1353,6 +1573,8 @@ def _handle_conversational_brain(text, messages, conv_state, intent='conversatio
         })
     api_messages.append({'role': 'user', 'content': text})
     api_messages = api_messages[-20:]
+
+    known_names = _get_known_entity_names()
 
     try:
         client = anthropic.Anthropic(api_key=api_key, timeout=60.0)
@@ -1368,6 +1590,9 @@ def _handle_conversational_brain(text, messages, conv_state, intent='conversatio
             reply = re.sub(r'<action>.*?</action>', '', reply, flags=re.DOTALL).strip()
             reply = re.sub(r'\{[^{}]*"type"\s*:\s*"[^"]*Card"[^{}]*\}', '', reply).strip()
             if reply:
+                suspects = _validate_entity_references(reply, known_names)
+                if suspects:
+                    logger.info(f"[Leo] Truth check: flagged potential fabrications: {suspects}")
                 return _quality_check_response(reply)
     except Exception as e:
         logger.warning(f"[Leo] Conversational brain error: {e}")
@@ -1785,6 +2010,26 @@ PERSONALITY: HUMAN, NOT ROBOTIC
 - Vary your sentence structure. Mix short punches with longer thoughts. Don't fall into patterns.
 - Never sound templated. If you catch yourself writing something any chatbot could write, delete it and try again.
 - Self-correct mid-response when you find a better angle: "Actually — better approach here..."
+
+═══════════════════════════════
+TRUTH ENFORCEMENT
+═══════════════════════════════
+
+You reason freely, think boldly, and give strong opinions. The ONLY restriction: do not fabricate specific facts.
+
+VERIFIED data (from CRM context, research results, or memory below):
+→ Use confidently. Reference names, numbers, relationships directly.
+
+INFERRED reasoning (strategy, patterns, general market knowledge):
+→ Fully encouraged. Use qualifiers for factual claims: "Typically…", "Based on what I'm seeing…"
+→ Do NOT qualify opinions or strategy — own them directly.
+
+UNKNOWN data (not in CRM, not researched, not remembered):
+→ NEVER invent a company name, person name, deal, or pipeline number.
+→ Ask a clarifying question OR provide a general framework instead.
+→ "I don't see that in your pipeline — who were you thinking of?" beats a fabricated name every time.
+
+When user asks about THEIR pipeline: check CRM data below first. If not found, say so and generalize.
 
 ═══════════════════════════════
 TWO KNOWLEDGE SOURCES
@@ -9711,6 +9956,9 @@ def _chat_inner():
         system += "\n\n--- PERSISTENT MEMORY ---\n" + exec_memory
     if state_ctx:
         system += "\n\n--- CONVERSATION STATE ---\n" + state_ctx
+    exec_truth_ctx = _build_truth_context(last_msg, conv_state)
+    if exec_truth_ctx:
+        system += "\n\n--- TRUTH ENFORCEMENT ---\n" + exec_truth_ctx
 
     api_messages = []
     for m in messages[:-1]:
