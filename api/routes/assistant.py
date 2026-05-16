@@ -787,6 +787,19 @@ GOOD: "LionKnox is your warmest right now at 7/10 — haven't talked to them in 
 BAD: "PIPELINE DATA: LionKnox — warmth_score=7, last_contacted_at=2025-05-04..."
 
 ═══════════════════════════════
+PERSISTENT MEMORY
+═══════════════════════════════
+
+You have persistent memory — facts, preferences, and context that carry across sessions.
+When memory is provided below, USE it to personalize your responses:
+- Reference past conversations naturally: "Last time we talked about LionKnox..."
+- Apply learned preferences: if Max prefers relationship-first, don't suggest cold pitches
+- Use contact/company memories to ground advice in history
+- Items marked [unconfirmed] are low-confidence — don't state them as fact
+
+If memory contradicts current data, trust the current CRM data over old memories.
+
+═══════════════════════════════
 REPEAT PROTECTION
 ═══════════════════════════════
 
@@ -911,6 +924,11 @@ def _handle_conversational_brain(text, messages, conv_state, intent='conversatio
         pass
 
     system = CONVERSATIONAL_BRAIN_PROMPT
+
+    memory_ctx = _get_relevant_memories(text, conv_state)
+    if memory_ctx:
+        system += "\n\n--- PERSISTENT MEMORY ---\n" + memory_ctx
+
     if context_parts:
         system += "\n\n--- CONVERSATION STATE ---\n" + "\n".join(context_parts)
     if crm_parts:
@@ -1060,6 +1078,11 @@ def _handle_greeting(conv_state):
         "Hey —", "What's up —", "Hey there —", "Yo —",
     ]
     opener = random.choice(greetings)
+
+    proactive = _check_proactive_alerts()
+    if proactive:
+        for alert in proactive[:2]:
+            insights.append(alert)
 
     if insights:
         insight = random.choice(insights)
@@ -5096,8 +5119,305 @@ def _extract_memory_from_exchange(user_msg, reply_text, intent):
 
 
 # ---------------------------------------------------------------------------
-# V9: Real-time event awareness — track and surface CRM events
+# Persistent Memory System — cross-session intelligence
 # ---------------------------------------------------------------------------
+
+def _store_memory(memory_type, content, entity_id=None, entity_name=None,
+                  category=None, source='conversation', confidence=0.8):
+    """Store a persistent memory. Deduplicates against existing similar memories."""
+    content = content.strip()
+    if not content or len(content) < 5:
+        return
+    try:
+        if entity_id:
+            existing = fetch_one(
+                "SELECT id, content FROM leo_memory WHERE memory_type = ? AND entity_id = ? AND content = ?",
+                [memory_type, entity_id, content[:500]]
+            )
+        else:
+            existing = fetch_one(
+                "SELECT id, content FROM leo_memory WHERE memory_type = ? AND content = ? AND entity_id IS NULL",
+                [memory_type, content[:500]]
+            )
+        if existing:
+            execute(
+                "UPDATE leo_memory SET access_count = access_count + 1, updated_at = CURRENT_TIMESTAMP, confidence = MIN(1.0, confidence + 0.05) WHERE id = ?",
+                [existing['id']]
+            )
+            return
+        execute(
+            """INSERT INTO leo_memory (id, memory_type, category, entity_id, entity_name, content, source, confidence, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
+            [new_id(), memory_type, category, entity_id, entity_name, content[:500], source, confidence]
+        )
+    except Exception:
+        logger.debug("Failed to store memory", exc_info=True)
+
+
+def _get_memories(memory_type=None, entity_id=None, limit=10, min_confidence=0.3):
+    """Retrieve persistent memories with optional filters."""
+    try:
+        conditions = ["confidence >= ?"]
+        params = [min_confidence]
+        if memory_type:
+            conditions.append("memory_type = ?")
+            params.append(memory_type)
+        if entity_id:
+            conditions.append("entity_id = ?")
+            params.append(entity_id)
+        where = " AND ".join(conditions)
+        params.append(limit)
+        rows = fetch_all(
+            f"SELECT * FROM leo_memory WHERE {where} ORDER BY updated_at DESC LIMIT ?",
+            params
+        )
+        return rows or []
+    except Exception:
+        return []
+
+
+def _get_user_profile_memories():
+    """Retrieve Max's profile memories for prompt injection."""
+    memories = _get_memories(memory_type='user_profile', limit=15)
+    preferences = _get_memories(memory_type='preference', limit=10)
+    if not memories and not preferences:
+        return ""
+    parts = []
+    if memories:
+        parts.append("WHAT LEO KNOWS ABOUT MAX:")
+        for m in memories:
+            conf_tag = "" if m['confidence'] >= 0.8 else " [unconfirmed]"
+            parts.append(f"  - {m['content']}{conf_tag}")
+    if preferences:
+        parts.append("MAX'S PREFERENCES:")
+        for p in preferences:
+            conf_tag = "" if p['confidence'] >= 0.8 else " [unconfirmed]"
+            parts.append(f"  - {p['content']}{conf_tag}")
+    return "\n".join(parts)
+
+
+def _get_entity_memories(entity_id=None, entity_name=None, memory_type=None):
+    """Retrieve memories about a specific contact or company."""
+    if entity_id:
+        memories = _get_memories(memory_type=memory_type, entity_id=entity_id, limit=8)
+        if memories:
+            return memories
+    if entity_name:
+        try:
+            rows = fetch_all(
+                """SELECT * FROM leo_memory
+                   WHERE entity_name IS NOT NULL AND LOWER(entity_name) = ?
+                   AND confidence >= 0.3
+                   ORDER BY updated_at DESC LIMIT 8""",
+                [entity_name.lower()]
+            )
+            return rows or []
+        except Exception:
+            return []
+    return []
+
+
+def _get_relevant_memories(text, conv_state, limit=12):
+    """Retrieve memories relevant to the current message — smart retrieval."""
+    parts = []
+
+    profile = _get_user_profile_memories()
+    if profile:
+        parts.append(profile)
+
+    try:
+        mentioned_groups = _find_groups_fuzzy(text)
+        for g in mentioned_groups[:2]:
+            mems = _get_entity_memories(entity_id=g['id'], memory_type='company')
+            if mems:
+                parts.append(f"MEMORIES ABOUT {g['name'].upper()}:")
+                for m in mems[:4]:
+                    conf_tag = "" if m['confidence'] >= 0.8 else " [unconfirmed]"
+                    parts.append(f"  - {m['content']}{conf_tag}")
+
+        mentioned_contacts = _find_contacts_fuzzy(text)
+        for c in mentioned_contacts[:2]:
+            mems = _get_entity_memories(entity_id=c['id'], memory_type='contact')
+            if mems:
+                cname = f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
+                parts.append(f"MEMORIES ABOUT {cname.upper()}:")
+                for m in mems[:4]:
+                    conf_tag = "" if m['confidence'] >= 0.8 else " [unconfirmed]"
+                    parts.append(f"  - {m['content']}{conf_tag}")
+    except Exception:
+        pass
+
+    if conv_state.get('companies'):
+        for comp in conv_state['companies'][-2:]:
+            try:
+                mems = _get_entity_memories(entity_name=comp['name'], memory_type='company')
+                if mems:
+                    parts.append(f"MEMORIES ABOUT {comp['name'].upper()}:")
+                    for m in mems[:3]:
+                        conf_tag = "" if m['confidence'] >= 0.8 else " [unconfirmed]"
+                        parts.append(f"  - {m['content']}{conf_tag}")
+            except Exception:
+                pass
+    if conv_state.get('people'):
+        for person in conv_state['people'][-2:]:
+            try:
+                mems = _get_entity_memories(entity_name=person['name'], memory_type='contact')
+                if mems:
+                    parts.append(f"MEMORIES ABOUT {person['name'].upper()}:")
+                    for m in mems[:3]:
+                        conf_tag = "" if m['confidence'] >= 0.8 else " [unconfirmed]"
+                        parts.append(f"  - {m['content']}{conf_tag}")
+            except Exception:
+                pass
+
+    recent_conv = _get_memories(memory_type='conversation', limit=5)
+    if recent_conv:
+        parts.append("RECENT CONVERSATION CONTEXT:")
+        for m in recent_conv:
+            age = _days_since(m.get('created_at'))
+            when = "today" if age == 0 else f"{age}d ago"
+            parts.append(f"  - ({when}) {m['content']}")
+
+    return "\n".join(parts) if parts else ""
+
+
+def _extract_persistent_memories(user_msg, reply_text, intent, conv_state):
+    """
+    After each exchange, extract and persist noteworthy memories.
+    Saves: contact insights, company observations, preferences, strategic decisions.
+    Skips: casual noise, duplicate facts, low-value exchanges.
+    """
+    msg_lower = user_msg.lower()
+    reply_lower = (reply_text or '').lower()
+
+    if len(user_msg) < 10 and intent in ('greeting', 'conversational'):
+        return
+
+    try:
+        mentioned_groups = _find_groups_fuzzy(user_msg)
+        for g in mentioned_groups[:2]:
+            group_context = []
+            if any(w in msg_lower for w in ['relationship', 'warm', 'cold', 'reached out', 'met with',
+                                             'talked to', 'connected', 'responded', 'replied']):
+                group_context.append(user_msg[:200])
+            if any(w in msg_lower for w in ['angle', 'approach', 'strategy for', 'positioning',
+                                             'pitch', 'how to reach', 'best way']):
+                if reply_text:
+                    clean = re.sub(r'<[^>]+>[\s\S]*?</[^>]+>', '', reply_text)
+                    clean = re.sub(r'\*\*', '', clean).strip()
+                    first_para = clean.split('\n\n')[0][:200] if clean else ''
+                    if first_para:
+                        group_context.append(f"Outreach strategy discussed: {first_para}")
+
+            for ctx in group_context:
+                _store_memory('company', ctx, entity_id=g['id'], entity_name=g['name'],
+                              category='relationship', source='conversation', confidence=0.7)
+
+        mentioned_contacts = _find_contacts_fuzzy(user_msg)
+        for c in mentioned_contacts[:2]:
+            cname = f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
+            if any(w in msg_lower for w in ['title', 'role', 'position', 'works at', 'moved to',
+                                             'promoted', 'left', 'joined', 'personality', 'preference']):
+                _store_memory('contact', user_msg[:200], entity_id=c['id'], entity_name=cname,
+                              category='insight', source='conversation', confidence=0.7)
+    except Exception:
+        pass
+
+    _PREFERENCE_SIGNALS = {
+        'tone': ['tone', 'casual', 'formal', 'professional', 'friendly', 'direct'],
+        'style': ['style', 'approach', 'way I like', 'prefer', 'always do', 'never do', 'my way'],
+        'workflow': ['workflow', 'process', 'routine', 'first thing', 'end of day', 'how I work'],
+    }
+    for cat, keywords in _PREFERENCE_SIGNALS.items():
+        if any(kw in msg_lower for kw in keywords):
+            if any(w in msg_lower for w in ['i prefer', 'i like', 'i want', 'i always', 'i never',
+                                             'my style', 'my approach', 'my way', 'don\'t like']):
+                _store_memory('preference', user_msg[:200], category=cat,
+                              source='explicit', confidence=0.9)
+                break
+
+    _DECISION_SIGNALS = ['decided', 'going to', 'let\'s go with', 'moving forward',
+                          'the plan is', 'we\'re doing', 'i\'ll do', 'committed to']
+    if any(s in msg_lower for s in _DECISION_SIGNALS):
+        entities = [g['name'] for g in (mentioned_groups if 'mentioned_groups' in dir() else [])][:3]
+        _store_memory('conversation', user_msg[:200], category='decision',
+                      source='conversation', confidence=0.8)
+
+    _STRATEGY_SIGNALS = ['strategy', 'approach', 'we should', 'focus on', 'priority',
+                          'next quarter', 'this month', 'pipeline']
+    if sum(1 for s in _STRATEGY_SIGNALS if s in msg_lower) >= 2:
+        summary = user_msg[:100]
+        if reply_text:
+            clean = re.sub(r'<[^>]+>[\s\S]*?</[^>]+>', '', reply_text)
+            first_line = clean.strip().split('\n')[0][:100]
+            if first_line:
+                summary = f"{user_msg[:80]} → {first_line}"
+        _store_memory('conversation', summary, category='strategy',
+                      source='conversation', confidence=0.7)
+
+
+def _check_proactive_alerts():
+    """
+    Check for high-value proactive alerts. Returns a list of alert strings.
+    Only surfaces genuinely important items — no spam.
+    """
+    alerts = []
+    try:
+        cooling = fetch_all(
+            """SELECT name, warmth_score, last_contacted_at FROM capital_groups
+               WHERE warmth_score >= 6 AND last_contacted_at IS NOT NULL
+               AND last_contacted_at < datetime('now', '-10 days')
+               AND relationship_status NOT IN ('dormant', 'cold')
+               ORDER BY warmth_score DESC LIMIT 3""", []
+        )
+        for g in cooling:
+            days = _days_since(g.get('last_contacted_at'))
+            alerts.append(f"**{g['name']}** (warmth {g['warmth_score']}/10) has been quiet for {days} days — worth a check-in")
+    except Exception:
+        pass
+
+    try:
+        overdue = fetch_all(
+            """SELECT f.title, f.due_date, g.name as group_name
+               FROM follow_ups f
+               LEFT JOIN capital_groups g ON f.entity_id = g.id
+               WHERE f.status = 'pending' AND f.due_date < date('now', '-2 days')
+               ORDER BY f.due_date ASC LIMIT 3""", []
+        )
+        for f in overdue:
+            days = _days_since(f.get('due_date'))
+            group_note = f" ({f['group_name']})" if f.get('group_name') else ""
+            alerts.append(f"Overdue follow-up: **{f['title']}**{group_note} — {days} days past due")
+    except Exception:
+        pass
+
+    try:
+        new_signals = fetch_all(
+            """SELECT s.title, s.importance, g.name as group_name
+               FROM prospecting_signals s
+               LEFT JOIN capital_groups g ON s.group_id = g.id
+               WHERE s.importance >= 7 AND s.created_at > datetime('now', '-3 days')
+               ORDER BY s.importance DESC, s.created_at DESC LIMIT 2""", []
+        )
+        for s in new_signals:
+            group_note = f" for **{s['group_name']}**" if s.get('group_name') else ""
+            alerts.append(f"High-priority signal{group_note}: {s['title']}")
+    except Exception:
+        pass
+
+    try:
+        untouched_warm = fetch_one(
+            """SELECT COUNT(*) as cnt FROM prospecting_contacts c
+               JOIN capital_groups g ON c.group_id = g.id
+               WHERE g.warmth_score >= 5
+               AND (c.last_touch_at IS NULL OR c.last_touch_at < datetime('now', '-21 days'))""", []
+        )
+        if untouched_warm and untouched_warm['cnt'] >= 3:
+            alerts.append(f"{untouched_warm['cnt']} warm contacts haven't been touched in 3+ weeks")
+    except Exception:
+        pass
+
+    return alerts[:4]
 
 def _record_event(event_type, entity_type=None, entity_id=None, entity_name=None, detail=None):
     """Record a CRM event for Leo's awareness."""
@@ -8859,6 +9179,7 @@ def _chat_inner():
         _persist_chat(last_msg, card, intent, 'conversational')
         try:
             _extract_memory_from_exchange(last_msg, brain_resp, intent)
+            _extract_persistent_memories(last_msg, brain_resp, intent, conv_state)
         except Exception:
             pass
         try:
@@ -8919,6 +9240,9 @@ def _chat_inner():
     )
     state_ctx = _build_state_context_block(conv_state, resolved_refs, msg_type)
     system = SYSTEM_PROMPT + "\n\n--- CURRENT DATA CONTEXT ---\n" + context
+    exec_memory = _get_relevant_memories(last_msg, conv_state)
+    if exec_memory:
+        system += "\n\n--- PERSISTENT MEMORY ---\n" + exec_memory
     if state_ctx:
         system += "\n\n--- CONVERSATION STATE ---\n" + state_ctx
 
@@ -9108,6 +9432,7 @@ def _chat_inner():
         # V9: Extract and store conversation memory
         try:
             _extract_memory_from_exchange(last_msg, card.get('text', ''), intent)
+            _extract_persistent_memories(last_msg, card.get('text', ''), intent, conv_state)
         except Exception:
             pass
 

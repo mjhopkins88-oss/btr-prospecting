@@ -416,6 +416,43 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS leo_memory (
+            id TEXT PRIMARY KEY,
+            memory_type TEXT NOT NULL,
+            category TEXT,
+            entity_id TEXT,
+            entity_name TEXT,
+            content TEXT NOT NULL,
+            source TEXT DEFAULT 'conversation',
+            confidence REAL DEFAULT 0.8,
+            access_count INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_leo_memory_type ON leo_memory(memory_type, created_at DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_leo_memory_entity ON leo_memory(entity_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_leo_memory_confidence ON leo_memory(confidence DESC)')
+
+    # Seed Max's user profile memories on first run
+    c.execute("SELECT COUNT(*) FROM leo_memory WHERE memory_type = 'user_profile'")
+    if c.fetchone()[0] == 0:
+        import uuid as _uuid_mem
+        _seed_memories = [
+            ('user_profile', 'business', "Max is the Director of BTR property insurance at Alkeme Insurance, running one of the only dedicated Build-to-Rent insurance programs in the US", 'system_seed', 1.0),
+            ('user_profile', 'program', "The BTR program has ~$700M insured value with zero losses historically — inclusion signals deal quality", 'system_seed', 1.0),
+            ('user_profile', 'targets', "Max targets PE firms, institutional capital partners, developers, and operators for BTR insurance placement", 'system_seed', 1.0),
+            ('user_profile', 'ideal_deal', "Ideal deal: ~200 unit BTR community, not yet vertical, needs builders risk first, then transitions to stabilized coverage", 'system_seed', 1.0),
+            ('user_profile', 'geography', "Geographic focus nationwide, strongest in the Texas-to-Florida corridor", 'system_seed', 1.0),
+            ('user_profile', 'positioning', "Max positions as a gatekeeper to a selective program that validates deal quality — not a commodity insurance broker", 'system_seed', 1.0),
+            ('user_profile', 'challenges', "Current challenges: slower capital markets, low response rates at top of funnel, difficulty reaching PE decision makers", 'system_seed', 1.0),
+            ('preference', 'style', "Max prefers relationship-first outreach — strategic partner positioning, not hard sells", 'system_seed', 0.9),
+        ]
+        for mtype, cat, content, source, conf in _seed_memories:
+            c.execute('INSERT INTO leo_memory (id, memory_type, category, content, source, confidence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
+                      (str(_uuid_mem.uuid4()), mtype, cat, content, source, conf))
+
     # --- Auth & CRM Tables ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS workspaces (
