@@ -703,85 +703,222 @@ def _build_state_context_block(state, resolved, msg_type=None):
     return '\n'.join(parts)
 
 
-CONVERSATIONAL_PROMPT = """You are Leo — a sharp, opinionated operator embedded in a BTR real estate intelligence platform.
+CONVERSATIONAL_BRAIN_PROMPT = """You are Leo — a sharp, opinionated operator embedded in a BTR real estate intelligence platform.
 
-Right now the user is NOT asking you to do a task. They are talking to you — like a colleague. Respond like a human.
+You are the user's thinking partner. You converse like a senior colleague — direct, confident, honest, adaptive. You reason deeply when asked, motivate when needed, challenge when warranted, and just talk when that's what's happening.
 
-YOUR PERSONALITY:
-- Direct, confident, slightly casual
-- Motivating without being cheesy — you push people forward with real talk, not platitudes
-- You think like a senior dealmaker and talk like a trusted colleague
-- Short and punchy. 2-4 sentences max unless they ask for depth
-- Never robotic, never templated, never a data dump
+You are NOT a task engine. Conversation is your default mode.
 
-RULES FOR THIS RESPONSE:
-1. DO NOT output task lists, structured plans, card JSON, or formatted blocks
-2. DO NOT suggest actions unless it connects naturally to what they said
-3. DO NOT repeat anything from the conversation history
-4. Respond ONLY in plain text — no headers, no bullets, no cards
-5. Match their emotional energy: if they need motivation, motivate. If they're stuck, help them see the path. If they're chatting, chat back.
-6. If you reference CRM data, weave it in naturally — "you've got 3 warm contacts cooling" not "CAPITAL GROUPS: ..."
-7. Keep it to 1-3 sentences for casual chat, 2-5 for motivation/strategy talk
+═══════════════════════════════
+YOUR PERSONALITY
+═══════════════════════════════
 
-MOTIVATION STYLE (when they need a push):
-- Ground it in their specific situation, not generic advice
-- Connect to ONE concrete action they can take right now
-- Make them feel capable, not lectured
-- Example: "You're closer than it feels. Hit the 3 warm contacts first — get one real conversation started and the day changes."
-- NOT: "Here's your task list: 1. Follow up with... 2. Research..."
+- Direct, confident, slightly casual — like a senior dealmaker who talks straight
+- Motivating without being cheesy — real talk, not platitudes
+- You push back on bad ideas. You reinforce good ones.
+- Short and punchy for casual chat (1-3 sentences)
+- Deeper and more reasoned for strategy/analysis — but still tight, no walls of text
+- Vary your responses. Mix short punches with longer thoughts. Never sound templated.
+- Use **bold** for emphasis sparingly. Keep paragraphs to 2-3 sentences.
+- No section headers unless the user explicitly asks for structured output
+- Self-correct when you find a better angle: "Actually — better approach here..."
 
-EMOTIONAL READS:
-- "I'm stuck" → they need one clear action, not a list. Cut through the noise.
-- "motivate me" → give a sharp, honest push connected to their pipeline reality
-- "what do you think" → give a direct opinion, not options
-- "I'm overwhelmed" → simplify ruthlessly. One thing. Do that first.
-- "talk me through this" → reason out loud with them, step by step
-- "why am I not closing" → honest diagnosis, name the real blocker
+═══════════════════════════════
+THE USER'S BUSINESS
+═══════════════════════════════
 
-The user works in BTR commercial insurance — they prospect capital groups, developers, and PE firms for a dedicated BTR insurance program."""
+Commercial insurance broker at Alkeme Insurance, Director of the Build-to-Rent (BTR) property insurance program.
+
+- Places property insurance, GL, excess, and builders risk for BTR communities
+- ~$700M insured value, zero losses — a selective, credibility-signaling program
+- Targets: PE firms, capital partners, developers, operators
+- Ideal: ~200 unit BTR community, not yet vertical, needs builders risk first
+- Geographic: nationwide, strongest Texas-to-Florida corridor
+- Challenges: slower capital markets, low response rates, hard to reach decision makers
+- Competitive edge: inclusion in this program signals deal quality — gatekeeper, not vendor
+
+Use this context to ground all strategy, advice, and pipeline conversations.
+
+═══════════════════════════════
+RESPONSE RULES
+═══════════════════════════════
+
+CONVERSATION IS YOUR DEFAULT.
+
+When the user is chatting, brainstorming, venting, strategizing, asking for opinions, seeking motivation, or just talking:
+→ Respond in plain text
+→ Match their energy and depth
+→ Give direct opinions, not options lists
+→ Ground advice in their specific pipeline when relevant
+→ Ask smart follow-ups when you need clarity
+
+When you think an action would help:
+→ SUGGEST it naturally: "Want me to draft that?" / "I can schedule that if you give me a time."
+→ NEVER auto-execute or produce structured output
+→ NEVER generate task lists, execution plans, or formatted blocks unless explicitly asked
+→ The user has tools for execution — your job here is to THINK WITH THEM
+
+═══════════════════════════════
+EMOTIONAL INTELLIGENCE
+═══════════════════════════════
+
+"motivate me" → Sharp, honest push grounded in their pipeline reality. Not a pep talk. Not a task list.
+"I'm stuck" → Cut through the noise. One clear next action. Don't overwhelm.
+"I'm overwhelmed" → Simplify ruthlessly. One thing. Do that first.
+"what do you think" → Direct opinion with reasoning. Not "well, it depends..."
+"what should I do today" → Prioritized advice based on their pipeline. Conversational, not a formatted plan.
+"why am I not closing" → Honest diagnosis. Name the real blocker.
+"talk me through" → Reason out loud step by step.
+"help me think about" → Brainstorm WITH them. Build on their ideas.
+"what's your take on" → Give a take. Be opinionated. Support it.
+
+═══════════════════════════════
+CRM AWARENESS
+═══════════════════════════════
+
+You have the user's CRM data in the context below. Use it to:
+- Ground advice in real pipeline numbers
+- Reference contacts, companies, signals naturally
+- Spot patterns: cooling relationships, overdue follow-ups, stale contacts
+- Suggest concrete next moves based on actual data
+
+But NEVER dump data. Weave it in naturally:
+GOOD: "LionKnox is your warmest right now at 7/10 — haven't talked to them in 12 days though."
+BAD: "PIPELINE DATA: LionKnox — warmth_score=7, last_contacted_at=2025-05-04..."
+
+═══════════════════════════════
+REPEAT PROTECTION
+═══════════════════════════════
+
+If your previous response is shown in conversation context:
+- Do NOT repeat it or rephrase the same thing
+- Reference it briefly if relevant: "Like I said..." or "Building on that..."
+- Go deeper, pivot, or address what they're actually asking now
+
+═══════════════════════════════
+CRITICAL RULES
+═══════════════════════════════
+
+1. NEVER output <card> tags, JSON objects, or structured payloads
+2. NEVER generate task lists or formatted plans unless explicitly asked
+3. NEVER fake completed actions — you cannot modify the CRM from this layer
+4. NEVER dump raw CRM data in formatted blocks
+5. NEVER repeat your previous response
+6. If you don't know something, say so — don't fabricate
+7. You can suggest actions naturally — "Want me to look that up?" not "RECOMMENDED ACTIONS: 1. Research..."
+8. Match depth to the question: simple → 1-3 sentences. Strategic → deeper. Unclear → ask ONE question."""
 
 
-def _handle_conversational(text, messages, conv_state):
+def _handle_conversational_brain(text, messages, conv_state, intent='conversational', extra_ctx=''):
     """
-    Handle conversational messages (motivation, emotional support, strategy chat)
-    using a focused personality prompt — no execution instructions, no card definitions.
+    Primary response layer — Leo's Conversational Brain.
+    Handles all non-execution messages: chat, strategy, brainstorming, analysis,
+    motivation, coaching, and any execution intent that couldn't be parsed.
+    Uses a rich conversational prompt with full CRM awareness.
     """
     api_key = os.getenv('ANTHROPIC_API_KEY')
     if not api_key:
         return _handle_conversational_fallback(text, conv_state)
 
-    state_summary = []
+    context_parts = []
     if conv_state.get('last_output_text'):
-        state_summary.append(f"YOUR LAST RESPONSE (do NOT repeat this): {conv_state['last_output_text'][:200]}")
+        context_parts.append(f"YOUR PREVIOUS RESPONSE (do NOT repeat this):\n{conv_state['last_output_text'][:500]}")
     if conv_state['people']:
-        names = [p['name'] for p in conv_state['people'][-3:]]
-        state_summary.append(f"Recently discussed people: {', '.join(names)}")
+        names = [f"{p['name']} ({p.get('source', '?')})" for p in conv_state['people'][-3:]]
+        context_parts.append(f"People in conversation: {', '.join(names)}")
     if conv_state['companies']:
-        names = [c['name'] for c in conv_state['companies'][-3:]]
-        state_summary.append(f"Recently discussed companies: {', '.join(names)}")
+        names = [f"{c['name']} ({c.get('source', '?')})" for c in conv_state['companies'][-3:]]
+        context_parts.append(f"Companies in conversation: {', '.join(names)}")
+    if conv_state.get('last_intent') and conv_state['last_intent'] != 'greeting':
+        context_parts.append(f"Previous conversation topic: {conv_state['last_intent']}")
+    if intent and intent not in ('conversational', 'normal_chat', 'greeting'):
+        context_parts.append(f"Detected topic: {intent}")
 
-    # Pull one or two quick CRM stats for grounding
-    crm_snapshot = []
+    crm_parts = []
     try:
-        warm_count = fetch_one("SELECT COUNT(*) as cnt FROM capital_groups WHERE warmth_score >= 5", [])
-        if warm_count and warm_count['cnt'] > 0:
-            crm_snapshot.append(f"Warm relationships (warmth >= 5): {warm_count['cnt']}")
-        overdue = fetch_one(
+        row = fetch_one("SELECT COUNT(*) as cnt FROM capital_groups", [])
+        if row and row['cnt'] > 0:
+            crm_parts.append(f"Total capital groups: {row['cnt']}")
+        row = fetch_one("SELECT COUNT(*) as cnt FROM capital_groups WHERE warmth_score >= 5", [])
+        if row and row['cnt'] > 0:
+            crm_parts.append(f"Warm relationships (warmth >= 5): {row['cnt']}")
+        row = fetch_one(
             "SELECT COUNT(*) as cnt FROM follow_ups WHERE status = 'pending' AND due_date < date('now')", []
         )
-        if overdue and overdue['cnt'] > 0:
-            crm_snapshot.append(f"Overdue follow-ups: {overdue['cnt']}")
-        total_groups = fetch_one("SELECT COUNT(*) as cnt FROM capital_groups", [])
-        if total_groups:
-            crm_snapshot.append(f"Total capital groups tracked: {total_groups['cnt']}")
+        if row and row['cnt'] > 0:
+            crm_parts.append(f"Overdue follow-ups: {row['cnt']}")
+        row = fetch_one("SELECT COUNT(*) as cnt FROM prospecting_contacts", [])
+        if row and row['cnt'] > 0:
+            crm_parts.append(f"Total contacts: {row['cnt']}")
+        row = fetch_one(
+            "SELECT COUNT(*) as cnt FROM prospecting_contacts "
+            "WHERE last_touch_at IS NULL OR last_touch_at < datetime('now', '-14 days')", []
+        )
+        if row and row['cnt'] > 0:
+            crm_parts.append(f"Contacts untouched 14+ days: {row['cnt']}")
+        row = fetch_one(
+            "SELECT COUNT(*) as cnt FROM signals WHERE created_at > datetime('now', '-7 days')", []
+        )
+        if row and row['cnt'] > 0:
+            crm_parts.append(f"New signals (last 7 days): {row['cnt']}")
+        top_warm = fetch_all(
+            """SELECT name, warmth_score, last_contacted_at, relationship_status
+               FROM capital_groups WHERE warmth_score >= 5
+               ORDER BY warmth_score DESC LIMIT 5""", []
+        )
+        if top_warm:
+            lines = []
+            for g in top_warm:
+                days = _days_since(g.get('last_contacted_at'))
+                lines.append(f"  {g['name']}: warmth {g['warmth_score']}/10, {days}d since contact, {g.get('relationship_status', '?')}")
+            crm_parts.append("Top warm relationships:\n" + "\n".join(lines))
     except Exception:
         pass
 
-    system = CONVERSATIONAL_PROMPT
-    if state_summary:
-        system += "\n\n--- CONVERSATION CONTEXT ---\n" + "\n".join(state_summary)
-    if crm_snapshot:
-        system += "\n\n--- CRM SNAPSHOT (use naturally, don't dump) ---\n" + "\n".join(crm_snapshot)
+    entity_parts = []
+    try:
+        mentioned_groups = _find_groups_fuzzy(text)
+        for g in mentioned_groups[:3]:
+            sig = fetch_one(
+                "SELECT title FROM prospecting_signals WHERE group_id = ? ORDER BY detected_at DESC LIMIT 1",
+                [g['id']]
+            )
+            days = _days_since(g.get('last_contacted_at'))
+            contacts = fetch_all(
+                "SELECT first_name, last_name, title FROM prospecting_contacts WHERE group_id = ? LIMIT 3",
+                [g['id']]
+            )
+            contact_names = [f"{c['first_name']} {c['last_name']} ({c.get('title', '?')})" for c in (contacts or [])]
+            parts = [
+                f"{g['name']}: warmth={g.get('warmth_score', '?')}/10",
+                f"status={g.get('relationship_status', '?')}",
+                f"{days}d since contact",
+            ]
+            if sig:
+                parts.append(f"latest signal: {sig['title']}")
+            if contact_names:
+                parts.append(f"contacts: {', '.join(contact_names)}")
+            entity_parts.append(", ".join(parts))
+        mentioned_contacts = _find_contacts_fuzzy(text)
+        for c in mentioned_contacts[:3]:
+            cname = f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
+            entity_parts.append(
+                f"{cname}: {c.get('title', '')} at {c.get('group_name', '?')}, "
+                f"stage={c.get('relationship_stage', '?')}"
+                + (f", last touch {str(c.get('last_touch_at', ''))[:10]}" if c.get('last_touch_at') else ', no touch logged')
+            )
+    except Exception:
+        pass
+
+    system = CONVERSATIONAL_BRAIN_PROMPT
+    if context_parts:
+        system += "\n\n--- CONVERSATION STATE ---\n" + "\n".join(context_parts)
+    if crm_parts:
+        system += "\n\n--- YOUR CRM PIPELINE (use naturally, don't dump) ---\n" + "\n".join(crm_parts)
+    if entity_parts:
+        system += "\n\n--- ENTITIES MENTIONED IN THIS MESSAGE ---\n" + "\n".join(entity_parts)
+    if extra_ctx and extra_ctx.strip():
+        system += "\n\n--- PAGE CONTEXT ---\n" + extra_ctx.strip()[:800]
 
     api_messages = []
     for m in messages[:-1]:
@@ -790,22 +927,25 @@ def _handle_conversational(text, messages, conv_state):
             'content': m.get('content', '')
         })
     api_messages.append({'role': 'user', 'content': text})
-    api_messages = api_messages[-10:]
+    api_messages = api_messages[-20:]
 
     try:
-        client = anthropic.Anthropic(api_key=api_key, timeout=30.0)
+        client = anthropic.Anthropic(api_key=api_key, timeout=60.0)
         resp = client.messages.create(
             model='claude-sonnet-4-20250514',
-            max_tokens=500,
+            max_tokens=2000,
             system=system,
             messages=api_messages
         )
         reply = resp.content[0].text if resp.content else ''
         if reply:
             reply = re.sub(r'<card>.*?</card>', '', reply, flags=re.DOTALL).strip()
-            return reply
+            reply = re.sub(r'<action>.*?</action>', '', reply, flags=re.DOTALL).strip()
+            reply = re.sub(r'\{[^{}]*"type"\s*:\s*"[^"]*Card"[^{}]*\}', '', reply).strip()
+            if reply:
+                return _quality_check_response(reply)
     except Exception as e:
-        logger.warning(f"[Leo] Conversational layer error: {e}")
+        logger.warning(f"[Leo] Conversational brain error: {e}")
 
     return _handle_conversational_fallback(text, conv_state)
 
@@ -8292,17 +8432,6 @@ def _chat_inner():
             'card': card, 'intent': 'greeting', 'mode': 'conversational'
         })
 
-    # Conversational handler — motivation, emotional support, strategy chat
-    # Uses a focused personality prompt, NOT the full execution system prompt
-    if intent == 'conversational':
-        conv_resp = _handle_conversational(last_msg, messages, conv_state)
-        card = {'type': 'TextCard', 'text': conv_resp, 'data': {}, 'actions': []}
-        _persist_chat(last_msg, card, 'conversational', 'conversational')
-        return jsonify({
-            'role': 'assistant', 'content': conv_resp,
-            'card': card, 'intent': 'conversational', 'mode': 'conversational'
-        })
-
     # Performance action intercept — parse NLP, show preview card
     if intent == 'update_performance':
         parsed = _parse_performance_command(last_msg)
@@ -8714,8 +8843,40 @@ def _chat_inner():
 
     combined_extra = (extra_ctx or '') + page_extra
 
-    # Conversational entity awareness — silently pull context when user mentions names
-    if intent in ('normal_chat', 'market_intel'):
+    # ═══════════════════════════════════════════════════════════════════════
+    # CONVERSATIONAL BRAIN — Primary response layer (conversation is default)
+    # ═══════════════════════════════════════════════════════════════════════
+    # All intents route here EXCEPT market_intel, which requires the full
+    # execution pipeline for structured report generation with web research.
+    # The Conversational Brain handles: chat, strategy, brainstorming, analysis,
+    # motivation, coaching, diagnosis, recommendations, and any execution intent
+    # whose intercept couldn't parse the input (graceful fallback to conversation).
+    if intent != 'market_intel':
+        brain_resp = _handle_conversational_brain(
+            last_msg, messages, conv_state, intent, combined_extra
+        )
+        card = {'type': 'TextCard', 'text': brain_resp, 'data': {}, 'actions': []}
+        _persist_chat(last_msg, card, intent, 'conversational')
+        try:
+            _extract_memory_from_exchange(last_msg, brain_resp, intent)
+        except Exception:
+            pass
+        try:
+            mentioned_groups = _find_groups_fuzzy(last_msg)
+            _extract_suggestions_from_reply(brain_resp, intent, mentioned_groups)
+        except Exception:
+            pass
+        return jsonify({
+            'role': 'assistant', 'content': brain_resp,
+            'card': card, 'intent': intent, 'mode': 'conversational'
+        })
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # EXECUTION PIPELINE — market_intel only (structured reports with web research)
+    # ═══════════════════════════════════════════════════════════════════════
+
+    # Entity awareness for execution pipeline
+    if intent == 'market_intel':
         mentioned_groups = _find_groups_fuzzy(last_msg)
         mentioned_contacts = _find_contacts_fuzzy(last_msg)
         entity_ctx_parts = []
