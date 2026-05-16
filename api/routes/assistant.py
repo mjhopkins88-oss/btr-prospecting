@@ -500,10 +500,13 @@ def _resolve_references(text, state):
 def _detect_message_type(text, state):
     """
     Determine if this message is a new request, continuation, modification, approval, greeting, or conversational.
-    Returns: 'greeting', 'conversational', 'approval', 'modification', 'continuation', or 'new'
+    Order matters — execution-related types (approval, modification, continuation) are checked
+    BEFORE conversational to prevent conversational patterns from hijacking execution flows.
+    Returns: 'greeting', 'approval', 'modification', 'continuation', 'conversational', or 'new'
     """
     text_lower = text.lower().strip().rstrip('.!?,')
 
+    # 1. Greetings — bare greetings only (3 words max, no embedded requests)
     _GREETING_PATTERNS = {
         'hey', 'hi', 'hello', 'yo', 'sup', 'hey leo', 'hi leo', 'hello leo',
         'hey there', 'hi there', 'what\'s up', 'whats up', 'howdy', 'good morning',
@@ -512,24 +515,7 @@ def _detect_message_type(text, state):
     if text_lower in _GREETING_PATTERNS or (len(text_lower.split()) <= 3 and text_lower.startswith(('hey', 'hi ', 'hello', 'yo ', 'sup'))):
         return 'greeting'
 
-    _CONVERSATIONAL_PATTERNS = [
-        'motivate me', 'pump me up', 'give me a push', 'fire me up',
-        'hype me up', 'get me going', 'need motivation', 'need a push',
-        'i\'m stuck', 'im stuck', 'i am stuck', 'feeling stuck',
-        'i\'m overwhelmed', 'im overwhelmed', 'i am overwhelmed',
-        'i\'m lost', 'im lost', 'i don\'t know what to do',
-        'talk me through', 'walk me through', 'think through',
-        'what do you think', 'what\'s your take', 'your thoughts',
-        'how are you', 'how\'s it going', 'talk to me',
-        'i need help', 'help me think', 'i\'m nervous', 'i\'m scared',
-        'should i be worried', 'am i doing okay', 'how am i doing',
-        'i feel like', 'i\'m not sure', 'i don\'t want to',
-        'convince me', 'why should i', 'is it worth',
-        'pep talk', 'cheer me up', 'i\'m frustrated',
-    ]
-    if any(p in text_lower for p in _CONVERSATIONAL_PATTERNS):
-        return 'conversational'
-
+    # 2. Approvals — BEFORE conversational (user may express hesitation then approve)
     _action_card_types = {'ConfirmationCard', 'CrmUpdatePreviewCard', 'SchedulePlanCard',
                           'DailyPlanCard', 'LeoActionPreviewCard', 'CalendarConfirmCard'}
     if _is_approval(text):
@@ -538,20 +524,62 @@ def _detect_message_type(text, state):
         if state.get('last_card_type') in _action_card_types:
             return 'approval'
 
+    # 3. Modifications — BEFORE conversational ("I don't want to..." could match both)
     for phrase in _MODIFICATION_PHRASES:
         if phrase in text_lower:
             if state.get('last_intent') and state.get('last_output_text'):
                 return 'modification'
 
+    # 4. Continuations — BEFORE conversational
     if state.get('last_intent'):
         for phrase in _CONTINUATION_PHRASES:
             if phrase in text_lower:
                 return 'continuation'
-        # Short messages after an action are likely continuations
         if len(text_lower.split()) <= 4 and state.get('last_card_type') not in (None, 'TextCard'):
             has_pronoun = any(p in text_lower for p in _PRONOUN_MAP)
             if has_pronoun:
                 return 'continuation'
+
+    # 5. Conversational — only if NO execution keywords are present
+    _EXECUTION_GUARDS = [
+        'add contact', 'add a contact', 'adding a contact', 'adding contact',
+        'create contact', 'create a contact',
+        'add company', 'add a company', 'adding a company', 'adding company',
+        'create company', 'create a company',
+        'add group', 'add a group', 'create group', 'create a group',
+        'add to capital', 'add to my',
+        'schedule meeting', 'schedule a meeting', 'book meeting', 'book a meeting',
+        'schedule a call', 'set up a meeting',
+        'draft email', 'draft outreach', 'draft a', 'write email', 'write an email',
+        'reach out to', 'send email', 'send a message',
+        'log touchpoint', 'log a call', 'log call', 'update stage', 'set warmth',
+        'add note', 'add a note',
+        'research', 'look up', 'look into',
+        'export', 'download', 'pdf', 'brief',
+        'add phone', 'add email', 'update contact',
+        'create task', 'add task', 'generate', 'build plan', 'build my',
+        'delete', 'remove',
+    ]
+    has_execution_keyword = any(kw in text_lower for kw in _EXECUTION_GUARDS)
+
+    if not has_execution_keyword:
+        _CONVERSATIONAL_PATTERNS = [
+            'motivate me', 'pump me up', 'give me a push', 'fire me up',
+            'hype me up', 'get me going', 'need motivation', 'need a push',
+            'i\'m stuck', 'im stuck', 'i am stuck', 'feeling stuck',
+            'i\'m overwhelmed', 'im overwhelmed', 'i am overwhelmed',
+            'i\'m lost', 'im lost', 'i don\'t know what to do',
+            'talk me through', 'walk me through', 'think through',
+            'what do you think', 'what\'s your take', 'your thoughts',
+            'how are you', 'how\'s it going', 'talk to me',
+            'i need help', 'help me think', 'i\'m nervous', 'i\'m scared',
+            'should i be worried', 'am i doing okay', 'how am i doing',
+            'i feel like', 'i\'m not sure', 'i don\'t want to',
+            'convince me', 'why should i', 'is it worth',
+            'pep talk', 'cheer me up', 'i\'m frustrated',
+        ]
+        if any(p in text_lower for p in _CONVERSATIONAL_PATTERNS):
+            return 'conversational'
 
     return 'new'
 
