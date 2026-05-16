@@ -36,6 +36,7 @@ _state_lock = threading.Lock()
 
 _APPROVAL_PHRASES = frozenset([
     'approved', 'approve', 'proceed', 'yes', 'confirm', 'confirmed',
+    'sure', 'okay', 'ok', 'yep', 'yup', 'cool',
     'add these', 'add them', 'go ahead', 'do it', 'looks good',
     'add to calendar', 'add to my calendar', 'put on calendar',
     'put on my calendar', 'schedule these', 'schedule them',
@@ -44,6 +45,7 @@ _APPROVAL_PHRASES = frozenset([
     'yes please', 'please proceed', 'go for it', 'let\'s do it',
     'add all', 'confirm all', 'approve all', 'execute',
     'do it all', 'make it happen', 'lock it in',
+    'works for me', 'that works', 'good to go', 'all good',
 ])
 
 _APPROVAL_NEGATORS = frozenset(['but', 'however', 'change', 'instead', 'wait', 'except', 'modify', 'actually', 'hold on', 'not yet'])
@@ -545,13 +547,14 @@ def _detect_message_type(text, state):
         'add contact', 'add a contact', 'adding a contact', 'adding contact',
         'create contact', 'create a contact',
         'add company', 'add a company', 'adding a company', 'adding company',
-        'create company', 'create a company',
-        'add group', 'add a group', 'create group', 'create a group',
+        'create company', 'create a company', 'creating a company', 'creating company',
+        'add group', 'add a group', 'create group', 'create a group', 'creating a group', 'creating group',
         'add to capital', 'add to my',
         'schedule meeting', 'schedule a meeting', 'book meeting', 'book a meeting',
         'schedule a call', 'set up a meeting',
         'draft email', 'draft outreach', 'draft a', 'write email', 'write an email',
-        'reach out to', 'send email', 'send a message',
+        'reach out to', 'send email', 'send a message', 'reply to', 'respond to',
+        'write outreach', 'cold email', 'linkedin message',
         'log touchpoint', 'log a call', 'log call', 'update stage', 'set warmth',
         'add note', 'add a note',
         'research', 'look up', 'look into',
@@ -576,7 +579,13 @@ def _detect_message_type(text, state):
             'should i be worried', 'am i doing okay', 'how am i doing',
             'i feel like', 'i\'m not sure', 'i don\'t want to',
             'convince me', 'why should i', 'is it worth',
-            'pep talk', 'cheer me up', 'i\'m frustrated',
+            'pep talk', 'cheer me up', 'i\'m frustrated', 'i am frustrated', 'im frustrated',
+            'give me advice', 'tell me more', 'go deeper',
+            'break it down', 'what else', 'keep going',
+            'i\'m worried', 'im worried', 'i am worried',
+            'i\'m confused', 'im confused', 'i am confused',
+            'what would you do', 'honest opinion', 'real talk',
+            'be honest', 'level with me', 'straight talk',
         ]
         if any(p in text_lower for p in _CONVERSATIONAL_PATTERNS):
             return 'conversational'
@@ -751,6 +760,18 @@ When the user is chatting, brainstorming, venting, strategizing, asking for opin
 → Give direct opinions, not options lists
 → Ground advice in their specific pipeline when relevant
 → Ask smart follow-ups when you need clarity
+
+RESPONSE LENGTH:
+→ Greeting/casual: 1-2 sentences
+→ Motivation/emotional: 2-4 sentences (one key insight, one push)
+→ Strategy/analysis: 3-6 sentences (reasoning + recommendation)
+→ Deep brainstorming: up to 2 short paragraphs
+→ Never exceed 2 paragraphs unless the user explicitly asks for depth
+
+AMBIGUOUS REQUESTS:
+→ If the user's intent is unclear, respond conversationally AND ask one clarifying question
+→ "That could go a few ways — are you looking for strategy advice or want me to actually draft something?"
+→ Never guess wrong and auto-execute. When in doubt, stay conversational.
 
 When you think an action would help:
 → SUGGEST it naturally: "Want me to draft that?" / "I can schedule that if you give me a time."
@@ -989,10 +1010,40 @@ def _handle_conversational_fallback(text, conv_state):
         ]
         return random.choice(responses)
 
-    if any(w in text_lower for w in ['think', 'opinion', 'take', 'thoughts']):
-        return "Give me something specific and I'll give you a real opinion. What are you weighing?"
+    if any(w in text_lower for w in ['think', 'opinion', 'take', 'thoughts', 'honest', 'level with']):
+        responses = [
+            "Give me something specific and I'll give you a real opinion. What are you weighing?",
+            "Happy to weigh in — what's the situation?",
+            "I'll shoot straight. What's on your mind?",
+        ]
+        return random.choice(responses)
 
-    return "I'm here. What are you working through?"
+    if any(w in text_lower for w in ['strateg', 'approach', 'brainstorm', 'idea', 'how could', 'what if']):
+        responses = [
+            "Let's think through this. What angle are you coming from right now?",
+            "Good — strategy mode. Give me the setup and I'll riff with you.",
+            "I've got some thoughts. What are you working with so far?",
+        ]
+        return random.choice(responses)
+
+    if any(w in text_lower for w in ['worried', 'nervous', 'scared', 'confused', 'frustrated']):
+        responses = [
+            "Let's break it down. What's the biggest thing eating at you right now?",
+            "One thing at a time. Tell me what's going on and we'll figure it out.",
+            "Take a breath. What happened — give me the short version.",
+        ]
+        return random.choice(responses)
+
+    if any(w in text_lower for w in ['explain', 'what does', 'what is', 'how does', 'define', 'mean']):
+        return "Sure — what concept or metric are you trying to understand?"
+
+    general_responses = [
+        "I'm here. What are you working through?",
+        "What's on your mind?",
+        "Talk to me — what's going on?",
+        "I'm listening. What do you need?",
+    ]
+    return random.choice(general_responses)
 
 
 def _handle_greeting(conv_state):
@@ -1109,8 +1160,8 @@ INTENT_KEYWORDS = {
                          'low', 'behind', 'stuck', 'bottleneck', 'what went wrong'],
     'build_prompt':     ['build prompt', 'write prompt', 'create prompt', 'prompt for',
                          'claude prompt', 'ai prompt', 'system design', 'architect'],
-    'draft_outreach':   ['draft', 'write email', 'outreach', 'message to', 'reach out',
-                         'cold email', 'linkedin message', 'write to'],
+    'draft_outreach':   ['draft', 'write email', 'write an email', 'outreach', 'message to', 'reach out',
+                         'cold email', 'linkedin message', 'write to', 'send email', 'send an email'],
     'explain_metrics':  ['explain', 'what does', 'what is', 'how does', 'mean by',
                          'metric', 'score', 'warmth', 'define'],
     'analyze_contact':  ['about this contact', 'tell me about', 'who is', 'contact info',
@@ -1238,17 +1289,16 @@ def _classify_intent(text):
 
     best_intent = 'normal_chat'
     best_score = 0
+    action_intents = {'schedule_meeting', 'update_calendar', 'log_update_crm', 'crm_update',
+                      'update_performance', 'export_report', 'push_forward', 'research_web',
+                      'market_intel', 'draft_outreach'}
     for intent, keywords in INTENT_KEYWORDS.items():
         score = sum(1 for kw in keywords if kw in text_lower)
-        if score > best_score:
+        if score > best_score or (score == best_score and score > 0
+                                   and intent in action_intents and best_intent not in action_intents):
             best_score = score
             best_intent = intent
 
-    # Action intents (scheduling, CRM updates, logging) should trigger on a single keyword match
-    # because their keywords are already specific multi-word phrases
-    action_intents = {'schedule_meeting', 'update_calendar', 'log_update_crm', 'crm_update',
-                      'update_performance', 'export_report', 'push_forward', 'research_web',
-                      'market_intel'}
     if best_score >= 1 and best_intent in action_intents:
         return best_intent
 
