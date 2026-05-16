@@ -499,8 +499,8 @@ def _resolve_references(text, state):
 
 def _detect_message_type(text, state):
     """
-    Determine if this message is a new request, continuation, modification, approval, or greeting.
-    Returns: 'greeting', 'approval', 'modification', 'continuation', or 'new'
+    Determine if this message is a new request, continuation, modification, approval, greeting, or conversational.
+    Returns: 'greeting', 'conversational', 'approval', 'modification', 'continuation', or 'new'
     """
     text_lower = text.lower().strip().rstrip('.!?,')
 
@@ -511,6 +511,24 @@ def _detect_message_type(text, state):
     }
     if text_lower in _GREETING_PATTERNS or (len(text_lower.split()) <= 3 and text_lower.startswith(('hey', 'hi ', 'hello', 'yo ', 'sup'))):
         return 'greeting'
+
+    _CONVERSATIONAL_PATTERNS = [
+        'motivate me', 'pump me up', 'give me a push', 'fire me up',
+        'hype me up', 'get me going', 'need motivation', 'need a push',
+        'i\'m stuck', 'im stuck', 'i am stuck', 'feeling stuck',
+        'i\'m overwhelmed', 'im overwhelmed', 'i am overwhelmed',
+        'i\'m lost', 'im lost', 'i don\'t know what to do',
+        'talk me through', 'walk me through', 'think through',
+        'what do you think', 'what\'s your take', 'your thoughts',
+        'how are you', 'how\'s it going', 'talk to me',
+        'i need help', 'help me think', 'i\'m nervous', 'i\'m scared',
+        'should i be worried', 'am i doing okay', 'how am i doing',
+        'i feel like', 'i\'m not sure', 'i don\'t want to',
+        'convince me', 'why should i', 'is it worth',
+        'pep talk', 'cheer me up', 'i\'m frustrated',
+    ]
+    if any(p in text_lower for p in _CONVERSATIONAL_PATTERNS):
+        return 'conversational'
 
     _action_card_types = {'ConfirmationCard', 'CrmUpdatePreviewCard', 'SchedulePlanCard',
                           'DailyPlanCard', 'LeoActionPreviewCard', 'CalendarConfirmCard'}
@@ -548,6 +566,9 @@ def _classify_intent_contextual(text, state, msg_type):
 
     if msg_type == 'greeting':
         return 'greeting'
+
+    if msg_type == 'conversational':
+        return 'conversational'
 
     if msg_type == 'approval':
         return state.get('last_intent', base_intent)
@@ -652,6 +673,140 @@ def _build_state_context_block(state, resolved, msg_type=None):
             parts.append(f"RESOLVED REFERENCES: {'; '.join(res_parts)}")
 
     return '\n'.join(parts)
+
+
+CONVERSATIONAL_PROMPT = """You are Leo — a sharp, opinionated operator embedded in a BTR real estate intelligence platform.
+
+Right now the user is NOT asking you to do a task. They are talking to you — like a colleague. Respond like a human.
+
+YOUR PERSONALITY:
+- Direct, confident, slightly casual
+- Motivating without being cheesy — you push people forward with real talk, not platitudes
+- You think like a senior dealmaker and talk like a trusted colleague
+- Short and punchy. 2-4 sentences max unless they ask for depth
+- Never robotic, never templated, never a data dump
+
+RULES FOR THIS RESPONSE:
+1. DO NOT output task lists, structured plans, card JSON, or formatted blocks
+2. DO NOT suggest actions unless it connects naturally to what they said
+3. DO NOT repeat anything from the conversation history
+4. Respond ONLY in plain text — no headers, no bullets, no cards
+5. Match their emotional energy: if they need motivation, motivate. If they're stuck, help them see the path. If they're chatting, chat back.
+6. If you reference CRM data, weave it in naturally — "you've got 3 warm contacts cooling" not "CAPITAL GROUPS: ..."
+7. Keep it to 1-3 sentences for casual chat, 2-5 for motivation/strategy talk
+
+MOTIVATION STYLE (when they need a push):
+- Ground it in their specific situation, not generic advice
+- Connect to ONE concrete action they can take right now
+- Make them feel capable, not lectured
+- Example: "You're closer than it feels. Hit the 3 warm contacts first — get one real conversation started and the day changes."
+- NOT: "Here's your task list: 1. Follow up with... 2. Research..."
+
+EMOTIONAL READS:
+- "I'm stuck" → they need one clear action, not a list. Cut through the noise.
+- "motivate me" → give a sharp, honest push connected to their pipeline reality
+- "what do you think" → give a direct opinion, not options
+- "I'm overwhelmed" → simplify ruthlessly. One thing. Do that first.
+- "talk me through this" → reason out loud with them, step by step
+- "why am I not closing" → honest diagnosis, name the real blocker
+
+The user works in BTR commercial insurance — they prospect capital groups, developers, and PE firms for a dedicated BTR insurance program."""
+
+
+def _handle_conversational(text, messages, conv_state):
+    """
+    Handle conversational messages (motivation, emotional support, strategy chat)
+    using a focused personality prompt — no execution instructions, no card definitions.
+    """
+    api_key = os.getenv('ANTHROPIC_API_KEY')
+    if not api_key:
+        return _handle_conversational_fallback(text, conv_state)
+
+    state_summary = []
+    if conv_state.get('last_output_text'):
+        state_summary.append(f"YOUR LAST RESPONSE (do NOT repeat this): {conv_state['last_output_text'][:200]}")
+    if conv_state['people']:
+        names = [p['name'] for p in conv_state['people'][-3:]]
+        state_summary.append(f"Recently discussed people: {', '.join(names)}")
+    if conv_state['companies']:
+        names = [c['name'] for c in conv_state['companies'][-3:]]
+        state_summary.append(f"Recently discussed companies: {', '.join(names)}")
+
+    # Pull one or two quick CRM stats for grounding
+    crm_snapshot = []
+    try:
+        warm_count = fetch_one("SELECT COUNT(*) as cnt FROM capital_groups WHERE warmth_score >= 5", [])
+        if warm_count and warm_count['cnt'] > 0:
+            crm_snapshot.append(f"Warm relationships (warmth >= 5): {warm_count['cnt']}")
+        overdue = fetch_one(
+            "SELECT COUNT(*) as cnt FROM follow_ups WHERE status = 'pending' AND due_date < date('now')", []
+        )
+        if overdue and overdue['cnt'] > 0:
+            crm_snapshot.append(f"Overdue follow-ups: {overdue['cnt']}")
+        total_groups = fetch_one("SELECT COUNT(*) as cnt FROM capital_groups", [])
+        if total_groups:
+            crm_snapshot.append(f"Total capital groups tracked: {total_groups['cnt']}")
+    except Exception:
+        pass
+
+    system = CONVERSATIONAL_PROMPT
+    if state_summary:
+        system += "\n\n--- CONVERSATION CONTEXT ---\n" + "\n".join(state_summary)
+    if crm_snapshot:
+        system += "\n\n--- CRM SNAPSHOT (use naturally, don't dump) ---\n" + "\n".join(crm_snapshot)
+
+    api_messages = []
+    for m in messages[:-1]:
+        api_messages.append({
+            'role': m.get('role', 'user'),
+            'content': m.get('content', '')
+        })
+    api_messages.append({'role': 'user', 'content': text})
+    api_messages = api_messages[-10:]
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key, timeout=30.0)
+        resp = client.messages.create(
+            model='claude-sonnet-4-20250514',
+            max_tokens=500,
+            system=system,
+            messages=api_messages
+        )
+        reply = resp.content[0].text if resp.content else ''
+        if reply:
+            reply = re.sub(r'<card>.*?</card>', '', reply, flags=re.DOTALL).strip()
+            return reply
+    except Exception as e:
+        logger.warning(f"[Leo] Conversational layer error: {e}")
+
+    return _handle_conversational_fallback(text, conv_state)
+
+
+def _handle_conversational_fallback(text, conv_state):
+    """Fallback conversational responses when API is unavailable."""
+    import random
+    text_lower = text.lower()
+
+    if any(w in text_lower for w in ['motivat', 'pump', 'push', 'fire', 'hype', 'get me going']):
+        responses = [
+            "You don't need to solve the whole pipeline today. Pick the warmest contact, send one message, and let momentum do the rest.",
+            "The difference between a good week and a wasted one is usually just 2-3 real conversations. You've got the contacts — go start one.",
+            "Stop planning and start moving. One follow-up right now is worth ten tomorrow. Which one's been sitting too long?",
+        ]
+        return random.choice(responses)
+
+    if any(w in text_lower for w in ['stuck', 'overwhelm', 'lost', 'don\'t know', 'dont know']):
+        responses = [
+            "When everything feels like a priority, nothing moves. Pick the one contact with the highest warmth score and start there. Just that one.",
+            "You're not stuck — you're overthinking it. The next move is almost always a follow-up. Who haven't you talked to in a while?",
+            "Forget the full pipeline for a minute. What's the single most important relationship you should be advancing today?",
+        ]
+        return random.choice(responses)
+
+    if any(w in text_lower for w in ['think', 'opinion', 'take', 'thoughts']):
+        return "Give me something specific and I'll give you a real opinion. What are you weighing?"
+
+    return "I'm here. What are you working through?"
 
 
 def _handle_greeting(conv_state):
@@ -833,6 +988,7 @@ INTENT_KEYWORDS = {
 
 INTENT_TO_MODE = {
     'greeting':         'conversational',
+    'conversational':   'conversational',
     'normal_chat':      'conversational',
     'brainstorm':       'strategic',
     'diagnose':         'analyst',
@@ -8106,6 +8262,17 @@ def _chat_inner():
         return jsonify({
             'role': 'assistant', 'content': greeting_resp,
             'card': card, 'intent': 'greeting', 'mode': 'conversational'
+        })
+
+    # Conversational handler — motivation, emotional support, strategy chat
+    # Uses a focused personality prompt, NOT the full execution system prompt
+    if intent == 'conversational':
+        conv_resp = _handle_conversational(last_msg, messages, conv_state)
+        card = {'type': 'TextCard', 'text': conv_resp, 'data': {}, 'actions': []}
+        _persist_chat(last_msg, card, 'conversational', 'conversational')
+        return jsonify({
+            'role': 'assistant', 'content': conv_resp,
+            'card': card, 'intent': 'conversational', 'mode': 'conversational'
         })
 
     # Performance action intercept — parse NLP, show preview card
