@@ -176,6 +176,18 @@ def _build_action_items():
     """Build personalized action items from CRM data, with generic fallbacks."""
     actions = []
 
+    # Include user's daily focus if set
+    try:
+        today_str = datetime.utcnow().strftime('%Y-%m-%d')
+        focus_row = fetch_one(
+            "SELECT daily_focus FROM performance_daily WHERE date_str = ?",
+            [today_str]
+        )
+        if focus_row and focus_row.get('daily_focus'):
+            actions.append(f"TODAY'S FOCUS: {focus_row['daily_focus']}")
+    except Exception:
+        pass
+
     # Try to pull real data
     try:
         today = datetime.utcnow().strftime('%Y-%m-%d')

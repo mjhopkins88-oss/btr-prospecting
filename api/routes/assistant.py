@@ -994,6 +994,7 @@ def _handle_hybrid_route(text, messages, conv_state, router, page_context, extra
     try:
         _extract_memory_from_exchange(text, brain_resp, router['execution_intent'])
         _extract_persistent_memories(text, brain_resp, router['execution_intent'], conv_state)
+        _sync_focus_from_chat(text, brain_resp, conv_state)
     except Exception:
         pass
     return jsonify({
@@ -1094,6 +1095,17 @@ def _build_state_context_block(state, resolved, msg_type=None):
             res_parts.append(f"'it/this/that' = draft for {resolved['draft_target']}")
         if res_parts:
             parts.append(f"RESOLVED REFERENCES: {'; '.join(res_parts)}")
+
+    try:
+        focus_data = _get_current_focus()
+        if focus_data.get('daily_focus'):
+            parts.append(f"USER'S CURRENT FOCUS: {focus_data['daily_focus']}")
+        if focus_data.get('strategy_notes'):
+            parts.append("RECENT STRATEGY CONTEXT:")
+            for note in focus_data['strategy_notes'][:3]:
+                parts.append(f"  - {note}")
+    except Exception:
+        pass
 
     return '\n'.join(parts)
 
@@ -1687,9 +1699,10 @@ def _handle_greeting(conv_state):
     # Check for overdue follow-ups
     try:
         overdue = fetch_all(
-            """SELECT title, due_date FROM follow_ups
-               WHERE status = 'pending' AND due_date < date('now')
-               ORDER BY due_date ASC LIMIT 5""", []
+            """SELECT title, due_at FROM prospecting_tasks
+               WHERE status = 'pending' AND type = 'follow_up'
+                 AND due_at < date('now')
+               ORDER BY due_at ASC LIMIT 5""", []
         )
         if overdue:
             count = len(overdue)
@@ -1703,7 +1716,7 @@ def _handle_greeting(conv_state):
     # Check for recent signals
     try:
         recent_signals = fetch_all(
-            """SELECT title FROM signals
+            """SELECT title FROM prospecting_signals
                WHERE created_at > datetime('now', '-3 days')
                ORDER BY created_at DESC LIMIT 3""", []
         )
@@ -1740,6 +1753,16 @@ def _handle_greeting(conv_state):
         "Hey —", "What's up —", "Hey there —", "Yo —",
     ]
     opener = random.choice(greetings)
+
+    # Surface user's current focus if set
+    try:
+        focus_data = _get_current_focus()
+        if focus_data.get('daily_focus'):
+            insights.insert(0,
+                f"your focus today is **{focus_data['daily_focus']}**. Want to keep pushing on that or pivot?"
+            )
+    except Exception:
+        pass
 
     proactive = _check_proactive_alerts()
     if proactive:
@@ -3444,6 +3467,13 @@ def _generate_daily_plan():
             except Exception:
                 pass
 
+    # Apply user focus boost — items matching focus entities sort higher
+    try:
+        focus_data = _get_current_focus()
+        _apply_focus_boost(plan, focus_data, score_key='deal_score')
+    except Exception:
+        pass
+
     # Re-sort by priority then deal score descending
     plan.sort(key=lambda x: (prio_order.get(x['priority'], 4), -(x.get('deal_score', 0))))
     plan = plan[:8]
@@ -5015,6 +5045,13 @@ def _generate_execution_queue(limit=10):
                 'urgency': 'medium' if prob['score'] >= 50 else 'low',
             })
 
+    # Apply user focus boost before sorting
+    try:
+        focus_data = _get_current_focus()
+        _apply_focus_boost(items, focus_data, score_key='priority_score')
+    except Exception:
+        pass
+
     items.sort(key=lambda x: x.get('priority_score', 0), reverse=True)
     items = items[:limit]
     items = _filter_plan_tasks(items) or items
@@ -6039,6 +6076,130 @@ def _extract_persistent_memories(user_msg, reply_text, intent, conv_state):
                       source='conversation', confidence=0.7)
 
 
+# ---------------------------------------------------------------------------
+# Focus/Priority Sync — write-through from chat to actionable data
+# ---------------------------------------------------------------------------
+
+_FOCUS_PATTERNS = re.compile(
+    r"(?:focus\s+on|prioritize|priority\s+(?:is|should\s+be)|"
+    r"let'?s\s+focus\s+on|my\s+focus\s+(?:is|should\s+be)|"
+    r"concentrate\s+on|zero\s+in\s+on|"
+    r"top\s+priority\s+(?:is|should\s+be)|"
+    r"shift\s+(?:focus|attention)\s+to|"
+    r"i\s+want\s+to\s+focus\s+on|"
+    r"today(?:'s)?\s+focus\s+(?:is|should\s+be)|"
+    r"this\s+week(?:'s)?\s+focus)",
+    re.IGNORECASE
+)
+
+
+def _get_current_focus():
+    """Read the user's current focus from performance_daily and recent strategy memories."""
+    focus_data = {'daily_focus': None, 'focus_entities': [], 'strategy_notes': []}
+    try:
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        day = fetch_one(
+            "SELECT daily_focus FROM performance_daily WHERE date_str = ?", [today]
+        )
+        if day and day.get('daily_focus'):
+            focus_data['daily_focus'] = day['daily_focus']
+    except Exception:
+        pass
+
+    try:
+        recent_focus = fetch_all(
+            """SELECT content, entity_name, confidence FROM leo_memory
+               WHERE category IN ('strategy', 'decision')
+                 AND confidence >= 0.6
+                 AND updated_at > datetime('now', '-7 days')
+               ORDER BY updated_at DESC LIMIT 5""", []
+        )
+        for m in (recent_focus or []):
+            if m.get('entity_name'):
+                focus_data['focus_entities'].append(m['entity_name'].lower())
+            focus_data['strategy_notes'].append(m['content'])
+    except Exception:
+        pass
+
+    return focus_data
+
+
+def _sync_focus_from_chat(user_msg, reply_text, conv_state):
+    """
+    Write-through: when user mentions focus/priority in chat,
+    persist to performance_daily.daily_focus and boost related tasks.
+    """
+    if not _FOCUS_PATTERNS.search(user_msg):
+        return
+
+    focus_match = _FOCUS_PATTERNS.search(user_msg)
+    if not focus_match:
+        return
+
+    after = user_msg[focus_match.end():].strip().rstrip('.!?')
+    if not after or len(after) < 3:
+        return
+
+    focus_text = after[:200]
+
+    try:
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        now = datetime.utcnow().isoformat()
+        from api.routes.performance import _ensure_day
+        _ensure_day(today)
+        execute(
+            "UPDATE performance_daily SET daily_focus = ?, updated_at = ? WHERE date_str = ?",
+            [focus_text, now, today]
+        )
+        logger.info(f"[Sync] Focus write-through: '{focus_text[:60]}'")
+    except Exception:
+        logger.debug("Focus write-through failed", exc_info=True)
+
+    try:
+        mentioned_groups = _find_groups_fuzzy(focus_text)
+        if mentioned_groups:
+            now = datetime.utcnow().isoformat()
+            for g in mentioned_groups[:3]:
+                execute(
+                    """UPDATE prospecting_tasks SET priority = MAX(priority, 8), updated_at = ?
+                       WHERE capital_group_id = ? AND status = 'pending'""",
+                    [now, g['id']]
+                )
+                logger.info(f"[Sync] Boosted task priority for focus entity: {g['name']}")
+    except Exception:
+        logger.debug("Focus entity boost failed", exc_info=True)
+
+    _store_memory('conversation', f"Focus set: {focus_text}", category='strategy',
+                  source='explicit', confidence=0.9)
+
+
+def _apply_focus_boost(items, focus_data, score_key='priority_score'):
+    """Boost priority of items matching the user's current focus entities."""
+    if not focus_data:
+        return items
+    has_entities = bool(focus_data.get('focus_entities'))
+    has_daily = bool(focus_data.get('daily_focus'))
+    if not has_entities and not has_daily:
+        return items
+    focus_names = set(focus_data.get('focus_entities') or [])
+    daily = (focus_data.get('daily_focus') or '').lower()
+    for item in items:
+        target = (item.get('target') or '').lower()
+        if not target:
+            continue
+        matched = False
+        if target in focus_names or any(fn in target for fn in focus_names):
+            matched = True
+        elif daily and target in daily:
+            matched = True
+        if matched:
+            current = item.get(score_key, 0)
+            if isinstance(current, (int, float)):
+                item[score_key] = current + 15
+                item['focus_boosted'] = True
+    return items
+
+
 def _check_proactive_alerts():
     """
     Check for high-value proactive alerts. Returns a list of alert strings.
@@ -6061,14 +6222,15 @@ def _check_proactive_alerts():
 
     try:
         overdue = fetch_all(
-            """SELECT f.title, f.due_date, g.name as group_name
-               FROM follow_ups f
-               LEFT JOIN capital_groups g ON f.entity_id = g.id
-               WHERE f.status = 'pending' AND f.due_date < date('now', '-2 days')
-               ORDER BY f.due_date ASC LIMIT 3""", []
+            """SELECT t.title, t.due_at, g.name as group_name
+               FROM prospecting_tasks t
+               LEFT JOIN capital_groups g ON t.capital_group_id = g.id
+               WHERE t.status = 'pending' AND t.type = 'follow_up'
+                 AND t.due_at < datetime('now', '-2 days')
+               ORDER BY t.due_at ASC LIMIT 3""", []
         )
-        for f in overdue:
-            days = _days_since(f.get('due_date'))
+        for f in (overdue or []):
+            days = _days_since(f.get('due_at'))
             group_note = f" ({f['group_name']})" if f.get('group_name') else ""
             alerts.append(f"Overdue follow-up: **{f['title']}**{group_note} — {days} days past due")
     except Exception:
@@ -9891,6 +10053,7 @@ def _chat_inner():
         try:
             _extract_memory_from_exchange(last_msg, brain_resp, intent)
             _extract_persistent_memories(last_msg, brain_resp, intent, conv_state)
+            _sync_focus_from_chat(last_msg, brain_resp, conv_state)
         except Exception:
             pass
         try:
@@ -10143,10 +10306,11 @@ def _chat_inner():
 
         _persist_chat(messages[-1].get('content', ''), card, intent, mode)
 
-        # V9: Extract and store conversation memory
+        # V9: Extract and store conversation memory + sync focus
         try:
             _extract_memory_from_exchange(last_msg, card.get('text', ''), intent)
             _extract_persistent_memories(last_msg, card.get('text', ''), intent, conv_state)
+            _sync_focus_from_chat(last_msg, card.get('text', ''), conv_state)
         except Exception:
             pass
 
