@@ -2070,7 +2070,7 @@ function BTRAssistantChat(props) {
           setInsightBadge(highImpact.length);
         })
         .catch(function() {});
-    }, 5 * 60 * 1000);
+    }, 10 * 60 * 1000);
     return function() { clearInterval(interval); };
   }, []);
 

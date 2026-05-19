@@ -75,6 +75,21 @@ if _allowed_origins:
 else:
     CORS(app, supports_credentials=True)
 
+# --- Global error handlers ---
+import logging as _logging
+_app_logger = _logging.getLogger('btr')
+
+@app.errorhandler(404)
+def not_found(e):
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Not found', 'path': request.path}), 404
+    return app.send_static_file('index.html')
+
+@app.errorhandler(500)
+def server_error(e):
+    _app_logger.error(f"[500] {request.path}: {e}\n{traceback.format_exc()}")
+    return jsonify({'error': 'Internal server error', 'detail': str(e)}), 500
+
 # --- SignalStack module (LinkedIn sales intelligence + messaging) ---
 try:
     from signalstack import bp as _signalstack_bp, init_schema as _signalstack_init_schema

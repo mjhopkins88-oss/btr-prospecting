@@ -157,7 +157,7 @@ def _execute_pending_action(action):
             }
             _persist_chat('(approved)', card, atype, 'execution')
             return jsonify({'role': 'assistant', 'content': msg, 'card': card,
-                            'intent': atype, 'mode': 'execution', 'calendar_changed': True})
+                            'intent': atype, 'mode': 'execution', 'data_changed': True, 'calendar_changed': True})
         else:
             _mark_pending_action(action_id, 'failed')
             err_msg = result.get('message', 'Failed to add schedule blocks.')
@@ -1620,6 +1620,9 @@ def _handle_conversational_brain(text, messages, conv_state, intent='conversatio
                 if suspects:
                     logger.info(f"[Leo] Truth check: flagged potential fabrications: {suspects}")
                 return _quality_check_response(reply)
+    except (anthropic.APITimeoutError, anthropic.APIConnectionError) as e:
+        logger.warning(f"[Leo] Claude API timeout: {e}")
+        return "I'm taking longer than usual to think through this. Try again or simplify your request."
     except Exception as e:
         logger.warning(f"[Leo] Conversational brain error: {e}")
 
@@ -1708,7 +1711,7 @@ def _handle_greeting(conv_state):
                 f"**{top}** being the hottest. Want me to prioritize those or something else?"
             )
     except Exception:
-        pass
+        logger.debug("_handle_greeting cooling query failed", exc_info=True)
 
     # Check for overdue follow-ups
     try:
@@ -1725,7 +1728,7 @@ def _handle_greeting(conv_state):
                 f"Want me to knock those out or focus on something fresh?"
             )
     except Exception:
-        pass
+        logger.debug("_handle_greeting overdue query failed", exc_info=True)
 
     # Check for recent signals
     try:
@@ -1741,7 +1744,7 @@ def _handle_greeting(conv_state):
                 f"Want me to dig into those or work your pipeline?"
             )
     except Exception:
-        pass
+        logger.debug("_handle_greeting signals query failed", exc_info=True)
 
     # Check for contacts needing attention
     try:
@@ -1761,7 +1764,7 @@ def _handle_greeting(conv_state):
                 + ("best ones?" if count != 1 else "details?")
             )
     except Exception:
-        pass
+        logger.debug("_handle_greeting untouched contacts query failed", exc_info=True)
 
     greetings = [
         "Hey —", "What's up —", "Hey there —", "Yo —",
@@ -1776,7 +1779,7 @@ def _handle_greeting(conv_state):
                 f"your focus today is **{focus_data['daily_focus']}**. Want to keep pushing on that or pivot?"
             )
     except Exception:
-        pass
+        logger.debug("_handle_greeting focus query failed", exc_info=True)
 
     try:
         completed_today = fetch_all(
@@ -1789,7 +1792,7 @@ def _handle_greeting(conv_state):
                 f"you've already knocked out {cnt} task{'s' if cnt != 1 else ''} today. Nice momentum."
             )
     except Exception:
-        pass
+        logger.debug("_handle_greeting completed_today query failed", exc_info=True)
 
     proactive = _check_proactive_alerts()
     if proactive:
@@ -3344,6 +3347,8 @@ def _generate_daily_plan():
     4. Scheduled follow-ups due today/tomorrow
     5. Top-scored opportunities for outreach
     """
+    import time as _time_mod
+    _start = _time_mod.time()
     plan = []
     today = datetime.utcnow().strftime('%Y-%m-%d')
     tomorrow = (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d')
@@ -3372,7 +3377,7 @@ def _generate_daily_plan():
                 'type': 'overdue_task',
             })
     except Exception:
-        pass
+        logger.debug("_generate_daily_plan query failed", exc_info=True)
 
     # 2. High-warmth groups going cold
     try:
@@ -3397,7 +3402,7 @@ def _generate_daily_plan():
                 'type': 'cooling_contact',
             })
     except Exception:
-        pass
+        logger.debug("_generate_daily_plan query failed", exc_info=True)
 
     # 3. Unactioned fresh signals
     try:
@@ -3428,7 +3433,7 @@ def _generate_daily_plan():
                 'type': 'unactioned_signal',
             })
     except Exception:
-        pass
+        logger.debug("_generate_daily_plan query failed", exc_info=True)
 
     # 4. Follow-ups due today/tomorrow — exclude passive types
     try:
@@ -3453,7 +3458,7 @@ def _generate_daily_plan():
                 'type': 'scheduled_followup',
             })
     except Exception:
-        pass
+        logger.debug("_generate_daily_plan query failed", exc_info=True)
 
     # 5. Top opportunities for outreach
     if len(plan) < 5:
@@ -3492,20 +3497,23 @@ def _generate_daily_plan():
                     item['deal_score'] = prob.get('score', 0)
                     item['deal_label'] = prob.get('label', '')
             except Exception:
-                pass
+                logger.debug("_generate_daily_plan query failed", exc_info=True)
 
     # Apply user focus boost — items matching focus entities sort higher
     try:
         focus_data = _get_current_focus()
         _apply_focus_boost(plan, focus_data, score_key='deal_score')
     except Exception:
-        pass
+        logger.debug("_generate_daily_plan query failed", exc_info=True)
 
     # Re-sort by priority then deal score descending
     plan.sort(key=lambda x: (prio_order.get(x['priority'], 4), -(x.get('deal_score', 0))))
     plan = plan[:8]
 
     total_minutes = sum(p.get('est_minutes', 10) for p in plan)
+    _elapsed = _time_mod.time() - _start
+    if _elapsed > 2.0:
+        logger.warning(f"[Perf] _generate_daily_plan took {_elapsed:.1f}s")
     return plan, total_minutes
 
 
@@ -3544,7 +3552,7 @@ def _generate_proactive_insights(as_objects=False):
                 'action_targets': [g['name'] for g in undertouched],
             })
     except Exception:
-        pass
+        logger.debug("_generate_daily_plan query failed", exc_info=True)
 
     # 2. Activity trend
     try:
@@ -3579,7 +3587,7 @@ def _generate_proactive_insights(as_objects=False):
                 'detail': f"{tw} vs {lw} touchpoints — strong momentum, keep pushing",
             })
     except Exception:
-        pass
+        logger.debug("_generate_daily_plan query failed", exc_info=True)
 
     # 3. Unactioned signals
     try:
@@ -3610,7 +3618,7 @@ def _generate_proactive_insights(as_objects=False):
                 'action_params': {'tab': 'signals'},
             })
     except Exception:
-        pass
+        logger.debug("_generate_daily_plan query failed", exc_info=True)
 
     # 4. Stage bottleneck
     try:
@@ -3635,7 +3643,7 @@ def _generate_proactive_insights(as_objects=False):
                     'action_params': {'tab': 'prospecting'},
                 })
     except Exception:
-        pass
+        logger.debug("_generate_daily_plan query failed", exc_info=True)
 
     # 5. Overdue tasks
     try:
@@ -3658,7 +3666,7 @@ def _generate_proactive_insights(as_objects=False):
                 'action_params': {'tab': 'prospecting'},
             })
     except Exception:
-        pass
+        logger.debug("_generate_daily_plan query failed", exc_info=True)
 
     # 6. Contacts going cold
     try:
@@ -3683,7 +3691,7 @@ def _generate_proactive_insights(as_objects=False):
                 'action_targets': [g['name'] for g in going_cold],
             })
     except Exception:
-        pass
+        logger.debug("_generate_daily_plan query failed", exc_info=True)
 
     # 7. Weekly target proximity
     try:
@@ -3705,7 +3713,7 @@ def _generate_proactive_insights(as_objects=False):
                 'action_type': 'start_sprint',
             })
     except Exception:
-        pass
+        logger.debug("_generate_daily_plan query failed", exc_info=True)
 
     # Sort by impact, take top 4
     raw_insights.sort(key=lambda x: x.get('impact', 0), reverse=True)
@@ -4653,6 +4661,8 @@ RULES:
             intros = json.loads(reply[json_start:json_end])
             if isinstance(intros, list) and len(intros) >= 1:
                 return intros[:3]
+    except (anthropic.APITimeoutError, anthropic.APIConnectionError) as e:
+        logger.warning(f"[Leo] Claude API timeout generating intros: {e}")
     except Exception:
         logger.warning("Failed to generate research intros, falling back to generic", exc_info=True)
 
@@ -4885,7 +4895,7 @@ def _detect_automation_opportunities():
             })
             time_saved_min += sig_count * 3
     except Exception:
-        pass
+        logger.debug("_generate_execution_queue query failed", exc_info=True)
 
     if not suggestions:
         suggestions.append({
@@ -4908,6 +4918,8 @@ def _generate_execution_queue(limit=10):
     urgency, signal freshness, inactivity risk.
     Sources: SignalStack, follow-ups, stale contacts, touchpoints, performance, prospecting.
     """
+    import time as _time_mod
+    _start = _time_mod.time()
     items = []
     seen_ids = set()
     today = datetime.utcnow().strftime('%Y-%m-%d')
@@ -4944,7 +4956,7 @@ def _generate_execution_queue(limit=10):
                 'urgency': 'critical',
             })
     except Exception:
-        pass
+        logger.debug("_generate_execution_queue query failed", exc_info=True)
 
     # 2. High-warmth going cold
     try:
@@ -4976,7 +4988,7 @@ def _generate_execution_queue(limit=10):
                 'urgency': 'high',
             })
     except Exception:
-        pass
+        logger.debug("_generate_execution_queue query failed", exc_info=True)
 
     # 3. Fresh unactioned signals
     try:
@@ -5015,7 +5027,7 @@ def _generate_execution_queue(limit=10):
                 'urgency': 'high' if (s.get('importance') or 5) >= 7 else 'medium',
             })
     except Exception:
-        pass
+        logger.debug("_generate_execution_queue query failed", exc_info=True)
 
     # 4. Follow-ups due today/tomorrow — exclude passive types
     try:
@@ -5050,7 +5062,7 @@ def _generate_execution_queue(limit=10):
                 'urgency': 'medium',
             })
     except Exception:
-        pass
+        logger.debug("_generate_execution_queue query failed", exc_info=True)
 
     # 5. Top-scored opportunities for outreach
     if len(items) < limit:
@@ -5102,6 +5114,9 @@ def _generate_execution_queue(limit=10):
                 f"{item['reason']}"
             )
 
+    _elapsed = _time_mod.time() - _start
+    if _elapsed > 2.0:
+        logger.warning(f"[Perf] _generate_execution_queue took {_elapsed:.1f}s")
     return items
 
 
@@ -6247,7 +6262,7 @@ def _check_proactive_alerts():
             days = _days_since(g.get('last_contacted_at'))
             alerts.append(f"**{g['name']}** (warmth {g['warmth_score']}/10) has been quiet for {days} days — worth a check-in")
     except Exception:
-        pass
+        logger.debug("_check_proactive_alerts query failed", exc_info=True)
 
     try:
         overdue = fetch_all(
@@ -6263,7 +6278,7 @@ def _check_proactive_alerts():
             group_note = f" ({f['group_name']})" if f.get('group_name') else ""
             alerts.append(f"Overdue follow-up: **{f['title']}**{group_note} — {days} days past due")
     except Exception:
-        pass
+        logger.debug("_check_proactive_alerts query failed", exc_info=True)
 
     try:
         new_signals = fetch_all(
@@ -6277,7 +6292,7 @@ def _check_proactive_alerts():
             group_note = f" for **{s['group_name']}**" if s.get('group_name') else ""
             alerts.append(f"High-priority signal{group_note}: {s['title']}")
     except Exception:
-        pass
+        logger.debug("_check_proactive_alerts query failed", exc_info=True)
 
     try:
         untouched_warm = fetch_one(
@@ -6289,7 +6304,7 @@ def _check_proactive_alerts():
         if untouched_warm and untouched_warm['cnt'] >= 3:
             alerts.append(f"{untouched_warm['cnt']} warm contacts haven't been touched in 3+ weeks")
     except Exception:
-        pass
+        logger.debug("_check_proactive_alerts query failed", exc_info=True)
 
     return alerts[:4]
 
@@ -9201,6 +9216,16 @@ def _chat_inner():
     messages = data.get('messages', [])
     page_context = data.get('page_context', {})
 
+    if not isinstance(messages, list):
+        return jsonify({
+            'role': 'assistant', 'content': '',
+            'card': {'type': 'ErrorCard', 'text': 'Invalid request format.', 'data': {'error': 'messages must be a list'}, 'actions': []},
+            'intent': 'error', 'mode': 'execution'
+        }), 400
+
+    if len(messages) > 100:
+        messages = messages[-50:]
+
     if not messages:
         return jsonify({
             'role': 'assistant', 'content': '',
@@ -10364,6 +10389,17 @@ def _chat_inner():
             'intent': intent,
             'mode': mode
         })
+    except (anthropic.APITimeoutError, anthropic.APIConnectionError) as e:
+        logger.warning(f"[Leo] Claude API timeout: {e}")
+        timeout_text = "I'm taking longer than usual to think through this. Try again or simplify your request."
+        return jsonify({
+            'role': 'assistant', 'content': timeout_text,
+            'card': {
+                'type': 'TextCard', 'text': timeout_text,
+                'data': {}, 'actions': [{'id': 'retry', 'label': 'Try Again', 'action': 'retry', 'params': {}}]
+            },
+            'intent': intent, 'mode': mode
+        })
     except anthropic.APIError as e:
         import logging
         logging.getLogger('leo').error(f"[Leo] Anthropic API error: {e}")
@@ -10595,7 +10631,7 @@ def execute_action():
             if exec_action.startswith('perf_'):
                 result = _exec_performance_action(exec_params)
                 if result.get('success'):
-                    return jsonify({'success': True, 'card': {
+                    return jsonify({'success': True, 'data_changed': True, 'card': {
                         'type': 'ConfirmationCard', 'text': result['message'],
                         'data': {'what': exec_action, 'result': 'success'}, 'actions': []
                     }})
@@ -10612,7 +10648,7 @@ def execute_action():
                                     'created_count': len(created), 'skipped_count': len(skipped)}
                     if skipped:
                         confirm_data['skipped'] = skipped
-                    return jsonify({'success': True, 'calendar_changed': True, 'card': {
+                    return jsonify({'success': True, 'data_changed': True, 'calendar_changed': True, 'card': {
                         'type': 'ConfirmationCard', 'text': result['message'],
                         'data': confirm_data,
                         'actions': [{'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}}]
@@ -10624,7 +10660,7 @@ def execute_action():
             if exec_action.startswith('cal_'):
                 result = _exec_calendar_action(exec_params)
                 if result.get('success'):
-                    return jsonify({'success': True, 'card': {
+                    return jsonify({'success': True, 'data_changed': True, 'calendar_changed': True, 'card': {
                         'type': 'ConfirmationCard', 'text': result['message'],
                         'data': {'what': exec_action, 'result': 'success'},
                         'actions': [{'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}}]
@@ -10905,7 +10941,7 @@ def _exec_create_company(params):
     _log_leo_action('create_company', 'crm_group', f'Created company: {name}',
                     {'name': name, 'type': group_type},
                     {'group_id': group_id})
-    return jsonify({'success': True, 'card': {
+    return jsonify({'success': True, 'data_changed': True, 'card': {
         'type': 'ConfirmationCard',
         'text': f'Added **{name}** to your capital groups as a prospect.',
         'data': {'what': 'company_created', 'result': 'success', 'entity_id': group_id, 'name': name},
@@ -10977,7 +11013,7 @@ def _exec_create_contacts(params):
     _log_leo_action('create_contacts', 'crm_contact', summary,
                     {'group_id': group_id, 'count': len(created), 'contacts': created},
                     {'created': len(created), 'skipped': len(skipped)})
-    return jsonify({'success': True, 'card': {
+    return jsonify({'success': True, 'data_changed': True, 'card': {
         'type': 'ConfirmationCard', 'text': summary,
         'data': {'what': 'contacts_created', 'result': 'success',
                  'created': created, 'skipped': skipped, 'group_id': group_id},
@@ -11005,7 +11041,7 @@ def _exec_update_warmth(params):
     text = f"Updated {group['name']} warmth: {old_warmth} → {warmth}"
     _log_leo_action('update_warmth', 'crm_warmth', text,
                     {'group_id': group_id, 'old': old_warmth, 'new': warmth}, {'success': True})
-    return jsonify({'success': True, 'card': {
+    return jsonify({'success': True, 'data_changed': True, 'card': {
         'type': 'ConfirmationCard', 'text': text,
         'data': {'what': 'warmth', 'result': str(warmth), 'entity_id': group_id},
         'actions': []
@@ -12822,7 +12858,7 @@ def _exec_batch(params):
     confirm_text = f'Done! {summary_text}'
     if feedback:
         confirm_text += f" {feedback}"
-    return jsonify({'success': True, 'card': {
+    return jsonify({'success': True, 'data_changed': True, 'card': {
         'type': 'ConfirmationCard',
         'text': confirm_text,
         'data': {'what': 'batch_update', 'result': 'success',
