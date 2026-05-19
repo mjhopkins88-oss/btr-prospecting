@@ -5859,33 +5859,34 @@ function CommandCenter({ user, prospects, setActiveTab }) {
       .then(function(d) { if (!cancelled) setOpportunities(d.capital_groups || []); })
       .catch(function() {});
 
-    fetch(API_BASE + '/api/prospecting/engagement')
-      .then(function(r) { return r.ok ? r.json() : {}; })
-      .then(function(d) { if (!cancelled) setEngagement(d); })
-      .catch(function() {});
-
+    var _sinceLastHoursAgo = null;
     try {
       var _lastVisit = localStorage.getItem('btr_last_visit');
       var _now = new Date().toISOString();
       if (_lastVisit) {
         var hoursAgo = (Date.now() - new Date(_lastVisit).getTime()) / 36e5;
         if (hoursAgo >= 2) {
-          fetch(API_BASE + '/api/prospecting/engagement')
-            .then(function(r) { return r.ok ? r.json() : {}; })
-            .then(function(d) {
-              if (cancelled) return;
-              setSinceLast({
-                hoursAgo: Math.round(hoursAgo),
-                followupsDue: d.going_cold ? d.going_cold.length : 0,
-                openLoops: d.open_loops || 0,
-                stalled: d.stalled_opportunities ? d.stalled_opportunities.length : 0
-              });
-            })
-            .catch(function() {});
+          _sinceLastHoursAgo = Math.round(hoursAgo);
         }
       }
       localStorage.setItem('btr_last_visit', _now);
     } catch(_) {}
+
+    fetch(API_BASE + '/api/prospecting/engagement')
+      .then(function(r) { return r.ok ? r.json() : {}; })
+      .then(function(d) {
+        if (cancelled) return;
+        setEngagement(d);
+        if (_sinceLastHoursAgo !== null) {
+          setSinceLast({
+            hoursAgo: _sinceLastHoursAgo,
+            followupsDue: d.going_cold ? d.going_cold.length : 0,
+            openLoops: d.open_loops || 0,
+            stalled: d.stalled_opportunities ? d.stalled_opportunities.length : 0
+          });
+        }
+      })
+      .catch(function() {});
 
     fetch(API_BASE + '/api/dashboard/finance')
       .then(function(r) { return r.ok ? r.json() : null; })
@@ -5903,6 +5904,25 @@ function CommandCenter({ user, prospects, setActiveTab }) {
   useEffect(() => {
     var tick = setInterval(function() { setClockTime(new Date()); }, 60000);
     return function() { clearInterval(tick); };
+  }, []);
+
+  useEffect(function() {
+    function handleDataRefresh() {
+        fetch(API_BASE + '/api/prospecting/followup-queue?limit=30')
+            .then(function(r) { return r.ok ? r.json() : []; })
+            .then(function(d) { setDueLeads(Array.isArray(d) ? d : []); })
+            .catch(function() {});
+        fetch(API_BASE + '/api/prospecting/todays-focus?limit=8')
+            .then(function(r) { return r.ok ? r.json() : []; })
+            .then(function(d) { setFocusItems(Array.isArray(d) ? d : []); })
+            .catch(function() {});
+        fetch(API_BASE + '/api/prospecting/engagement')
+            .then(function(r) { return r.ok ? r.json() : {}; })
+            .then(function(d) { setEngagement(d); })
+            .catch(function() {});
+    }
+    window.addEventListener('btr-data-refresh', handleDataRefresh);
+    return function() { window.removeEventListener('btr-data-refresh', handleDataRefresh); };
   }, []);
 
   useEffect(function() {

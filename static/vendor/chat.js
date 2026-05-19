@@ -494,6 +494,9 @@ function executeCardAction(act, messages, setMessages, setActionLoading) {
            act.action === 'update_stage' || act.action === 'create_followup' || act.action === 'complete_task'))) {
         window.dispatchEvent(new CustomEvent('btr-calendar-refresh'));
       }
+      if (d.data_changed) {
+        window.dispatchEvent(new CustomEvent('btr-data-refresh'));
+      }
     })
     .catch(function(err) {
       setActionLoading(false);
@@ -2231,6 +2234,9 @@ function BTRAssistantChat(props) {
         if (d.mode) setLastMode(d.mode);
         if (d.calendar_changed) {
           window.dispatchEvent(new CustomEvent('btr-calendar-refresh'));
+        }
+        if (d.data_changed) {
+          window.dispatchEvent(new CustomEvent('btr-data-refresh'));
         }
         setLoading(false);
       })
