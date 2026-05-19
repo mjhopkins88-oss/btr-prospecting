@@ -5659,6 +5659,38 @@ def api_health():
         'railway': bool(os.getenv('RAILWAY_ENVIRONMENT', '')),
     }), 200
 
+@app.route('/api/health/services')
+def api_health_services():
+    """Non-destructive connectivity check for external APIs (Claude)."""
+    results = {}
+
+    # Claude API check — minimal message, max_tokens=1
+    api_key = os.getenv('ANTHROPIC_API_KEY')
+    if api_key and api_key != 'your_anthropic_api_key_here':
+        try:
+            _client = anthropic.Anthropic(api_key=api_key, timeout=10.0)
+            _client.messages.create(
+                model='claude-sonnet-4-20250514',
+                max_tokens=1,
+                messages=[{'role': 'user', 'content': 'ping'}],
+            )
+            results['claude'] = {'status': 'ok'}
+        except anthropic.AuthenticationError:
+            results['claude'] = {'status': 'error', 'reason': 'invalid_api_key'}
+        except anthropic.RateLimitError:
+            results['claude'] = {'status': 'ok', 'note': 'rate_limited_but_reachable'}
+        except Exception as e:
+            results['claude'] = {'status': 'error', 'reason': str(type(e).__name__)}
+    else:
+        results['claude'] = {'status': 'not_configured'}
+
+    all_ok = all(v.get('status') in ('ok', 'not_configured') for v in results.values())
+    return jsonify({
+        'status': 'healthy' if all_ok else 'degraded',
+        'services': results,
+        'timestamp': datetime.now().isoformat(),
+    }), 200 if all_ok else 503
+
 @app.route('/api/search', methods=['POST'])
 @require_auth
 def api_search():

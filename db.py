@@ -179,15 +179,73 @@ class _PgConnectionWrapper:
         return cur
 
 
+# --- Connection pool (PostgreSQL only) ---
+
+_pg_pool = None
+
+def _get_pg_pool():
+    """Lazy-init a thread-safe PostgreSQL connection pool."""
+    global _pg_pool
+    if _pg_pool is not None:
+        return _pg_pool
+    try:
+        from psycopg2 import pool as _pg_pool_mod
+        min_conn = int(os.getenv('DB_POOL_MIN', '2'))
+        max_conn = int(os.getenv('DB_POOL_MAX', '10'))
+        _pg_pool = _pg_pool_mod.ThreadedConnectionPool(
+            min_conn, max_conn, DATABASE_URL
+        )
+        return _pg_pool
+    except Exception:
+        return None
+
+
+class _PooledPgConnection:
+    """Wraps a pooled psycopg2 connection. Returns it to the pool on close()."""
+
+    def __init__(self, pool, real_conn):
+        self._pool = pool
+        self._conn = _PgConnectionWrapper(real_conn)
+        self._raw = real_conn
+
+    def cursor(self):
+        return self._conn.cursor()
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        try:
+            self._pool.putconn(self._raw)
+        except Exception:
+            try:
+                self._raw.close()
+            except Exception:
+                pass
+
+    def execute(self, sql, params=None):
+        return self._conn.execute(sql, params)
+
+
 # --- Public API ---
 
 def get_db():
     """
     Get a database connection.
-    - If DATABASE_URL is set: returns a psycopg2 connection (wrapped)
+    - If DATABASE_URL is set: returns a pooled psycopg2 connection (wrapped)
     - Otherwise: returns a sqlite3 connection with WAL mode
     """
     if _use_postgres:
+        pool = _get_pg_pool()
+        if pool:
+            try:
+                raw_conn = pool.getconn()
+                return _PooledPgConnection(pool, raw_conn)
+            except Exception:
+                pass
         import psycopg2
         conn = psycopg2.connect(DATABASE_URL)
         return _PgConnectionWrapper(conn)

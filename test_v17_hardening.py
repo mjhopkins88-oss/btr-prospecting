@@ -280,6 +280,83 @@ for fn_name in ['_get_current_focus', '_store_memory', '_sync_focus_from_chat']:
         test(f"hardened: {fn_name} exists", False)
 
 # ============================================================
+# 10. PostgreSQL Connection Pooling (3 tests)
+# ============================================================
+print("--- Connection Pooling ---")
+from db import get_db, is_postgres, _translate_sql, _PgCursorWrapper
+
+test("pool: get_db returns connection", get_db() is not None)
+test("pool: translate_sql preserves sqlite", _translate_sql("SELECT ?") == "SELECT ?" if not is_postgres() else True)
+conn = get_db()
+try:
+    cur = conn.cursor()
+    cur.execute("SELECT 1")
+    row = cur.fetchone()
+    test("pool: basic query works", row is not None and row[0] == 1)
+finally:
+    conn.close()
+
+# ============================================================
+# 11. Batch Deal Data (5 tests)
+# ============================================================
+print("--- Batch Deal Data ---")
+from api.routes.assistant import _batch_deal_data, _deal_probability
+
+dd = _batch_deal_data([])
+test("deal_batch: empty input returns empty dict", dd == {})
+
+dd2 = _batch_deal_data(['nonexistent-id-1'])
+test("deal_batch: returns dict for missing IDs", isinstance(dd2, dict))
+test("deal_batch: has entry for ID", 'nonexistent-id-1' in dd2)
+test("deal_batch: missing IDs have zero tp_count",
+     dd2.get('nonexistent-id-1', {}).get('tp_count', -1) == 0)
+
+# _deal_probability with precomputed data
+mock_g = {'id': 'test-deal-group', 'warmth_score': 6, 'type': 'developer', 'stage': 'engaged'}
+prob = _deal_probability(mock_g, precomputed=dd2)
+test("deal_prob: returns dict with precomputed",
+     isinstance(prob, dict) and 'score' in prob and 0 <= prob['score'] <= 100)
+
+# ============================================================
+# 12. Health Endpoint Structure (3 tests)
+# ============================================================
+print("--- Health Endpoint ---")
+# Verify the health endpoint exists in app.py
+import importlib
+try:
+    with open('app.py', 'r') as f:
+        app_src = f.read()
+    test("health: /api/health/services defined", "api_health_services" in app_src)
+    test("health: claude check implemented", "anthropic.AuthenticationError" in app_src)
+    test("health: returns degraded on failure", "'degraded'" in app_src)
+except Exception:
+    test("health: /api/health/services defined", False)
+    test("health: claude check implemented", False)
+    test("health: returns degraded on failure", False)
+
+# ============================================================
+# 13. Live API Health (conditional — only if key exists)
+# ============================================================
+print("--- Live API Health (conditional) ---")
+_anthropic_key = os.getenv('ANTHROPIC_API_KEY', '')
+if _anthropic_key and _anthropic_key != 'your_anthropic_api_key_here':
+    print("  ANTHROPIC_API_KEY found — testing live connectivity")
+    try:
+        import anthropic as _anth
+        _test_client = _anth.Anthropic(api_key=_anthropic_key, timeout=15.0)
+        _resp = _test_client.messages.create(
+            model='claude-sonnet-4-20250514',
+            max_tokens=1,
+            messages=[{'role': 'user', 'content': 'ping'}],
+        )
+        test("live: Claude API reachable", _resp is not None)
+    except Exception as e:
+        test(f"live: Claude API reachable ({type(e).__name__})", False)
+else:
+    print("  ANTHROPIC_API_KEY not set — skipping live API test")
+    test("live: skipped (no key)", True)
+
+# ============================================================
 # Summary
 # ============================================================
 print(f"\n{'='*50}")

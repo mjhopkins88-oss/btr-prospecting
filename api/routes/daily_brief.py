@@ -36,22 +36,29 @@ for _dir in (_PROJECT_FONT_DIR, _SYSTEM_FONT_DIR):
 
 UNICODE_FONTS_AVAILABLE = _FONT_REGULAR is not None
 
+if not UNICODE_FONTS_AVAILABLE:
+    logger.error(
+        "[PDF] DejaVu fonts NOT FOUND. Searched: %s, %s. "
+        "PDFs with Unicode content will fail. Install dejavu-fonts or place "
+        "DejaVuSans.ttf + DejaVuSans-Bold.ttf in the fonts/ directory.",
+        _PROJECT_FONT_DIR, _SYSTEM_FONT_DIR
+    )
+
 
 def _register_unicode_fonts(pdf):
     """Register DejaVu Unicode fonts on an FPDF instance. Returns font family name."""
-    if UNICODE_FONTS_AVAILABLE:
-        # fpdf2 >= 2.5 handles Unicode automatically for TTF; pass uni=True for
-        # older builds that still accept the parameter.
-        for style, path in [('', _FONT_REGULAR), ('B', _FONT_BOLD),
-                            ('I', _FONT_REGULAR), ('BI', _FONT_BOLD)]:
-            try:
-                pdf.add_font('DejaVu', style, path, uni=True)
-            except TypeError:
-                # fpdf2 dropped the uni kwarg in newer releases
-                pdf.add_font('DejaVu', style, path)
-        return 'DejaVu'
-    logger.warning("[PDF] DejaVu fonts not found, falling back to Helvetica (Latin-1 only)")
-    return 'Helvetica'
+    if not UNICODE_FONTS_AVAILABLE:
+        raise RuntimeError(
+            "DejaVu Unicode fonts not found. Install dejavu-fonts or place "
+            "DejaVuSans.ttf + DejaVuSans-Bold.ttf in the fonts/ directory."
+        )
+    for style, path in [('', _FONT_REGULAR), ('B', _FONT_BOLD),
+                        ('I', _FONT_REGULAR), ('BI', _FONT_BOLD)]:
+        try:
+            pdf.add_font('DejaVu', style, path, uni=True)
+        except TypeError:
+            pdf.add_font('DejaVu', style, path)
+    return 'DejaVu'
 
 
 def _sanitize_pdf_text(text):
@@ -343,11 +350,15 @@ def _build_daily_targets():
 # ---------------------------------------------------------------------------
 
 def _build_pdf(brief):
-    """Generate a clean, professional PDF from brief content. Returns bytes."""
+    """Generate a clean, professional PDF from brief content. Returns bytes or None."""
     from fpdf import FPDF
 
+    if not UNICODE_FONTS_AVAILABLE:
+        logger.error("[PDF] Cannot build PDF: Unicode fonts not available")
+        return None
+
     s = _sanitize_pdf_text
-    F = 'DejaVu' if UNICODE_FONTS_AVAILABLE else 'Helvetica'
+    F = 'DejaVu'
 
     class BriefPDF(FPDF):
         def header(self):
@@ -577,7 +588,7 @@ os.makedirs(PDF_DIR, exist_ok=True)
 
 
 def build_doc_pdf(doc):
-    """Build a premium PDF from a structured document dict.
+    """Build a premium PDF from a structured document dict. Returns bytes or None.
 
     Supports section types:
       priority_snapshot, action_queue, schedule, intel,
@@ -585,6 +596,10 @@ def build_doc_pdf(doc):
     Returns PDF bytes.
     """
     from fpdf import FPDF
+
+    if not UNICODE_FONTS_AVAILABLE:
+        logger.error("[PDF] Cannot build doc PDF: Unicode fonts not available")
+        return None
 
     S900 = (15, 23, 42)
     S700 = (51, 65, 85)

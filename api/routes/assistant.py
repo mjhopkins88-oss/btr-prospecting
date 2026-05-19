@@ -970,7 +970,7 @@ def _handle_hybrid_route(text, messages, conv_state, router, page_context, extra
                             s.get('url', '') for s in research['sources'][:3]
                         )
             except Exception:
-                pass
+                logger.debug("_handle_hybrid_route exception suppressed", exc_info=True)
 
     combined = (extra_ctx or '') + research_ctx
     if hybrid.get('outreach'):
@@ -3315,14 +3315,72 @@ def _compute_contact_priority(contact, group=None, tp_stats=None):
     }
 
 
-def _deal_probability(group):
+def _batch_deal_data(group_ids):
+    """Batch-fetch touchpoint counts, latest signals, and task counts for deal probability."""
+    data = {gid: {'tp_count': 0, 'signal': None, 'pending': 0, 'overdue': 0} for gid in group_ids}
+    if not group_ids:
+        return data
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    for bs in range(0, len(group_ids), 20):
+        batch = group_ids[bs:bs + 20]
+        ph = ','.join(['?'] * len(batch))
+        try:
+            for r in (fetch_all(
+                f"SELECT group_id, COUNT(*) as cnt FROM prospecting_touchpoints "
+                f"WHERE group_id IN ({ph}) GROUP BY group_id", batch) or []):
+                gid = r.get('group_id')
+                if gid and gid in data:
+                    data[gid]['tp_count'] = r.get('cnt', 0) or 0
+        except Exception:
+            try:
+                for r in (fetch_all(
+                    f"SELECT capital_group_id as gid, COUNT(*) as cnt FROM prospecting_touchpoints "
+                    f"WHERE capital_group_id IN ({ph}) GROUP BY capital_group_id", batch) or []):
+                    gid = r.get('gid')
+                    if gid and gid in data:
+                        data[gid]['tp_count'] = r.get('cnt', 0) or 0
+            except Exception:
+                logger.debug("_batch_deal_data touchpoint query failed", exc_info=True)
+        try:
+            for r in (fetch_all(
+                f"SELECT group_id, detected_at, importance FROM prospecting_signals "
+                f"WHERE group_id IN ({ph}) AND id IN ("
+                f"  SELECT MAX(id) FROM prospecting_signals WHERE group_id IN ({ph}) GROUP BY group_id"
+                f")", batch + batch) or []):
+                gid = r.get('group_id')
+                if gid and gid in data:
+                    data[gid]['signal'] = r
+        except Exception:
+            logger.debug("_batch_deal_data signal query failed", exc_info=True)
+        try:
+            for r in (fetch_all(
+                f"SELECT capital_group_id as gid, "
+                f"COUNT(*) as total, "
+                f"SUM(CASE WHEN due_at < ? THEN 1 ELSE 0 END) as overdue "
+                f"FROM prospecting_tasks "
+                f"WHERE capital_group_id IN ({ph}) AND status = 'pending' "
+                f"GROUP BY capital_group_id",
+                [today] + batch) or []):
+                gid = r.get('gid')
+                if gid and gid in data:
+                    data[gid]['pending'] = r.get('total', 0) or 0
+                    data[gid]['overdue'] = r.get('overdue', 0) or 0
+        except Exception:
+            logger.debug("_batch_deal_data task query failed", exc_info=True)
+    return data
+
+
+def _deal_probability(group, precomputed=None):
     """
     Score deal probability 0-100 with High/Medium/Low label.
     Inputs: touchpoint recency/count, signal freshness, engagement,
     follow-up status, relationship stage.
+    Optional precomputed dict from _batch_deal_data.
     """
     score = 0.0
     reasons = []
+    gid = group.get('id', '')
+    pre = (precomputed or {}).get(gid, {}) if precomputed else {}
 
     # 1. Touchpoint recency (0-20)
     days_silent = _days_since(group.get('last_contacted_at'))
@@ -3338,14 +3396,17 @@ def _deal_probability(group):
         reasons.append(f'{days_silent}d since last contact')
 
     # 2. Touchpoint count / engagement depth (0-20)
-    try:
-        tp_row = fetch_one(
-            "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE group_id = ?",
-            [group['id']]
-        )
-        tp_count = tp_row['cnt'] if tp_row else 0
-    except Exception:
-        tp_count = 0
+    if pre:
+        tp_count = pre.get('tp_count', 0)
+    else:
+        try:
+            tp_row = fetch_one(
+                "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE group_id = ?",
+                [gid]
+            )
+            tp_count = tp_row['cnt'] if tp_row else 0
+        except Exception:
+            tp_count = 0
     if tp_count >= 10:
         score += 20
         reasons.append(f'{tp_count} touchpoints — deep engagement')
@@ -3360,13 +3421,16 @@ def _deal_probability(group):
         reasons.append('no touchpoints yet')
 
     # 3. Signal freshness (0-20)
-    try:
-        sig = fetch_one(
-            "SELECT detected_at, importance FROM prospecting_signals WHERE group_id = ? ORDER BY detected_at DESC LIMIT 1",
-            [group['id']]
-        )
-    except Exception:
-        sig = None
+    if pre:
+        sig = pre.get('signal')
+    else:
+        try:
+            sig = fetch_one(
+                "SELECT detected_at, importance FROM prospecting_signals WHERE group_id = ? ORDER BY detected_at DESC LIMIT 1",
+                [gid]
+            )
+        except Exception:
+            sig = None
     if sig:
         sig_age = _days_since(sig.get('detected_at'))
         imp = sig.get('importance') or 5
@@ -3387,20 +3451,24 @@ def _deal_probability(group):
         reasons.append(f'warmth {warmth}/10 — moderate')
 
     # 5. Follow-up status (0-10)
-    try:
-        pending_fu = fetch_one(
-            "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE capital_group_id = ? AND status = 'pending'",
-            [group['id']]
-        )
-        overdue_fu = fetch_one(
-            "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE capital_group_id = ? AND status = 'pending' AND due_at < ?",
-            [group['id'], datetime.utcnow().strftime('%Y-%m-%d')]
-        )
-        has_pending = pending_fu['cnt'] if pending_fu else 0
-        has_overdue = overdue_fu['cnt'] if overdue_fu else 0
-    except Exception:
-        has_pending = 0
-        has_overdue = 0
+    if pre:
+        has_pending = pre.get('pending', 0)
+        has_overdue = pre.get('overdue', 0)
+    else:
+        try:
+            pending_fu = fetch_one(
+                "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE capital_group_id = ? AND status = 'pending'",
+                [gid]
+            )
+            overdue_fu = fetch_one(
+                "SELECT COUNT(*) as cnt FROM prospecting_tasks WHERE capital_group_id = ? AND status = 'pending' AND due_at < ?",
+                [gid, datetime.utcnow().strftime('%Y-%m-%d')]
+            )
+            has_pending = pending_fu['cnt'] if pending_fu else 0
+            has_overdue = overdue_fu['cnt'] if overdue_fu else 0
+        except Exception:
+            has_pending = 0
+            has_overdue = 0
     if has_overdue > 0:
         score += 3
         reasons.append(f'{has_overdue} overdue follow-ups')
@@ -3725,13 +3793,14 @@ def _generate_daily_plan():
             except Exception:
                 logger.debug("_generate_daily_plan batch group fetch failed", exc_info=True)
     _plan_tp_stats = _batch_touchpoint_stats(_plan_gids)
+    _plan_deal_data = _batch_deal_data(_plan_gids)
 
     for item in plan:
         gid = item.get('target_id')
         g = _plan_groups.get(gid) if gid else None
         if g:
             try:
-                prob = _deal_probability(g)
+                prob = _deal_probability(g, precomputed=_plan_deal_data)
                 item['deal_score'] = prob.get('score', 0)
                 item['deal_label'] = prob.get('label', '')
             except (KeyError, TypeError, ValueError):
@@ -4174,7 +4243,7 @@ def _conversion_diagnosis():
         for r in rows:
             stages[r['relationship_status'].lower()] = r['cnt']
     except Exception:
-        pass
+        logger.debug("_conversion_diagnosis exception suppressed", exc_info=True)
 
     # Build funnel stages
     funnel_order = ['new', 'contacted', 'qualified', 'warm', 'active', 'engaged', 'closing', 'closed']
@@ -5158,7 +5227,7 @@ def _detect_automation_opportunities():
                 })
                 time_saved_min += top_channel['cnt'] * 2
     except Exception:
-        pass
+        logger.debug("_detect_automation_opportunities exception suppressed", exc_info=True)
 
     # 2. Daily follow-up patterns — check if user does follow-ups same time daily
     try:
@@ -5180,7 +5249,7 @@ def _detect_automation_opportunities():
             })
             time_saved_min += fu_count * 5
     except Exception:
-        pass
+        logger.debug("_detect_automation_opportunities exception suppressed", exc_info=True)
 
     # 3. Contacts getting same type of outreach — template opportunity
     try:
@@ -5204,7 +5273,7 @@ def _detect_automation_opportunities():
                 })
                 time_saved_min += 30
     except Exception:
-        pass
+        logger.debug("_detect_automation_opportunities exception suppressed", exc_info=True)
 
     # 4. Stage stagnation — groups sitting too long at same stage
     try:
@@ -12482,7 +12551,7 @@ def _generate_schedule_blocks(target_date=None):
             [date_str]
         ) or []
     except Exception:
-        pass
+        logger.debug("_generate_schedule_blocks exception suppressed", exc_info=True)
 
     occupied = set()
     for m in existing_cal:
@@ -12592,7 +12661,7 @@ def _build_schedule_plan_card(blocks, target_date):
     try:
         date_label = datetime.strptime(target_date, '%Y-%m-%d').strftime('%A, %B %d')
     except Exception:
-        pass
+        logger.debug("_build_schedule_plan_card exception suppressed", exc_info=True)
 
     text = f"**Schedule for {date_label}**\n\n" + '\n'.join(lines)
     if new_blocks:
@@ -12784,7 +12853,7 @@ def _generate_doc_pdf(doc_type):
             [date_short]
         ) or []
     except Exception:
-        pass
+        logger.debug("_generate_doc_pdf exception suppressed", exc_info=True)
 
     pattern_text = _get_pattern_insights()
 
@@ -12797,7 +12866,7 @@ def _generate_doc_pdf(doc_type):
                GROUP BY relationship_status ORDER BY cnt DESC""", []
         ) or []
     except Exception:
-        pass
+        logger.debug("_generate_doc_pdf exception suppressed", exc_info=True)
 
     titles = {
         'attack_plan': ('Attack Plan', 'Prioritized execution targets with deal progression strategy'),
