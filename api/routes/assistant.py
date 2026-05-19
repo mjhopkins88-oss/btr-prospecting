@@ -5086,12 +5086,26 @@ def _generate_execution_queue(limit=10):
                 'urgency': 'medium' if prob['score'] >= 50 else 'low',
             })
 
+    # Batch-fetch capital_groups to avoid N+1
+    _all_gids = list(set(item.get('target_id', '') for item in items if item.get('target_id')))
+    _group_cache = {}
+    if _all_gids:
+        for _batch_start in range(0, len(_all_gids), 20):
+            _batch = _all_gids[_batch_start:_batch_start+20]
+            _placeholders = ','.join(['?'] * len(_batch))
+            try:
+                _rows = fetch_all(f"SELECT * FROM capital_groups WHERE id IN ({_placeholders})", _batch)
+                for _r in (_rows or []):
+                    _group_cache[_r['id']] = _r
+            except Exception:
+                pass
+
     # Apply user focus boost before sorting
     try:
         focus_data = _get_current_focus()
         _apply_focus_boost(items, focus_data, score_key='priority_score')
     except Exception:
-        pass
+        logger.debug("_generate_execution_queue query failed", exc_info=True)
 
     items.sort(key=lambda x: x.get('priority_score', 0), reverse=True)
     items = items[:limit]
@@ -5099,10 +5113,10 @@ def _generate_execution_queue(limit=10):
 
     for i, item in enumerate(items):
         item['rank'] = i + 1
-        # V9: Attach confidence to each queue item
+        # V9: Attach confidence to each queue item (uses batch-fetched _group_cache)
         gid = item.get('target_id')
         if gid:
-            g = fetch_one("SELECT * FROM capital_groups WHERE id = ?", [gid]) if gid else None
+            g = _group_cache.get(gid)
             if g:
                 item['confidence'] = _compute_confidence(g, item.get('action_type', 'outreach'))
         if 'confidence' not in item:
@@ -9644,235 +9658,187 @@ def _chat_inner():
                 f"companies={[c['name'] for c in conv_state['companies'][-2:]]} "
                 f"last_intent={conv_state.get('last_intent')}")
 
-    # Confidence safety — low confidence on execution routes triggers clarification
-    if router['route'] == 'clarify' and msg_type == 'new':
-        clarify_resp = _handle_low_confidence_clarification(last_msg, router, conv_state)
-        card = {'type': 'TextCard', 'text': clarify_resp, 'data': {}, 'actions': []}
-        _persist_chat(last_msg, card, 'clarification', 'conversational')
-        return jsonify({
-            'role': 'assistant', 'content': clarify_resp,
-            'card': card, 'intent': 'clarification', 'mode': 'conversational'
-        })
+    try:
+        # Confidence safety — low confidence on execution routes triggers clarification
+        if router['route'] == 'clarify' and msg_type == 'new':
+            clarify_resp = _handle_low_confidence_clarification(last_msg, router, conv_state)
+            card = {'type': 'TextCard', 'text': clarify_resp, 'data': {}, 'actions': []}
+            _persist_chat(last_msg, card, 'clarification', 'conversational')
+            return jsonify({
+                'role': 'assistant', 'content': clarify_resp,
+                'card': card, 'intent': 'clarification', 'mode': 'conversational'
+            })
 
-    # Hybrid routing — multi-layer messages (e.g., research + outreach synthesis)
-    if router['route'] == 'hybrid':
-        page_extra = ""
-        if page_context.get('active_tab'):
-            page_extra += f"\nUser is on the '{page_context['active_tab']}' page."
-        hybrid_result = _handle_hybrid_route(
-            last_msg, messages, conv_state, router, page_context,
-            (extra_ctx or '') + page_extra
-        )
-        if hybrid_result:
-            return hybrid_result
-
-    # Greeting handler — respond conversationally, never dump task lists
-    if intent == 'greeting':
-        greeting_resp = _handle_greeting(conv_state)
-        card = {'type': 'TextCard', 'text': greeting_resp, 'data': {}, 'actions': []}
-        _persist_chat(last_msg, card, 'greeting', 'conversational')
-        return jsonify({
-            'role': 'assistant', 'content': greeting_resp,
-            'card': card, 'intent': 'greeting', 'mode': 'conversational'
-        })
-
-    # Performance action intercept — parse NLP, show preview card
-    if intent == 'update_performance':
-        parsed = _parse_performance_command(last_msg)
-        if parsed and parsed.get('action') and not parsed['action'].endswith('_error'):
-            card = _build_leo_action_preview(
-                parsed['action'], 'performance', parsed['description'],
-                parsed['changes'], parsed['affected'],
-                parsed['action'], parsed
+        # Hybrid routing — multi-layer messages (e.g., research + outreach synthesis)
+        if router['route'] == 'hybrid':
+            page_extra = ""
+            if page_context.get('active_tab'):
+                page_extra += f"\nUser is on the '{page_context['active_tab']}' page."
+            hybrid_result = _handle_hybrid_route(
+                last_msg, messages, conv_state, router, page_context,
+                (extra_ctx or '') + page_extra
             )
-            _persist_chat(last_msg, card, 'update_performance', 'execution')
-            return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'update_performance', 'mode': 'execution'})
+            if hybrid_result:
+                return hybrid_result
 
-    # Calendar modification intercept — parse NLP, show preview card
-    if intent == 'update_calendar':
-        parsed = _parse_calendar_command(last_msg)
-        if parsed:
-            if parsed.get('action') == 'cal_error':
-                card = {'type': 'ErrorCard', 'text': parsed['error'], 'data': {'error': parsed['error']}, 'actions': []}
-                _persist_chat(last_msg, card, 'update_calendar', 'execution')
-                return jsonify({'role': 'assistant', 'content': parsed['error'], 'card': card, 'intent': 'update_calendar', 'mode': 'execution'})
-            card = _build_leo_action_preview(
-                parsed['action'], 'calendar', parsed['description'],
-                parsed['changes'], parsed['affected'],
-                parsed['action'], parsed
-            )
-            _persist_chat(last_msg, card, 'update_calendar', 'execution')
-            return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'update_calendar', 'mode': 'execution'})
+        # Greeting handler — respond conversationally, never dump task lists
+        if intent == 'greeting':
+            greeting_resp = _handle_greeting(conv_state)
+            card = {'type': 'TextCard', 'text': greeting_resp, 'data': {}, 'actions': []}
+            _persist_chat(last_msg, card, 'greeting', 'conversational')
+            return jsonify({
+                'role': 'assistant', 'content': greeting_resp,
+                'card': card, 'intent': 'greeting', 'mode': 'conversational'
+            })
 
-    # Schedule meeting intent intercept — try NLP parse, show CalendarConfirmCard
-    if intent == 'schedule_meeting':
-        lower_msg = last_msg.lower()
-        # Full-day schedule generation: "schedule my day", "build my day", "plan my day", "build my schedule"
-        is_full_schedule = any(w in lower_msg for w in [
-            'schedule my day', 'build my day', 'plan my day',
-            'build my schedule', 'create my schedule', 'build a schedule',
-            'plan my schedule', 'generate my schedule', 'make my schedule',
-            'schedule for today', 'schedule for tomorrow', 'schedule for saturday',
-            'schedule for sunday', 'schedule for monday', 'schedule for tuesday',
-            'schedule for wednesday', 'schedule for thursday', 'schedule for friday',
-        ])
-        if is_full_schedule:
-            # Parse target date from message
-            target_date = datetime.utcnow().strftime('%Y-%m-%d')
-            date_match = re.search(
-                r'(?:for|on)\s+(today|tomorrow|'
-                r'(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))',
-                last_msg, re.IGNORECASE
-            )
-            if date_match:
-                parsed_date = _parse_relative_date(date_match.group(1))
-                if parsed_date:
-                    target_date = parsed_date
-
-            blocks = _generate_schedule_blocks(target_date)
-            if blocks:
-                card = _build_schedule_plan_card(blocks, target_date)
-                _persist_chat(last_msg, card, 'schedule_plan', 'execution')
-                return jsonify({'role': 'assistant', 'content': card['text'], 'card': card,
-                                'intent': 'schedule_plan', 'mode': 'execution'})
-
-        sched_events = _parse_schedule_events(last_msg)
-        if sched_events:
-            card = _build_calendar_confirm_card(sched_events)
-            _persist_chat(last_msg, card, 'schedule_meeting', 'execution')
-            return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'schedule_meeting', 'mode': 'execution'})
-        # Fallback: could not parse details — ask user, never fall through to LLM
-        fallback_card = {
-            'type': 'TextCard',
-            'text': "I can add that to your calendar. Who's the meeting with, and when?\n\n"
-                    "Try: **schedule a call with [name] [date] at [time]**",
-            'data': {}, 'actions': [
-                {'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}}
-            ]
-        }
-        _persist_chat(last_msg, fallback_card, 'schedule_meeting', 'execution')
-        return jsonify({'role': 'assistant', 'content': fallback_card['text'], 'card': fallback_card,
-                        'intent': 'schedule_meeting', 'mode': 'execution'})
-
-    # Web research intent — extract query and redirect to research handler
-    if intent == 'research_web' and not processed_msg.startswith('__'):
-        _research_input = resolved_msg if resolved_refs else last_msg
-        query = re.sub(
-            r'\b(research|look up|find out about|google|search for|search online|'
-            r'web search|dig into|background on|intel on|look into|and write me an? intro'
-            r'|and write an? intro|and draft|write me|intro message|outreach'
-            r'|find the best approach to reach out|find the best approach|best way to reach'
-            r'|best approach to reach out|how to reach|and find|online|to reach out'
-            r'|write outreach using)\b',
-            '', _research_input, flags=re.IGNORECASE
-        ).strip(' .,!?')
-        if not query or len(query) < 2:
-            if conv_state['people']:
-                query = conv_state['people'][-1]['name']
-            elif conv_state['companies']:
-                query = conv_state['companies'][-1]['name']
-        if query:
-            research = _research_web(query)
-            if research and research.get('_error') == 'timeout':
-                card = {
-                    'type': 'ErrorCard',
-                    'text': f'Research for "{query}" timed out — the web search took too long. Try a more specific query or try again.',
-                    'data': {'error': 'research_timeout', 'query': query},
-                    'actions': [{'id': 'retry_research', 'label': 'Try Again', 'action': 'retry', 'params': {}}],
-                }
-                _persist_chat(last_msg, card, 'research_web', 'analyst')
-                return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'research_web', 'mode': 'analyst'})
-            elif research:
-                intros = _generate_research_intros(query, research)
-                text, card = _build_research_response(query, research, intros)
-                _persist_chat(last_msg, card, 'research_web', 'analyst')
-                return jsonify({'role': 'assistant', 'content': text, 'card': card, 'intent': 'research_web', 'mode': 'analyst'})
-            else:
-                card = {
-                    'type': 'ErrorCard',
-                    'text': f'Web research failed for "{query}". Try again or check server logs.',
-                    'data': {'error': 'research_failed', 'query': query},
-                    'actions': [{'id': 'retry_research', 'label': 'Try Again', 'action': 'retry', 'params': {}}],
-                }
-                return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'research_web', 'mode': 'analyst'})
-
-    # V16: Draft outreach intercept — generate 3 variants locally when contact found
-    if intent == 'draft_outreach':
-        # Use resolved_msg for pronoun resolution, fall back to last_msg
-        _draft_input = resolved_msg if resolved_refs else last_msg
-        target = re.sub(
-            r'\b(draft|write|compose|create|send|email|message|linkedin|outreach|reach out|follow up)\b',
-            '', _draft_input, flags=re.IGNORECASE
-        ).strip(' .,!?')
-        target = re.sub(r'\b(to|for|an?|the|with|about)\b', '', target, flags=re.IGNORECASE).strip(' .,!?')
-        # If target is empty/too short, try conversation state entities
-        if not target or len(target) < 2:
-            if conv_state['people']:
-                target = conv_state['people'][-1]['name']
-            elif conv_state['companies']:
-                target = conv_state['companies'][-1]['name']
-        if target:
-            mentioned_contacts = _find_contacts_fuzzy(target)
-            mentioned_groups = _find_groups_fuzzy(target)
-            if mentioned_contacts:
-                c = mentioned_contacts[0]
-                grp = None
-                if c.get('group_id'):
-                    grp = fetch_one("SELECT * FROM capital_groups WHERE id = ?", [c['group_id']])
-                draft_data = _generate_single_draft(c, grp)
-                full_name = draft_data['contact_name']
-                company = draft_data['target']
-                lines = [f"**3 outreach variants for {full_name}** ({company})"]
-                for i, v in enumerate(draft_data['variants'], 1):
-                    lines.append(f"\n**{v['label']}:**\n*Subject:* {v['subject']}\n\n{v['body']}")
-                lines.append(f"\n**Why this works:** {draft_data['why_it_works']}")
-                lines.append(f"**Confidence:** {draft_data['confidence']}")
-                text = '\n'.join(lines)
-                card = {
-                    'type': 'DraftCard', 'text': text,
-                    'data': {
-                        'contact_name': full_name, 'contact_id': draft_data['contact_id'],
-                        'target': company, 'target_id': draft_data['target_id'],
-                        'signal_ref': draft_data['signal_ref'],
-                        'confidence': draft_data['confidence'],
-                        'why_it_works': draft_data['why_it_works'],
-                        'variants': draft_data['variants'],
-                        'subject': draft_data['variants'][0]['subject'],
-                        'body': draft_data['variants'][0]['body'],
-                    },
-                    'actions': [
-                        {'id': 'copy_safe', 'label': 'Copy Safe', 'action': 'copy_text',
-                         'params': {'subject': draft_data['variants'][0]['subject'], 'body': draft_data['variants'][0]['body']}},
-                        {'id': 'copy_creative', 'label': 'Copy Creative', 'action': 'copy_text',
-                         'params': {'subject': draft_data['variants'][1]['subject'], 'body': draft_data['variants'][1]['body']}},
-                        {'id': 'copy_direct', 'label': 'Copy Direct', 'action': 'copy_text',
-                         'params': {'subject': draft_data['variants'][2]['subject'], 'body': draft_data['variants'][2]['body']}},
-                    ],
-                }
-                _set_pending_action('outreach_draft', {
-                    'drafts': [{
-                        'id': f"draft_{c['id'][:8]}",
-                        'contact_name': full_name, 'contact_id': draft_data['contact_id'],
-                        'target': company, 'target_id': draft_data['target_id'],
-                        'subject': draft_data['variants'][0]['subject'],
-                        'body': draft_data['variants'][0]['body'],
-                        'signal_ref': draft_data['signal_ref'],
-                    }]
-                }, f"Outreach drafts for {full_name}")
-                _persist_chat(last_msg, card, 'draft_outreach', 'execution')
-                return jsonify({'role': 'assistant', 'content': text, 'card': card,
-                                'intent': 'draft_outreach', 'mode': 'execution'})
-            elif mentioned_groups:
-                g_match = mentioned_groups[0]
-                contact_for_group = fetch_one(
-                    "SELECT * FROM prospecting_contacts WHERE group_id = ? ORDER BY last_touch_at DESC NULLS LAST LIMIT 1",
-                    [g_match['id']]
+        # Performance action intercept — parse NLP, show preview card
+        if intent == 'update_performance':
+            parsed = _parse_performance_command(last_msg)
+            if parsed and parsed.get('action') and not parsed['action'].endswith('_error'):
+                card = _build_leo_action_preview(
+                    parsed['action'], 'performance', parsed['description'],
+                    parsed['changes'], parsed['affected'],
+                    parsed['action'], parsed
                 )
-                if contact_for_group:
-                    draft_data = _generate_single_draft(contact_for_group, g_match)
+                _persist_chat(last_msg, card, 'update_performance', 'execution')
+                return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'update_performance', 'mode': 'execution'})
+
+        # Calendar modification intercept — parse NLP, show preview card
+        if intent == 'update_calendar':
+            parsed = _parse_calendar_command(last_msg)
+            if parsed:
+                if parsed.get('action') == 'cal_error':
+                    card = {'type': 'ErrorCard', 'text': parsed['error'], 'data': {'error': parsed['error']}, 'actions': []}
+                    _persist_chat(last_msg, card, 'update_calendar', 'execution')
+                    return jsonify({'role': 'assistant', 'content': parsed['error'], 'card': card, 'intent': 'update_calendar', 'mode': 'execution'})
+                card = _build_leo_action_preview(
+                    parsed['action'], 'calendar', parsed['description'],
+                    parsed['changes'], parsed['affected'],
+                    parsed['action'], parsed
+                )
+                _persist_chat(last_msg, card, 'update_calendar', 'execution')
+                return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'update_calendar', 'mode': 'execution'})
+
+        # Schedule meeting intent intercept — try NLP parse, show CalendarConfirmCard
+        if intent == 'schedule_meeting':
+            lower_msg = last_msg.lower()
+            # Full-day schedule generation: "schedule my day", "build my day", "plan my day", "build my schedule"
+            is_full_schedule = any(w in lower_msg for w in [
+                'schedule my day', 'build my day', 'plan my day',
+                'build my schedule', 'create my schedule', 'build a schedule',
+                'plan my schedule', 'generate my schedule', 'make my schedule',
+                'schedule for today', 'schedule for tomorrow', 'schedule for saturday',
+                'schedule for sunday', 'schedule for monday', 'schedule for tuesday',
+                'schedule for wednesday', 'schedule for thursday', 'schedule for friday',
+            ])
+            if is_full_schedule:
+                # Parse target date from message
+                target_date = datetime.utcnow().strftime('%Y-%m-%d')
+                date_match = re.search(
+                    r'(?:for|on)\s+(today|tomorrow|'
+                    r'(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))',
+                    last_msg, re.IGNORECASE
+                )
+                if date_match:
+                    parsed_date = _parse_relative_date(date_match.group(1))
+                    if parsed_date:
+                        target_date = parsed_date
+
+                blocks = _generate_schedule_blocks(target_date)
+                if blocks:
+                    card = _build_schedule_plan_card(blocks, target_date)
+                    _persist_chat(last_msg, card, 'schedule_plan', 'execution')
+                    return jsonify({'role': 'assistant', 'content': card['text'], 'card': card,
+                                    'intent': 'schedule_plan', 'mode': 'execution'})
+
+            sched_events = _parse_schedule_events(last_msg)
+            if sched_events:
+                card = _build_calendar_confirm_card(sched_events)
+                _persist_chat(last_msg, card, 'schedule_meeting', 'execution')
+                return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'schedule_meeting', 'mode': 'execution'})
+            # Fallback: could not parse details — ask user, never fall through to LLM
+            fallback_card = {
+                'type': 'TextCard',
+                'text': "I can add that to your calendar. Who's the meeting with, and when?\n\n"
+                        "Try: **schedule a call with [name] [date] at [time]**",
+                'data': {}, 'actions': [
+                    {'id': 'nav_cal', 'label': 'Open Calendar', 'action': 'navigate', 'params': {'tab': 'calendar'}}
+                ]
+            }
+            _persist_chat(last_msg, fallback_card, 'schedule_meeting', 'execution')
+            return jsonify({'role': 'assistant', 'content': fallback_card['text'], 'card': fallback_card,
+                            'intent': 'schedule_meeting', 'mode': 'execution'})
+
+        # Web research intent — extract query and redirect to research handler
+        if intent == 'research_web' and not processed_msg.startswith('__'):
+            _research_input = resolved_msg if resolved_refs else last_msg
+            query = re.sub(
+                r'\b(research|look up|find out about|google|search for|search online|'
+                r'web search|dig into|background on|intel on|look into|and write me an? intro'
+                r'|and write an? intro|and draft|write me|intro message|outreach'
+                r'|find the best approach to reach out|find the best approach|best way to reach'
+                r'|best approach to reach out|how to reach|and find|online|to reach out'
+                r'|write outreach using)\b',
+                '', _research_input, flags=re.IGNORECASE
+            ).strip(' .,!?')
+            if not query or len(query) < 2:
+                if conv_state['people']:
+                    query = conv_state['people'][-1]['name']
+                elif conv_state['companies']:
+                    query = conv_state['companies'][-1]['name']
+            if query:
+                research = _research_web(query)
+                if research and research.get('_error') == 'timeout':
+                    card = {
+                        'type': 'ErrorCard',
+                        'text': f'Research for "{query}" timed out — the web search took too long. Try a more specific query or try again.',
+                        'data': {'error': 'research_timeout', 'query': query},
+                        'actions': [{'id': 'retry_research', 'label': 'Try Again', 'action': 'retry', 'params': {}}],
+                    }
+                    _persist_chat(last_msg, card, 'research_web', 'analyst')
+                    return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'research_web', 'mode': 'analyst'})
+                elif research:
+                    intros = _generate_research_intros(query, research)
+                    text, card = _build_research_response(query, research, intros)
+                    _persist_chat(last_msg, card, 'research_web', 'analyst')
+                    return jsonify({'role': 'assistant', 'content': text, 'card': card, 'intent': 'research_web', 'mode': 'analyst'})
+                else:
+                    card = {
+                        'type': 'ErrorCard',
+                        'text': f'Web research failed for "{query}". Try again or check server logs.',
+                        'data': {'error': 'research_failed', 'query': query},
+                        'actions': [{'id': 'retry_research', 'label': 'Try Again', 'action': 'retry', 'params': {}}],
+                    }
+                    return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'research_web', 'mode': 'analyst'})
+
+        # V16: Draft outreach intercept — generate 3 variants locally when contact found
+        if intent == 'draft_outreach':
+            # Use resolved_msg for pronoun resolution, fall back to last_msg
+            _draft_input = resolved_msg if resolved_refs else last_msg
+            target = re.sub(
+                r'\b(draft|write|compose|create|send|email|message|linkedin|outreach|reach out|follow up)\b',
+                '', _draft_input, flags=re.IGNORECASE
+            ).strip(' .,!?')
+            target = re.sub(r'\b(to|for|an?|the|with|about)\b', '', target, flags=re.IGNORECASE).strip(' .,!?')
+            # If target is empty/too short, try conversation state entities
+            if not target or len(target) < 2:
+                if conv_state['people']:
+                    target = conv_state['people'][-1]['name']
+                elif conv_state['companies']:
+                    target = conv_state['companies'][-1]['name']
+            if target:
+                mentioned_contacts = _find_contacts_fuzzy(target)
+                mentioned_groups = _find_groups_fuzzy(target)
+                if mentioned_contacts:
+                    c = mentioned_contacts[0]
+                    grp = None
+                    if c.get('group_id'):
+                        grp = fetch_one("SELECT * FROM capital_groups WHERE id = ?", [c['group_id']])
+                    draft_data = _generate_single_draft(c, grp)
                     full_name = draft_data['contact_name']
-                    lines = [f"**3 outreach variants for {full_name}** ({g_match['name']})"]
-                    for v in draft_data['variants']:
+                    company = draft_data['target']
+                    lines = [f"**3 outreach variants for {full_name}** ({company})"]
+                    for i, v in enumerate(draft_data['variants'], 1):
                         lines.append(f"\n**{v['label']}:**\n*Subject:* {v['subject']}\n\n{v['body']}")
                     lines.append(f"\n**Why this works:** {draft_data['why_it_works']}")
                     lines.append(f"**Confidence:** {draft_data['confidence']}")
@@ -9880,7 +9846,11 @@ def _chat_inner():
                     card = {
                         'type': 'DraftCard', 'text': text,
                         'data': {
-                            'contact_name': full_name, 'target': g_match['name'],
+                            'contact_name': full_name, 'contact_id': draft_data['contact_id'],
+                            'target': company, 'target_id': draft_data['target_id'],
+                            'signal_ref': draft_data['signal_ref'],
+                            'confidence': draft_data['confidence'],
+                            'why_it_works': draft_data['why_it_works'],
                             'variants': draft_data['variants'],
                             'subject': draft_data['variants'][0]['subject'],
                             'body': draft_data['variants'][0]['body'],
@@ -9894,169 +9864,218 @@ def _chat_inner():
                              'params': {'subject': draft_data['variants'][2]['subject'], 'body': draft_data['variants'][2]['body']}},
                         ],
                     }
+                    _set_pending_action('outreach_draft', {
+                        'drafts': [{
+                            'id': f"draft_{c['id'][:8]}",
+                            'contact_name': full_name, 'contact_id': draft_data['contact_id'],
+                            'target': company, 'target_id': draft_data['target_id'],
+                            'subject': draft_data['variants'][0]['subject'],
+                            'body': draft_data['variants'][0]['body'],
+                            'signal_ref': draft_data['signal_ref'],
+                        }]
+                    }, f"Outreach drafts for {full_name}")
                     _persist_chat(last_msg, card, 'draft_outreach', 'execution')
                     return jsonify({'role': 'assistant', 'content': text, 'card': card,
                                     'intent': 'draft_outreach', 'mode': 'execution'})
-                else:
-                    extra_ctx = (extra_ctx or '') + f"\nTarget company: {g_match['name']} (id={g_match['id'][:8]}, status={g_match.get('relationship_status')}, warmth={g_match.get('warmth_score')})"
+                elif mentioned_groups:
+                    g_match = mentioned_groups[0]
+                    contact_for_group = fetch_one(
+                        "SELECT * FROM prospecting_contacts WHERE group_id = ? ORDER BY last_touch_at DESC NULLS LAST LIMIT 1",
+                        [g_match['id']]
+                    )
+                    if contact_for_group:
+                        draft_data = _generate_single_draft(contact_for_group, g_match)
+                        full_name = draft_data['contact_name']
+                        lines = [f"**3 outreach variants for {full_name}** ({g_match['name']})"]
+                        for v in draft_data['variants']:
+                            lines.append(f"\n**{v['label']}:**\n*Subject:* {v['subject']}\n\n{v['body']}")
+                        lines.append(f"\n**Why this works:** {draft_data['why_it_works']}")
+                        lines.append(f"**Confidence:** {draft_data['confidence']}")
+                        text = '\n'.join(lines)
+                        card = {
+                            'type': 'DraftCard', 'text': text,
+                            'data': {
+                                'contact_name': full_name, 'target': g_match['name'],
+                                'variants': draft_data['variants'],
+                                'subject': draft_data['variants'][0]['subject'],
+                                'body': draft_data['variants'][0]['body'],
+                            },
+                            'actions': [
+                                {'id': 'copy_safe', 'label': 'Copy Safe', 'action': 'copy_text',
+                                 'params': {'subject': draft_data['variants'][0]['subject'], 'body': draft_data['variants'][0]['body']}},
+                                {'id': 'copy_creative', 'label': 'Copy Creative', 'action': 'copy_text',
+                                 'params': {'subject': draft_data['variants'][1]['subject'], 'body': draft_data['variants'][1]['body']}},
+                                {'id': 'copy_direct', 'label': 'Copy Direct', 'action': 'copy_text',
+                                 'params': {'subject': draft_data['variants'][2]['subject'], 'body': draft_data['variants'][2]['body']}},
+                            ],
+                        }
+                        _persist_chat(last_msg, card, 'draft_outreach', 'execution')
+                        return jsonify({'role': 'assistant', 'content': text, 'card': card,
+                                        'intent': 'draft_outreach', 'mode': 'execution'})
+                    else:
+                        extra_ctx = (extra_ctx or '') + f"\nTarget company: {g_match['name']} (id={g_match['id'][:8]}, status={g_match.get('relationship_status')}, warmth={g_match.get('warmth_score')})"
 
-    if intent == 'crm_update':
-        _crm_input = resolved_msg if resolved_refs else last_msg
-        parsed = _parse_crm_command(_crm_input)
-        if parsed['status'] == 'ok':
-            card = _build_preview_card(parsed['ops'], last_msg)
-            _persist_chat(last_msg, card, 'crm_update', 'execution')
-            return jsonify({
-                'role': 'assistant', 'content': card['text'],
-                'card': card, 'intent': 'crm_update', 'mode': 'execution'
-            })
-        elif parsed['status'] == 'ambiguous':
-            card = _build_ambiguity_card(parsed['ambiguous'], last_msg)
-            _persist_chat(last_msg, card, 'crm_update', 'execution')
-            return jsonify({
-                'role': 'assistant', 'content': card['text'],
-                'card': card, 'intent': 'crm_update', 'mode': 'execution'
-            })
-        # 'no_entity' falls through to Claude
-
-    # Push forward intercept — build multi-step chain locally
-    if intent == 'push_forward':
-        _pf_input = resolved_msg if resolved_refs else last_msg
-        target = re.sub(
-            r'\b(push forward|advance|move forward|progress|accelerate|fast track|push)\b',
-            '', _pf_input, flags=re.IGNORECASE
-        ).strip(' .,!?')
-        if not target or len(target) < 2:
-            if conv_state['companies']:
-                target = conv_state['companies'][-1]['name']
-        if target:
-            card = _build_push_forward_chain(target)
-            if card:
-                _persist_chat(last_msg, card, 'push_forward', 'execution')
+        if intent == 'crm_update':
+            _crm_input = resolved_msg if resolved_refs else last_msg
+            parsed = _parse_crm_command(_crm_input)
+            if parsed['status'] == 'ok':
+                card = _build_preview_card(parsed['ops'], last_msg)
+                _persist_chat(last_msg, card, 'crm_update', 'execution')
                 return jsonify({
                     'role': 'assistant', 'content': card['text'],
-                    'card': card, 'intent': 'push_forward', 'mode': 'execution'
+                    'card': card, 'intent': 'crm_update', 'mode': 'execution'
                 })
+            elif parsed['status'] == 'ambiguous':
+                card = _build_ambiguity_card(parsed['ambiguous'], last_msg)
+                _persist_chat(last_msg, card, 'crm_update', 'execution')
+                return jsonify({
+                    'role': 'assistant', 'content': card['text'],
+                    'card': card, 'intent': 'crm_update', 'mode': 'execution'
+                })
+            # 'no_entity' falls through to Claude
 
-    # Market intel report — dynamically generated via Claude with optional web research
-    if intent == 'market_intel':
-        topic = re.sub(
-            r'\b(intel|report|market|analysis|intelligence|build me|write me|generate|create|give me|'
-            r'btr|real estate|a|an|the|for|on|about|of|me|my)\b',
-            '', last_msg, flags=re.IGNORECASE
-        ).strip(' .,!?')
-        research_ctx = ''
-        if topic:
-            try:
-                research = _research_web(f"BTR build-to-rent real estate {topic} market 2025 2026")
-                if research and research.get('summary'):
-                    research_ctx = (
-                        f"\n\nWEB RESEARCH RESULTS for '{topic}':\n"
-                        f"{research['summary'][:2000]}\n"
-                    )
-                    if research.get('sources'):
-                        research_ctx += "Sources: " + ", ".join(
-                            s.get('url', '') for s in research['sources'][:5]
+        # Push forward intercept — build multi-step chain locally
+        if intent == 'push_forward':
+            _pf_input = resolved_msg if resolved_refs else last_msg
+            target = re.sub(
+                r'\b(push forward|advance|move forward|progress|accelerate|fast track|push)\b',
+                '', _pf_input, flags=re.IGNORECASE
+            ).strip(' .,!?')
+            if not target or len(target) < 2:
+                if conv_state['companies']:
+                    target = conv_state['companies'][-1]['name']
+            if target:
+                card = _build_push_forward_chain(target)
+                if card:
+                    _persist_chat(last_msg, card, 'push_forward', 'execution')
+                    return jsonify({
+                        'role': 'assistant', 'content': card['text'],
+                        'card': card, 'intent': 'push_forward', 'mode': 'execution'
+                    })
+
+        # Market intel report — dynamically generated via Claude with optional web research
+        if intent == 'market_intel':
+            topic = re.sub(
+                r'\b(intel|report|market|analysis|intelligence|build me|write me|generate|create|give me|'
+                r'btr|real estate|a|an|the|for|on|about|of|me|my)\b',
+                '', last_msg, flags=re.IGNORECASE
+            ).strip(' .,!?')
+            research_ctx = ''
+            if topic:
+                try:
+                    research = _research_web(f"BTR build-to-rent real estate {topic} market 2025 2026")
+                    if research and research.get('summary'):
+                        research_ctx = (
+                            f"\n\nWEB RESEARCH RESULTS for '{topic}':\n"
+                            f"{research['summary'][:2000]}\n"
                         )
-            except Exception:
-                pass
-        extra_ctx = (extra_ctx or '') + research_ctx
-        extra_ctx += (
-            f"\n\nINTEL REPORT REQUEST: The user wants a dynamic intelligence report about: {topic or last_msg}. "
-            f"Generate a unique, deeply reasoned market intelligence report. "
-            f"DO NOT use generic BTR talking points. "
-            f"Focus on what specifically matters about THIS market/geography for BTR prospecting and capital placement. "
-            f"Include: market positioning, competitive landscape, specific opportunities, risks, and actionable angles. "
-            f"Every section must contain location-specific insights, not boilerplate."
-        )
+                        if research.get('sources'):
+                            research_ctx += "Sources: " + ", ".join(
+                                s.get('url', '') for s in research['sources'][:5]
+                            )
+                except Exception:
+                    pass
+            extra_ctx = (extra_ctx or '') + research_ctx
+            extra_ctx += (
+                f"\n\nINTEL REPORT REQUEST: The user wants a dynamic intelligence report about: {topic or last_msg}. "
+                f"Generate a unique, deeply reasoned market intelligence report. "
+                f"DO NOT use generic BTR talking points. "
+                f"Focus on what specifically matters about THIS market/geography for BTR prospecting and capital placement. "
+                f"Include: market positioning, competitive landscape, specific opportunities, risks, and actionable angles. "
+                f"Every section must contain location-specific insights, not boilerplate."
+            )
 
-    # Export/brief intercept — produce actionable card instead of LLM text
-    if intent == 'export_report':
-        lower_msg = last_msg.lower()
-        is_brief = any(w in lower_msg for w in ['daily brief', 'my brief', 'morning brief'])
-        if is_brief:
-            try:
-                from api.routes.daily_brief import _generate_brief_content
-                brief = _generate_brief_content()
+        # Export/brief intercept — produce actionable card instead of LLM text
+        if intent == 'export_report':
+            lower_msg = last_msg.lower()
+            is_brief = any(w in lower_msg for w in ['daily brief', 'my brief', 'morning brief'])
+            if is_brief:
+                try:
+                    from api.routes.daily_brief import _generate_brief_content
+                    brief = _generate_brief_content()
+                    card = {
+                        'type': 'BriefCard',
+                        'text': f"**{brief['title']}**\n\nYour daily intelligence brief is ready.",
+                        'data': {
+                            'title': brief['title'], 'date': brief['date'],
+                            'market_snapshot': brief.get('market_snapshot', [])[:3],
+                            'action_items': brief.get('action_items', [])[:3],
+                            'daily_targets': brief.get('daily_targets', [])[:3],
+                            'download_url': '/api/brief/download',
+                            'fileName': f"BTR_Brief_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf",
+                        },
+                        'actions': [
+                            {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download',
+                             'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf"}},
+                        ]
+                    }
+                    _persist_chat(last_msg, card, 'brief_pdf', 'execution')
+                    return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'brief_pdf', 'mode': 'execution'})
+                except Exception:
+                    pass
+
+            # PDF document intercept — attack plan, strategy, schedule, execution plan (NOT market intel)
+            doc_type = None
+            if any(w in lower_msg for w in ['attack plan', 'attack']):
+                doc_type = 'attack_plan'
+            elif any(w in lower_msg for w in ['strategy plan', 'strategy doc']):
+                doc_type = 'strategy'
+            elif any(w in lower_msg for w in ['schedule', 'daily schedule', 'time block', 'build my day', 'plan my day']):
+                doc_type = 'schedule'
+            elif any(w in lower_msg for w in ['execution plan', 'action plan', 'action queue']):
+                doc_type = 'execution_plan'
+            elif 'pdf' in lower_msg and any(w in lower_msg for w in ['plan', 'strategy', 'schedule']):
+                doc_type = 'attack_plan'
+
+            if doc_type and not is_brief:
+                card, err = _generate_doc_pdf(doc_type)
+                if card:
+                    _persist_chat(last_msg, card, 'doc_pdf', 'execution')
+                    return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'doc_pdf', 'mode': 'execution'})
+                if err:
+                    err_card = {
+                        'type': 'ErrorCard',
+                        'text': f'PDF generation failed: {err}. Try again or ask Leo for a text version.',
+                        'data': {'error': err, 'doc_type': doc_type},
+                        'actions': []
+                    }
+                    _persist_chat(last_msg, err_card, 'doc_pdf', 'execution')
+                    return jsonify({'role': 'assistant', 'content': err_card['text'], 'card': err_card, 'intent': 'doc_pdf', 'mode': 'execution'})
+
+            if not is_brief and not doc_type:
+                export_type = 'contacts'
+                if 'capital' in lower_msg or 'partner' in lower_msg:
+                    export_type = 'capital_partners'
+                elif 'underwriting' in lower_msg:
+                    export_type = 'underwriting'
+                elif 'prospect' in lower_msg:
+                    export_type = 'prospects'
+                urls = {
+                    'contacts': '/api/prospecting/contacts/export',
+                    'capital_partners': '/api/prospecting/capital-groups-export',
+                    'underwriting': '/api/underwriting/export?mode=latest',
+                    'prospects': '/api/export',
+                }
+                url = urls.get(export_type, urls['contacts'])
+                file_name = f"{export_type}_{datetime.utcnow().strftime('%Y-%m-%d')}.csv"
                 card = {
-                    'type': 'BriefCard',
-                    'text': f"**{brief['title']}**\n\nYour daily intelligence brief is ready.",
+                    'type': 'ExportCard',
+                    'text': f'Your {export_type.replace("_", " ")} export is ready.',
                     'data': {
-                        'title': brief['title'], 'date': brief['date'],
-                        'market_snapshot': brief.get('market_snapshot', [])[:3],
-                        'action_items': brief.get('action_items', [])[:3],
-                        'daily_targets': brief.get('daily_targets', [])[:3],
-                        'download_url': '/api/brief/download',
-                        'fileName': f"BTR_Brief_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf",
+                        'export_type': export_type, 'url': url,
+                        'fileName': file_name, 'filename': file_name,
                     },
                     'actions': [
-                        {'id': 'download_brief', 'label': 'Download PDF', 'action': 'download',
-                         'params': {'url': '/api/brief/download', 'fileName': f"BTR_Brief_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf"}},
+                        {'id': 'download_export', 'label': 'Download', 'action': 'download',
+                         'params': {'url': url, 'fileName': file_name}},
                     ]
                 }
-                _persist_chat(last_msg, card, 'brief_pdf', 'execution')
-                return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'brief_pdf', 'mode': 'execution'})
-            except Exception:
-                pass
+                _persist_chat(last_msg, card, 'export_report', 'execution')
+                return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'export_report', 'mode': 'execution'})
 
-        # PDF document intercept — attack plan, strategy, schedule, execution plan (NOT market intel)
-        doc_type = None
-        if any(w in lower_msg for w in ['attack plan', 'attack']):
-            doc_type = 'attack_plan'
-        elif any(w in lower_msg for w in ['strategy plan', 'strategy doc']):
-            doc_type = 'strategy'
-        elif any(w in lower_msg for w in ['schedule', 'daily schedule', 'time block', 'build my day', 'plan my day']):
-            doc_type = 'schedule'
-        elif any(w in lower_msg for w in ['execution plan', 'action plan', 'action queue']):
-            doc_type = 'execution_plan'
-        elif 'pdf' in lower_msg and any(w in lower_msg for w in ['plan', 'strategy', 'schedule']):
-            doc_type = 'attack_plan'
-
-        if doc_type and not is_brief:
-            card, err = _generate_doc_pdf(doc_type)
-            if card:
-                _persist_chat(last_msg, card, 'doc_pdf', 'execution')
-                return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'doc_pdf', 'mode': 'execution'})
-            if err:
-                err_card = {
-                    'type': 'ErrorCard',
-                    'text': f'PDF generation failed: {err}. Try again or ask Leo for a text version.',
-                    'data': {'error': err, 'doc_type': doc_type},
-                    'actions': []
-                }
-                _persist_chat(last_msg, err_card, 'doc_pdf', 'execution')
-                return jsonify({'role': 'assistant', 'content': err_card['text'], 'card': err_card, 'intent': 'doc_pdf', 'mode': 'execution'})
-
-        if not is_brief and not doc_type:
-            export_type = 'contacts'
-            if 'capital' in lower_msg or 'partner' in lower_msg:
-                export_type = 'capital_partners'
-            elif 'underwriting' in lower_msg:
-                export_type = 'underwriting'
-            elif 'prospect' in lower_msg:
-                export_type = 'prospects'
-            urls = {
-                'contacts': '/api/prospecting/contacts/export',
-                'capital_partners': '/api/prospecting/capital-groups-export',
-                'underwriting': '/api/underwriting/export?mode=latest',
-                'prospects': '/api/export',
-            }
-            url = urls.get(export_type, urls['contacts'])
-            file_name = f"{export_type}_{datetime.utcnow().strftime('%Y-%m-%d')}.csv"
-            card = {
-                'type': 'ExportCard',
-                'text': f'Your {export_type.replace("_", " ")} export is ready.',
-                'data': {
-                    'export_type': export_type, 'url': url,
-                    'fileName': file_name, 'filename': file_name,
-                },
-                'actions': [
-                    {'id': 'download_export', 'label': 'Download', 'action': 'download',
-                     'params': {'url': url, 'fileName': file_name}},
-                ]
-            }
-            _persist_chat(last_msg, card, 'export_report', 'execution')
-            return jsonify({'role': 'assistant', 'content': card['text'], 'card': card, 'intent': 'export_report', 'mode': 'execution'})
+    except Exception as _dispatch_err:
+        logger.error(f"[Leo] Unhandled error in intent={intent} route={router['route']}: {_dispatch_err}", exc_info=True)
+        # Fall through to conversational brain / execution pipeline
 
     # Page-aware context
     page_extra = ""
