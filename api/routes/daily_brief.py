@@ -502,12 +502,12 @@ def download_brief():
             filepath = os.path.join(PDF_DIR, filename)
             with open(filepath, 'wb') as f:
                 f.write(pdf_bytes)
-            # Validate PDF was written
             if not os.path.exists(filepath) or os.path.getsize(filepath) < 100:
                 logger.error(f"[Brief] PDF validation failed: {filepath}")
             else:
                 logger.info(f"[Brief] PDF cached: {filepath}")
-        except Exception as cache_err:
+            _evict_old_pdfs()
+        except OSError as cache_err:
             logger.warning(f"[Brief] PDF cache write failed: {cache_err}")
 
         return send_file(
@@ -553,10 +553,11 @@ def invalidate_brief_cache():
                     try:
                         os.remove(os.path.join(PDF_DIR, f))
                         removed += 1
-                    except Exception:
+                    except OSError:
                         pass
             logger.info(f"[Brief] Cache invalidated ({removed} files removed)")
-    except Exception as e:
+            _evict_old_pdfs()
+    except OSError as e:
         logger.warning(f"[Brief] Cache invalidation failed: {e}")
 
 
@@ -892,21 +893,35 @@ def store_pdf(pdf_bytes, filename, report_type='unknown'):
     return pdf_id
 
 
+MAX_CACHED_PDFS = 50
+
+
 def _evict_old_pdfs():
-    """Keep only the 50 most recent PDFs on disk."""
+    """Unified cache eviction: keep only MAX_CACHED_PDFS most recent files."""
     try:
-        meta_files = sorted(
-            [f for f in os.listdir(PDF_DIR) if f.endswith('.json')],
+        all_pdfs = sorted(
+            [f for f in os.listdir(PDF_DIR) if f.endswith('.pdf')],
             key=lambda f: os.path.getmtime(os.path.join(PDF_DIR, f))
         )
-        if len(meta_files) > 50:
-            for mf in meta_files[:len(meta_files) - 50]:
-                pdf_id = mf.replace('.json', '')
-                for ext in ('.pdf', '.json'):
-                    p = os.path.join(PDF_DIR, pdf_id + ext)
-                    if os.path.exists(p):
-                        os.remove(p)
-    except Exception as e:
+        if len(all_pdfs) > MAX_CACHED_PDFS:
+            for pf in all_pdfs[:len(all_pdfs) - MAX_CACHED_PDFS]:
+                try:
+                    os.remove(os.path.join(PDF_DIR, pf))
+                    meta = os.path.join(PDF_DIR, pf.replace('.pdf', '.json'))
+                    if os.path.exists(meta):
+                        os.remove(meta)
+                except OSError:
+                    pass
+            logger.info(f"[PDF] Evicted {len(all_pdfs) - MAX_CACHED_PDFS} old PDFs")
+        # Clean orphaned .json files with no matching .pdf
+        pdf_stems = {f.replace('.pdf', '') for f in os.listdir(PDF_DIR) if f.endswith('.pdf')}
+        for jf in os.listdir(PDF_DIR):
+            if jf.endswith('.json') and jf.replace('.json', '') not in pdf_stems:
+                try:
+                    os.remove(os.path.join(PDF_DIR, jf))
+                except OSError:
+                    pass
+    except OSError as e:
         logger.warning(f"[PDF] Eviction error: {e}")
 
 

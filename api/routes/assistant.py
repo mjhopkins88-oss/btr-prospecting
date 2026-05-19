@@ -996,7 +996,7 @@ def _handle_hybrid_route(text, messages, conv_state, router, page_context, extra
         _extract_persistent_memories(text, brain_resp, router['execution_intent'], conv_state)
         _sync_focus_from_chat(text, brain_resp, conv_state)
     except Exception:
-        pass
+        logger.debug("Hybrid route post-processing failed", exc_info=True)
     return jsonify({
         'role': 'assistant', 'content': brain_resp,
         'card': card, 'intent': router['execution_intent'], 'mode': 'hybrid',
@@ -1105,7 +1105,7 @@ def _build_state_context_block(state, resolved, msg_type=None):
             for note in focus_data['strategy_notes'][:3]:
                 parts.append(f"  - {note}")
     except Exception:
-        pass
+        logger.debug("State context focus query failed", exc_info=True)
 
     try:
         recent_actions = fetch_all(
@@ -1119,7 +1119,7 @@ def _build_state_context_block(state, resolved, msg_type=None):
             for a in recent_actions:
                 parts.append(f"  - {a['action_type']}: {a['description']}")
     except Exception:
-        pass
+        logger.debug("State context recent actions query failed", exc_info=True)
 
     return '\n'.join(parts)
 
@@ -1313,7 +1313,7 @@ def _get_known_entity_names():
             if ln and len(ln) >= 3:
                 names.add(ln.lower())
     except Exception:
-        pass
+        logger.debug("_known_entity_names query failed", exc_info=True)
     return names
 
 
@@ -1464,7 +1464,7 @@ def _build_truth_context(text, conv_state):
         else:
             parts.append("VERIFIED CONTACTS IN CRM: none found")
     except Exception:
-        pass
+        logger.debug("_build_truth_context exception suppressed", exc_info=True)
 
     if parts:
         return "\n".join(parts)
@@ -1535,7 +1535,7 @@ def _handle_conversational_brain(text, messages, conv_state, intent='conversatio
                 lines.append(f"  {g['name']}: warmth {g['warmth_score']}/10, {days}d since contact, {g.get('relationship_status', '?')}")
             crm_parts.append("Top warm relationships:\n" + "\n".join(lines))
     except Exception:
-        pass
+        logger.debug("Conversational brain CRM context query failed", exc_info=True)
 
     entity_parts = []
     try:
@@ -1570,7 +1570,7 @@ def _handle_conversational_brain(text, messages, conv_state, intent='conversatio
                 + (f", last touch {str(c.get('last_touch_at', ''))[:10]}" if c.get('last_touch_at') else ', no touch logged')
             )
     except Exception:
-        pass
+        logger.debug("Conversational brain entity context query failed", exc_info=True)
 
     system = CONVERSATIONAL_BRAIN_PROMPT
 
@@ -3018,7 +3018,7 @@ def _score_opportunity(group, signal=None, contact=None, overdue_task=None):
             )
             tp_count = tp_row['cnt'] if tp_row else 0
         except Exception:
-            pass
+            logger.debug("_score_opportunity exception suppressed", exc_info=True)
     stage = group.get('relationship_status', '').lower()
     stage_scores = {
         'closing': 40, 'active': 32, 'engaged': 28, 'warm': 24,
@@ -3093,7 +3093,42 @@ def _score_opportunity(group, signal=None, contact=None, overdue_task=None):
 # Contact priority & next-best-action scoring (V17)
 # ---------------------------------------------------------------------------
 
-def _compute_contact_priority(contact, group=None):
+def _batch_touchpoint_stats(group_ids):
+    """Batch-fetch recent and total touchpoint counts for a list of group IDs.
+    Returns {gid: {'recent_count': int, 'total_count': int}}."""
+    if not group_ids:
+        return {}
+    stats = {gid: {'recent_count': 0, 'total_count': 0} for gid in group_ids}
+    thirty_days_ago = (datetime.utcnow() - timedelta(days=30)).isoformat()
+    col = 'capital_group_id'
+    for attempt in range(2):
+        try:
+            for batch_start in range(0, len(group_ids), 20):
+                batch = group_ids[batch_start:batch_start + 20]
+                ph = ','.join(['?'] * len(batch))
+                rows = fetch_all(
+                    f"SELECT {col}, COUNT(*) as total, "
+                    f"SUM(CASE WHEN created_at > ? THEN 1 ELSE 0 END) as recent "
+                    f"FROM prospecting_touchpoints WHERE {col} IN ({ph}) GROUP BY {col}",
+                    [thirty_days_ago] + batch
+                )
+                for r in (rows or []):
+                    gid = r.get(col)
+                    if gid and gid in stats:
+                        stats[gid] = {
+                            'recent_count': r.get('recent') or 0,
+                            'total_count': r.get('total') or 0,
+                        }
+            return stats
+        except Exception:
+            if attempt == 0:
+                col = 'group_id'
+            else:
+                logger.debug("_batch_touchpoint_stats failed", exc_info=True)
+    return stats
+
+
+def _compute_contact_priority(contact, group=None, tp_stats=None):
     """
     Compute a contact priority score (0-100) with next-best-action recommendation.
 
@@ -3159,7 +3194,9 @@ def _compute_contact_priority(contact, group=None):
         gid = group.get('id')
     elif contact:
         gid = contact.get('group_id')
-    if gid:
+    if gid and tp_stats and gid in tp_stats:
+        recent_tp_count = tp_stats[gid].get('recent_count', 0)
+    elif gid:
         try:
             thirty_days_ago = (datetime.utcnow() - timedelta(days=30)).isoformat()
             tp_row = fetch_one(
@@ -3169,7 +3206,6 @@ def _compute_contact_priority(contact, group=None):
             if tp_row:
                 recent_tp_count = tp_row.get('cnt', 0) or 0
         except Exception:
-            # Fallback: try group_id column name
             try:
                 tp_row = fetch_one(
                     "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE group_id = ? AND created_at > ?",
@@ -3178,7 +3214,7 @@ def _compute_contact_priority(contact, group=None):
                 if tp_row:
                     recent_tp_count = tp_row.get('cnt', 0) or 0
             except Exception:
-                pass
+                logger.debug("_compute_contact_priority touchpoint query failed", exc_info=True)
 
     if recent_tp_count >= 4:
         engagement_component = 100
@@ -3219,9 +3255,11 @@ def _compute_contact_priority(contact, group=None):
         btr_fit_label = 'weak'
 
     # --- Next-best-action logic ---
-    # Check if there have ever been any touchpoints
+    # Check if there have ever been any touchpoints (use batch stats if available)
     has_any_touchpoints = True
-    if gid:
+    if gid and tp_stats and gid in tp_stats:
+        has_any_touchpoints = tp_stats[gid].get('total_count', 0) > 0
+    elif gid:
         try:
             any_tp = fetch_one(
                 "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE capital_group_id = ?",
@@ -3238,7 +3276,7 @@ def _compute_contact_priority(contact, group=None):
                 if any_tp and (any_tp.get('cnt', 0) or 0) == 0:
                     has_any_touchpoints = False
             except Exception:
-                pass
+                logger.debug("_compute_contact_priority total touchpoint query failed", exc_info=True)
     else:
         has_any_touchpoints = False
 
@@ -3674,31 +3712,33 @@ def _generate_daily_plan():
     plan.sort(key=lambda x: prio_order.get(x['priority'], 4))
     plan = _filter_plan_tasks(plan)
 
-    # Enrich plan items with prediction data
-    for item in plan:
-        gid = item.get('target_id')
-        if gid:
+    # Batch-fetch groups and touchpoint stats to avoid N+1 queries
+    _plan_gids = list(set(item.get('target_id', '') for item in plan if item.get('target_id')))
+    _plan_groups = {}
+    if _plan_gids:
+        for _bs in range(0, len(_plan_gids), 20):
+            _batch = _plan_gids[_bs:_bs + 20]
+            _ph = ','.join(['?'] * len(_batch))
             try:
-                g = fetch_one("SELECT * FROM capital_groups WHERE id = ?", [gid])
-                if g:
-                    prob = _deal_probability(g)
-                    item['deal_score'] = prob.get('score', 0)
-                    item['deal_label'] = prob.get('label', '')
+                for _r in (fetch_all(f"SELECT * FROM capital_groups WHERE id IN ({_ph})", _batch) or []):
+                    _plan_groups[_r['id']] = _r
             except Exception:
-                logger.debug("_generate_daily_plan query failed", exc_info=True)
+                logger.debug("_generate_daily_plan batch group fetch failed", exc_info=True)
+    _plan_tp_stats = _batch_touchpoint_stats(_plan_gids)
 
-    # Enrich plan items with contact priority & next-best-action (V17)
     for item in plan:
         gid = item.get('target_id')
-        if gid:
+        g = _plan_groups.get(gid) if gid else None
+        if g:
             try:
-                group = fetch_one("SELECT * FROM capital_groups WHERE id = ?", [gid])
-                if group:
-                    cp = _compute_contact_priority(None, group)
-                    item['next_best_action'] = cp['next_best_action']
-                    item['decay_risk'] = cp['decay_risk']
-            except Exception:
-                logger.debug("_generate_daily_plan contact priority failed", exc_info=True)
+                prob = _deal_probability(g)
+                item['deal_score'] = prob.get('score', 0)
+                item['deal_label'] = prob.get('label', '')
+            except (KeyError, TypeError, ValueError):
+                logger.debug("_generate_daily_plan deal probability failed", exc_info=True)
+            cp = _compute_contact_priority(None, g, tp_stats=_plan_tp_stats)
+            item['next_best_action'] = cp['next_best_action']
+            item['decay_risk'] = cp['decay_risk']
 
     # Apply user focus boost — items matching focus entities sort higher
     try:
@@ -4701,22 +4741,29 @@ RULES:
         )
 
         response_text = ""
-        # Extract source URLs from web search tool result blocks
         web_search_sources = []
-        for block in message.content:
-            if block.type == "text":
-                response_text += block.text
-            elif block.type == "web_search_tool_result":
-                # content is a list of WebSearchResultBlock or a WebSearchToolResultError
-                if isinstance(getattr(block, 'content', None), list):
-                    for result in block.content:
-                        if hasattr(result, 'type') and result.type == 'web_search_result':
-                            if hasattr(result, 'url') and hasattr(result, 'title'):
+        for block in (getattr(message, 'content', None) or []):
+            block_type = getattr(block, 'type', None)
+            if block_type == "text":
+                response_text += getattr(block, 'text', '')
+            elif block_type in ("web_search_tool_result", "server_tool_use"):
+                try:
+                    block_content = getattr(block, 'content', None)
+                    if not isinstance(block_content, list):
+                        continue
+                    for result in block_content:
+                        result_type = getattr(result, 'type', None)
+                        if result_type in ('web_search_result', 'search_result'):
+                            url = getattr(result, 'url', '')
+                            title = getattr(result, 'title', '')
+                            if url:
                                 web_search_sources.append({
-                                    'title': getattr(result, 'title', ''),
-                                    'url': getattr(result, 'url', ''),
+                                    'title': title or url[:60],
+                                    'url': url,
                                     'page_age': getattr(result, 'page_age', ''),
                                 })
+                except (AttributeError, TypeError):
+                    logger.debug("Source extraction from block failed", exc_info=True)
 
         json_start = response_text.find('{')
         json_end = response_text.rfind('}') + 1
@@ -5409,21 +5456,17 @@ def _generate_execution_queue(limit=10):
                 for _r in (_rows or []):
                     _group_cache[_r['id']] = _r
             except Exception:
-                pass
+                logger.debug("_generate_execution_queue batch group fetch failed", exc_info=True)
+
+    _eq_tp_stats = _batch_touchpoint_stats(_all_gids)
 
     # Enrich items with contact priority data (V17)
     for item in items:
         gid = item.get('target_id')
         if gid:
             group = _group_cache.get(gid)
-            if not group:
-                try:
-                    group = fetch_one(
-                        "SELECT * FROM capital_groups WHERE id = ?", [gid])
-                except Exception:
-                    group = None
             if group:
-                cp = _compute_contact_priority(None, group)
+                cp = _compute_contact_priority(None, group, tp_stats=_eq_tp_stats)
                 item['contact_priority'] = cp['priority_score']
                 item['decay_risk'] = cp['decay_risk']
                 item['next_best_action'] = cp['next_best_action']
@@ -6036,7 +6079,7 @@ def _get_strategic_memory():
                 f"{r['channel']} ({r['cnt']}x)" for r in reply_channels
             ))
     except Exception:
-        pass
+        logger.debug("Memory extraction reply channels query failed", exc_info=True)
 
     # Recent stage progressions — what moved forward?
     try:
@@ -6051,7 +6094,7 @@ def _get_strategic_memory():
                 f"{g['name']} ({g['relationship_status']})" for g in active_engaged
             ))
     except Exception:
-        pass
+        logger.debug("Memory extraction stage progressions query failed", exc_info=True)
 
     # Contacts with inbound engagement — who responded?
     try:
@@ -6070,7 +6113,7 @@ def _get_strategic_memory():
                 for r in responsive
             ))
     except Exception:
-        pass
+        logger.debug("_get_strategic_memory exception suppressed", exc_info=True)
 
     return "\n".join(parts) if parts else ""
 
@@ -6138,7 +6181,7 @@ def _store_context_memory(memory_type, summary, entities=None):
             [new_id(), memory_type, summary[:500], json.dumps(entities or [])[:500]]
         )
     except Exception:
-        pass
+        logger.debug("_store_context_memory exception suppressed", exc_info=True)
 
 
 def _get_context_memory(limit=10, memory_type=None):
@@ -6212,7 +6255,7 @@ def _extract_memory_from_exchange(user_msg, reply_text, intent):
         groups = _find_groups_fuzzy(user_msg)
         entities = [g['name'] for g in groups[:3]]
     except Exception:
-        pass
+        logger.debug("_extract_memory_from_exchange exception suppressed", exc_info=True)
 
     summary = user_msg[:120]
     if reply_text:
@@ -6352,7 +6395,7 @@ def _get_relevant_memories(text, conv_state, limit=12):
                     conf_tag = "" if m['confidence'] >= 0.8 else " [unconfirmed]"
                     parts.append(f"  - {m['content']}{conf_tag}")
     except Exception:
-        pass
+        logger.debug("Memory retrieval for people failed", exc_info=True)
 
     if conv_state.get('companies'):
         for comp in conv_state['companies'][-2:]:
@@ -6364,7 +6407,7 @@ def _get_relevant_memories(text, conv_state, limit=12):
                         conf_tag = "" if m['confidence'] >= 0.8 else " [unconfirmed]"
                         parts.append(f"  - {m['content']}{conf_tag}")
             except Exception:
-                pass
+                logger.debug("_get_relevant_memories exception suppressed", exc_info=True)
     if conv_state.get('people'):
         for person in conv_state['people'][-2:]:
             try:
@@ -6375,7 +6418,7 @@ def _get_relevant_memories(text, conv_state, limit=12):
                         conf_tag = "" if m['confidence'] >= 0.8 else " [unconfirmed]"
                         parts.append(f"  - {m['content']}{conf_tag}")
             except Exception:
-                pass
+                logger.debug("_get_relevant_memories exception suppressed", exc_info=True)
 
     recent_conv = _get_memories(memory_type='conversation', limit=5)
     if recent_conv:
@@ -6428,7 +6471,7 @@ def _extract_persistent_memories(user_msg, reply_text, intent, conv_state):
                 _store_memory('contact', user_msg[:200], entity_id=c['id'], entity_name=cname,
                               category='insight', source='conversation', confidence=0.7)
     except Exception:
-        pass
+        logger.debug("_extract_persistent_memories exception suppressed", exc_info=True)
 
     _PREFERENCE_SIGNALS = {
         'tone': ['tone', 'casual', 'formal', 'professional', 'friendly', 'direct'],
@@ -6491,7 +6534,7 @@ def _get_current_focus():
         if day and day.get('daily_focus'):
             focus_data['daily_focus'] = day['daily_focus']
     except Exception:
-        pass
+        logger.debug("_get_current_focus exception suppressed", exc_info=True)
 
     try:
         recent_focus = fetch_all(
@@ -6506,7 +6549,7 @@ def _get_current_focus():
                 focus_data['focus_entities'].append(m['entity_name'].lower())
             focus_data['strategy_notes'].append(m['content'])
     except Exception:
-        pass
+        logger.debug("_get_current_focus exception suppressed", exc_info=True)
 
     return focus_data
 
@@ -6544,7 +6587,7 @@ def _sync_focus_from_chat(user_msg, reply_text, conv_state):
             from api.routes.daily_brief import invalidate_brief_cache
             invalidate_brief_cache()
         except Exception:
-            pass
+            logger.debug("_sync_focus_from_chat exception suppressed", exc_info=True)
     except Exception:
         logger.debug("Focus write-through failed", exc_info=True)
 
@@ -6666,7 +6709,7 @@ def _record_event(event_type, entity_type=None, entity_id=None, entity_name=None
             [new_id(), event_type, entity_type, entity_id, entity_name, (detail or '')[:300]]
         )
     except Exception:
-        pass
+        logger.debug("_record_event exception suppressed", exc_info=True)
 
 
 def _get_recent_events(limit=8, since_hours=24):
@@ -6712,7 +6755,7 @@ def _acknowledge_events():
     try:
         execute("UPDATE leo_events SET acknowledged = 1 WHERE acknowledged = 0")
     except Exception:
-        pass
+        logger.debug("_acknowledge_events exception suppressed", exc_info=True)
 
 
 def _detect_new_events():
@@ -6736,7 +6779,7 @@ def _detect_new_events():
                           s.get('group_name', 'Unknown'),
                           f"{s['title'][:80]} (importance {s.get('importance', '?')}/10)")
     except Exception:
-        pass
+        logger.debug("_detect_new_events exception suppressed", exc_info=True)
 
     # Inbound replies (new inbound touchpoints)
     try:
@@ -6755,7 +6798,7 @@ def _detect_new_events():
             _record_event('inbound_reply', 'touchpoint', r['id'], name,
                           f"Reply via {r.get('channel', '?')}: {(r.get('summary') or '')[:60]}")
     except Exception:
-        pass
+        logger.debug("_detect_new_events exception suppressed", exc_info=True)
 
     # Completed tasks
     try:
@@ -6773,7 +6816,7 @@ def _detect_new_events():
                           t.get('group_name', ''),
                           f"Completed: {t['title'][:80]}")
     except Exception:
-        pass
+        logger.debug("_detect_new_events exception suppressed", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -6798,7 +6841,7 @@ def _action_feedback(action_type, entity_name, detail):
             elif momentum['streak'] >= 3:
                 parts.append(f"{momentum['streak']}-day streak going. Nice consistency.")
         except Exception:
-            pass
+            logger.debug("_action_feedback exception suppressed", exc_info=True)
 
     elif action_type == 'update_stage':
         _record_event('stage_changed', 'group', None, entity_name, detail)
@@ -6830,7 +6873,7 @@ def _record_pattern(pattern_type, channel=None, stage_from=None, stage_to=None,
              touchpoint_count, days_elapsed]
         )
     except Exception:
-        pass
+        logger.debug("_record_pattern exception suppressed", exc_info=True)
 
 
 def _get_pattern_insights():
@@ -11543,7 +11586,7 @@ def _log_leo_action(action_type, target_area, description, params=None, result=N
              datetime.utcnow().isoformat()]
         )
     except Exception:
-        pass
+        logger.debug("_log_leo_action exception suppressed", exc_info=True)
 
 
 def _build_leo_action_preview(action_type, target_area, description, changes, affected_record, exec_action, exec_params):
@@ -13332,7 +13375,7 @@ def _track_interaction(event_type, action, params=None):
              json.dumps(params or {})[:2000]]
         )
     except Exception:
-        pass
+        logger.debug("_track_interaction exception suppressed", exc_info=True)
 
 
 @assistant_bp.route('/track', methods=['POST'])
@@ -13370,7 +13413,7 @@ def _persist_chat(user_msg, card, intent='unknown', mode='unknown'):
              card_json]
         )
     except Exception:
-        pass
+        logger.debug("_persist_chat exception suppressed", exc_info=True)
 
 
 @assistant_bp.route('/history', methods=['GET'])
