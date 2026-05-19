@@ -1448,7 +1448,7 @@ def _build_truth_context(text, conv_state):
         else:
             parts.append("VERIFIED COMPANIES IN CRM: none found")
     except Exception:
-        pass
+        parts.append("VERIFIED COMPANIES IN CRM: none available")
 
     try:
         contacts = fetch_all(
@@ -3089,6 +3089,194 @@ def _score_opportunity(group, signal=None, contact=None, overdue_task=None):
     }
 
 
+# ---------------------------------------------------------------------------
+# Contact priority & next-best-action scoring (V17)
+# ---------------------------------------------------------------------------
+
+def _compute_contact_priority(contact, group=None):
+    """
+    Compute a contact priority score (0-100) with next-best-action recommendation.
+
+    Components (weights):
+      - warmth_score   (0.25) — from group's warmth_score field
+      - decay_risk     (0.25) — based on days since last touch
+      - last_touch_age (0.20) — linear decay over 90 days
+      - btr_fit        (0.20) — based on group type
+      - engagement     (0.10) — touchpoint count in last 30 days
+
+    Returns dict with priority_score, decay_risk label, btr_fit label,
+    next_best_action, and next_best_action_reason.
+    """
+    # Resolve last_touch_at from contact or group
+    last_touch_at = None
+    if contact and contact.get('last_touch_at'):
+        last_touch_at = contact.get('last_touch_at')
+    elif group and group.get('last_contacted_at'):
+        last_touch_at = group.get('last_contacted_at')
+
+    days_since_touch = _days_since(last_touch_at)
+
+    # --- warmth_score component (25%) ---
+    group_warmth = 50  # default
+    if group and group.get('warmth_score') is not None:
+        try:
+            group_warmth = min(float(group['warmth_score']) * 10, 100)
+        except (ValueError, TypeError):
+            group_warmth = 50
+    warmth_component = group_warmth
+
+    # --- decay_risk component (25%) ---
+    if days_since_touch <= 7:
+        decay_component = 100
+    elif days_since_touch <= 14:
+        decay_component = 75
+    elif days_since_touch <= 30:
+        decay_component = 50
+    elif days_since_touch <= 60:
+        decay_component = 25
+    else:
+        decay_component = 0
+
+    # --- last_touch_age component (20%) ---
+    touch_age_component = max(0, 100 - (days_since_touch * 100 / 90))
+
+    # --- btr_fit component (20%) ---
+    group_type = ''
+    if group:
+        group_type = (group.get('type') or '').lower().strip()
+    fit_scores = {
+        'developer': 100,
+        'operator': 90,
+        'investor': 80,
+        'lender': 70,
+    }
+    fit_component = fit_scores.get(group_type, 50)
+
+    # --- engagement component (10%) ---
+    recent_tp_count = 0
+    gid = None
+    if group:
+        gid = group.get('id')
+    elif contact:
+        gid = contact.get('group_id')
+    if gid:
+        try:
+            thirty_days_ago = (datetime.utcnow() - timedelta(days=30)).isoformat()
+            tp_row = fetch_one(
+                "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE capital_group_id = ? AND created_at > ?",
+                [gid, thirty_days_ago]
+            )
+            if tp_row:
+                recent_tp_count = tp_row.get('cnt', 0) or 0
+        except Exception:
+            # Fallback: try group_id column name
+            try:
+                tp_row = fetch_one(
+                    "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE group_id = ? AND created_at > ?",
+                    [gid, thirty_days_ago]
+                )
+                if tp_row:
+                    recent_tp_count = tp_row.get('cnt', 0) or 0
+            except Exception:
+                pass
+
+    if recent_tp_count >= 4:
+        engagement_component = 100
+    elif recent_tp_count == 3:
+        engagement_component = 80
+    elif recent_tp_count == 2:
+        engagement_component = 60
+    elif recent_tp_count == 1:
+        engagement_component = 40
+    else:
+        engagement_component = 0
+
+    # --- Weighted total ---
+    weighted_total = (
+        warmth_component * 0.25 +
+        decay_component * 0.25 +
+        touch_age_component * 0.20 +
+        fit_component * 0.20 +
+        engagement_component * 0.10
+    )
+
+    # --- Decay risk label ---
+    if days_since_touch < 14:
+        decay_risk_label = 'low'
+    elif days_since_touch < 30:
+        decay_risk_label = 'medium'
+    elif days_since_touch < 60:
+        decay_risk_label = 'high'
+    else:
+        decay_risk_label = 'critical'
+
+    # --- BTR fit label ---
+    if group_type in ('developer', 'operator'):
+        btr_fit_label = 'strong'
+    elif group_type in ('investor', 'lender'):
+        btr_fit_label = 'moderate'
+    else:
+        btr_fit_label = 'weak'
+
+    # --- Next-best-action logic ---
+    # Check if there have ever been any touchpoints
+    has_any_touchpoints = True
+    if gid:
+        try:
+            any_tp = fetch_one(
+                "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE capital_group_id = ?",
+                [gid]
+            )
+            if any_tp and (any_tp.get('cnt', 0) or 0) == 0:
+                has_any_touchpoints = False
+        except Exception:
+            try:
+                any_tp = fetch_one(
+                    "SELECT COUNT(*) as cnt FROM prospecting_touchpoints WHERE group_id = ?",
+                    [gid]
+                )
+                if any_tp and (any_tp.get('cnt', 0) or 0) == 0:
+                    has_any_touchpoints = False
+            except Exception:
+                pass
+    else:
+        has_any_touchpoints = False
+
+    warmth_raw = group.get('warmth_score', 0) if group else 0
+    try:
+        warmth_raw = float(warmth_raw or 0)
+    except (ValueError, TypeError):
+        warmth_raw = 0
+    # Normalize warmth_raw to 0-100 scale for threshold comparison (stored as 0-10)
+    warmth_for_threshold = warmth_raw * 10
+
+    if decay_risk_label == 'critical':
+        next_action = f"Re-engage — no contact in {days_since_touch} days"
+        next_reason = f"Relationship at risk: {days_since_touch} days without contact exceeds safe threshold"
+    elif not has_any_touchpoints:
+        next_action = "Initial outreach — introduce BTR services"
+        next_reason = "No prior touchpoints recorded; first contact needed to establish relationship"
+    elif warmth_for_threshold > 70 and days_since_touch <= 14:
+        next_action = "Advance deal — schedule meeting or send proposal"
+        next_reason = f"High warmth ({warmth_raw}/10) with recent engagement; ready to move forward"
+    elif 40 <= warmth_for_threshold <= 70:
+        next_action = "Nurture — share relevant market intel"
+        next_reason = f"Moderate warmth ({warmth_raw}/10); build value with insights before pushing for commitment"
+    else:
+        next_action = "Follow up — check in on current status"
+        next_reason = "Maintain contact cadence to keep relationship on track"
+
+    return {
+        'priority_score': int(weighted_total),
+        'warmth_score': group_warmth,
+        'decay_risk': decay_risk_label,
+        'last_touch_days': int(days_since_touch),
+        'btr_fit': btr_fit_label,
+        'next_best_action': next_action,
+        'next_best_action_reason': next_reason,
+    }
+
+
 def _deal_probability(group):
     """
     Score deal probability 0-100 with High/Medium/Low label.
@@ -3498,6 +3686,19 @@ def _generate_daily_plan():
                     item['deal_label'] = prob.get('label', '')
             except Exception:
                 logger.debug("_generate_daily_plan query failed", exc_info=True)
+
+    # Enrich plan items with contact priority & next-best-action (V17)
+    for item in plan:
+        gid = item.get('target_id')
+        if gid:
+            try:
+                group = fetch_one("SELECT * FROM capital_groups WHERE id = ?", [gid])
+                if group:
+                    cp = _compute_contact_priority(None, group)
+                    item['next_best_action'] = cp['next_best_action']
+                    item['decay_risk'] = cp['decay_risk']
+            except Exception:
+                logger.debug("_generate_daily_plan contact priority failed", exc_info=True)
 
     # Apply user focus boost — items matching focus entities sort higher
     try:
@@ -4500,9 +4701,22 @@ RULES:
         )
 
         response_text = ""
+        # Extract source URLs from web search tool result blocks
+        web_search_sources = []
         for block in message.content:
             if block.type == "text":
                 response_text += block.text
+            elif block.type == "web_search_tool_result":
+                # content is a list of WebSearchResultBlock or a WebSearchToolResultError
+                if isinstance(getattr(block, 'content', None), list):
+                    for result in block.content:
+                        if hasattr(result, 'type') and result.type == 'web_search_result':
+                            if hasattr(result, 'url') and hasattr(result, 'title'):
+                                web_search_sources.append({
+                                    'title': getattr(result, 'title', ''),
+                                    'url': getattr(result, 'url', ''),
+                                    'page_age': getattr(result, 'page_age', ''),
+                                })
 
         json_start = response_text.find('{')
         json_end = response_text.rfind('}') + 1
@@ -4524,8 +4738,19 @@ RULES:
 
             research['sources'] = _filter_and_rank_sources(research.get('sources', []))
 
+            # Merge web search tool sources (deduplicated) — these come directly
+            # from the Anthropic API response and are never fabricated
+            existing_urls = {s.get('url') for s in research['sources'] if s.get('url')}
+            for ws in web_search_sources:
+                if ws['url'] and ws['url'] not in existing_urls:
+                    existing_urls.add(ws['url'])
+                    research['sources'].append(ws)
+            # Keep a separate list of verified web search sources for the card
+            research['web_search_sources'] = web_search_sources[:5]
+
             logger.info(f"[Leo] Outreach intel complete: person={person}, company={company}, "
-                        f"sources={len(research['sources'])}, confidence={research['confidence'].get('overall', 'low')}")
+                        f"sources={len(research['sources'])}, web_sources={len(web_search_sources)}, "
+                        f"confidence={research['confidence'].get('overall', 'low')}")
             return research
         else:
             logger.warning(f"[Leo] Outreach intel returned no JSON for: {query}")
@@ -4693,6 +4918,58 @@ def _generate_generic_intros(query):
     ]
 
 
+def _validate_research_entity(query, research_text):
+    """Validate that research results actually match the queried entity."""
+    validation = {
+        'entity_match': True,
+        'has_btr_relevance': False,
+        'has_recent_activity': False,
+        'confidence_factors': [],
+        'warnings': []
+    }
+
+    # Extract the entity name being researched (first quoted term or capitalized phrase)
+    import re
+    entity_match = re.search(r'"([^"]+)"|\'([^\']+)\'', query)
+    entity_name = (entity_match.group(1) or entity_match.group(2)) if entity_match else None
+
+    if not entity_name:
+        # Try to extract capitalized multi-word phrases
+        caps = re.findall(r'[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+', query)
+        entity_name = caps[0] if caps else None
+
+    if entity_name and research_text:
+        # Check if entity name appears in research results
+        if entity_name.lower() not in research_text.lower():
+            validation['entity_match'] = False
+            validation['warnings'].append(f"Research results may not match '{entity_name}' — verify before acting")
+
+    if research_text:
+        text_lower = research_text.lower()
+        # BTR relevance markers
+        btr_terms = ['build-to-rent', 'btr', 'multifamily', 'rental', 'apartment',
+                     'housing', 'residential', 'real estate', 'property', 'development',
+                     'construction', 'portfolio', 'units', 'communities']
+        if any(term in text_lower for term in btr_terms):
+            validation['has_btr_relevance'] = True
+            validation['confidence_factors'].append('BTR/real estate relevance confirmed')
+
+        # Recent activity markers
+        from datetime import datetime as _dt_validate
+        current_year = str(_dt_validate.utcnow().year)
+        prev_year = str(_dt_validate.utcnow().year - 1)
+        if current_year in research_text or prev_year in research_text:
+            validation['has_recent_activity'] = True
+            validation['confidence_factors'].append('Recent activity found')
+
+        activity_terms = ['announced', 'launched', 'acquired', 'partnered', 'raised',
+                         'expanded', 'closed', 'developed', 'broke ground', 'completed']
+        if any(term in text_lower for term in activity_terms):
+            validation['confidence_factors'].append('Deal/activity indicators present')
+
+    return validation
+
+
 def _build_research_response(query, research, intros):
     """Build OutreachIntelCard text + card dict from research results and intros."""
     entities = _extract_research_entities(query)
@@ -4709,6 +4986,26 @@ def _build_research_response(query, research, intros):
         confidence = {'overall': confidence, 'reasons': []}
     if not confidence.get('overall'):
         confidence['overall'] = 'high' if research.get('sources') else ('medium' if research.get('summary') else 'low')
+
+    # Validate research entity match — build a text representation for validation
+    research_text_for_validation = ' '.join(filter(None, [
+        snapshot.get('description', ''),
+        btr.get('explanation', ''),
+        person_conn.get('explanation', ''),
+        ' '.join(a.get('event', '') for a in activity),
+        research.get('gaps', ''),
+    ]))
+    validation = _validate_research_entity(query, research_text_for_validation)
+
+    # Build structured confidence from validation
+    confidence_details = {
+        'overall': confidence.get('overall', 'medium'),
+        'entity_verified': validation['entity_match'],
+        'btr_relevant': validation['has_btr_relevance'],
+        'recent_activity': validation['has_recent_activity'],
+        'factors': validation['confidence_factors'],
+        'warnings': validation['warnings']
+    }
 
     activity_md = '\n'.join(
         f"- {a.get('event', '')}" + (f" ({a.get('date', '')})" if a.get('date') else '')
@@ -4730,9 +5027,21 @@ def _build_research_response(query, research, intros):
         f"**BTR Connection:** {btr_icon} — {btr.get('explanation', 'No clear connection found.')}\n\n"
         f"**Person:** {person_conn.get('role', 'Role unknown')} — {person_conn.get('explanation', 'Limited info')}\n\n"
         f"**Best Angle:** {angle.get('why_they_care', 'General outreach')}\n\n"
-        f"**Sources:**\n{sources_md or 'No sources found.'}\n\n"
-        f"**Confidence:** {conf_level}"
+        f"**Sources:**\n{sources_md or 'No sources found.'}"
     )
+
+    # Append verified web search sources if available
+    if research.get('web_search_sources'):
+        text += "\n\n**Verified Web Sources:**"
+        for s in research['web_search_sources'][:3]:
+            text += f"\n- [{s['title']}]({s['url']})"
+
+    text += f"\n\n**Confidence:** {conf_level}"
+
+    # Append validation warnings
+    if validation['warnings']:
+        for w in validation['warnings']:
+            text += f"\n\n⚠️ {w}"
 
     card = {
         'type': 'OutreachIntelCard',
@@ -4746,7 +5055,9 @@ def _build_research_response(query, research, intros):
             'person_connection': person_conn,
             'outreach_angle': angle,
             'sources': [{k: v for k, v in s.items() if k != '_quality'} for s in research.get('sources', [])],
+            'web_search_sources': research.get('web_search_sources', []),
             'confidence': confidence,
+            'confidence_details': confidence_details,
             'gaps': research.get('gaps', ''),
             'intros': intros,
         },
@@ -5099,6 +5410,24 @@ def _generate_execution_queue(limit=10):
                     _group_cache[_r['id']] = _r
             except Exception:
                 pass
+
+    # Enrich items with contact priority data (V17)
+    for item in items:
+        gid = item.get('target_id')
+        if gid:
+            group = _group_cache.get(gid)
+            if not group:
+                try:
+                    group = fetch_one(
+                        "SELECT * FROM capital_groups WHERE id = ?", [gid])
+                except Exception:
+                    group = None
+            if group:
+                cp = _compute_contact_priority(None, group)
+                item['contact_priority'] = cp['priority_score']
+                item['decay_risk'] = cp['decay_risk']
+                item['next_best_action'] = cp['next_best_action']
+                item['next_best_action_reason'] = cp['next_best_action_reason']
 
     # Apply user focus boost before sorting
     try:
@@ -8971,6 +9300,24 @@ def get_automation():
     """Detect automation opportunities."""
     auto = _detect_automation_opportunities()
     return jsonify(auto)
+
+
+# ---------------------------------------------------------------------------
+# API: V17 — Contact Priority & Next-Best-Action
+# ---------------------------------------------------------------------------
+
+@assistant_bp.route('/contact-priority/<group_id>')
+def get_contact_priority(group_id):
+    """Return computed contact priority and next-best-action for a group."""
+    try:
+        group = fetch_one("SELECT * FROM capital_groups WHERE id = ?", [group_id])
+    except Exception:
+        return jsonify({'error': 'Database error'}), 500
+    if not group:
+        return jsonify({'error': 'Group not found'}), 404
+    cp = _compute_contact_priority(None, group)
+    cp['group_name'] = group.get('name', '')
+    return jsonify(cp)
 
 
 # ---------------------------------------------------------------------------
