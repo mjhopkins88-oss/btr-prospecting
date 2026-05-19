@@ -1107,6 +1107,20 @@ def _build_state_context_block(state, resolved, msg_type=None):
     except Exception:
         pass
 
+    try:
+        recent_actions = fetch_all(
+            """SELECT action_type, description, created_at
+               FROM leo_action_log
+               WHERE created_at > datetime('now', '-24 hours')
+               ORDER BY created_at DESC LIMIT 5""", []
+        )
+        if recent_actions:
+            parts.append("RECENT ACTIONS (last 24h):")
+            for a in recent_actions:
+                parts.append(f"  - {a['action_type']}: {a['description']}")
+    except Exception:
+        pass
+
     return '\n'.join(parts)
 
 
@@ -1760,6 +1774,19 @@ def _handle_greeting(conv_state):
         if focus_data.get('daily_focus'):
             insights.insert(0,
                 f"your focus today is **{focus_data['daily_focus']}**. Want to keep pushing on that or pivot?"
+            )
+    except Exception:
+        pass
+
+    try:
+        completed_today = fetch_all(
+            """SELECT COUNT(*) as cnt FROM prospecting_tasks
+               WHERE status = 'completed' AND completed_at > date('now')""", []
+        )
+        if completed_today and completed_today[0]['cnt'] > 0:
+            cnt = completed_today[0]['cnt']
+            insights.append(
+                f"you've already knocked out {cnt} task{'s' if cnt != 1 else ''} today. Nice momentum."
             )
     except Exception:
         pass
@@ -4670,6 +4697,8 @@ def _build_research_response(query, research, intros):
     confidence = research.get('confidence', {})
     if isinstance(confidence, str):
         confidence = {'overall': confidence, 'reasons': []}
+    if not confidence.get('overall'):
+        confidence['overall'] = 'high' if research.get('sources') else ('medium' if research.get('summary') else 'low')
 
     activity_md = '\n'.join(
         f"- {a.get('event', '')}" + (f" ({a.get('date', '')})" if a.get('date') else '')
@@ -10728,7 +10757,7 @@ def _exec_log_touchpoint(params):
                     {'channel': channel, 'direction': direction, 'contact_id': contact_id, 'group_id': group_id},
                     {'touchpoint_id': tp_id})
 
-    return jsonify({'success': True, 'card': {
+    return jsonify({'success': True, 'data_changed': True, 'card': {
         'type': 'ConfirmationCard',
         'text': confirm_text,
         'data': {'what': 'touchpoint', 'result': 'logged', 'entity_id': tp_id},
@@ -10768,7 +10797,7 @@ def _exec_update_stage(params):
         _log_leo_action('update_stage', 'contact', text,
                         {'contact_id': contact_id, 'old_stage': old_stage, 'new_stage': new_stage},
                         {'success': True})
-        return jsonify({'success': True, 'card': {
+        return jsonify({'success': True, 'data_changed': True, 'card': {
             'type': 'ConfirmationCard', 'text': text,
             'data': {'what': 'stage', 'result': new_stage, 'entity_id': contact_id},
             'actions': []
@@ -10799,7 +10828,7 @@ def _exec_update_stage(params):
                     {'success': True})
     if old_stage and old_stage != new_stage:
         _record_pattern('stage_progression', stage_from=old_stage, stage_to=new_stage)
-    return jsonify({'success': True, 'card': {
+    return jsonify({'success': True, 'data_changed': True, 'card': {
         'type': 'ConfirmationCard', 'text': text,
         'data': {'what': 'stage', 'result': new_stage, 'entity_id': group_id},
         'actions': []
@@ -10836,7 +10865,7 @@ def _exec_create_followup(params):
     _log_leo_action('create_followup', 'tasks', confirm_text,
                     {'title': title, 'due_date': due_date, 'group_id': group_id},
                     {'task_id': task_id})
-    return jsonify({'success': True, 'card': {
+    return jsonify({'success': True, 'data_changed': True, 'card': {
         'type': 'ConfirmationCard',
         'text': confirm_text,
         'data': {'what': 'follow_up', 'result': 'created', 'entity_id': task_id},

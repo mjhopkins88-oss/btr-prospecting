@@ -150,6 +150,23 @@ def _generate_brief_content():
     targets = _build_daily_targets()
     brief['daily_targets'] = targets
 
+    # --- Section: What Changed (from Leo actions in last 24h) ---
+    changes = []
+    try:
+        recent_actions = fetch_all(
+            """SELECT action_type, description, created_at
+               FROM leo_action_log
+               WHERE created_at > datetime('now', '-24 hours')
+               ORDER BY created_at DESC LIMIT 5""", []
+        )
+        for a in (recent_actions or []):
+            changes.append(f"{a['action_type']}: {a['description']}")
+    except Exception:
+        logger.debug("What changed query failed", exc_info=True)
+    if not changes:
+        changes.append('No recent actions logged.')
+    brief['what_changed'] = changes
+
     # --- Section 6: Learning Insight ---
     brief['learning_insight'] = {
         'title': 'The 3-Touch Rule',
@@ -405,6 +422,13 @@ def _build_pdf(brief):
     for target in brief.get('daily_targets', []):
         pdf.bullet(target)
     pdf.ln(3)
+
+    # What Changed section
+    if brief.get('what_changed'):
+        pdf.section_header('WHAT CHANGED (LAST 24H)')
+        for item in brief['what_changed'][:5]:
+            pdf.bullet(item)
+        pdf.ln(3)
 
     # Learning Insight
     learning = brief.get('learning_insight', {})
