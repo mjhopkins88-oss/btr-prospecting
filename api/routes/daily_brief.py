@@ -4,6 +4,7 @@ API Routes: Daily BTR Intelligence Brief — PDF generation + download.
 from flask import Blueprint, request, jsonify, send_file
 from shared.database import fetch_all, fetch_one
 from datetime import datetime, timedelta
+import hashlib
 import io
 import json
 import logging
@@ -39,29 +40,46 @@ UNICODE_FONTS_AVAILABLE = _FONT_REGULAR is not None
 def _register_unicode_fonts(pdf):
     """Register DejaVu Unicode fonts on an FPDF instance. Returns font family name."""
     if UNICODE_FONTS_AVAILABLE:
-        pdf.add_font('DejaVu', '', _FONT_REGULAR)
-        pdf.add_font('DejaVu', 'B', _FONT_BOLD)
-        pdf.add_font('DejaVu', 'I', _FONT_REGULAR)
-        pdf.add_font('DejaVu', 'BI', _FONT_BOLD)
+        # fpdf2 >= 2.5 handles Unicode automatically for TTF; pass uni=True for
+        # older builds that still accept the parameter.
+        for style, path in [('', _FONT_REGULAR), ('B', _FONT_BOLD),
+                            ('I', _FONT_REGULAR), ('BI', _FONT_BOLD)]:
+            try:
+                pdf.add_font('DejaVu', style, path, uni=True)
+            except TypeError:
+                # fpdf2 dropped the uni kwarg in newer releases
+                pdf.add_font('DejaVu', style, path)
         return 'DejaVu'
     logger.warning("[PDF] DejaVu fonts not found, falling back to Helvetica (Latin-1 only)")
     return 'Helvetica'
 
 
-def sanitize_text(text):
-    """Normalize Unicode text for maximum PDF compatibility. Fallback sanitizer."""
+def _sanitize_pdf_text(text):
+    """Remove characters that cause fpdf2 rendering issues."""
+    if not text:
+        return ''
     text = str(text)
-    text = text.replace('—', ' - ').replace('–', '-')
-    text = text.replace('‘', "'").replace('’', "'")
-    text = text.replace('“', '"').replace('”', '"')
-    text = text.replace('…', '...')
-    text = text.replace(' ', ' ').replace('​', '')
-    text = text.replace('•', '-')
-    text = text.replace('→', '->').replace('←', '<-')
-    text = text.replace('✓', '[x]').replace('✗', '[ ]')
-    text = text.replace('·', '-')
+    # Replace common problematic Unicode
+    replacements = {
+        '’': "'", '‘': "'",   # smart quotes
+        '“': '"', '”': '"',
+        '—': ' - ', '–': ' - ',  # em/en dash
+        '…': '...', ' ': ' ',    # ellipsis, nbsp
+        '​': '', '‎': '', '‏': '',  # zero-width
+        '﻿': '',  # BOM
+        '•': '-',  # bullet
+        '→': '->', '←': '<-',  # arrows
+        '✓': '[x]', '✗': '[ ]',  # check/cross
+        '·': '-',  # middle dot
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
     text = text.replace('\r\n', '\n').replace('\r', '\n')
     return text
+
+
+# Backward-compatible alias
+sanitize_text = _sanitize_pdf_text
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +91,8 @@ def _generate_brief_content():
     Generate the full daily brief content with personalization from app data.
     Returns dict with all sections.
     """
+    # Always read fresh data - no in-memory caching
+    logger.info("[Brief] Generating fresh brief content")
     today = datetime.utcnow()
     date_str = today.strftime('%A, %B %d, %Y')
 
@@ -326,7 +346,7 @@ def _build_pdf(brief):
     """Generate a clean, professional PDF from brief content. Returns bytes."""
     from fpdf import FPDF
 
-    s = sanitize_text
+    s = _sanitize_pdf_text
     F = 'DejaVu' if UNICODE_FONTS_AVAILABLE else 'Helvetica'
 
     class BriefPDF(FPDF):
@@ -469,12 +489,27 @@ def download_brief():
     try:
         brief = _generate_brief_content()
         pdf_bytes = _build_pdf(brief)
-        if not validate_pdf(pdf_bytes):
+        if not pdf_bytes or not validate_pdf(pdf_bytes):
             logger.error("[PDF] Daily brief generated invalid PDF")
-            return jsonify({'success': False, 'error': 'PDF generation failed'}), 500
-        now = datetime.utcnow()
-        filename = f'BTR_Brief_{now.strftime("%Y-%m-%d_%H%M%S")}.pdf'
+            return jsonify({'error': 'PDF generation failed', 'detail': 'File was not created'}), 500
+        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        content_hash = hashlib.md5(str(brief).encode()).hexdigest()[:8]
+        filename = f'daily_brief_{timestamp}_{content_hash}.pdf'
         logger.info(f"[PDF] Daily brief generated: {filename} ({len(pdf_bytes)} bytes)")
+
+        # Persist to cache for later retrieval
+        try:
+            filepath = os.path.join(PDF_DIR, filename)
+            with open(filepath, 'wb') as f:
+                f.write(pdf_bytes)
+            # Validate PDF was written
+            if not os.path.exists(filepath) or os.path.getsize(filepath) < 100:
+                logger.error(f"[Brief] PDF validation failed: {filepath}")
+            else:
+                logger.info(f"[Brief] PDF cached: {filepath}")
+        except Exception as cache_err:
+            logger.warning(f"[Brief] PDF cache write failed: {cache_err}")
+
         return send_file(
             io.BytesIO(pdf_bytes),
             mimetype='application/pdf',
@@ -483,7 +518,7 @@ def download_brief():
         )
     except Exception as e:
         logger.error(f"[PDF] Daily brief generation failed: {e}")
-        return jsonify({'success': False, 'error': 'PDF generation failed'}), 500
+        return jsonify({'error': 'PDF generation failed', 'detail': str(e)}), 500
 
 
 @daily_brief_bp.route('/preview', methods=['GET'])
@@ -492,8 +527,8 @@ def preview_brief():
     try:
         brief = _generate_brief_content()
         pdf_bytes = _build_pdf(brief)
-        if not validate_pdf(pdf_bytes):
-            return jsonify({'success': False, 'error': 'PDF generation failed'}), 500
+        if not pdf_bytes or not validate_pdf(pdf_bytes):
+            return jsonify({'error': 'PDF generation failed', 'detail': 'File was not created'}), 500
         return send_file(
             io.BytesIO(pdf_bytes),
             mimetype='application/pdf',
@@ -501,7 +536,35 @@ def preview_brief():
         )
     except Exception as e:
         logger.error(f"[PDF] Preview generation failed: {e}")
-        return jsonify({'success': False, 'error': 'PDF generation failed'}), 500
+        return jsonify({'error': 'PDF generation failed', 'detail': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Brief cache invalidation
+# ---------------------------------------------------------------------------
+
+def invalidate_brief_cache():
+    """Remove cached daily-brief PDFs so next request generates fresh content."""
+    try:
+        if os.path.exists(PDF_DIR):
+            removed = 0
+            for f in os.listdir(PDF_DIR):
+                if f.startswith('daily_brief_') and f.endswith('.pdf'):
+                    try:
+                        os.remove(os.path.join(PDF_DIR, f))
+                        removed += 1
+                    except Exception:
+                        pass
+            logger.info(f"[Brief] Cache invalidated ({removed} files removed)")
+    except Exception as e:
+        logger.warning(f"[Brief] Cache invalidation failed: {e}")
+
+
+@daily_brief_bp.route('/invalidate-cache', methods=['POST'])
+def invalidate_cache():
+    """Invalidate brief cache so next download generates fresh content."""
+    invalidate_brief_cache()
+    return jsonify({'success': True, 'message': 'Brief cache invalidated'})
 
 
 # ---------------------------------------------------------------------------
@@ -536,7 +599,7 @@ def build_doc_pdf(doc):
     BLUE = (37, 99, 235)
     PRIO_CLR = {'critical': RED, 'high': AMBER, 'medium': BLUE, 'low': S500}
 
-    s = sanitize_text
+    s = _sanitize_pdf_text
 
     class PremiumPDF(FPDF):
         def header(self):

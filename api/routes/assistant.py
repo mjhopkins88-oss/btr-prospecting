@@ -6539,6 +6539,12 @@ def _sync_focus_from_chat(user_msg, reply_text, conv_state):
             [focus_text, now, today]
         )
         logger.info(f"[Sync] Focus write-through: '{focus_text[:60]}'")
+        # Invalidate brief cache so next download reflects the new focus
+        try:
+            from api.routes.daily_brief import invalidate_brief_cache
+            invalidate_brief_cache()
+        except Exception:
+            pass
     except Exception:
         logger.debug("Focus write-through failed", exc_info=True)
 
