@@ -11,6 +11,7 @@ flagged via `is_demo` on each lead, and `is_demo_data` on aggregate
 responses) only when it has zero matching real leads.
 """
 import dataclasses
+from datetime import date, datetime, timedelta
 
 from flask import Blueprint, request, jsonify
 
@@ -18,29 +19,68 @@ from multifamily.pipeline import (
     run_pipeline, filter_leads, website_intent_leads,
     renewal_opportunity_leads, acquisition_trigger_leads,
     construction_trigger_leads, inbound_leads, with_demo_fallback,
-    sort_leads_by_priority,
+    sort_leads_by_priority, call_today_leads, completion_leads, nurture_leads,
 )
 from multifamily.daily_brief.multifamily_daily_brief_builder import build_daily_brief
 from multifamily.intake import build_lead_from_intake
 from multifamily import repository
 from multifamily import spam_guard
+from multifamily.types import ACTIVITY_TYPES
 from multifamily.stage_timing import compute_stage_timing
+from multifamily.timing import detect_process_stage
+from multifamily.timing.process_stage_types import OUTREACH_WINDOW_RANK
+from multifamily.outreach.outreach_bundle_builder import build_outreach_bundle
 
 multifamily_bp = Blueprint('multifamily', __name__, url_prefix='/api/multifamily')
 
+# Per-lead fields that must NEVER reach a non-super-admin client (Part 5).
+# `spam_status` is also stripped for non-admins; a coarse `is_suspicious`
+# boolean is injected instead so the SUSPICIOUS badge still works without
+# exposing the raw reason codes / hashed IP / user-agent.
+_ADMIN_ONLY_LEAD_FIELDS = ('spam_reason_codes', 'submitted_ip_hash', 'user_agent_summary')
+
+
+def _requester_is_super_admin():
+    """Non-rejecting check of the current session — used only to decide
+    whether sensitive spam/debug fields are included in the response.
+    Lazy import of app avoids the circular import (app.py imports this
+    blueprint before defining these helpers); by request time app is
+    fully loaded in sys.modules. Any failure (no session, no users yet)
+    safely returns False."""
+    try:
+        import app as _app
+        user, _ = _app._get_session_user()
+        if not user:
+            return False
+        return bool(
+            user.get('role') == 'admin'
+            and user.get('is_super_admin')
+            and user.get('email') == _app.SUPER_ADMIN_EMAIL
+        )
+    except Exception:
+        return False
+
+
+def _serialize_lead(lead, is_admin, stage_result=None):
+    """Serialize one lead, attaching LIVE timing intelligence (never
+    persisted — it's time-dependent) and redacting admin-only fields for
+    non-super-admins."""
+    d = dataclasses.asdict(lead)
+    d['stage_timing'] = compute_stage_timing(lead)
+    sr = stage_result or detect_process_stage(lead)
+    d['process_stage'] = dataclasses.asdict(sr)
+    # Coarse, non-sensitive suspicious flag for everyone (drives the badge).
+    d['is_suspicious'] = (getattr(lead, 'spam_status', 'clean') == 'suspicious')
+    if not is_admin:
+        for f in _ADMIN_ONLY_LEAD_FIELDS:
+            d.pop(f, None)
+        d.pop('spam_status', None)  # internal triage state — admin only
+    return d
+
 
 def _serialize_leads(leads):
-    """Serialize leads for an API response, attaching LIVE construction
-    stage-timing intelligence (Phase 5) to each one. stage_timing is
-    never stored on the lead or persisted — "days in stage" grows every
-    day regardless of resubmission, so it's always recomputed fresh here
-    rather than frozen at whatever moment the lead was scored/saved."""
-    result = []
-    for lead in leads:
-        d = dataclasses.asdict(lead)
-        d['stage_timing'] = compute_stage_timing(lead)
-        result.append(d)
-    return result
+    is_admin = _requester_is_super_admin()
+    return [_serialize_lead(l, is_admin) for l in leads]
 
 
 def _real_and_mock():
@@ -130,10 +170,30 @@ def create_lead():
         event_type = 'accepted_clean'
     repository.record_intake_event(event_type, ip_hash, email, {'spam_reason_codes': spam_reason_codes})
 
-    # Always a normal-looking success — never reveal spam detection to the submitter.
-    lead_dict = dataclasses.asdict(lead)
-    lead_dict['stage_timing'] = compute_stage_timing(lead)
+    # Always a normal-looking success — never reveal spam detection to the
+    # submitter. Serialized through the same redaction path as every other
+    # endpoint (an anonymous public submitter is non-admin -> spam fields
+    # stripped), with live process-stage + stage-timing attached.
+    lead_dict = _serialize_lead(lead, _requester_is_super_admin())
     return jsonify({'success': True, 'lead': lead_dict}), 201
+
+
+@multifamily_bp.route('/leads/call-today', methods=['GET'])
+def get_call_today_leads():
+    """Who to call today: leads scored 'call_today' (real-first, demo fallback)."""
+    return _view(call_today_leads)
+
+
+@multifamily_bp.route('/leads/completion', methods=['GET'])
+def get_completion_leads():
+    """Completion / lease-up: the builder's-risk -> operating-coverage transition window."""
+    return _view(completion_leads)
+
+
+@multifamily_bp.route('/leads/nurture', methods=['GET'])
+def get_nurture_leads():
+    """Nurture: long-cycle leads (nurture/watchlist category)."""
+    return _view(nurture_leads)
 
 
 @multifamily_bp.route('/leads/inbound', methods=['GET'])
@@ -234,12 +294,44 @@ def get_daily_brief():
     return jsonify(brief)
 
 
+def _mission_item(lead, stage_result=None):
+    """Compact, action-oriented summary of a lead for the Overview's
+    'Today's Mission' cards."""
+    sr = stage_result or detect_process_stage(lead)
+    contact = lead.contacts[0] if lead.contacts else None
+    return {
+        'lead_id': lead.id,
+        'company': lead.company.name,
+        'contact': (contact.full_name if contact else None),
+        'contact_email': (contact.email if contact else None),
+        'state': lead.state,
+        'city': lead.city,
+        'score': lead.score.total if lead.score else None,
+        'category': lead.score.category if lead.score else None,
+        'source': lead.primary_source,
+        'process_stage': sr.process_stage,
+        'urgency_label': sr.urgency_label,
+        'reason': sr.timing_reason,
+        'next_best_action': lead.next_best_action,
+        'is_demo': lead.is_demo,
+    }
+
+
+# Process stages that count toward each Overview tile.
+_ACQ_FIN_STAGES = {'acquisition_due_diligence', 'refinance_or_financing', 'construction_loan_closing'}
+_CONSTRUCTION_STAGES = {'entitlement_or_permit', 'construction_loan_closing', 'construction_start'}
+
+
 @multifamily_bp.route('/overview', methods=['GET'])
 def get_overview():
-    """Summary stats for the Multifamily Overview dashboard section."""
+    """Home-base summary for the Multifamily Overview: count tiles,
+    'Today's Multifamily Mission', top source/campaign, and best first
+    action. Counts/mission run over the active lead set (real-first, demo
+    fallback). Additive to the prior payload — existing keys unchanged."""
     real_leads, mock_leads, source_runs = _real_and_mock()
-    leads = real_leads if real_leads else mock_leads
+    leads = sort_leads_by_priority(real_leads if real_leads else mock_leads)
     is_demo_data = bool(leads) and all(l.is_demo for l in leads)
+    is_admin = _requester_is_super_admin()
 
     scored = [l for l in leads if l.score]
     by_category = {}
@@ -247,13 +339,64 @@ def get_overview():
         by_category[l.score.category] = by_category.get(l.score.category, 0) + 1
     by_state = {}
     for l in leads:
-        key = l.state or 'unknown'
-        by_state[key] = by_state.get(key, 0) + 1
+        by_state[l.state or 'unknown'] = by_state.get(l.state or 'unknown', 0) + 1
     by_source = {}
     for l in leads:
         by_source[l.primary_source] = by_source.get(l.primary_source, 0) + 1
 
-    return jsonify({
+    # Process-stage tally (one detect per lead, reused below).
+    staged = [(l, detect_process_stage(l)) for l in leads]
+    stage_counts = {}
+    for _, sr in staged:
+        stage_counts[sr.process_stage] = stage_counts.get(sr.process_stage, 0) + 1
+
+    counts = {
+        'call_today': by_category.get('call_today', 0),
+        'hot': by_category.get('hot', 0),
+        'warm': by_category.get('warm', 0),
+        'new_inbound': len(inbound_leads(leads)),
+        'renewal_window': stage_counts.get('renewal_window', 0),
+        'acquisition_financing': sum(stage_counts.get(s, 0) for s in _ACQ_FIN_STAGES),
+        'construction_buildersrisk': sum(stage_counts.get(s, 0) for s in _CONSTRUCTION_STAGES),
+        'completion_leaseup': stage_counts.get('completion_or_lease_up', 0),
+        'nurture': by_category.get('nurture', 0) + by_category.get('watchlist', 0),
+    }
+
+    # Top source / campaign (real-lead attribution where available).
+    perf = repository.get_source_performance()
+    top_source = max(perf['leads_by_source'].items(), key=lambda kv: kv[1])[0] if perf['leads_by_source'] else (
+        max(by_source.items(), key=lambda kv: kv[1])[0] if by_source else None)
+    campaigns = {k: v for k, v in perf['leads_by_campaign'].items() if k not in ('none', 'unknown')}
+    top_campaign = max(campaigns.items(), key=lambda kv: kv[1])[0] if campaigns else None
+
+    # --- Today's Multifamily Mission ---
+    actionable = [(l, sr) for l, sr in staged if l.score and not l.score.disqualified]
+    best_first_call = next(((l, sr) for l, sr in actionable if l.contacts), None)
+    best_email = next(((l, sr) for l, sr in actionable if any(c.email for c in l.contacts)), None)
+    best_followup = next(
+        ((l, sr) for l, sr in actionable if sr.outreach_window in ('this_week', 'next_30_days')
+         and (not best_first_call or l.id != best_first_call[0].id)),
+        None,
+    )
+    best_nurture = next(((l, sr) for l, sr in staged if l.score and l.score.category in ('nurture', 'watchlist')), None)
+    needs_info = next(((l, sr) for l, sr in staged if l.score and l.score.disqualifier_codes), None)
+
+    best_email_item = None
+    if best_email:
+        lead, sr = best_email
+        bundle = build_outreach_bundle(lead, sr)
+        best_email_item = {**_mission_item(lead, sr), 'email_draft': bundle['email_draft']}
+
+    mission = {
+        'best_first_call': _mission_item(*best_first_call) if best_first_call else None,
+        'best_email_draft': best_email_item,
+        'best_followup': _mission_item(*best_followup) if best_followup else None,
+        'best_nurture_action': _mission_item(*best_nurture) if best_nurture else None,
+        'lead_needing_info': _mission_item(*needs_info) if needs_info else None,
+    }
+    best_first_action = mission['best_first_call'] or mission['best_email_draft'] or mission['best_followup']
+
+    payload = {
         'total_leads': len(leads),
         'real_lead_count': len(real_leads),
         'is_demo_data': is_demo_data,
@@ -261,10 +404,138 @@ def get_overview():
         'by_state': by_state,
         'by_source': by_source,
         'source_runs': [dataclasses.asdict(r) for r in source_runs],
-        # Phase 5: construction stage-timing breakdown (pure analytics —
-        # never affects scoring/category).
         'construction_stage_timing': _stage_timing_summary(leads),
-    })
+        # New command-center home payload (Part 3).
+        'counts': counts,
+        'process_stage_counts': stage_counts,
+        'top_source': top_source,
+        'top_campaign': top_campaign,
+        'best_first_action': best_first_action,
+        'mission': mission,
+    }
+    # Suspicious/spam count — admin only (Part 3).
+    if is_admin:
+        payload['counts']['suspicious'] = repository.get_intake_stats().get('counts_by_spam_status', {}).get('suspicious', 0)
+    return jsonify(payload)
+
+
+def _find_lead(lead_id):
+    """Look up a single lead by id across real + demo (real wins). Returns
+    (lead, None) or (None, response_tuple) on 404."""
+    real_leads, mock_leads, _ = _real_and_mock()
+    for lead in real_leads + mock_leads:
+        if lead.id == lead_id:
+            return lead, None
+    return None, (jsonify({'error': 'Lead not found'}), 404)
+
+
+@multifamily_bp.route('/leads/<lead_id>', methods=['GET'])
+def get_lead(lead_id):
+    """Single lead for the detail drawer — real + demo, redacted, with
+    live process-stage/stage-timing attached."""
+    lead, err = _find_lead(lead_id)
+    if err:
+        return err
+    return jsonify({'lead': _serialize_lead(lead, _requester_is_super_admin()), 'is_demo': lead.is_demo})
+
+
+@multifamily_bp.route('/leads/<lead_id>/outreach', methods=['GET'])
+def get_lead_outreach(lead_id):
+    """The full Outreach Workbench message bundle for one lead (call
+    opener, email, LinkedIn note, follow-ups, soft bump, discovery
+    questions). Drafts only — nothing is ever sent."""
+    lead, err = _find_lead(lead_id)
+    if err:
+        return err
+    return jsonify({'lead_id': lead_id, 'company': lead.company.name, 'outreach': build_outreach_bundle(lead)})
+
+
+@multifamily_bp.route('/source-performance', methods=['GET'])
+def get_source_performance():
+    """Part 8: source/UTM/campaign/offer performance over real leads."""
+    data = repository.get_source_performance()
+    data['is_demo_data'] = (data.get('total_real_leads', 0) == 0)
+    return jsonify(data)
+
+
+@multifamily_bp.route('/leads/<lead_id>/activity', methods=['POST'])
+def log_activity(lead_id):
+    """Log a manual activity / follow-up on a lead (Part 7). Login
+    required (internal operator action). Never sends anything."""
+    import app as _app
+    from flask import g
+
+    @_app.require_auth
+    def _authorized():
+        payload = request.get_json(silent=True) or {}
+        activity_type = (payload.get('activity_type') or '').strip()
+        if activity_type not in ACTIVITY_TYPES:
+            return jsonify({'success': False, 'errors': [f'activity_type must be one of {ACTIVITY_TYPES}']}), 400
+        user_email = (g.user or {}).get('email') if getattr(g, 'user', None) else None
+        activity = repository.insert_activity(
+            lead_id, activity_type,
+            note=(payload.get('note') or None),
+            next_follow_up_date=(payload.get('next_follow_up_date') or None),
+            user_email=user_email,
+        )
+        return jsonify({'success': True, 'activity': activity}), 201
+
+    return _authorized()
+
+
+@multifamily_bp.route('/leads/<lead_id>/activities', methods=['GET'])
+def list_activities(lead_id):
+    """All logged activities for one lead (newest first). Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        return jsonify({'lead_id': lead_id, 'activities': repository.get_activities_for_lead(lead_id)})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/activity/dashboard', methods=['GET'])
+def activity_dashboard():
+    """Follow-up & activity dashboard (Part 7): follow-ups due today,
+    stale hot leads, replied/needs-response, meetings booked, needs-info.
+    Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        today = date.today().isoformat()
+        follow_ups_due = repository.get_followups_due(today)
+        replied = repository.get_activities_by_type(['replied'])
+        meetings_booked = repository.get_activities_by_type(['meeting_booked'])
+        needs_info = repository.get_activities_by_type(['needs_info'])
+
+        # Stale hot leads: real leads scored hot/call_today with no activity
+        # in the last 3 days (needs live scoring, so computed here).
+        real_leads = repository.get_real_leads()
+        last_activity = repository.last_activity_at_by_lead()
+        cutoff = (datetime.utcnow() - timedelta(days=3)).isoformat()
+        stale_hot = []
+        for l in real_leads:
+            if not (l.score and l.score.category in ('call_today', 'hot')):
+                continue
+            last = last_activity.get(l.id)
+            if last is None or last < cutoff:
+                stale_hot.append({
+                    'lead_id': l.id, 'company': l.company.name, 'state': l.state, 'city': l.city,
+                    'category': l.score.category, 'score': l.score.total,
+                    'last_activity_at': last,
+                })
+
+        return jsonify({
+            'follow_ups_due': follow_ups_due,
+            'stale_hot_leads': stale_hot,
+            'replied_needs_response': replied,
+            'meetings_booked': meetings_booked,
+            'needs_info': needs_info,
+        })
+
+    return _authorized()
 
 
 @multifamily_bp.route('/admin/intake-stats', methods=['GET'])

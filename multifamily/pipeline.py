@@ -148,6 +148,20 @@ def inbound_leads(leads: List[MultifamilyLead]) -> List[MultifamilyLead]:
     return [l for l in leads if l.primary_source in INBOUND_INTENT_SOURCES]
 
 
+def call_today_leads(leads: List[MultifamilyLead]) -> List[MultifamilyLead]:
+    return [l for l in leads if l.score and l.score.category == 'call_today']
+
+
+def completion_leads(leads: List[MultifamilyLead]) -> List[MultifamilyLead]:
+    """Completion / lease-up: a completion construction signal (the
+    builder's-risk -> operating-coverage transition window)."""
+    return [l for l in leads if any(s.signal_type == 'completion' for s in l.signals)]
+
+
+def nurture_leads(leads: List[MultifamilyLead]) -> List[MultifamilyLead]:
+    return [l for l in leads if l.score and l.score.category in ('nurture', 'watchlist')]
+
+
 def with_demo_fallback(
     real_leads: List[MultifamilyLead],
     mock_leads: List[MultifamilyLead],
