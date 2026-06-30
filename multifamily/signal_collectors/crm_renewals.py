@@ -33,7 +33,7 @@ def collect():
         is_decision_maker=True, company_id=company.id,
     )
     lead = MultifamilyLead(
-        id=new_id(), company=company, property=prop, signals=[signal], contacts=[contact],
+        id=new_id(), is_demo=True, company=company, property=prop, signals=[signal], contacts=[contact],
         state='TX', city='Corpus Christi', primary_signal_type='renewal_date_known',
         primary_source='crm', source_url=None, confidence=0.9,
         last_verified_at=utc_now_iso(), pain_flags=['cat_exposed_geography'],

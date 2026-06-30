@@ -33,7 +33,7 @@ def collect():
         is_decision_maker=True, company_id=company.id,
     )
     lead = MultifamilyLead(
-        id=new_id(), company=company, property=prop, signals=[signal], contacts=[contact],
+        id=new_id(), is_demo=True, company=company, property=prop, signals=[signal], contacts=[contact],
         state='TX', city='San Antonio', primary_signal_type='linkedin_lead_form_submit',
         primary_source='linkedin_lead_form', source_url=None, confidence=0.7,
         last_verified_at=utc_now_iso(),

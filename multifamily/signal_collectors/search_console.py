@@ -31,7 +31,7 @@ def collect():
     )
 
     lead = MultifamilyLead(
-        id=new_id(), company=company, property=prop, signals=[signal],
+        id=new_id(), is_demo=True, company=company, property=prop, signals=[signal],
         state='TX', city='Waco', primary_signal_type='keyword_intent',
         primary_source='search_console', source_url=signal.source_url, confidence=0.4,
         last_verified_at=utc_now_iso(),

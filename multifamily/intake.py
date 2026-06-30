@@ -1,0 +1,207 @@
+"""
+Real lead intake — validates, builds, and scores a MultifamilyLead from
+raw form input (the public benchmark form or internal manual entry).
+
+This is the "real" counterpart to the mock signal_collectors: instead of
+hardcoded demo data, build_lead_from_intake() turns an actual submission
+into the same MultifamilyLead shape the rest of the system already knows
+how to score, explain, and display.
+
+No LinkedIn scraping, no invented contact info — every field here comes
+directly from what the submitter typed.
+"""
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional, Tuple
+
+from multifamily.types import (
+    MultifamilyLead, MultifamilyCompany, MultifamilyProperty, MultifamilyContact,
+    MultifamilySignal, SIGNAL_SOURCES, SUPPORTED_STATES, new_id, utc_now_iso,
+)
+from multifamily.scoring.multifamily_score_engine import score_lead
+from multifamily.scoring.multifamily_score_explanations import explain_why_warm, explain_likely_pain
+from multifamily.daily_brief.multifamily_next_best_action import next_best_action_for_lead
+from multifamily.pipeline import build_opener
+
+LEAD_SITUATIONS = ['renewal', 'acquisition', 'refinance', 'construction', 'operating', 'benchmark']
+
+# Primary concern options map 1:1 to the scoring engine's pain-flag keys
+# (multifamily/scoring/multifamily_score_rules.py: PAIN_POINTS) so a real
+# submission scores exactly like the equivalent mock pain flag.
+PRIMARY_CONCERN_OPTIONS = [
+    'premium_increase', 'deductible_concern', 'lender_requirement',
+    'cat_exposed_geography', 'builders_risk_need', 'gl_excess_concern',
+]
+
+DECISION_MAKER_KEYWORDS = (
+    'owner', 'president', 'ceo', 'cfo', 'coo', 'principal', 'partner',
+    'vp', 'vice president', 'director', 'head of', 'chief', 'founder',
+)
+
+REQUIRED_FIELDS = ['name', 'company', 'email', 'state', 'leadSituation', 'source']
+
+
+class IntakeValidationError(Exception):
+    def __init__(self, errors: List[str]):
+        super().__init__('; '.join(errors))
+        self.errors = errors
+
+
+def _clean(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    value = str(value).strip()
+    return value or None
+
+
+def _is_decision_maker(role: Optional[str]) -> bool:
+    if not role:
+        return False
+    role_lower = role.lower()
+    return any(kw in role_lower for kw in DECISION_MAKER_KEYWORDS)
+
+
+def _days_until(date_str: Optional[str]) -> Optional[int]:
+    if not date_str:
+        return None
+    try:
+        target = datetime.strptime(str(date_str)[:10], '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return None
+    return (target - date.today()).days
+
+
+def validate_intake(payload: Dict[str, Any]) -> List[str]:
+    """Return a list of human-readable validation errors (empty = valid)."""
+    errors = []
+
+    for field_name in REQUIRED_FIELDS:
+        if not _clean(payload.get(field_name)):
+            errors.append(f'{field_name} is required')
+
+    state = _clean(payload.get('state'))
+    if state and state.upper() not in SUPPORTED_STATES:
+        errors.append(f"state must be one of {SUPPORTED_STATES} (got '{state}')")
+
+    source = _clean(payload.get('source'))
+    if source and source not in SIGNAL_SOURCES:
+        errors.append(f"source must be one of {SIGNAL_SOURCES} (got '{source}')")
+
+    lead_situation = _clean(payload.get('leadSituation'))
+    if lead_situation and lead_situation not in LEAD_SITUATIONS:
+        errors.append(f"leadSituation must be one of {LEAD_SITUATIONS} (got '{lead_situation}')")
+
+    email = _clean(payload.get('email'))
+    if email and '@' not in email:
+        errors.append('email is not a valid email address')
+
+    units = payload.get('numberOfUnits')
+    if units not in (None, ''):
+        try:
+            int(units)
+        except (TypeError, ValueError):
+            errors.append('numberOfUnits must be a whole number')
+
+    return errors
+
+
+def _situation_signals(payload: Dict[str, Any], property_id: str, company_id: str) -> List[MultifamilySignal]:
+    """Translate leadSituation (+ renewalDate/projectStartDate) into the
+    secondary timing/trigger signal that feeds insurance_timing scoring."""
+    situation = _clean(payload.get('leadSituation')) or ''
+    source = payload.get('source')
+    signals = []
+
+    if situation == 'renewal':
+        days = _days_until(payload.get('renewalDate'))
+        detail = {'renewal_date': payload.get('renewalDate'), 'self_reported': True}
+        if days is not None:
+            detail['days_until_renewal'] = days
+        signals.append(MultifamilySignal(
+            id=new_id(), signal_type='renewal_date_known', source=source, confidence=0.85,
+            detail=detail, property_id=property_id, company_id=company_id,
+        ))
+    elif situation == 'acquisition':
+        signals.append(MultifamilySignal(
+            id=new_id(), signal_type='acquisition', source=source, confidence=0.8,
+            detail={'self_reported': True}, property_id=property_id, company_id=company_id,
+        ))
+    elif situation == 'refinance':
+        signals.append(MultifamilySignal(
+            id=new_id(), signal_type='refinance', source=source, confidence=0.8,
+            detail={'self_reported': True}, property_id=property_id, company_id=company_id,
+        ))
+    elif situation == 'construction':
+        days = _days_until(payload.get('projectStartDate'))
+        stage = 'vertical_construction' if (days is not None and days <= 0) else 'groundbreaking'
+        signals.append(MultifamilySignal(
+            id=new_id(), signal_type=stage, source=source, confidence=0.75,
+            detail={'project_start_date': payload.get('projectStartDate'), 'self_reported': True},
+            property_id=property_id, company_id=company_id,
+        ))
+    # 'operating' and 'benchmark' add no secondary timing signal — that's
+    # honest: there's no known trigger driving urgency yet.
+
+    return signals
+
+
+def build_lead_from_intake(payload: Dict[str, Any]) -> Tuple[Optional[MultifamilyLead], List[str]]:
+    """Validate, build, score, and explain a real MultifamilyLead from raw
+    form input. Returns (lead, []) on success or (None, errors) if the
+    submission is incomplete/invalid."""
+    errors = validate_intake(payload)
+    if errors:
+        return None, errors
+
+    company = MultifamilyCompany(
+        id=new_id(),
+        name=_clean(payload['company']),
+        decision_maker_role=_clean(payload.get('role')),
+    )
+    prop = MultifamilyProperty(
+        id=new_id(),
+        name=f"{company.name} Property",
+        city=_clean(payload.get('city')),
+        state=(_clean(payload.get('state')) or '').upper() or None,
+        unit_count=int(payload['numberOfUnits']) if payload.get('numberOfUnits') not in (None, '') else None,
+        asset_type=_clean(payload.get('assetType')),
+        company_id=company.id,
+    )
+    contact = MultifamilyContact(
+        id=new_id(),
+        full_name=_clean(payload['name']),
+        title=_clean(payload.get('role')),
+        email=_clean(payload.get('email')),
+        phone=_clean(payload.get('phone')),
+        is_decision_maker=_is_decision_maker(payload.get('role')),
+        company_id=company.id,
+    )
+
+    situation = _clean(payload.get('leadSituation')) or ''
+    source = _clean(payload['source'])
+    primary_signal = MultifamilySignal(
+        id=new_id(), signal_type='benchmark_form_submit', source=source,
+        source_url=_clean(payload.get('sourceUrl')), confidence=0.9,
+        detail={'lead_situation': situation, 'source_page': _clean(payload.get('sourcePage'))},
+        property_id=prop.id, company_id=company.id,
+    )
+    signals = [primary_signal] + _situation_signals(payload, prop.id, company.id)
+
+    primary_concern = _clean(payload.get('primaryConcern'))
+    pain_flags = [primary_concern] if primary_concern in PRIMARY_CONCERN_OPTIONS else []
+
+    lead = MultifamilyLead(
+        id=new_id(), company=company, property=prop, signals=signals, contacts=[contact],
+        state=prop.state, city=prop.city, primary_signal_type='benchmark_form_submit',
+        primary_source=source, source_url=primary_signal.source_url,
+        source_page=_clean(payload.get('sourcePage')), confidence=0.9,
+        last_verified_at=utc_now_iso(), pain_flags=pain_flags,
+        notes=_clean(payload.get('notes')), is_demo=False,
+    )
+
+    lead.score = score_lead(lead)
+    lead.why_warm = explain_why_warm(lead)
+    lead.likely_pain = explain_likely_pain(lead)
+    lead.next_best_action = next_best_action_for_lead(lead)
+    lead.suggested_opener = build_opener(lead)
+
+    return lead, []

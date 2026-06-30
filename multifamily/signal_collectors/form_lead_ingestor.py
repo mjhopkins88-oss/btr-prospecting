@@ -50,7 +50,7 @@ def collect():
         email='mock-contact-1@example.com', is_decision_maker=True, company_id=company.id,
     )
     leads.append(MultifamilyLead(
-        id=new_id(), company=company, property=prop, signals=[signal, renewal_signal], contacts=[contact],
+        id=new_id(), is_demo=True, company=company, property=prop, signals=[signal, renewal_signal], contacts=[contact],
         state='TX', city='Austin', primary_signal_type='benchmark_form_submit',
         primary_source='form', source_url=None, confidence=0.95,
         last_verified_at=utc_now_iso(), pain_flags=['premium_increase'],
@@ -86,7 +86,7 @@ def collect():
         email='mock-contact-2@example.com', is_decision_maker=True, company_id=company2.id,
     )
     leads.append(MultifamilyLead(
-        id=new_id(), company=company2, property=prop2, signals=[signal2, renewal_signal2], contacts=[contact2],
+        id=new_id(), is_demo=True, company=company2, property=prop2, signals=[signal2, renewal_signal2], contacts=[contact2],
         state='CA', city='Oakland', primary_signal_type='guide_download',
         primary_source='form', source_url=None, confidence=0.85,
         last_verified_at=utc_now_iso(), pain_flags=['cat_exposed_geography'],

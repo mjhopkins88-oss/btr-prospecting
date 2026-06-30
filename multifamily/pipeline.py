@@ -6,9 +6,9 @@ explains, and attaches a suggested opener + next-best-action to every
 lead. Entirely in-memory — no DB writes — so it can be exercised from
 the demo/test scripts and the Flask API layer alike.
 """
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
-from multifamily.types import MultifamilyLead, MultifamilySourceRun, new_id, utc_now_iso
+from multifamily.types import MultifamilyLead, MultifamilySourceRun, INBOUND_INTENT_SOURCES, new_id, utc_now_iso
 from multifamily.dedupe import dedupe_leads
 from multifamily.scoring.multifamily_score_engine import score_lead
 from multifamily.scoring.multifamily_score_explanations import explain_why_warm, explain_likely_pain
@@ -51,7 +51,9 @@ _WEBSITE_INTENT_TYPES = {
 }
 
 
-def _build_opener(lead: MultifamilyLead) -> str:
+def build_opener(lead: MultifamilyLead) -> str:
+    """Pick the right outreach opener generator for a lead's signal mix.
+    Public so multifamily/intake.py can reuse it for real leads."""
     signal_types = {s.signal_type for s in lead.signals}
     if signal_types & _RENEWAL_TYPES:
         return renewal_opener_generator.generate(lead)
@@ -87,7 +89,7 @@ def run_pipeline() -> Tuple[List[MultifamilyLead], List[MultifamilySourceRun]]:
         lead.score = score_lead(lead)
         lead.why_warm = explain_why_warm(lead)
         lead.likely_pain = explain_likely_pain(lead)
-        lead.suggested_opener = _build_opener(lead)
+        lead.suggested_opener = build_opener(lead)
         lead.next_best_action = next_best_action_for_lead(lead)
 
     leads = sort_leads_by_priority(leads)
@@ -143,5 +145,20 @@ def construction_trigger_leads(leads: List[MultifamilyLead]) -> List[Multifamily
 
 
 def inbound_leads(leads: List[MultifamilyLead]) -> List[MultifamilyLead]:
-    inbound_sources = {'form', 'website', 'search_console', 'google_ads', 'linkedin_lead_form'}
-    return [l for l in leads if l.primary_source in inbound_sources]
+    return [l for l in leads if l.primary_source in INBOUND_INTENT_SOURCES]
+
+
+def with_demo_fallback(
+    real_leads: List[MultifamilyLead],
+    mock_leads: List[MultifamilyLead],
+    filter_fn: Callable[[List[MultifamilyLead]], List[MultifamilyLead]],
+) -> List[MultifamilyLead]:
+    """Apply `filter_fn` to real leads first. Real leads always win and are
+    never silently mixed with mock/demo leads — if (and only if) this
+    specific view has zero matching real leads, fall back to the same
+    filter applied to the mock/demo pipeline (every mock lead carries
+    is_demo=True, so the UI can label it clearly)."""
+    real_filtered = sort_leads_by_priority(filter_fn(real_leads))
+    if real_filtered:
+        return real_filtered
+    return sort_leads_by_priority(filter_fn(mock_leads))

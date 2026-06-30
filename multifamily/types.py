@@ -16,9 +16,16 @@ from typing import Any, Dict, List, Optional
 # ---------------------------------------------------------------------------
 
 SIGNAL_SOURCES = [
-    'website', 'form', 'search_console', 'google_ads', 'linkedin_lead_form',
+    'website', 'form', 'benchmark_form', 'search_console', 'google_ads', 'linkedin_lead_form',
     'permit', 'news', 'crm', 'manual',
 ]
+
+# Sources that represent a real prospect taking inbound action (vs. a
+# third-party trigger feed). Used to bucket leads into "Inbound Leads"
+# regardless of whether the data is real or mock/demo.
+INBOUND_INTENT_SOURCES = {
+    'form', 'benchmark_form', 'manual', 'website', 'search_console', 'google_ads', 'linkedin_lead_form',
+}
 
 SIGNAL_TYPES = [
     'benchmark_form_submit', 'quote_request', 'meeting_request',
@@ -185,10 +192,17 @@ class MultifamilyLead:
     primary_signal_type: Optional[str] = None
     primary_source: Optional[str] = None
     source_url: Optional[str] = None
+    source_page: Optional[str] = None
     confidence: float = 0.5
     last_verified_at: str = field(default_factory=utc_now_iso)
     pain_flags: List[str] = field(default_factory=list)
     relationship_flags: List[str] = field(default_factory=list)
+    notes: Optional[str] = None
+    # True for mock/demo leads from the signal collectors; False for real
+    # leads captured through POST /api/multifamily/leads. The dashboard
+    # must never show is_demo leads without a clear "Demo Data" label, and
+    # real leads always take priority over demo leads in any given view.
+    is_demo: bool = False
     score: Optional[MultifamilyLeadScore] = None
     why_warm: Optional[str] = None
     likely_pain: Optional[str] = None

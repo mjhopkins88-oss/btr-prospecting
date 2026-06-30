@@ -37,7 +37,7 @@ def collect():
         property_id=prop.id, company_id=company.id,
     )
     leads.append(MultifamilyLead(
-        id=new_id(), company=company, property=prop, signals=[signal],
+        id=new_id(), is_demo=True, company=company, property=prop, signals=[signal],
         state='TX', city='Fort Worth', primary_signal_type='acquisition',
         primary_source='news', source_url=signal.source_url, confidence=0.7,
         last_verified_at=utc_now_iso(), pain_flags=['lender_requirement', 'gl_excess_concern'],
@@ -58,7 +58,7 @@ def collect():
         property_id=prop2.id, company_id=company2.id,
     )
     leads.append(MultifamilyLead(
-        id=new_id(), company=company2, property=prop2, signals=[signal2],
+        id=new_id(), is_demo=True, company=company2, property=prop2, signals=[signal2],
         state=None, city=None, primary_signal_type='portfolio_growth',
         primary_source='news', source_url=signal2.source_url, confidence=0.25,
         last_verified_at=utc_now_iso(),
