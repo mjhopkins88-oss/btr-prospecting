@@ -69,7 +69,35 @@ def _safe_ts(val):
     return str(val)
 
 
-CORS(app, supports_credentials=True)
+_allowed_origins = [o.strip() for o in os.getenv('ALLOWED_ORIGINS', '').split(',') if o.strip()]
+if _allowed_origins:
+    CORS(app, origins=_allowed_origins, supports_credentials=True)
+else:
+    CORS(app, supports_credentials=True)
+
+# --- Global error handlers ---
+import logging as _logging
+_app_logger = _logging.getLogger('btr')
+
+@app.errorhandler(404)
+def not_found(e):
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Not found', 'path': request.path}), 404
+    return app.send_static_file('index.html')
+
+@app.errorhandler(500)
+def server_error(e):
+    _app_logger.error(f"[500] {request.path}: {e}\n{traceback.format_exc()}")
+    return jsonify({'error': 'Internal server error', 'detail': str(e)}), 500
+
+# --- SignalStack module (LinkedIn sales intelligence + messaging) ---
+try:
+    from signalstack import bp as _signalstack_bp, init_schema as _signalstack_init_schema
+    app.register_blueprint(_signalstack_bp)
+    _signalstack_init_schema()
+    print("[SignalStack] Module registered at /signalstack")
+except Exception as _ss_err:
+    print(f"[SignalStack] Failed to register: {_ss_err}")
 
 # --- Login rate limiter (in-memory) ---
 _login_attempts = {}  # email -> { count, locked_until }
@@ -305,6 +333,141 @@ def init_db():
             items_found INTEGER DEFAULT 0
         )
     ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS serpapi_daily_budget (
+            date_str TEXT PRIMARY KEY,
+            api_calls INTEGER DEFAULT 0,
+            cache_hits INTEGER DEFAULT 0,
+            skipped INTEGER DEFAULT 0,
+            updated_at TIMESTAMP
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS signal_pool (
+            url TEXT PRIMARY KEY,
+            title TEXT,
+            snippet TEXT,
+            source TEXT,
+            published_date TEXT,
+            query TEXT,
+            feature TEXT,
+            city TEXT,
+            state TEXT,
+            fetched_at TIMESTAMP,
+            matched_ids TEXT
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS assistant_chat_log (
+            id TEXT PRIMARY KEY,
+            user_message TEXT,
+            card_type TEXT,
+            card_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    # --- Leo Intelligence Tables ---
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS leo_context_memory (
+            id TEXT PRIMARY KEY,
+            memory_type TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            entities TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS leo_events (
+            id TEXT PRIMARY KEY,
+            event_type TEXT NOT NULL,
+            entity_type TEXT,
+            entity_id TEXT,
+            entity_name TEXT,
+            detail TEXT,
+            acknowledged INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS leo_pattern_stats (
+            id TEXT PRIMARY KEY,
+            pattern_type TEXT NOT NULL,
+            channel TEXT,
+            stage_from TEXT,
+            stage_to TEXT,
+            outcome TEXT,
+            touchpoint_count INTEGER DEFAULT 0,
+            days_elapsed INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS leo_suggestions (
+            id TEXT PRIMARY KEY,
+            suggestion_type TEXT NOT NULL,
+            target_entity TEXT,
+            target_id TEXT,
+            suggestion TEXT NOT NULL,
+            outcome TEXT,
+            outcome_detected_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS leo_outcome_log (
+            id TEXT PRIMARY KEY,
+            action_type TEXT NOT NULL,
+            channel TEXT,
+            group_id TEXT,
+            contact_id TEXT,
+            signal_used INTEGER DEFAULT 0,
+            signal_age_days INTEGER,
+            touchpoint_count_at_action INTEGER DEFAULT 0,
+            warmth_at_action INTEGER,
+            stage_at_action TEXT,
+            outcome TEXT,
+            outcome_detail TEXT,
+            days_to_outcome INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS leo_memory (
+            id TEXT PRIMARY KEY,
+            memory_type TEXT NOT NULL,
+            category TEXT,
+            entity_id TEXT,
+            entity_name TEXT,
+            content TEXT NOT NULL,
+            source TEXT DEFAULT 'conversation',
+            confidence REAL DEFAULT 0.8,
+            access_count INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_leo_memory_type ON leo_memory(memory_type, created_at DESC)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_leo_memory_entity ON leo_memory(entity_id)')
+    c.safe_execute('CREATE INDEX IF NOT EXISTS idx_leo_memory_confidence ON leo_memory(confidence DESC)')
+
+    # Seed Max's user profile memories on first run
+    c.execute("SELECT COUNT(*) FROM leo_memory WHERE memory_type = 'user_profile'")
+    if c.fetchone()[0] == 0:
+        import uuid as _uuid_mem
+        _seed_memories = [
+            ('user_profile', 'business', "Max is the Director of BTR property insurance at Alkeme Insurance, running one of the only dedicated Build-to-Rent insurance programs in the US", 'system_seed', 1.0),
+            ('user_profile', 'program', "The BTR program has ~$700M insured value with zero losses historically — inclusion signals deal quality", 'system_seed', 1.0),
+            ('user_profile', 'targets', "Max targets PE firms, institutional capital partners, developers, and operators for BTR insurance placement", 'system_seed', 1.0),
+            ('user_profile', 'ideal_deal', "Ideal deal: ~200 unit BTR community, not yet vertical, needs builders risk first, then transitions to stabilized coverage", 'system_seed', 1.0),
+            ('user_profile', 'geography', "Geographic focus nationwide, strongest in the Texas-to-Florida corridor", 'system_seed', 1.0),
+            ('user_profile', 'positioning', "Max positions as a gatekeeper to a selective program that validates deal quality — not a commodity insurance broker", 'system_seed', 1.0),
+            ('user_profile', 'challenges', "Current challenges: slower capital markets, low response rates at top of funnel, difficulty reaching PE decision makers", 'system_seed', 1.0),
+            ('preference', 'style', "Max prefers relationship-first outreach — strategic partner positioning, not hard sells", 'system_seed', 0.9),
+        ]
+        for mtype, cat, content, source, conf in _seed_memories:
+            c.execute('INSERT INTO leo_memory (id, memory_type, category, content, source, confidence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
+                      (str(_uuid_mem.uuid4()), mtype, cat, content, source, conf))
+
     # --- Auth & CRM Tables ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS workspaces (
@@ -410,6 +573,12 @@ def init_db():
     ''')
     c.safe_execute('CREATE INDEX IF NOT EXISTS idx_lead_activity_lead ON lead_activity(lead_id, created_at DESC)')
     c.safe_execute('CREATE INDEX IF NOT EXISTS idx_lead_activity_actor ON lead_activity(actor_user_id, created_at DESC)')
+
+    # --- CRM leads: prospecting context columns ---
+    _col_target = _real_cursor if _is_postgres() else c
+    _safe_add_column(_col_target, 'crm_leads', 'group_id', 'TEXT')
+    _safe_add_column(_col_target, 'crm_leads', 'contact_id', 'TEXT')
+    _safe_add_column(_col_target, 'crm_leads', 'source', "TEXT DEFAULT 'manual'")
 
     # --- Trend Detection & Weekly Briefs Tables ---
     c.execute('''
@@ -1022,6 +1191,366 @@ def init_db():
         pass
     try:
         c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_outcomes_lead ON li_outcomes(lead_id)')
+    except Exception:
+        pass
+
+    # ===================================================================
+    # CAPITAL GROUPS — Long-term relationship tracking
+    # Separate from properties/projects (which are transactional), capital
+    # groups represent the developers, capital partners, operators, and
+    # brokers who deploy capital repeatedly over time. The same group
+    # may drive many projects; tracking the relationship across those
+    # projects is where portfolio-level thinking lives.
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS capital_groups (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            type TEXT DEFAULT 'developer',
+            markets TEXT,
+            strategy TEXT,
+            notes TEXT,
+            relationship_status TEXT DEFAULT 'prospect',
+            warmth_score INTEGER DEFAULT 1,
+            last_contacted_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(name, type)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS capital_group_touchpoints (
+            id TEXT PRIMARY KEY,
+            capital_group_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            outcome TEXT,
+            notes TEXT,
+            occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Link projects to the capital group that owns/drives them. Nullable
+    # so the existing project graph keeps working unchanged; the FK is
+    # additive and only used when a user attaches a project to a group.
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'li_projects', 'capital_group_id', 'TEXT')
+
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_capital_groups_type ON capital_groups(type)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_capital_groups_status ON capital_groups(relationship_status)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_capital_groups_contacted ON capital_groups(last_contacted_at DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_capital_touchpoints_group ON capital_group_touchpoints(capital_group_id, occurred_at DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_li_projects_capital_group ON li_projects(capital_group_id)')
+    except Exception:
+        pass
+
+    # ===================================================================
+    # CENTERS OF INFLUENCE — Tables
+    # ===================================================================
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS centers_of_influence (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            type TEXT DEFAULT 'broker',
+            markets TEXT,
+            specialty TEXT,
+            notes TEXT,
+            relationship_status TEXT DEFAULT 'prospect',
+            warmth_score INTEGER DEFAULT 1,
+            last_contacted_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(name, type)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS coi_touchpoints (
+            id TEXT PRIMARY KEY,
+            coi_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            outcome TEXT,
+            notes TEXT,
+            occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'centers_of_influence', 'website', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'centers_of_influence', 'linkedin_url', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'centers_of_influence', 'contact_name', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'centers_of_influence', 'contact_email', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'centers_of_influence', 'contact_phone', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'centers_of_influence', 'contact_linkedin', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'coi_touchpoints', 'contact_id', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_contacts', 'coi_id', 'TEXT')
+
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_coi_type ON centers_of_influence(type)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_coi_status ON centers_of_influence(relationship_status)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_coi_contacted ON centers_of_influence(last_contacted_at DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_coi_touchpoints_coi ON coi_touchpoints(coi_id, occurred_at DESC)')
+    except Exception:
+        pass
+
+    # ===================================================================
+    # PROSPECTING TASK ENGINE — Tables
+    # ===================================================================
+
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'contact_name', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'contact_email', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'contact_phone', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'contact_linkedin', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'opportunity_stage', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'opportunity_value', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'opportunity_notes', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'opportunity_updated_at', 'TIMESTAMP')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_group_touchpoints', 'contact_id', 'TEXT')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_sequences (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT,
+            status TEXT DEFAULT 'draft',
+            total_steps INTEGER DEFAULT 0,
+            step_definitions TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_enrollments (
+            id TEXT PRIMARY KEY,
+            sequence_id TEXT NOT NULL,
+            capital_group_id TEXT NOT NULL,
+            current_step INTEGER DEFAULT 1,
+            status TEXT DEFAULT 'active',
+            enrolled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_step_at TIMESTAMP,
+            completed_at TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_tasks (
+            id TEXT PRIMARY KEY,
+            capital_group_id TEXT,
+            type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            status TEXT DEFAULT 'pending',
+            priority INTEGER DEFAULT 5,
+            due_at TIMESTAMP,
+            completed_at TIMESTAMP,
+            trigger_rule TEXT,
+            enrollment_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_feed (
+            id TEXT PRIMARY KEY,
+            capital_group_id TEXT,
+            type TEXT NOT NULL,
+            action TEXT NOT NULL,
+            detail TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_tasks_status ON prospecting_tasks(status, due_at)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_tasks_group ON prospecting_tasks(capital_group_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_tasks_contact ON prospecting_tasks(contact_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_tasks_signal ON prospecting_tasks(signal_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_enroll_seq ON prospecting_enrollments(sequence_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_enroll_group ON prospecting_enrollments(capital_group_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_feed_type ON prospecting_feed(type, created_at DESC)')
+    except Exception:
+        pass
+
+    # ===================================================================
+    # RELATIONSHIP-FIRST PROSPECTING — contacts, properties, signals, notices
+    # ===================================================================
+
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'website', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'linkedin_url', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'capital_groups', 'last_touch_at', 'TIMESTAMP')
+
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'contact_id', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'signal_id', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'channel', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'generated_reason', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'next_best_action_type', 'TEXT')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'updated_at', 'TIMESTAMP')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'last_activity_at', 'TIMESTAMP')
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_tasks', 'source', 'TEXT')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_contacts (
+            id TEXT PRIMARY KEY,
+            group_id TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            title TEXT,
+            linkedin_url TEXT,
+            email TEXT,
+            phone TEXT,
+            first_reached_out_at TIMESTAMP,
+            last_touch_at TIMESTAMP,
+            relationship_stage TEXT DEFAULT 'cold',
+            owner_user_id TEXT,
+            notes TEXT,
+            is_favorite INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    _safe_add_column(_real_cursor if _is_postgres() else c, 'prospecting_contacts', 'is_favorite', 'INTEGER DEFAULT 0')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_properties (
+            id TEXT PRIMARY KEY,
+            group_id TEXT,
+            name TEXT NOT NULL,
+            market TEXT,
+            state TEXT,
+            stage TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_touchpoints (
+            id TEXT PRIMARY KEY,
+            contact_id TEXT,
+            group_id TEXT,
+            property_id TEXT,
+            channel TEXT,
+            direction TEXT,
+            subject TEXT,
+            summary TEXT,
+            occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            outcome TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_signals (
+            id TEXT PRIMARY KEY,
+            group_id TEXT,
+            contact_id TEXT,
+            property_id TEXT,
+            signal_scope TEXT NOT NULL,
+            signal_type TEXT,
+            title TEXT NOT NULL,
+            summary TEXT,
+            source_url TEXT,
+            importance INTEGER DEFAULT 5,
+            detected_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prospecting_notices (
+            id TEXT PRIMARY KEY,
+            group_id TEXT,
+            contact_id TEXT,
+            signal_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            summary TEXT,
+            status TEXT DEFAULT 'new',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_contacts_group ON prospecting_contacts(group_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_contacts_stage ON prospecting_contacts(relationship_stage)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_properties_group ON prospecting_properties(group_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_tp_contact ON prospecting_touchpoints(contact_id, occurred_at DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_tp_group ON prospecting_touchpoints(group_id, occurred_at DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_signals_scope ON prospecting_signals(signal_scope, detected_at DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_signals_group ON prospecting_signals(group_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_notices_status ON prospecting_notices(status, created_at DESC)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_notices_signal ON prospecting_notices(signal_id)')
+    except Exception:
+        pass
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_prosp_notices_group ON prospecting_notices(group_id)')
     except Exception:
         pass
 
@@ -1911,8 +2440,139 @@ def init_db():
     c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dc_city ON development_corridors(city, state)')
     c.safe_execute('CREATE INDEX IF NOT EXISTS idx_dc_density ON development_corridors(signal_density DESC)')
 
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS performance_daily (
+            id TEXT PRIMARY KEY,
+            date_str TEXT NOT NULL,
+            workout INTEGER DEFAULT 0,
+            squats INTEGER DEFAULT 0,
+            revenue REAL DEFAULT 0,
+            revenue_target REAL DEFAULT 0,
+            daily_focus TEXT,
+            extra_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    try:
+        c.safe_execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_perf_daily_date ON performance_daily(date_str)')
+    except Exception:
+        pass
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS performance_logs (
+            id TEXT PRIMARY KEY,
+            date_str TEXT NOT NULL,
+            log_type TEXT NOT NULL,
+            raw_text TEXT,
+            parsed_value TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_perf_logs_date ON performance_logs(date_str, created_at DESC)')
+    except Exception:
+        pass
+
+    c.safe_execute('''
+        CREATE TABLE IF NOT EXISTS calendar_meetings (
+            id TEXT PRIMARY KEY,
+            contact_id TEXT,
+            group_id TEXT,
+            meeting_date TEXT NOT NULL,
+            meeting_time TEXT DEFAULT '09:00',
+            duration_min INTEGER DEFAULT 30,
+            meeting_type TEXT DEFAULT 'general',
+            title TEXT,
+            notes TEXT,
+            status TEXT DEFAULT 'scheduled',
+            outcome TEXT,
+            outcome_notes TEXT,
+            next_steps TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cal_meetings_date ON calendar_meetings(meeting_date, meeting_time)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cal_meetings_contact ON calendar_meetings(contact_id)')
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_cal_meetings_status ON calendar_meetings(status)')
+    except Exception:
+        pass
+
+    c.safe_execute('''
+        CREATE TABLE IF NOT EXISTS leo_action_log (
+            id TEXT PRIMARY KEY,
+            action_type TEXT NOT NULL,
+            target_area TEXT NOT NULL,
+            description TEXT,
+            params_json TEXT,
+            result_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_leo_action_log_date ON leo_action_log(created_at DESC)')
+    except Exception:
+        pass
+
+    c.safe_execute('''
+        CREATE TABLE IF NOT EXISTS leo_pending_actions (
+            id TEXT PRIMARY KEY,
+            action_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            description TEXT,
+            status TEXT DEFAULT 'pending',
+            user_message TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    try:
+        c.safe_execute('CREATE INDEX IF NOT EXISTS idx_leo_pending_status ON leo_pending_actions(status, created_at DESC)')
+    except Exception:
+        pass
+
+    # Performance indexes on hot query columns
+    for idx_sql in [
+        'CREATE INDEX IF NOT EXISTS idx_capital_groups_warmth ON capital_groups(warmth_score DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_prospecting_touchpoints_occurred ON prospecting_touchpoints(occurred_at DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_prospecting_signals_detected ON prospecting_signals(detected_at DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_prospecting_tasks_type ON prospecting_tasks(type)',
+        'CREATE INDEX IF NOT EXISTS idx_crm_touchpoints_lead ON crm_touchpoints(lead_id)',
+        'CREATE INDEX IF NOT EXISTS idx_calendar_meetings_date ON calendar_meetings(meeting_date)',
+        'CREATE INDEX IF NOT EXISTS idx_calendar_meetings_group ON calendar_meetings(group_id)',
+        'CREATE INDEX IF NOT EXISTS idx_assistant_chat_log_created ON assistant_chat_log(created_at DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_assistant_chat_log_card_type ON assistant_chat_log(card_type)',
+    ]:
+        try:
+            c.safe_execute(idx_sql)
+        except Exception:
+            pass
+
+    # Auto-close existing research tasks — research is not an execution action
+    try:
+        c.safe_execute(
+            "UPDATE prospecting_tasks SET status = 'cancelled' WHERE type = 'research' AND status IN ('pending', 'in_progress')"
+        )
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
+
+    # Run one-time task lifecycle cleanup after schema is ready
+    try:
+        from services.task_engine import cleanup_existing_bloat
+        result = cleanup_existing_bloat()
+        if any(v > 0 for v in result.values()):
+            import logging
+            logging.getLogger('task_engine').info(
+                'Task bloat cleanup: invalid=%d, duplicates=%d, stale=%d',
+                result['invalid_removed'], result['duplicates_merged'], result['stale_archived']
+            )
+    except Exception:
+        pass
 
 init_db()
 
@@ -1958,6 +2618,13 @@ from api.routes.developer_network import developer_network_bp
 from api.routes.momentum import momentum_bp
 from api.routes.corridors import corridors_bp
 from api.routes.signal_discovery import signal_discovery_bp
+from api.routes.capital_groups import capital_groups_bp
+from api.routes.prospecting import prospecting_bp
+from api.routes.coi import coi_bp
+from api.routes.assistant import assistant_bp
+from api.routes.performance import performance_bp
+from api.routes.daily_brief import daily_brief_bp
+from api.routes.calendar import calendar_bp
 
 app.register_blueprint(leads_bp)
 app.register_blueprint(projects_bp)
@@ -1975,6 +2642,168 @@ app.register_blueprint(developer_network_bp)
 app.register_blueprint(momentum_bp)
 app.register_blueprint(corridors_bp)
 app.register_blueprint(signal_discovery_bp)
+app.register_blueprint(capital_groups_bp)
+app.register_blueprint(prospecting_bp)
+app.register_blueprint(coi_bp)
+app.register_blueprint(assistant_bp)
+app.register_blueprint(performance_bp)
+app.register_blueprint(daily_brief_bp)
+app.register_blueprint(calendar_bp)
+
+# ---------------------------------------------------------------------------
+# Global authentication middleware for all Blueprint API routes
+# ---------------------------------------------------------------------------
+_AUTH_EXEMPT_PREFIXES = (
+    '/api/auth/login', '/api/auth/bootstrap', '/api/auth/has-users',
+    '/api/auth/logout', '/api/auth/me',
+    '/health', '/api/health',
+)
+
+@app.before_request
+def _enforce_auth():
+    """Require a valid session for all /api/ routes except auth & health."""
+    path = request.path
+    if not path.startswith('/api/'):
+        return  # static files, HTML pages — no auth needed
+    for exempt in _AUTH_EXEMPT_PREFIXES:
+        if path == exempt or path.startswith(exempt + '/'):
+            return
+    if not _has_users():
+        g.user = None
+        g.workspace_id = None
+        return
+    user, workspace_id = _get_session_user()
+    if not user:
+        return jsonify({
+            'success': False, 'ok': False,
+            'message': 'Authentication required',
+            'error': 'Authentication required',
+            'auth_required': True
+        }), 401
+    g.user = user
+    g.workspace_id = workspace_id
+
+# ===================================================================
+# DASHBOARD — Weather endpoint (WeatherAPI.com)
+# ===================================================================
+
+WEATHER_API_KEY = os.getenv('WEATHER_API_KEY', '')
+print(f"[Weather] API key loaded: {bool(WEATHER_API_KEY)}")
+
+
+@app.route('/api/dashboard/weather', methods=['GET'])
+def dashboard_weather():
+    if not WEATHER_API_KEY:
+        return jsonify({'error': 'Weather API key not configured'}), 503
+    try:
+        import requests as _wreq
+        resp = _wreq.get(
+            'https://api.weatherapi.com/v1/current.json',
+            params={'key': WEATHER_API_KEY, 'q': 'Los Angeles'},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        d = resp.json()
+        loc = d.get('location', {})
+        cur = d.get('current', {})
+        cond = cur.get('condition', {})
+        return jsonify({
+            'location': loc.get('name', 'Los Angeles'),
+            'region': loc.get('region', ''),
+            'time': loc.get('localtime', ''),
+            'temp': cur.get('temp_f'),
+            'condition': cond.get('text', ''),
+            'icon': cond.get('icon', ''),
+        })
+    except Exception as e:
+        print(f"[Weather] API error: {e}")
+        return jsonify({'error': 'Weather data unavailable'}), 500
+
+
+# ===================================================================
+# DASHBOARD — Finance Snapshot (FRED + Alpha Vantage)
+# ===================================================================
+
+_FINANCE_FALLBACK = os.getenv('FINANCE_API_KEY', '')
+FRED_API_KEY = os.getenv('FRED_API_KEY', '') or _FINANCE_FALLBACK
+ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY', '') or _FINANCE_FALLBACK
+print(f"[Finance] FRED key loaded: {bool(FRED_API_KEY)}")
+print(f"[Finance] Alpha Vantage key loaded: {bool(ALPHA_VANTAGE_API_KEY)}")
+
+_finance_cache = {'data': None, 'ts': 0}
+_FINANCE_TTL = 600  # 10 minutes
+
+
+@app.route('/api/dashboard/finance', methods=['GET'])
+def dashboard_finance():
+    print("[Finance] endpoint hit")
+    import time
+    now = time.time()
+    if _finance_cache['data'] and (now - _finance_cache['ts']) < _FINANCE_TTL:
+        return jsonify(_finance_cache['data'])
+
+    import requests as _freq
+    result = {}
+    errors = []
+
+    # FRED: 10-Year Treasury Yield (DGS10)
+    if FRED_API_KEY:
+        try:
+            r = _freq.get('https://api.stlouisfed.org/fred/series/observations', params={
+                'series_id': 'DGS10', 'api_key': FRED_API_KEY,
+                'file_type': 'json', 'sort_order': 'desc', 'limit': 1
+            }, timeout=8)
+            r.raise_for_status()
+            obs = r.json().get('observations', [])
+            if obs and obs[0].get('value', '.') != '.':
+                result['tenYearYield'] = float(obs[0]['value'])
+        except Exception as e:
+            errors.append(f'FRED DGS10: {e}')
+
+        # FRED: Fed Funds Rate (FEDFUNDS)
+        try:
+            r = _freq.get('https://api.stlouisfed.org/fred/series/observations', params={
+                'series_id': 'FEDFUNDS', 'api_key': FRED_API_KEY,
+                'file_type': 'json', 'sort_order': 'desc', 'limit': 1
+            }, timeout=8)
+            r.raise_for_status()
+            obs = r.json().get('observations', [])
+            if obs and obs[0].get('value', '.') != '.':
+                result['fedFundsRate'] = float(obs[0]['value'])
+        except Exception as e:
+            errors.append(f'FRED FEDFUNDS: {e}')
+    else:
+        errors.append('FRED_API_KEY not set')
+
+    # Alpha Vantage: S&P 500 via SPY
+    if ALPHA_VANTAGE_API_KEY:
+        try:
+            r = _freq.get('https://www.alphavantage.co/query', params={
+                'function': 'GLOBAL_QUOTE', 'symbol': 'SPY',
+                'apikey': ALPHA_VANTAGE_API_KEY
+            }, timeout=8)
+            r.raise_for_status()
+            gq = r.json().get('Global Quote', {})
+            price = gq.get('05. price')
+            change_pct = gq.get('10. change percent', '').replace('%', '')
+            if price:
+                result['sp500'] = float(price)
+            if change_pct:
+                result['sp500Change'] = float(change_pct)
+        except Exception as e:
+            errors.append(f'AlphaVantage SPY: {e}')
+    else:
+        errors.append('ALPHA_VANTAGE_API_KEY not set')
+
+    if errors:
+        print(f"[Finance] errors: {errors}")
+
+    if not result:
+        return jsonify({'error': 'finance_unavailable'}), 503
+
+    _finance_cache['data'] = result
+    _finance_cache['ts'] = now
+    return jsonify(result)
 
 # ===================================================================
 # MULTIFAMILY COMMAND — standalone module, separate from the BTR queue
@@ -3028,6 +3857,54 @@ def api_crm_upsert_lead():
     return jsonify({'success': True, 'lead': lead})
 
 
+@app.route('/api/crm/lead/from-prospecting', methods=['POST'])
+@require_auth
+@require_any_role('admin', 'producer')
+def api_crm_lead_from_prospecting():
+    """Create a CRM lead from a prospecting contact/group."""
+    if not g.user:
+        return jsonify({'success': False, 'message': 'Auth required'}), 401
+    data = request.json or {}
+    group_id = data.get('group_id')
+    contact_id = data.get('contact_id')
+    company_name = data.get('company_name', '').strip()
+    if not company_name:
+        return jsonify({'success': False, 'message': 'company_name required'}), 400
+
+    conn = _get_db_conn()
+    c = conn.cursor()
+    ws = g.workspace_id
+    prospect_key = 'prosp_' + (group_id or contact_id or str(uuid.uuid4()))
+
+    # Find or create crm_company
+    c.execute('SELECT id FROM crm_companies WHERE workspace_id = ? AND prospect_key = ?', (ws, prospect_key))
+    row = c.fetchone()
+    if row:
+        company_id = row[0]
+    else:
+        company_id = str(uuid.uuid4())
+        website = data.get('website') or None
+        c.execute('INSERT INTO crm_companies (id, workspace_id, prospect_key, company_name, website) VALUES (?, ?, ?, ?, ?)',
+                  (company_id, ws, prospect_key, company_name, website))
+
+    # Check if lead already exists for this company
+    c.execute('SELECT id, status FROM crm_leads WHERE workspace_id = ? AND company_id = ?', (ws, company_id))
+    existing = c.fetchone()
+    if existing:
+        conn.close()
+        return jsonify({'success': True, 'lead': {'id': existing[0], 'status': existing[1]}, 'already_exists': True})
+
+    lead_id = str(uuid.uuid4())
+    c.execute('''INSERT INTO crm_leads (id, workspace_id, company_id, owner_user_id, status, group_id, contact_id, source)
+                 VALUES (?, ?, ?, ?, 'New', ?, ?, 'prospecting')''',
+              (lead_id, ws, company_id, g.user['id'], group_id, contact_id))
+    _log_lead_activity(c, lead_id, g.user['id'], 'SAVED')
+    _log_lead_activity(c, lead_id, g.user['id'], 'OWNER_ASSIGNED', None, g.user['id'])
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'lead': {'id': lead_id, 'status': 'New', 'company_name': company_name}})
+
+
 @app.route('/api/crm/leads', methods=['GET'])
 @require_auth
 @require_any_role('admin', 'producer')
@@ -3043,12 +3920,25 @@ def api_crm_list_leads():
         SELECT l.id, l.status, l.owner_user_id, l.last_touch_at, l.next_followup_at, l.priority, l.created_at,
                co.company_name, co.prospect_key, co.website,
                u.name as owner_name,
-               la.action_type as last_action_type, la.created_at as last_activity_at
+               la.action_type as last_action_type, la.created_at as last_activity_at,
+               l.group_id, l.contact_id, l.source,
+               pc.first_name as contact_first_name, pc.last_name as contact_last_name,
+               pc.title as contact_title, pc.relationship_stage,
+               cg.entity_name as group_name, cg.warmth_score,
+               ps.title as last_signal_title
         FROM crm_leads l
         JOIN crm_companies co ON l.company_id = co.id
         LEFT JOIN users u ON l.owner_user_id = u.id
         LEFT JOIN lead_activity la ON la.id = (
             SELECT la2.id FROM lead_activity la2 WHERE la2.lead_id = l.id ORDER BY la2.created_at DESC LIMIT 1
+        )
+        LEFT JOIN prospecting_contacts pc ON l.contact_id = pc.id
+        LEFT JOIN capital_groups cg ON l.group_id = cg.id
+        LEFT JOIN prospecting_signals ps ON ps.id = (
+            SELECT ps2.id FROM prospecting_signals ps2
+            WHERE (ps2.signal_scope = 'company' AND ps2.entity_name = co.company_name)
+               OR (l.group_id IS NOT NULL AND ps2.entity_name = cg.entity_name)
+            ORDER BY ps2.detected_at DESC LIMIT 1
         )
         WHERE l.workspace_id = ?
     '''
@@ -3082,6 +3972,11 @@ def api_crm_list_leads():
             'created_at': _safe_ts(r[6]), 'company_name': r[7], 'prospect_key': r[8],
             'website': r[9], 'owner_name': r[10],
             'last_action_type': r[11], 'last_activity_at': r[12],
+            'group_id': r[13], 'contact_id': r[14], 'source': r[15],
+            'contact_first_name': r[16], 'contact_last_name': r[17],
+            'contact_title': r[18], 'relationship_stage': r[19],
+            'group_name': r[20], 'warmth_score': r[21],
+            'last_signal_title': r[22],
         })
     conn.close()
     return jsonify({'success': True, 'leads': leads})
@@ -3490,7 +4385,8 @@ def search_btr_prospects(city="Texas", limit=10):
             for query in queries:
                 try:
                     results = cached_serpapi_search(
-                        query, num=5, feature='prospect', city=city, state=''
+                        query, num=5, feature='prospect', city=city, state='',
+                        manual=True
                     )
                     for r in results:
                         link = r.get('link', '')
@@ -3988,6 +4884,12 @@ def run_daily_discovery(is_scheduled=False):
                 print(f"[Discovery] Webhook delivery failed: {e}")
 
         print(f"[Discovery] Run complete. {total_new} new signals across {len(config['cities'])} cities.")
+
+        try:
+            _fanout_discovery_to_prospecting(results)
+        except Exception as e:
+            print(f"[Discovery] Prospecting fan-out failed: {e}")
+
         return results, digest
 
     except Exception as e:
@@ -3996,6 +4898,145 @@ def run_daily_discovery(is_scheduled=False):
         return {}, ""
     finally:
         _discovery_running = False
+
+
+def _fanout_discovery_to_prospecting(results):
+    """Route Daily Discovery output into the prospecting signal / notice / task
+    pipeline.
+
+    Matching strategy (checked in order, first match wins):
+      1. ``entity_name`` from Claude classification matches a capital_groups name
+         (case-insensitive, must match a whole word or be ≥60% of the group name).
+      2. Group name appears as a whole word in the signal title or summary.
+
+    Company-matched items become ``scope=company`` signals (→ notice + outreach
+    task via rule 4).  Unmatched BTR-relevant items become ``scope=industry``
+    signals (→ notices/tasks for contacts in active stages via rule 5).
+
+    Dedup: signals whose ``source_url`` already exists in ``prospecting_signals``
+    are skipped.
+
+    Relevance filter: items with ``signal_type == 'not_relevant'`` or
+    ``'unclassified'`` are dropped for industry signals (kept only if they
+    matched a tracked group).
+    """
+    if not results:
+        return
+    from services.prospecting_rules import ingest_signal
+    from shared.database import fetch_all as _fa, fetch_one as _fo
+
+    # --- Build group lookup ---
+    groups = _fa("SELECT id, name, type FROM capital_groups") or []
+    if not groups:
+        print("[Discovery→Prospecting] No tracked groups; skipping fan-out.")
+        return
+
+    import re as _re
+    group_index = []
+    for g in groups:
+        raw = (g.get('name') or '').strip()
+        if not raw:
+            continue
+        pattern = _re.compile(r'\b' + _re.escape(raw) + r'\b', _re.IGNORECASE)
+        group_index.append((g['id'], raw, raw.lower(), pattern, g.get('type') or ''))
+
+    # --- Collect all signal items from the results dict ---
+    items = []
+    if isinstance(results, dict):
+        for val in results.values():
+            sigs = val if isinstance(val, list) else (val.get('signals') if isinstance(val, dict) else None)
+            if isinstance(sigs, list):
+                items.extend(sigs)
+    elif isinstance(results, list):
+        items = results
+
+    if not items:
+        return
+
+    # --- Pre-fetch existing signal URLs for dedup ---
+    existing_urls = set()
+    rows = _fa("SELECT source_url FROM prospecting_signals WHERE source_url IS NOT NULL AND source_url != ''") or []
+    for r in rows:
+        existing_urls.add(r['source_url'])
+
+    stats = {'company': 0, 'industry': 0, 'skipped_dup': 0, 'skipped_irrelevant': 0, 'total': 0}
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        stats['total'] += 1
+
+        title = (item.get('title') or item.get('headline') or '').strip()
+        summary = (item.get('summary') or item.get('description') or '').strip()
+        url = (item.get('url') or item.get('source_url') or '').strip()
+        signal_type = item.get('signal_type') or ''
+        entity = (item.get('entity_name') or '').strip()
+
+        if not title:
+            continue
+
+        # Dedup by URL
+        if url and url in existing_urls:
+            stats['skipped_dup'] += 1
+            continue
+
+        # Parse importance safely
+        raw_imp = item.get('importance') or item.get('score') or 5
+        try:
+            importance = max(1, min(10, int(float(raw_imp))))
+        except (ValueError, TypeError):
+            importance = 5
+
+        # --- Attempt group match ---
+        matched_gid = None
+
+        # Strategy 1: entity_name from classification
+        if entity:
+            entity_lower = entity.lower()
+            for gid, _gname, gname_lower, _pat, _gtype in group_index:
+                if entity_lower == gname_lower:
+                    matched_gid = gid
+                    break
+                overlap = len(set(entity_lower.split()) & set(gname_lower.split()))
+                total = max(len(gname_lower.split()), 1)
+                if overlap / total >= 0.6:
+                    matched_gid = gid
+                    break
+
+        # Strategy 2: whole-word match in title/summary
+        if not matched_gid:
+            haystack = f"{title} {summary}"
+            for gid, _gname, _gnl, pattern, _gtype in group_index:
+                if pattern.search(haystack):
+                    matched_gid = gid
+                    break
+
+        if matched_gid:
+            ingest_signal(
+                scope='company', title=title, summary=summary,
+                source_url=url, signal_type=signal_type,
+                importance=importance, group_id=matched_gid
+            )
+            if url:
+                existing_urls.add(url)
+            stats['company'] += 1
+        else:
+            # Skip irrelevant/unclassified items for industry signals
+            if signal_type in ('not_relevant', 'unclassified', ''):
+                stats['skipped_irrelevant'] += 1
+                continue
+            ingest_signal(
+                scope='industry', title=title, summary=summary,
+                source_url=url, signal_type=signal_type,
+                importance=importance
+            )
+            if url:
+                existing_urls.add(url)
+            stats['industry'] += 1
+
+    print(f"[Discovery→Prospecting] {stats['total']} items processed: "
+          f"{stats['company']} company, {stats['industry']} industry, "
+          f"{stats['skipped_dup']} dup, {stats['skipped_irrelevant']} irrelevant")
 
 # ===================================================================
 # BROKER API ROUTES (Deal Board)
@@ -8179,15 +9220,14 @@ _GOV_SIGNAL_QUERIES = {
 def refresh_government_signals():
     """
     Background job: populate government_signals from public data.
-    Searches for gov-related signals per configured city using existing search cache / SerpAPI.
-    Rate-limited, deduplicates by source_url, caps at 50 items per city per signal_type.
-    Runs daily. Stubbed sources that fail return 0 without crashing.
+    Uses cached_serpapi_search with budget controls instead of direct API calls.
+    Deduplicates by source_url, caps at 50 items per city per signal_type.
     """
-    import time as _time
-    import requests as _req
+    from serpapi_client import cached_serpapi_search, SerpAPIError, clear_run_dedup
     from datetime import date
 
     app.logger.info('[gov-signals] Starting refresh_government_signals()')
+    clear_run_dedup()
     total_inserted = 0
     total_skipped = 0
     city_stats = {}
@@ -8202,29 +9242,16 @@ def refresh_government_signals():
             try:
                 query = query_tmpl.format(city=city, state=state)
 
-                # Use SerpAPI if available, otherwise skip
-                serpapi_key = os.getenv('SERPAPI_API_KEY', '')
-                if not serpapi_key:
-                    app.logger.debug(f'[gov-signals] No SERPAPI_API_KEY, skipping {sig_type} for {city_key}')
+                try:
+                    organic = cached_serpapi_search(
+                        query, num=10, feature='gov_signals', city=city, state=state
+                    )
+                except SerpAPIError as e:
+                    app.logger.warning(f'[gov-signals] SerpAPI error for {sig_type}/{city_key}: {e}')
                     continue
 
-                # Rate limit: 1 second between SerpAPI calls
-                _time.sleep(1.0)
-
-                resp = _req.get('https://serpapi.com/search.json', params={
-                    'api_key': serpapi_key,
-                    'engine': 'google',
-                    'q': query,
-                    'num': 10,
-                    'tbs': 'qdr:m',  # past month
-                }, timeout=15)
-
-                if resp.status_code != 200:
-                    app.logger.warning(f'[gov-signals] SerpAPI {resp.status_code} for {sig_type}/{city_key}')
+                if not organic:
                     continue
-
-                data = resp.json()
-                organic = data.get('organic_results', [])
 
                 conn = _get_db_conn()
                 c = conn.cursor()
@@ -8384,6 +9411,15 @@ def api_government_signals():
     except Exception as e:
         app.logger.error(f'[gov-signals-api] Error: {e}')
         return jsonify({'ok': False, 'error': 'Failed to query government signals', 'details': str(e)}), 500
+
+
+@app.route('/api/admin/serpapi-stats', methods=['GET'])
+@require_auth
+@require_role('admin')
+def api_serpapi_stats():
+    """Return today's SerpAPI usage stats for admin visibility."""
+    from serpapi_client import get_serpapi_stats
+    return jsonify({'ok': True, 'data': get_serpapi_stats()})
 
 
 def _normalize_name(name):

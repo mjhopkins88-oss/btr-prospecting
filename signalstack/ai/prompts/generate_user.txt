@@ -1,0 +1,302 @@
+Draft {n} distinct LinkedIn outreach options for this prospect.
+
+You are writing AS this operator:
+{sender_persona_line}
+
+Full sender persona (identity + strengths + lens + market context
++ hard bans) — never treat any of this as prospect personalization:
+{sender_persona_block}
+
+CONFIDENCE_LEVEL: {confidence_level}
+
+====================================================================
+THE SENDER'S LENS (READ THIS BEFORE YOU WRITE ANYTHING)
+====================================================================
+
+Every message must be written THROUGH the sender's lens. The lens
+is: sees risk across many deals, usually brought in too late,
+thinks of insurance as a deal-shaping factor (not a product).
+
+The lens is a FRAMING DEVICE, not a pitch. The sender does not
+mention insurance, pricing, quotes, carriers, or programs. The
+sender's seat shows up in HOW the observation is framed, not in
+what's being sold.
+
+Before drafting each message, answer:
+
+  - Where does this create friction, risk, or timing pressure in
+    the prospect's deal execution?
+  - What's the thing that usually surfaces too late on deals like
+    this?
+  - When would the sender usually get pulled into this conversation
+    — and what's the cost of being pulled in late?
+
+Use the answers to shape the observation. If your message could
+have been written by a newsletter author, a market analyst, or
+anyone OUTSIDE the deal process — it is NOT lensed, and it will
+be rejected.
+
+PREFERRED OPENINGS (lens-first, operator voice):
+  - "we see this a lot when…"
+  - "this usually shows up once…"
+  - "this tends to become an issue when…"
+  - "we often get pulled in when…"
+  - "the thing we keep running into on deals like this is…"
+  - "by the time this hits our desk, it's usually…"
+
+BANNED OPENINGS (analyst / newsletter voice — HARD REJECT):
+  - "pattern I keep noticing"
+  - "the pattern I keep seeing is"
+  - "the trend suggests"
+  - "teams in this segment"
+  - "in today's market"
+  - "in the current environment"
+
+====================================================================
+PRIMARY SOURCE — READ THIS SECOND
+====================================================================
+
+The INTERNAL THOUGHTS below are plain-language, peer-voice thoughts.
+Each one is a single sentence a smart operator might actually
+think. Your job is to turn ONE internal thought into ONE LinkedIn
+message — and to write that message THROUGH THE LENS described
+above. Write FROM the thought — do not stitch together the raw
+insight, the profile blob, or the keyword list.
+
+Every option must be written FROM A DIFFERENT THOUGHT and in A
+DIFFERENT STYLE MODE. Two options must never share a thought, a
+style mode, or an opening line.
+
+====================================================================
+HARD BANS — never produce any of these
+====================================================================
+
+- Comma-separated topic lists ("build to rent, commercial real
+  estate, insurance").
+- Repeated keyword phrases from featured_topics, headline, or any
+  other CRM-tag field.
+- "X, Y, and Z" structures where X/Y/Z are industry tags.
+- Anything that reads like a profile summary ("given your focus on
+  X, Y, and Z, curious how...").
+- Anything that reads like a CRM tag line flattened into prose.
+- Template SDR openers ("hope this finds you well", "I came across
+  your profile", "I help companies like yours", "quick chat",
+  "would love to connect", etc).
+- Fake scarcity or reverse-psychology gimmicks.
+- Performative contrarianism — disagreement has to be earned, not
+  theatrical.
+- Anything that reads like a broker, an SDR, or a vendor pitch.
+  You are an operator who sees risk across many deals and is
+  usually brought in too late — not a salesperson asking for time.
+- Any mention of selling insurance, pricing, quotes, carriers,
+  programs, or "I run an insurance program" — the sender's lens
+  is FRAMING, not a pitch. The partnership angle is carried by
+  POV (risk, timing, deal execution), never by naming the product.
+- Any ask for a call, meeting, or quick chat.
+- Any vague, floating market commentary. Every message must have
+  a "where this shows up" anchor. Phrases like "this part of the
+  market", "this space", "this slice", "this slice of the market",
+  "this segment", "this kind of market", "this side of the
+  business", "the current environment", "today's market" are
+  BANNED — they have no anchor.
+- Any neutral market observation that is not filtered through the
+  sender's lens. Observation without lens = newsletter voice =
+  HARD REJECT.
+- "Pattern I keep noticing" / "the pattern I keep seeing is" /
+  "trend I'm watching" — analyst voice, not operator voice.
+  HARD REJECT.
+
+====================================================================
+CONTEXTUAL ANCHOR (do this BEFORE writing each message)
+====================================================================
+
+For every option, first pick a CONTEXTUAL ANCHOR — the real
+operating surface where the idea actually shows up in the
+prospect's world. The anchor answers:
+
+    "Where would this insight actually show up in their world?"
+
+Use one of these shapes (or a close variant that names a real
+operating surface):
+
+  - "on newer deals"
+  - "in your pipeline"
+  - "when underwriting gets deeper"
+  - "on newer communities"
+  - "once deals get closer to execution"
+  - "in the next capital allocation decision"
+  - "during lease-up"
+  - "as new sites come online"
+  - "on deals still in diligence"
+  - "on the sites you're working right now"
+  - "in the build phase of new communities"
+
+Two options in the same batch should lean on DIFFERENT anchors
+where possible — not every message on the same surface.
+
+BAD  (floats, no anchor, no lens):
+  "the trend suggests where capital is moving"
+
+BAD  (anchored but NOT lensed — sounds like a newsletter):
+  "on newer BTR deals, capital is getting more selective the
+   deeper you get into underwriting"
+
+GOOD (anchored + lensed through risk / timing / being pulled in
+      late):
+  "we see this a lot on newer BTR deals — capital still shows up,
+   but the real hang-up lands later, once the risk side of
+   underwriting catches up. curious if that timing is matching
+   what you're seeing."
+
+====================================================================
+MESSAGE STRUCTURE (use unless the style mode needs otherwise)
+====================================================================
+
+  1. lensed observation    — observation filtered through the
+                             sender's lens (risk, timing, deal
+                             execution, being pulled in late) AND
+                             anchored on a real operating surface
+                             (pipeline, underwriting, newer deals,
+                             lease-up, capital allocation, etc.).
+                             The lens is the "why this matters from
+                             my seat"; the anchor is the "where this
+                             shows up in your world". Both required.
+  2. interpretation        — the internal thought, in peer voice,
+                             framed from inside the deal process.
+  3. light curiosity       — a low-pressure compare-notes question.
+
+Example shapes:
+  "we see this a lot when [anchor / operating surface], and the
+   thing that tends to get missed is [interpretation]. curious how
+   it's landing on your side."
+  "this usually shows up once [anchor / timing surface] — by then,
+   [interpretation]. wanted to compare notes before that's where
+   you end up."
+  "we often get pulled in when [anchor / execution surface] —
+   [interpretation]. curious if that's matching what you're seeing."
+
+Tone: sharp, low-pressure, human, calm, peer-like, slightly
+understated. Always from INSIDE the deal process, never OUTSIDE
+commenting on it.
+
+====================================================================
+STYLE MODES (REQUIRED — ONE PER OPTION, NO REPEATS)
+====================================================================
+
+Each option MUST use a DIFFERENT style mode from the STRATEGIES
+list below. The strategies are pre-assigned by the pipeline — use
+the style_mode field on each strategy as the voice for that option.
+
+The five style modes:
+
+  1. curious_insider    — real peer-question voice, warm but not
+                          eager, short observation -> single
+                          question.
+  2. quiet_contrarian   — light earned counter-view of the default
+                          read, invites pushback without theatrics.
+  3. pattern_spotter    — names the pattern across similar desks,
+                          invites compare-notes.
+  4. low_ego_peer       — calm understated no-ask opener, survives
+                          a non-reply.
+  5. sharp_operator     — concise operator voice, earned authority,
+                          direct but not pushy.
+
+====================================================================
+PSYCHOLOGY ANGLES (ONE PER OPTION)
+====================================================================
+
+Each option leans on EXACTLY ONE of these ethical levers, drawn
+from the style mode's allowed list:
+
+  curiosity, self_relevance, low_pressure_control,
+  pattern_recognition, peer_status_framing, subtle_contrast,
+  earned_contrarianism.
+
+====================================================================
+BEHAVIOUR BY CONFIDENCE LEVEL
+====================================================================
+
+- HIGH: lead with the strongest distilled observation and/or
+  internal thought. Be specific and timely, but always through
+  the peer-voice thought — never through raw profile keywords.
+- MEDIUM: lean on the internal thoughts (already grounded in
+  profile, industry, market, and role). Pattern-based framing is
+  fine. Do not claim specific deals.
+- LOW: anchor on the internal thoughts or the HYPOTHESES below.
+  Every LOW-confidence message must preserve "likely / possibly /
+  may be / tends to / seeing a lot of X lately" framing. Do not
+  assert any thought as a claim about the individual.
+
+====================================================================
+INPUTS
+====================================================================
+
+PROSPECT:
+{prospect_line}
+
+CONTEXT:
+{context_json}
+
+INTERNAL THOUGHTS (primary source — write FROM these, one per option):
+{thoughts_json}
+
+DISTILLED OBSERVATIONS (secondary — for grounding only, do NOT
+quote verbatim):
+{observations_json}
+
+INSIGHTS (reference — the thoughts above are the translated form):
+{insights_json}
+
+HYPOTHESES (fallback for low-confidence generation — these are
+POSSIBILITIES, never claims):
+{hypotheses_json}
+
+STRATEGIES (one per option — each carries angle + style_mode +
+psychology_angle; use the style_mode as the voice):
+{strategies_json}
+
+USER INSTRUCTION (optional, may be empty):
+{instruction}
+
+====================================================================
+OUTPUT FORMAT (return JSON ONLY — no prose, no markdown fences)
+====================================================================
+
+Return an object of shape:
+
+{
+  "messages": [
+    {
+      "thought": "exact peer-voice text of the internal thought used",
+      "thought_id": "thought-0",
+      "thought_type": "pattern_recognition|tension_tradeoff|contrarian_observation|timing_insight|second_order_effect|self_relevance",
+      "psychology_angle": "curiosity|self_relevance|low_pressure_control|pattern_recognition|peer_status_framing|subtle_contrast|earned_contrarianism",
+      "style_mode": "curious_insider|quiet_contrarian|pattern_spotter|low_ego_peer|sharp_operator",
+      "body": "the final message body",
+      "final_message": "same as body",
+      "why_it_works": "one short sentence — why this lands and what lever it leans on",
+      "rationale": "one short sentence on angle + grounding basis",
+      "angle": "...",
+      "observation": { "summary": "...", "safe_reference_text": "..." },
+      "message_basis": "signal_based|observation_based|hypothesis_based",
+      "message_type": "curiosity|insight|casual|direct",
+      "primary_trigger": "...",
+      "communication_style": "...",
+      "outreach_goal": "...",
+      "signal_ids": ["..."],
+      "notes_used": ["..."],
+      "profile_fields_used": ["..."],
+      "facts_used": ["..."]
+    }
+  ]
+}
+
+Every option must be written from a DIFFERENT thought, a DIFFERENT
+style mode, a DIFFERENT psychology angle, and a DIFFERENT opening
+line. Every option must carry its OWN contextual anchor (the
+"where this shows up" surface) AND be written THROUGH the sender's
+lens (risk, timing, deal execution, being pulled in late). Minor
+rewrites of the same line are a hard failure. Unanchored abstract
+market commentary is a hard failure. Any message that reads like
+neutral market commentary — written by an outside observer rather
+than someone inside the deal process — is a hard failure.

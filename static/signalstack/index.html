@@ -1,0 +1,1990 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>SignalStack</title>
+<style>
+  :root {
+    --bg: #0b0d10; --panel: #14181d; --line: #232a32;
+    --fg: #e6ecf2; --muted: #8a96a3; --accent: #6ee7b7; --warn: #fbbf24;
+    --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 -apple-system, system-ui, sans-serif; }
+  a { color: var(--accent); text-decoration: none; cursor: pointer; }
+  header { display: flex; align-items: center; gap: 18px;
+    padding: 14px 22px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 16px; letter-spacing: 0.04em; }
+  header nav a { color: var(--muted); margin-right: 14px; font-size: 13px; }
+  header nav a.active { color: var(--fg); }
+  main { padding: 22px; max-width: 1180px; margin: 0 auto; }
+  h2 { font-size: 18px; margin: 0 0 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 16px; margin-bottom: 14px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 200px; }
+  input, select, textarea, button {
+    background: #0f1318; color: var(--fg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 8px 10px; font: inherit; width: 100%;
+  }
+  textarea { min-height: 70px; resize: vertical; }
+  button { background: var(--accent); color: #0b0d10; border: none;
+    font-weight: 600; cursor: pointer; width: auto; padding: 8px 14px; }
+  button.ghost { background: transparent; color: var(--fg);
+    border: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px;
+    text-transform: uppercase; letter-spacing: 0.04em; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px;
+    background: #1c2530; color: var(--muted); font-size: 11px; }
+  .pill.warn { color: var(--warn); }
+  .pill.good { color: var(--accent); }
+  .pill.bad { color: var(--bad); }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); }
+  .stat { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 14px; }
+  .stat .n { font-size: 24px; font-weight: 600; }
+  .stat .l { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+  .muted { color: var(--muted); }
+  .candidate { border-left: 3px solid var(--accent); padding-left: 12px;
+    margin-bottom: 14px; }
+  .rejected .candidate { border-left-color: var(--bad); }
+  .confidence-banner { border-radius: 8px; padding: 10px 14px;
+    margin-bottom: 12px; font-size: 13px; }
+  .confidence-banner.high { background: #0d2e1b; color: #6fe2a0;
+    border: 1px solid #1f6b3f; }
+  .confidence-banner.medium { background: #2e2a0d; color: #e2c96f;
+    border: 1px solid #6b5a1f; }
+  .confidence-banner.low { background: #2e1a0d; color: #e29a6f;
+    border: 1px solid #6b3a1f; }
+  .basis-tag { display: inline-block; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 2px 6px; border-radius: 4px; margin-right: 6px; }
+  .basis-tag.signal { background: #0d2e1b; color: #6fe2a0; }
+  .basis-tag.observation { background: #0d1f2e; color: #6fb6e2; }
+  .basis-tag.hypothesis { background: #2e1a0d; color: #e29a6f; }
+  .conf-tag { display: inline-block; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 2px 6px; border-radius: 4px; margin-right: 6px;
+    background: #1d1d1f; color: var(--muted); }
+  pre { white-space: pre-wrap; word-break: break-word; }
+  label { display: block; font-size: 12px; color: var(--muted);
+    margin-bottom: 4px; }
+  .mb { margin-bottom: 10px; }
+
+  /* ----------------- Knowledge Library ----------------- */
+  .kn-page { display: flex; flex-direction: column; gap: 18px; }
+  .kn-header {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap;
+  }
+  .kn-header .kn-title h1 {
+    margin: 0; font-size: 22px; letter-spacing: 0.01em; color: var(--fg);
+  }
+  .kn-header .kn-title p {
+    margin: 4px 0 0; color: var(--muted); font-size: 13px; max-width: 640px;
+  }
+  .kn-header .kn-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .kn-btn {
+    background: var(--accent); color: #0b0d10; border: none;
+    border-radius: 6px; padding: 9px 14px; font-weight: 600;
+    cursor: pointer; font: inherit;
+  }
+  .kn-btn:hover { filter: brightness(1.06); }
+  .kn-btn.ghost {
+    background: transparent; color: var(--fg);
+    border: 1px solid var(--line);
+  }
+  .kn-btn.ghost:hover { border-color: #2f3947; background: #161b22; }
+  .kn-btn.danger { background: transparent; color: var(--bad); border: 1px solid #3a2226; }
+  .kn-btn.danger:hover { background: #1c1216; }
+  .kn-btn.sm { padding: 6px 10px; font-size: 12px; }
+
+  .kn-stats {
+    display: grid; gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+  .kn-stat {
+    background: linear-gradient(180deg, #161b22 0%, #11151b 100%);
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; display: flex; flex-direction: column; gap: 4px;
+    transition: border-color 0.15s ease;
+  }
+  .kn-stat:hover { border-color: #2f3947; }
+  .kn-stat .kn-stat-label {
+    color: var(--muted); font-size: 10px; letter-spacing: 0.08em;
+    text-transform: uppercase; font-weight: 600;
+  }
+  .kn-stat .kn-stat-value {
+    font-size: 22px; font-weight: 700; color: var(--fg); line-height: 1.1;
+  }
+  .kn-stat .kn-stat-hint { color: var(--muted); font-size: 11px; }
+  .kn-stat .kn-stat-icon { font-size: 14px; opacity: 0.8; }
+
+  .kn-toolbar {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px;
+    display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;
+  }
+  .kn-toolbar .kn-field {
+    display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 140px;
+  }
+  .kn-toolbar .kn-field.kn-field-search { flex: 2; min-width: 220px; }
+  .kn-toolbar .kn-field label {
+    color: var(--muted); font-size: 10px; letter-spacing: 0.08em;
+    text-transform: uppercase; margin: 0;
+  }
+  .kn-toolbar input, .kn-toolbar select {
+    background: #0e1217; border: 1px solid var(--line);
+    border-radius: 6px; padding: 8px 10px; color: var(--fg);
+    width: 100%; font: inherit;
+  }
+  .kn-toolbar input:focus, .kn-toolbar select:focus {
+    outline: none; border-color: #2f4a3a;
+  }
+  .kn-toolbar .kn-view-toggle {
+    display: inline-flex; background: #0e1217; border: 1px solid var(--line);
+    border-radius: 6px; padding: 2px; gap: 2px;
+  }
+  .kn-toolbar .kn-view-toggle button {
+    background: transparent; border: none; color: var(--muted);
+    padding: 6px 12px; cursor: pointer; border-radius: 4px;
+    font-size: 12px; font-weight: 500;
+  }
+  .kn-toolbar .kn-view-toggle button.active {
+    background: #1c2530; color: var(--fg);
+  }
+
+  /* Card grid */
+  .kn-card-grid {
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  }
+  .kn-source-card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px; display: flex; flex-direction: column;
+    gap: 10px; transition: all 0.15s ease; cursor: pointer; position: relative;
+  }
+  .kn-source-card:hover {
+    border-color: #324052; background: #161b22; transform: translateY(-1px);
+  }
+  .kn-source-card .kn-card-top {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;
+  }
+  .kn-source-card .kn-card-icon {
+    width: 36px; height: 36px; border-radius: 8px;
+    background: #1c2530; display: flex; align-items: center; justify-content: center;
+    font-size: 18px; flex-shrink: 0;
+  }
+  .kn-source-card .kn-card-badges {
+    display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+  }
+  .kn-source-card h3 {
+    margin: 0; font-size: 15px; color: var(--fg);
+    line-height: 1.35; font-weight: 600;
+  }
+  .kn-source-card .kn-card-summary {
+    color: #b7c2cf; font-size: 13px; line-height: 1.45;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .kn-source-card .kn-card-tags {
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .kn-source-card .kn-card-meta {
+    display: flex; align-items: center; justify-content: space-between;
+    color: var(--muted); font-size: 11px;
+    border-top: 1px solid #1b2129; padding-top: 10px;
+  }
+  .kn-source-card .kn-card-meta .kn-meta-left {
+    display: flex; gap: 12px; align-items: center;
+  }
+  .kn-source-card .kn-card-actions {
+    display: flex; gap: 6px;
+  }
+  .kn-source-card .kn-card-actions a {
+    color: var(--muted); font-size: 11px;
+    border: 1px solid var(--line); padding: 4px 8px;
+    border-radius: 4px; transition: all 0.15s ease;
+  }
+  .kn-source-card .kn-card-actions a:hover {
+    color: var(--accent); border-color: #2f4a3a;
+  }
+  .kn-source-card .kn-card-actions a.danger:hover {
+    color: var(--bad); border-color: #3a2226;
+  }
+
+  /* Source type badge */
+  .kn-type {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 9px; border-radius: 999px; font-size: 11px;
+    font-weight: 600; background: #1c2530; color: #b7c2cf;
+    border: 1px solid #232a32;
+  }
+  .kn-type.video      { background: rgba(248, 113, 113, 0.08); color: #fca5a5; border-color: rgba(248,113,113,0.18); }
+  .kn-type.article    { background: rgba(96, 165, 250, 0.08);  color: #93c5fd; border-color: rgba(96,165,250,0.18); }
+  .kn-type.podcast    { background: rgba(167, 139, 250, 0.08); color: #c4b5fd; border-color: rgba(167,139,250,0.18); }
+  .kn-type.transcript { background: rgba(251, 191, 36, 0.08);  color: #fcd34d; border-color: rgba(251,191,36,0.18); }
+  .kn-type.note       { background: rgba(110, 231, 183, 0.08); color: #86efac; border-color: rgba(110,231,183,0.18); }
+  .kn-type.playbook   { background: rgba(244, 114, 182, 0.08); color: #f9a8d4; border-color: rgba(244,114,182,0.18); }
+  .kn-type.framework  { background: rgba(56, 189, 248, 0.08);  color: #7dd3fc; border-color: rgba(56,189,248,0.18); }
+  .kn-type.manual     { background: rgba(148, 163, 184, 0.08); color: #cbd5e1; border-color: rgba(148,163,184,0.18); }
+
+  /* Status badge */
+  .kn-status {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 8px; border-radius: 4px; font-size: 10px;
+    font-weight: 700; letter-spacing: 0.05em;
+    background: #1c2530; color: var(--muted);
+  }
+  .kn-status.raw       { background: rgba(251,191,36,0.10); color: #fcd34d; }
+  .kn-status.extracted { background: rgba(110,231,183,0.10); color: #6ee7b7; }
+  .kn-status.reviewed  { background: rgba(56,189,248,0.10); color: #7dd3fc; }
+  .kn-status.archived  { background: rgba(148,163,184,0.10); color: #94a3b8; }
+
+  .kn-active-dot {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent); margin-right: 4px;
+  }
+  .kn-active-dot.off { background: #4a5260; }
+
+  /* Tag chip */
+  .kn-tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    background: #1a2028; color: #93a3b3; font-size: 11px;
+    border: 1px solid #232a32;
+  }
+
+  /* Entry chip */
+  .kn-entry-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    color: var(--muted); font-size: 11px;
+  }
+  .kn-entry-chip strong { color: var(--accent); font-weight: 700; }
+
+  /* Source table */
+  .kn-table {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; overflow: hidden;
+  }
+  .kn-table table { width: 100%; border-collapse: collapse; }
+  .kn-table th {
+    text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line);
+    color: var(--muted); font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.06em; font-weight: 600; background: #11151b;
+  }
+  .kn-table td {
+    padding: 12px 14px; border-bottom: 1px solid #1a2028;
+    color: var(--fg); font-size: 13px;
+  }
+  .kn-table tr:last-child td { border-bottom: none; }
+  .kn-table tr:hover td { background: #161b22; }
+  .kn-table .kn-table-title { font-weight: 600; }
+  .kn-table .kn-table-title a { color: var(--fg); }
+  .kn-table .kn-table-title a:hover { color: var(--accent); }
+  .kn-table .kn-table-url { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .kn-table .kn-table-actions { white-space: nowrap; }
+  .kn-table .kn-table-actions a {
+    color: var(--muted); font-size: 11px; margin-right: 8px;
+    border-bottom: 1px dashed transparent;
+  }
+  .kn-table .kn-table-actions a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* Empty state */
+  .kn-empty {
+    background: var(--panel); border: 1px dashed var(--line);
+    border-radius: 10px; padding: 48px 24px; text-align: center;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+  }
+  .kn-empty .kn-empty-icon {
+    font-size: 32px; opacity: 0.6; margin-bottom: 6px;
+  }
+  .kn-empty h3 { margin: 0; font-size: 16px; color: var(--fg); }
+  .kn-empty p { margin: 0; color: var(--muted); font-size: 13px; max-width: 380px; }
+
+  /* Form layout */
+  .kn-form-grid {
+    display: grid; gap: 16px; grid-template-columns: 2fr 1fr;
+  }
+  @media (max-width: 820px) { .kn-form-grid { grid-template-columns: 1fr; } }
+  .kn-form-col {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 18px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .kn-form-col h3 {
+    margin: 0; font-size: 13px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600;
+  }
+  .kn-form-col .kn-field { display: flex; flex-direction: column; gap: 5px; }
+  .kn-form-col .kn-field label {
+    color: var(--muted); font-size: 11px; margin: 0;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .kn-form-col .kn-help {
+    color: var(--muted); font-size: 11px; line-height: 1.4;
+    margin-top: -2px;
+  }
+  .kn-form-col input,
+  .kn-form-col select,
+  .kn-form-col textarea {
+    background: #0e1217; border: 1px solid var(--line);
+    border-radius: 6px; padding: 9px 11px; color: var(--fg);
+    font: inherit; width: 100%;
+  }
+  .kn-form-col textarea { min-height: 90px; resize: vertical; }
+  .kn-form-col .kn-form-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .kn-form-col .kn-form-row > .kn-field { flex: 1; min-width: 160px; }
+  .kn-form-col .kn-checkbox-row {
+    display: flex; align-items: center; gap: 8px; color: var(--fg);
+    font-size: 13px;
+  }
+  .kn-form-col .kn-checkbox-row input { width: auto; }
+  .kn-form-actions {
+    display: flex; gap: 10px; flex-wrap: wrap;
+    padding-top: 4px; border-top: 1px solid #1b2129; margin-top: 4px;
+  }
+
+  /* Detail page */
+  .kn-detail-header {
+    background: linear-gradient(180deg, #161b22 0%, #11151b 100%);
+    border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px;
+    display: flex; gap: 18px; align-items: flex-start;
+  }
+  .kn-detail-header .kn-detail-icon {
+    width: 56px; height: 56px; border-radius: 12px;
+    background: #1c2530; display: flex; align-items: center; justify-content: center;
+    font-size: 26px; flex-shrink: 0;
+  }
+  .kn-detail-header .kn-detail-body { flex: 1; min-width: 0; }
+  .kn-detail-header h1 { margin: 0; font-size: 22px; color: var(--fg); line-height: 1.3; }
+  .kn-detail-header .kn-detail-meta {
+    margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  }
+  .kn-detail-header .kn-detail-summary {
+    margin-top: 12px; color: #b7c2cf; font-size: 14px; line-height: 1.55;
+  }
+  .kn-detail-header .kn-detail-tags {
+    margin-top: 12px; display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .kn-detail-header .kn-detail-actions {
+    margin-top: 14px; display: flex; gap: 8px; flex-wrap: wrap;
+  }
+
+  .kn-section {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 18px 20px;
+  }
+  .kn-section + .kn-section { margin-top: 14px; }
+  .kn-section .kn-section-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px; gap: 10px;
+  }
+  .kn-section .kn-section-head h2 {
+    margin: 0; font-size: 13px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;
+  }
+  .kn-section .kn-section-count {
+    color: var(--accent); font-size: 12px; font-weight: 700;
+  }
+
+  .kn-content-block {
+    background: #0e1217; border: 1px solid #1b2129;
+    border-radius: 8px; padding: 12px 14px; margin-bottom: 10px;
+  }
+  .kn-content-block .kn-content-label {
+    color: var(--muted); font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.06em; margin-bottom: 6px; font-weight: 600;
+  }
+  .kn-content-block pre {
+    margin: 0; color: #c8d3df; font-size: 13px; line-height: 1.55;
+  }
+  .kn-collapse-toggle {
+    color: var(--accent); font-size: 12px; cursor: pointer;
+    margin-top: 6px; display: inline-block;
+  }
+
+  .kn-entry-card {
+    background: #0e1217; border: 1px solid #1b2129;
+    border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 14px 16px; margin-bottom: 10px;
+  }
+  .kn-entry-card.inactive { border-left-color: #4a5260; opacity: 0.7; }
+  .kn-entry-card .kn-entry-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; flex-wrap: wrap; margin-bottom: 8px;
+  }
+  .kn-entry-card .kn-entry-title {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .kn-entry-card .kn-entry-title strong {
+    color: var(--fg); font-size: 14px;
+  }
+  .kn-entry-card .kn-entry-conf {
+    color: var(--muted); font-size: 11px;
+    background: #1a2028; padding: 2px 8px; border-radius: 999px;
+  }
+  .kn-entry-card .kn-entry-desc {
+    color: #b7c2cf; font-size: 13px; line-height: 1.55; margin-bottom: 8px;
+  }
+  .kn-entry-card .kn-entry-detail {
+    color: var(--muted); font-size: 12px; line-height: 1.5;
+    padding: 6px 0; display: grid; grid-template-columns: 110px 1fr; gap: 4px 12px;
+  }
+  .kn-entry-card .kn-entry-detail .lbl {
+    color: #6b7886; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .kn-entry-card .kn-entry-detail .val { color: #b7c2cf; }
+  .kn-entry-card .kn-entry-actions {
+    display: flex; gap: 8px; padding-top: 10px;
+    border-top: 1px solid #1a2028; margin-top: 10px;
+  }
+  .kn-entry-card .kn-entry-actions a {
+    color: var(--muted); font-size: 11px;
+    border: 1px solid var(--line); padding: 4px 10px; border-radius: 4px;
+  }
+  .kn-entry-card .kn-entry-actions a:hover { color: var(--accent); border-color: #2f4a3a; }
+  .kn-entry-card .kn-entry-actions a.danger:hover { color: var(--bad); border-color: #3a2226; }
+
+  /* Generator relevance */
+  .kn-relevance {
+    display: grid; gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+  .kn-relevance .kn-rel-cell {
+    background: #0e1217; border: 1px solid #1b2129;
+    border-radius: 8px; padding: 12px;
+  }
+  .kn-relevance .kn-rel-cell .kn-rel-label {
+    color: var(--muted); font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.06em; margin-bottom: 4px; font-weight: 600;
+  }
+  .kn-relevance .kn-rel-cell .kn-rel-value {
+    color: var(--fg); font-size: 16px; font-weight: 700;
+  }
+  .kn-relevance .kn-rel-cell.usable .kn-rel-value { color: var(--accent); }
+  .kn-relevance .kn-rel-cell.unusable .kn-rel-value { color: var(--bad); }
+  .kn-relevance .kn-rel-cell.kn-rel-cats { grid-column: 1 / -1; }
+  .kn-relevance .kn-rel-cats .kn-rel-list {
+    display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;
+  }
+
+  /* Playbooks */
+  .kn-playbook-grid {
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+  .kn-playbook-card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 18px;
+    display: flex; flex-direction: column; gap: 10px;
+    cursor: pointer; transition: all 0.15s ease;
+  }
+  .kn-playbook-card:hover { border-color: #324052; background: #161b22; }
+  .kn-playbook-card h3 { margin: 0; font-size: 15px; color: var(--fg); }
+  .kn-playbook-card .kn-pb-desc {
+    color: #b7c2cf; font-size: 12px; line-height: 1.5;
+  }
+  .kn-playbook-card .kn-pb-meta {
+    display: flex; gap: 12px; color: var(--muted); font-size: 11px;
+    border-top: 1px solid #1b2129; padding-top: 10px;
+  }
+  .kn-playbook-card .kn-pb-meta strong { color: var(--accent); }
+  .kn-playbook-card .kn-pb-cats {
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }
+
+  /* Spinner */
+  .kn-spinner {
+    display: inline-block; width: 12px; height: 12px;
+    border: 2px solid #2f3947; border-top-color: var(--accent);
+    border-radius: 50%; animation: kn-spin 0.7s linear infinite;
+    vertical-align: middle; margin-right: 6px;
+  }
+  @keyframes kn-spin { to { transform: rotate(360deg); } }
+
+  /* Toast */
+  .kn-toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: #161b22; border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    padding: 12px 16px; border-radius: 8px; color: var(--fg);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    font-size: 13px; max-width: 320px;
+    animation: kn-toast-in 0.2s ease-out;
+  }
+  .kn-toast.error { border-left-color: var(--bad); }
+  @keyframes kn-toast-in { from { transform: translateY(8px); opacity: 0; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>SignalStack</h1>
+  <nav id="nav">
+    <a data-route="/dashboard">Dashboard</a>
+    <a data-route="/prospects">Prospects</a>
+    <a data-route="/companies">Companies</a>
+    <a data-route="/generator">Generator</a>
+    <a data-route="/messages">Messages</a>
+    <a data-route="/knowledge">Knowledge</a>
+    <a data-route="/settings">Settings</a>
+  </nav>
+</header>
+<main id="view">Loading…</main>
+
+<script>
+const API = "/api/signalstack";
+const $ = (s, el=document) => el.querySelector(s);
+const h = (tag, props={}, ...kids) => {
+  const el = document.createElement(tag);
+  for (const [k,v] of Object.entries(props||{})) {
+    if (k === "class") el.className = v;
+    else if (k === "html") el.innerHTML = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) el.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) {
+    if (k == null) continue;
+    el.append(k.nodeType ? k : document.createTextNode(k));
+  }
+  return el;
+};
+async function api(path, opts={}) {
+  const r = await fetch(API + path, {
+    headers: {"Content-Type": "application/json"},
+    ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (!r.ok) {
+    let msg = r.statusText || ("HTTP " + r.status);
+    try {
+      const j = await r.json();
+      msg = j.error || j.message || msg;
+    } catch (_) {
+      try { msg = (await r.text()).slice(0, 300) || msg; } catch (_) {}
+    }
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
+let META = null;
+async function loadMeta() { if (!META) META = await api("/meta"); return META; }
+
+// ----------------- Router -----------------
+const routes = {
+  "/dashboard": viewDashboard,
+  "/prospects": viewProspects,
+  "/prospects/:id": viewProspect,
+  "/companies": viewCompanies,
+  "/companies/:id": viewCompany,
+  "/generator": viewGenerator,
+  "/messages": viewMessages,
+  "/knowledge": viewKnowledgeList,
+  "/knowledge/new": viewKnowledgeNew,
+  "/knowledge/playbooks": viewKnowledgePlaybooks,
+  "/knowledge/:id": viewKnowledgeDetail,
+  "/settings": viewSettings,
+};
+
+function parseHash() {
+  const raw = (location.hash || "#/dashboard").slice(1);
+  for (const pat of Object.keys(routes)) {
+    const pp = pat.split("/"), rp = raw.split("/");
+    if (pp.length !== rp.length) continue;
+    const params = {};
+    let ok = true;
+    for (let i=0;i<pp.length;i++) {
+      if (pp[i].startsWith(":")) params[pp[i].slice(1)] = decodeURIComponent(rp[i]);
+      else if (pp[i] !== rp[i]) { ok = false; break; }
+    }
+    if (ok) return { fn: routes[pat], params };
+  }
+  return { fn: viewDashboard, params: {} };
+}
+
+async function render() {
+  await loadMeta();
+  const { fn, params } = parseHash();
+  $("#view").innerHTML = "";
+  document.querySelectorAll("#nav a").forEach(a =>
+    a.classList.toggle("active", location.hash.startsWith("#"+a.dataset.route)));
+  try { await fn(params); }
+  catch (e) { $("#view").append(h("div", {class:"card"}, "Error: " + e.message)); }
+}
+window.addEventListener("hashchange", render);
+document.querySelectorAll("#nav a").forEach(a => {
+  a.href = "#" + a.dataset.route;
+});
+
+// ----------------- Views -----------------
+async function viewDashboard() {
+  const v = $("#view");
+  v.append(h("h2", {}, "Dashboard"));
+  const a = await api("/analytics");
+  const stats = h("div", {class:"grid"});
+  const stat = (l,n) => stats.append(h("div",{class:"stat"},
+    h("div",{class:"n"}, String(n)), h("div",{class:"l"}, l)));
+  stat("Messages sent", a.messages_sent);
+  stat("Reply rate", (a.reply_rate*100).toFixed(0) + "%");
+  stat("Positive reply rate", (a.positive_reply_rate*100).toFixed(0) + "%");
+  stat("Meeting rate", (a.meeting_rate*100).toFixed(0) + "%");
+  v.append(stats);
+
+  const byStatus = h("div", {class:"card"});
+  byStatus.append(h("h2",{},"Prospects by status"));
+  const tbl = h("table");
+  tbl.append(h("tr",{},h("th",{},"Status"),h("th",{},"Count")));
+  for (const [k,n] of Object.entries(a.prospects_by_status||{}))
+    tbl.append(h("tr",{},h("td",{},k),h("td",{},String(n))));
+  byStatus.append(tbl);
+  v.append(byStatus);
+
+  const cards = h("div",{class:"row"});
+  cards.append(makeRanker("Top message types", a.top_message_types, "message_type"));
+  cards.append(makeRanker("Top signal types", a.top_signal_types, "signal_type"));
+  v.append(cards);
+}
+function makeRanker(title, rows, key) {
+  const c = h("div",{class:"card"});
+  c.append(h("h2",{},title));
+  const t = h("table");
+  t.append(h("tr",{},h("th",{},"Type"),h("th",{},"Used"),h("th",{},"Positive"),h("th",{},"Rate")));
+  (rows||[]).forEach(r => t.append(h("tr",{},
+    h("td",{}, r[key]),
+    h("td",{}, String(r.sent || r.used || 0)),
+    h("td",{}, String(r.positive || 0)),
+    h("td",{}, ((r.rate||0)*100).toFixed(0)+"%"))));
+  c.append(t);
+  return c;
+}
+
+async function viewProspects() {
+  const v = $("#view");
+  v.append(h("h2",{},"Prospects"));
+
+  // Create form
+  const form = h("div",{class:"card"});
+  form.append(h("h2",{},"Add prospect"));
+  const fields = ["full_name","linkedin_url","company_name","title","industry","location"];
+  const inputs = {};
+  const row = h("div",{class:"row"});
+  fields.forEach(f => {
+    const w = h("div");
+    w.append(h("label",{},f.replace(/_/g," ")));
+    const i = h("input",{placeholder:f});
+    inputs[f] = i; w.append(i); row.append(w);
+  });
+  form.append(row);
+  const btn = h("button",{},"Add");
+  btn.onclick = async () => {
+    const data = {}; for (const [k,i] of Object.entries(inputs)) if (i.value) data[k]=i.value;
+    if (!data.full_name) return alert("full_name required");
+    await api("/prospects",{method:"POST",body:data});
+    render();
+  };
+  form.append(btn);
+  v.append(form);
+
+  // List
+  const q = h("input",{placeholder:"search…"});
+  q.oninput = () => loadList();
+  const listCard = h("div",{class:"card"});
+  listCard.append(q);
+  const tbl = h("table");
+  listCard.append(tbl);
+  v.append(listCard);
+  async function loadList() {
+    const items = await api("/prospects?q=" + encodeURIComponent(q.value));
+    tbl.innerHTML = "";
+    tbl.append(h("tr",{},h("th",{},"Name"),h("th",{},"Company"),h("th",{},"Title"),h("th",{},"Status")));
+    items.forEach(p => {
+      const tr = h("tr");
+      tr.append(h("td",{},h("a",{href:"#/prospects/"+p.id},p.full_name)));
+      tr.append(h("td",{},p.company_name||""));
+      tr.append(h("td",{},p.title||""));
+      tr.append(h("td",{},h("span",{class:"pill"},p.status)));
+      tbl.append(tr);
+    });
+  }
+  loadList();
+}
+
+async function viewProspect({id}) {
+  const v = $("#view");
+  const p = await api("/prospects/"+id);
+  v.append(h("h2",{},p.full_name));
+  v.append(h("div",{class:"muted mb"},
+    [p.title, p.company_name, p.location].filter(Boolean).join(" • ")));
+
+  // Status / warmth
+  const meta = h("div",{class:"card"});
+  const statusSel = h("select");
+  META.prospect_status.forEach(s => {
+    const o = h("option",{value:s},s); if (p.status===s) o.selected = true;
+    statusSel.append(o);
+  });
+  statusSel.onchange = () => api("/prospects/"+id, {method:"PATCH", body:{status: statusSel.value}});
+  meta.append(h("label",{},"Status"), statusSel);
+  v.append(meta);
+
+  // Signals
+  const sigCard = h("div",{class:"card"});
+  sigCard.append(h("h2",{},"Signals"));
+  (p.signals||[]).forEach(s => {
+    sigCard.append(h("div",{class:"mb"},
+      h("span",{class:"pill " + (s.safe_to_reference ? "good":"warn")}, s.type),
+      " ", s.text));
+  });
+  // Add signal
+  const sigType = h("select"); META.signal_types.forEach(t => sigType.append(h("option",{value:t},t)));
+  const sigSrc = h("select"); META.signal_sources.forEach(t => sigSrc.append(h("option",{value:t},t)));
+  const sigTxt = h("textarea",{placeholder:"Observed fact (only what you actually saw)…"});
+  const sigSafe = h("input",{type:"checkbox"}); sigSafe.checked = true;
+  const safeWrap = h("label",{},sigSafe," safe to reference in outreach");
+  const addSig = h("button",{},"Add signal");
+  addSig.onclick = async () => {
+    if (!sigTxt.value) return;
+    await api("/signals",{method:"POST", body:{
+      prospect_id: id, type: sigType.value, source: sigSrc.value,
+      text: sigTxt.value, safe_to_reference: sigSafe.checked,
+    }});
+    render();
+  };
+  sigCard.append(h("div",{class:"row"}, sigType, sigSrc), sigTxt, safeWrap, addSig);
+  v.append(sigCard);
+
+  // Generator shortcut
+  const gen = h("button",{},"Generate messages");
+  gen.onclick = () => location.hash = "#/generator?prospect=" + id;
+  v.append(gen);
+
+  // Messages
+  const mCard = h("div",{class:"card"});
+  mCard.append(h("h2",{},"Messages"));
+  (p.messages||[]).forEach(m => {
+    mCard.append(h("div",{class:"candidate mb"},
+      h("div",{class:"muted"}, m.status + " • " + (m.message_type||"")),
+      h("pre",{},m.body)));
+  });
+  v.append(mCard);
+}
+
+async function viewCompanies() {
+  const v = $("#view");
+  v.append(h("h2",{},"Companies"));
+  const form = h("div",{class:"card"});
+  const name = h("input",{placeholder:"name"});
+  const ind = h("input",{placeholder:"industry"});
+  const loc = h("input",{placeholder:"location"});
+  const btn = h("button",{},"Add");
+  btn.onclick = async () => {
+    if (!name.value) return;
+    await api("/companies",{method:"POST",body:{name:name.value, industry:ind.value, location:loc.value}});
+    render();
+  };
+  form.append(h("div",{class:"row"},name,ind,loc), btn);
+  v.append(form);
+  const items = await api("/companies");
+  const tbl = h("table");
+  tbl.append(h("tr",{},h("th",{},"Name"),h("th",{},"Industry"),h("th",{},"Location")));
+  items.forEach(c => tbl.append(h("tr",{},
+    h("td",{},h("a",{href:"#/companies/"+c.id},c.name)),
+    h("td",{},c.industry||""),
+    h("td",{},c.location||""))));
+  v.append(h("div",{class:"card"},tbl));
+}
+
+async function viewCompany({id}) {
+  const v = $("#view");
+  const c = await api("/companies/"+id);
+  v.append(h("h2",{},c.name));
+  v.append(h("div",{class:"muted mb"},[c.industry,c.location].filter(Boolean).join(" • ")));
+  v.append(h("div",{class:"card"}, h("h2",{},"Notes"), h("pre",{},c.notes||"—")));
+  const sc = h("div",{class:"card"});
+  sc.append(h("h2",{},"Signals"));
+  (c.signals||[]).forEach(s => sc.append(h("div",{},
+    h("span",{class:"pill"},s.type)," ",s.text)));
+  v.append(sc);
+  const pc = h("div",{class:"card"});
+  pc.append(h("h2",{},"Prospects at this company"));
+  (c.prospects||[]).forEach(p => pc.append(h("div",{},
+    h("a",{href:"#/prospects/"+p.id},p.full_name),
+    " — ", h("span",{class:"muted"},p.title||""))));
+  v.append(pc);
+}
+
+async function viewGenerator() {
+  const v = $("#view");
+  v.append(h("h2",{},"Generator"));
+  const params = new URLSearchParams((location.hash.split("?")[1])||"");
+  const prospects = await api("/prospects");
+  const sel = h("select");
+  sel.append(h("option",{value:""},"— select prospect —"));
+  prospects.forEach(p => {
+    const o = h("option",{value:p.id}, p.full_name + (p.company_name? " ("+p.company_name+")":""));
+    if (params.get("prospect") === p.id) o.selected = true;
+    sel.append(o);
+  });
+  const card = h("div",{class:"card"});
+  card.append(h("label",{},"Prospect"), sel);
+
+  // LinkedIn profile context inputs (manual / lawful workflow).
+  const linkedinUrl = h("input",{placeholder:"LinkedIn profile URL"});
+  const headline = h("input",{placeholder:"Headline (optional)"});
+  const featuredTopics = h("input",{placeholder:"Featured topics (optional)"});
+  const aboutText = h("textarea",{placeholder:"Paste profile / about text (optional)"});
+  const instruction = h("textarea",{placeholder:"Custom instruction — e.g. 'keep it short, focus on credibility'"});
+
+  // Strategy override
+  const mtype = h("select"); mtype.append(h("option",{value:""},"— message type —"));
+  META.message_types.forEach(t => mtype.append(h("option",{value:t},t)));
+  const trigger = h("select"); trigger.append(h("option",{value:""},"— primary trigger —"));
+  META.primary_triggers.forEach(t => trigger.append(h("option",{value:t},t)));
+  const style = h("select"); style.append(h("option",{value:""},"— style —"));
+  META.communication_styles.forEach(t => style.append(h("option",{value:t},t)));
+  const goal = h("select"); goal.append(h("option",{value:""},"— goal —"));
+  META.outreach_goals.forEach(t => goal.append(h("option",{value:t},t)));
+
+  card.append(h("label",{},"LinkedIn URL"), linkedinUrl);
+  card.append(h("div",{class:"row"},
+    h("div",{},h("label",{},"Headline"), headline),
+    h("div",{},h("label",{},"Featured topics"), featuredTopics)));
+  card.append(h("label",{},"Pasted profile / about text"), aboutText);
+  card.append(h("label",{},"Custom instruction"), instruction);
+  card.append(h("label",{},"Strategy override"));
+  card.append(h("div",{class:"row"}, mtype, trigger, style, goal));
+
+  // Prospecting handoff: prefill from sessionStorage if available.
+  let handoff = null;
+  try {
+    const raw = sessionStorage.getItem('signalstack_handoff');
+    if (raw) { handoff = JSON.parse(raw); sessionStorage.removeItem('signalstack_handoff'); }
+  } catch(e) {}
+  if (handoff) {
+    if (handoff.contact && handoff.contact.linkedin_url) linkedinUrl.value = handoff.contact.linkedin_url;
+    if (handoff.contact && handoff.contact.title) headline.value = handoff.contact.title;
+    const ctxParts = [];
+    if (handoff.relationship_stage) ctxParts.push('Relationship stage: ' + handoff.relationship_stage);
+    if (handoff.group && handoff.group.name) ctxParts.push('Group: ' + handoff.group.name);
+    if (handoff.last_touch && handoff.last_touch.summary) ctxParts.push('Last touch: ' + handoff.last_touch.summary);
+    if (handoff.trigger && handoff.trigger.title) ctxParts.push('Signal: ' + handoff.trigger.title);
+    if (handoff.trigger && handoff.trigger.summary) ctxParts.push(handoff.trigger.summary);
+    if (ctxParts.length) aboutText.value = ctxParts.join('\n');
+    if (handoff.suggested_angle) instruction.value = handoff.suggested_angle;
+    const banner = h("div",{class:"card",style:"border-color:var(--accent);margin-bottom:0"});
+    const contactLabel = handoff.contact
+      ? [handoff.contact.first_name, handoff.contact.last_name].filter(Boolean).join(' ') || 'Contact'
+      : 'Contact';
+    banner.append(h("div",{style:"color:var(--accent);font-weight:600;font-size:13px;margin-bottom:4px"},
+      "Prospecting handoff: " + (handoff.title || contactLabel)));
+    const details = [];
+    if (handoff.contact && handoff.contact.email) details.push('Email: ' + handoff.contact.email);
+    if (handoff.channel) details.push('Channel: ' + handoff.channel);
+    if (handoff.task_type) details.push('Task: ' + handoff.task_type);
+    if (details.length) banner.append(h("div",{style:"color:var(--muted);font-size:12px"}, details.join(' · ')));
+    card.prepend(banner);
+  }
+
+  const btn = h("button",{},"Generate");
+  card.append(btn);
+  v.append(card);
+
+  const out = h("div");
+  v.append(out);
+
+  btn.onclick = async () => {
+    if (!sel.value) { out.innerHTML = ""; out.append(h("div",{class:"card"},"Pick a prospect first.")); return; }
+    out.innerHTML = "Generating…";
+    btn.disabled = true;
+    try {
+      const profile = {
+        linkedin_url: linkedinUrl.value || undefined,
+        headline: headline.value || undefined,
+        featured_topics: featuredTopics.value || undefined,
+        about_text: aboutText.value || undefined,
+      };
+      const strategy = {
+        message_type: mtype.value || undefined,
+        primary_trigger: trigger.value || undefined,
+        communication_style: style.value || undefined,
+        outreach_goal: goal.value || undefined,
+      };
+      const r = await api("/generate",{method:"POST", body:{
+        prospect_id: sel.value, n: 4,
+        instruction: instruction.value || undefined,
+        profile, strategy,
+      }});
+      out.innerHTML = "";
+      if (r.error) {
+        out.append(h("div",{class:"card"}, r.message || r.error));
+        return;
+      }
+
+      // ---- Confidence banner (high/medium/low) ----
+      const confLevel = (r.confidence_level || (r.input_quality && r.input_quality.confidence_level) || "high").toLowerCase();
+      const confBanner = h("div", {class: "confidence-banner " + confLevel});
+      const confHeadlines = {
+        high: "HIGH confidence — strong signals available. Messages are sharp and signal-driven.",
+        medium: "MEDIUM confidence — pattern-based messages anchored in profile and market context.",
+        low: "LOW confidence — hypothesis-based messages leaning on role and market patterns. Add a signal, note, or richer profile for sharper output.",
+      };
+      confBanner.append(h("div", {}, confHeadlines[confLevel] || confHeadlines.high));
+      out.append(confBanner);
+
+      // ---- Pipeline summary / provider + stages + degradation flags ----
+      const pipelineCard = h("div",{class:"card"});
+      pipelineCard.append(h("h2",{},"Pipeline"));
+      const provLine = "Provider: " + (r.provider || "?") +
+        " • confidence: " + confLevel +
+        (r.minimal_mode ? " • minimal mode" : "") +
+        (r.insight_source ? " • insights: " + r.insight_source : "") +
+        (r.insight_error ? " • insight_error: " + r.insight_error : "");
+      pipelineCard.append(h("div",{class:"muted"}, provLine));
+      if (r.warning) {
+        pipelineCard.append(h("div",{class:"muted", style:"color:var(--warn)"}, r.warning));
+      }
+      if (r.stages) {
+        const degraded = Object.entries(r.stages)
+          .filter(([k,v]) => typeof v === "string" && (v.includes("failed") || v.includes("degraded") || v.includes("skipped")))
+          .map(([k,v]) => k+"="+v);
+        if (degraded.length) {
+          pipelineCard.append(h("div",{class:"muted"}, "Non-OK stages: " + degraded.join(", ")));
+        }
+        const cs = r.stages.candidate_validation_summary;
+        if (cs) {
+          pipelineCard.append(h("div",{class:"muted"},
+            "Validation: raw="+cs.raw+" accepted="+cs.accepted+" low_context="+cs.low_context+" rejected="+cs.rejected));
+        }
+        const ms = r.stages.message_critic_summary;
+        if (ms) {
+          pipelineCard.append(h("div",{class:"muted"},
+            "Critic: accepted="+(ms.accepted||0)+" rewrite="+(ms.rewrite||0)+" rejected="+(ms.rejected||0)));
+        }
+      }
+      // Input quality summary
+      if (r.input_quality) {
+        const iq = r.input_quality;
+        pipelineCard.append(h("div",{class:"muted"},
+          "Input quality tier "+iq.tier+" ("+iq.input_quality_score+") • strongest signal: "+
+          (iq.strongest_signal_type||"none")+
+          " • strongest observation: "+(iq.strongest_observation||"none")));
+      }
+      out.append(pipelineCard);
+
+      // ---- Observations ----
+      if ((r.distilled_observations||[]).length) {
+        const obsCard = h("div",{class:"card"});
+        obsCard.append(h("h2",{},"Observations"));
+        r.distilled_observations.forEach(o => {
+          obsCard.append(h("div",{class:"mb"},
+            h("div",{}, o.text),
+            h("div",{class:"muted"},
+              "[" + (o.source||"?") + "] strength: " + (o.strength||"?")),
+          ));
+        });
+        out.append(obsCard);
+      }
+
+      // ---- Insights ----
+      if ((r.insights||[]).length) {
+        const insCard = h("div",{class:"card"});
+        insCard.append(h("h2",{},"Insights"));
+        r.insights.forEach(i => {
+          insCard.append(h("div",{class:"mb"},
+            h("div",{}, i.text),
+            h("div",{class:"muted"},
+              "[" + (i.type||"?") + "] confidence: " + (i.confidence||"?") +
+              " • source: " + (i.source||"heuristic")),
+          ));
+        });
+        out.append(insCard);
+      }
+
+      // ---- Context expansion / hypotheses ----
+      const expansion = r.context_expansion || {};
+      if ((expansion.hypotheses||[]).length) {
+        const hypCard = h("div",{class:"card"});
+        hypCard.append(h("h2",{},"Context Expansion — Hypotheses"));
+        hypCard.append(h("div",{class:"muted"},
+          "Inferred role: "+(expansion.inferred_role_family||"unknown")+
+          " • market: "+(expansion.inferred_market||"unknown")+
+          " • activity: "+(expansion.inferred_activity||"unknown")+
+          " • confidence: "+(expansion.confidence_level||"?")));
+        hypCard.append(h("div",{class:"muted", style:"margin-bottom:8px"},
+          "These are plausible situational possibilities inferred from role and market context. They are NOT facts about this person — they frame how low-confidence messages are written."));
+        expansion.hypotheses.forEach(hy => {
+          hypCard.append(h("div",{class:"mb"},
+            h("div",{}, hy.text),
+            h("div",{class:"muted"},
+              "[" + (hy.basis||"?") + "] strength: " + (hy.strength||"?")),
+          ));
+        });
+        out.append(hypCard);
+      }
+
+      // ---- Strategies chosen ----
+      if ((r.strategies||[]).length) {
+        const stCard = h("div",{class:"card"});
+        stCard.append(h("h2",{},"Strategies selected"));
+        r.strategies.forEach(s => {
+          stCard.append(h("div",{class:"mb"},
+            h("div",{}, s.angle + " • " + (s.message_type||"?") + " • " + (s.primary_trigger||"?")),
+            (s.reasons && s.reasons.length)
+              ? h("div",{class:"muted"}, "why: " + s.reasons.join(", "))
+              : null,
+          ));
+        });
+        out.append(stCard);
+      }
+
+      const okCard = h("div",{class:"card"});
+      okCard.append(h("h2",{},"Candidates"));
+      if (r.playbook && r.playbook.name) {
+        const pbCard = h("div",{class:"card"});
+        pbCard.append(h("h2",{},"Industry playbook: "+r.playbook.name));
+        if (r.playbook.description) pbCard.append(h("div",{class:"muted"},r.playbook.description));
+        if ((r.playbook.categories||[]).length) {
+          pbCard.append(h("div",{class:"muted"},"Categories loaded: "+r.playbook.categories.join(", ")));
+        }
+        if ((r.playbook.preferred_angles||[]).length) {
+          pbCard.append(h("div",{class:"muted"},"Preferred angles: "+r.playbook.preferred_angles.slice(0,5).join(", ")));
+        }
+        (r.playbook.entries||[]).forEach(e => {
+          pbCard.append(h("div",{class:"mb"},
+            h("div",{},"["+e.category+"] "+e.title+" ("+(e.confidence||"")+")"),
+            e.description ? h("div",{class:"muted"},e.description) : null,
+          ));
+        });
+        if (r.playbook.reasoning) pbCard.append(h("div",{class:"muted"},r.playbook.reasoning));
+        out.append(pbCard);
+      }
+      if (!(r.candidates||[]).length && !(r.rejected||[]).length && !(r.low_context_candidates||[]).length) {
+        okCard.append(h("div",{class:"muted"},
+          "No candidates were generated. The pipeline will try hypothesis-based messages even on thin context — if you're seeing this, something in the provider or validator pipeline likely failed. Check the Pipeline card above for stage errors."));
+      }
+      const renderCandidate = (c) => {
+      const wrap = h("div",{class:"candidate mb"});
+      // Basis + confidence badges so the user can see at a glance
+      // whether a message is signal-based, observation-based, or
+      // hypothesis-based, and at what confidence level.
+      const basis = (c.message_basis || "observation_based");
+      const basisLabel = {
+        signal_based: "signal-based",
+        observation_based: "observation-based",
+        hypothesis_based: "hypothesis-based",
+      }[basis] || basis;
+      const basisClass = {
+        signal_based: "signal",
+        observation_based: "observation",
+        hypothesis_based: "hypothesis",
+      }[basis] || "observation";
+      const badgeRow = h("div", {class: "mb"});
+      badgeRow.append(h("span", {class: "basis-tag " + basisClass}, basisLabel));
+      if (c.confidence_level) {
+        badgeRow.append(h("span", {class: "conf-tag"}, c.confidence_level + " confidence"));
+      }
+      wrap.append(badgeRow);
+      wrap.append(h("pre",{},c.body));
+      const ac = c.anti_copy || {};
+      wrap.append(h("div",{class:"muted"},
+        c.message_type+" • "+c.primary_trigger
+        +" • grounding "+(c.grounding && c.grounding.score)
+        +" • "+(ac.char_count||c.body.length)+" chars"
+        +" • overlap "+(ac.raw_source_overlap_score ?? 0)
+        +(ac.passes_anti_copy_check===false ? " • COPY-FAIL" : "")));
+      if (c.critique) {
+        const cr = c.critique;
+        const s = cr.scores || {};
+        wrap.append(h("div",{class:"muted"},
+          "Critique: "+cr.verdict+" ("+cr.overall_score+") • "+
+          "spec "+(s.specificity||0)+" • natural "+(s.naturalness||0)+" • "+
+          "insight "+(s.insightfulness||0)+" • generic "+(s.genericity||0)+" • "+
+          "peer "+(s.peer_credibility||0)));
+        if ((cr.notes||[]).length) {
+          wrap.append(h("div",{class:"muted"}, "Critic notes: "+cr.notes.join(", ")));
+        }
+      }
+      if (c.observation && c.observation.safe_reference_text) {
+        wrap.append(h("div",{class:"muted"},
+          "Observation: "+c.observation.safe_reference_text));
+      }
+      wrap.append(h("div",{class:"muted"},"Rationale: "+c.rationale));
+      if (c.selected_angle) {
+        wrap.append(h("div",{class:"muted"},"Selected angle: "+c.selected_angle));
+      }
+      if (c.insight_id) {
+        const used = (r.insights||[]).find(i => i.id === c.insight_id);
+        if (used) {
+          wrap.append(h("div",{class:"muted"},"Insight used: "+used.text));
+        }
+      }
+      if ((c.playbook_entries_used||[]).length) {
+        wrap.append(h("div",{class:"muted"},
+          "Playbook entries used: " +
+          c.playbook_entries_used.map(e => "["+e.category+"] "+e.title).join(" • ")));
+      }
+      if ((c.knowledge_entries_used||[]).length) {
+        const used = c.knowledge_entries_used;
+        const sample = used.slice(0,4).map(e => "["+e.category+"] "+e.principle_name).join(" • ");
+        const more = used.length > 4 ? " (+"+(used.length-4)+" more)" : "";
+        wrap.append(h("div",{class:"muted"},
+          "Knowledge dataset: " + sample + more +
+          "  · " + (c.knowledge_source_ids_used||[]).length + " sources"));
+      }
+      if (c.playbook_reasoning) {
+        wrap.append(h("div",{class:"muted"},"Why: "+c.playbook_reasoning));
+      }
+      if ((c.signal_ids||[]).length) {
+        wrap.append(h("div",{class:"muted"},"Signals: "+c.signal_ids.join(", ")));
+      }
+      if ((c.facts_used||[]).length) {
+        wrap.append(h("div",{class:"muted"},"Facts: "+c.facts_used.join(", ")));
+      }
+      const save = h("button",{},"Save draft");
+      save.onclick = async () => {
+        await api("/messages",{method:"POST",body:{...c, prospect_id: sel.value}});
+        save.textContent = "Saved";
+      };
+      wrap.append(save);
+      return wrap;
+      };
+      (r.candidates||[]).forEach(c => okCard.append(renderCandidate(c)));
+      out.append(okCard);
+
+      if ((r.rewrite_candidates||[]).length) {
+        const rwc = h("div",{class:"card"});
+        rwc.append(h("h2",{},"Needs rewrite (flagged by critic)"));
+        r.rewrite_candidates.forEach(c => rwc.append(renderCandidate(c)));
+        out.append(rwc);
+      }
+
+      if ((r.low_context_candidates||[]).length) {
+        const lcc = h("div",{class:"card"});
+        lcc.append(h("h2",{},"Flagged as thin on specificity"));
+        lcc.append(h("div",{class:"muted"},
+          "These candidates were demoted by the anti-generic validator at high confidence — they read as broad even though real signals were available. Use them as drafts rather than as final messages."));
+        r.low_context_candidates.forEach(c => lcc.append(renderCandidate(c)));
+        out.append(lcc);
+      }
+
+      if (r.rejected?.length) {
+        const rc = h("div",{class:"card rejected"});
+        rc.append(h("h2",{},"Rejected by grounding"));
+        r.rejected.forEach(c => {
+          const reasons = [];
+          if (c.grounding && c.grounding.violations) reasons.push(...c.grounding.violations);
+          if (c.critique && c.critique.verdict === "reject") {
+            reasons.push("critic:"+c.critique.verdict);
+            if (c.critique.notes) reasons.push(...c.critique.notes);
+          }
+          rc.append(h("div",{class:"candidate mb"},
+            h("pre",{},c.body),
+            h("div",{class:"muted"}, "Reasons: " + reasons.join(", "))));
+        });
+        out.append(rc);
+      }
+    } catch (err) {
+      out.innerHTML = "";
+      out.append(h("div",{class:"card"}, "Generation failed: " + (err && err.message || err)));
+    } finally {
+      btn.disabled = false;
+    }
+  };
+}
+
+async function viewMessages() {
+  const v = $("#view");
+  v.append(h("h2",{},"Messages"));
+  const items = await api("/messages");
+  const tbl = h("table");
+  tbl.append(h("tr",{},h("th",{},"Created"),h("th",{},"Type"),h("th",{},"Status"),h("th",{},"Body"),h("th",{},"Outcome")));
+  items.forEach(m => {
+    const tr = h("tr");
+    tr.append(h("td",{},(m.created_at||"").slice(0,10)));
+    tr.append(h("td",{},m.message_type||""));
+    tr.append(h("td",{},m.status));
+    tr.append(h("td",{},m.body.slice(0,80)));
+    const sel = h("select");
+    sel.append(h("option",{value:""},"—"));
+    META.message_outcomes.forEach(o => sel.append(h("option",{value:o},o)));
+    sel.onchange = () => sel.value && api("/messages/"+m.id+"/outcome",{method:"POST",body:{outcome:sel.value}});
+    tr.append(h("td",{},sel));
+    tbl.append(tr);
+  });
+  v.append(h("div",{class:"card"},tbl));
+}
+
+// ----------------- Knowledge Dataset -----------------
+
+function _ksTypeLabel(t) {
+  return ({
+    youtube_video: "YouTube",
+    article: "Article",
+    note: "Note",
+    playbook: "Playbook",
+    transcript: "Transcript",
+    framework: "Framework",
+    manual_entry: "Manual",
+    podcast: "Podcast",
+    other: "Other",
+  })[t] || t;
+}
+
+function _ksTypeClass(t) {
+  return ({
+    youtube_video: "video",
+    article: "article",
+    podcast: "podcast",
+    transcript: "transcript",
+    note: "note",
+    playbook: "playbook",
+    framework: "framework",
+    manual_entry: "manual",
+    other: "manual",
+  })[t] || "manual";
+}
+
+function _ksTypeIcon(t) {
+  return ({
+    youtube_video: "▶",
+    article: "\u2756",
+    podcast: "\u25C9",
+    transcript: "\u00B6",
+    note: "\u270E",
+    playbook: "\u2692",
+    framework: "\u25A3",
+    manual_entry: "\u270D",
+    other: "\u2022",
+  })[t] || "\u2022";
+}
+
+function _ksStatusClass(s) {
+  return (s || "RAW").toLowerCase();
+}
+
+function _ksToast(msg, opts) {
+  const t = h("div", {class: "kn-toast" + (opts && opts.error ? " error" : "")}, msg);
+  document.body.append(t);
+  setTimeout(() => t.remove(), 3200);
+}
+
+function _ksKnowledgeHeader(active) {
+  const wrap = h("div", {class: "kn-header"});
+  const title = h("div", {class: "kn-title"},
+    h("h1", {}, "Knowledge dataset"),
+    h("p", {}, "Reusable strategy, style, and angle knowledge. Videos, articles, " +
+      "notes, podcasts, frameworks, playbooks. Fuels the generator's tone and framing — " +
+      "never used as prospect personalization."));
+  const actions = h("div", {class: "kn-actions"});
+  const addBtn = h("button", {class: "kn-btn"}, "+ Add source");
+  addBtn.onclick = () => location.hash = "#/knowledge/new";
+  const pbBtn = h("button", {class: "kn-btn ghost" + (active === "playbooks" ? " active" : "")}, "Playbooks");
+  pbBtn.onclick = () => location.hash = "#/knowledge/playbooks";
+  const srcBtn = h("button", {class: "kn-btn ghost" + (active === "sources" ? " active" : "")}, "Sources");
+  srcBtn.onclick = () => location.hash = "#/knowledge";
+  actions.append(srcBtn, pbBtn, addBtn);
+  wrap.append(title, actions);
+  return wrap;
+}
+
+async function viewKnowledgeList() {
+  const v = $("#view");
+  const page = h("div", {class: "kn-page"});
+  v.append(page);
+  page.append(_ksKnowledgeHeader("sources"));
+
+  // Stats row
+  const statsWrap = h("div", {class: "kn-stats"});
+  page.append(statsWrap);
+  try {
+    const s = await api("/knowledge/stats");
+    const stat = (label, value, hint) => statsWrap.append(h("div", {class: "kn-stat"},
+      h("div", {class: "kn-stat-label"}, label),
+      h("div", {class: "kn-stat-value"}, String(value || 0)),
+      hint ? h("div", {class: "kn-stat-hint"}, hint) : null,
+    ));
+    stat("Total sources", s.total_sources, (s.active_sources || 0) + " active");
+    stat("Extracted entries", s.total_entries, (s.active_entries || 0) + " active");
+    stat("Videos", s.videos);
+    stat("Articles", s.articles);
+    stat("Notes", (s.notes || 0) + (s.manual_entries || 0));
+    stat("Podcasts", s.podcasts);
+    stat("Playbooks", s.playbooks);
+    stat("Frameworks", s.frameworks);
+  } catch (e) {
+    statsWrap.append(h("div", {class: "kn-stat"},
+      h("div", {class: "kn-stat-label"}, "Stats unavailable"),
+      h("div", {class: "kn-stat-hint"}, e.message)));
+  }
+
+  // Toolbar
+  const tools = h("div", {class: "kn-toolbar"});
+  const searchField = h("div", {class: "kn-field kn-field-search"});
+  const search = h("input", {type: "search", placeholder: "Search title, summary, notes…"});
+  searchField.append(h("label", {}, "Search"), search);
+
+  const typeField = h("div", {class: "kn-field"});
+  const typeSel = h("select");
+  typeSel.append(h("option", {value: ""}, "All types"));
+  (META.knowledge_source_types || []).forEach(t =>
+    typeSel.append(h("option", {value: t}, _ksTypeLabel(t))));
+  typeField.append(h("label", {}, "Type"), typeSel);
+
+  const activeField = h("div", {class: "kn-field"});
+  const activeSel = h("select");
+  [["all", "All"], ["active", "Active only"], ["inactive", "Inactive only"]].forEach(([v, l]) =>
+    activeSel.append(h("option", {value: v}, l)));
+  activeField.append(h("label", {}, "Active"), activeSel);
+
+  const statusField = h("div", {class: "kn-field"});
+  const statusSel = h("select");
+  statusSel.append(h("option", {value: ""}, "Any status"));
+  (META.knowledge_extraction_status || []).forEach(s =>
+    statusSel.append(h("option", {value: s}, s)));
+  statusField.append(h("label", {}, "Status"), statusSel);
+
+  const tagField = h("div", {class: "kn-field"});
+  const tagInput = h("input", {placeholder: "tag…"});
+  tagField.append(h("label", {}, "Tag"), tagInput);
+
+  const viewToggle = h("div", {class: "kn-view-toggle"});
+  const gridBtn = h("button", {class: "active"}, "Grid");
+  const tableBtn = h("button", {}, "Table");
+  viewToggle.append(gridBtn, tableBtn);
+  const viewField = h("div", {class: "kn-field", style: "flex: 0 0 auto"});
+  viewField.append(h("label", {}, "View"), viewToggle);
+
+  tools.append(searchField, typeField, activeField, statusField, tagField, viewField);
+  page.append(tools);
+
+  // Results container
+  const listWrap = h("div");
+  page.append(listWrap);
+
+  let mode = "grid";
+  gridBtn.onclick = () => { mode = "grid"; gridBtn.classList.add("active"); tableBtn.classList.remove("active"); reload(); };
+  tableBtn.onclick = () => { mode = "table"; tableBtn.classList.add("active"); gridBtn.classList.remove("active"); reload(); };
+
+  function renderCard(s) {
+    const card = h("div", {class: "kn-source-card"});
+    const top = h("div", {class: "kn-card-top"});
+    top.append(h("div", {class: "kn-card-icon"}, _ksTypeIcon(s.source_type)));
+    const badges = h("div", {class: "kn-card-badges"});
+    badges.append(h("span", {class: "kn-type " + _ksTypeClass(s.source_type)}, _ksTypeLabel(s.source_type)));
+    badges.append(h("span", {class: "kn-status " + _ksStatusClass(s.extraction_status)}, s.extraction_status || "RAW"));
+    top.append(badges);
+    card.append(top);
+
+    card.append(h("h3", {}, s.title || "(untitled)"));
+    if (s.summary) card.append(h("div", {class: "kn-card-summary"}, s.summary));
+    else if (s.notes) card.append(h("div", {class: "kn-card-summary"}, s.notes));
+
+    if ((s.tags || []).length) {
+      const tagRow = h("div", {class: "kn-card-tags"});
+      (s.tags || []).slice(0, 6).forEach(t => tagRow.append(h("span", {class: "kn-tag"}, t)));
+      card.append(tagRow);
+    }
+
+    const meta = h("div", {class: "kn-card-meta"});
+    const left = h("div", {class: "kn-meta-left"});
+    left.append(h("span", {class: "kn-entry-chip"},
+      h("strong", {}, String(s.entry_count || 0)), " entries"));
+    left.append(h("span", {},
+      h("span", {class: "kn-active-dot" + (s.active ? "" : " off")}),
+      s.active ? "Active" : "Inactive"));
+    left.append(h("span", {}, (s.created_at || "").slice(0, 10)));
+    meta.append(left);
+
+    const actions = h("div", {class: "kn-card-actions"});
+    const viewLink = h("a", {href: "#/knowledge/" + s.id}, "View");
+    const extLink = h("a", {href: "#"}, "Extract");
+    extLink.onclick = async (ev) => {
+      ev.preventDefault(); ev.stopPropagation();
+      extLink.textContent = "…";
+      try {
+        await api("/knowledge/sources/" + s.id + "/extract", {method: "POST"});
+        _ksToast("Extraction complete");
+        reload();
+      } catch (e) {
+        extLink.textContent = "Failed";
+        _ksToast("Extract failed: " + e.message, {error: true});
+      }
+    };
+    const archLink = h("a", {href: "#", class: "danger"}, "Archive");
+    archLink.onclick = async (ev) => {
+      ev.preventDefault(); ev.stopPropagation();
+      if (!confirm("Archive this source?")) return;
+      try {
+        await api("/knowledge/sources/" + s.id + "/archive", {method: "POST"});
+        _ksToast("Source archived");
+        reload();
+      } catch (e) { _ksToast("Archive failed: " + e.message, {error: true}); }
+    };
+    actions.append(viewLink, extLink, archLink);
+    meta.append(actions);
+    card.append(meta);
+
+    card.onclick = (ev) => {
+      if (ev.target.tagName === "A") return;
+      location.hash = "#/knowledge/" + s.id;
+    };
+    return card;
+  }
+
+  function renderTable(items) {
+    const wrap = h("div", {class: "kn-table"});
+    const tbl = h("table");
+    const thead = h("thead");
+    thead.append(h("tr", {},
+      h("th", {}, "Title"),
+      h("th", {}, "Type"),
+      h("th", {}, "Status"),
+      h("th", {}, "Active"),
+      h("th", {}, "Entries"),
+      h("th", {}, "Tags"),
+      h("th", {}, "Created"),
+      h("th", {}, "Actions"),
+    ));
+    tbl.append(thead);
+    const tbody = h("tbody");
+    items.forEach(s => {
+      const tr = h("tr");
+      const titleCell = h("td", {class: "kn-table-title"},
+        h("a", {href: "#/knowledge/" + s.id}, s.title || "(untitled)"),
+        s.source_url ? h("div", {class: "kn-table-url"}, s.source_url) : null,
+      );
+      tr.append(titleCell);
+      tr.append(h("td", {}, h("span", {class: "kn-type " + _ksTypeClass(s.source_type)}, _ksTypeLabel(s.source_type))));
+      tr.append(h("td", {}, h("span", {class: "kn-status " + _ksStatusClass(s.extraction_status)}, s.extraction_status || "RAW")));
+      tr.append(h("td", {}, h("span", {},
+        h("span", {class: "kn-active-dot" + (s.active ? "" : " off")}),
+        s.active ? "yes" : "no")));
+      tr.append(h("td", {}, String(s.entry_count || 0)));
+      const tagsCell = h("td");
+      (s.tags || []).slice(0, 4).forEach(t => tagsCell.append(h("span", {class: "kn-tag"}, t), " "));
+      tr.append(tagsCell);
+      tr.append(h("td", {}, (s.created_at || "").slice(0, 10)));
+      const actions = h("td", {class: "kn-table-actions"});
+      const viewA = h("a", {href: "#/knowledge/" + s.id}, "View");
+      const extA = h("a", {href: "#"}, "Extract");
+      extA.onclick = async (ev) => {
+        ev.preventDefault();
+        extA.textContent = "…";
+        try { await api("/knowledge/sources/" + s.id + "/extract", {method: "POST"}); reload(); }
+        catch (e) { extA.textContent = "Failed"; _ksToast("Extract failed: " + e.message, {error: true}); }
+      };
+      const archA = h("a", {href: "#"}, "Archive");
+      archA.onclick = async (ev) => {
+        ev.preventDefault();
+        if (!confirm("Archive this source?")) return;
+        try { await api("/knowledge/sources/" + s.id + "/archive", {method: "POST"}); reload(); }
+        catch (e) { _ksToast("Archive failed: " + e.message, {error: true}); }
+      };
+      actions.append(viewA, extA, archA);
+      tr.append(actions);
+      tbody.append(tr);
+    });
+    tbl.append(tbody);
+    wrap.append(tbl);
+    return wrap;
+  }
+
+  async function reload() {
+    listWrap.innerHTML = "";
+    const loader = h("div", {class: "kn-empty"},
+      h("div", {}, h("span", {class: "kn-spinner"}), "Loading…"));
+    listWrap.append(loader);
+
+    const params = new URLSearchParams();
+    if (search.value) params.set("q", search.value);
+    if (typeSel.value) params.set("source_type", typeSel.value);
+    if (activeSel.value && activeSel.value !== "all") {
+      params.set("active", activeSel.value === "active" ? "true" : "false");
+    }
+    if (statusSel.value) params.set("extraction_status", statusSel.value);
+    if (tagInput.value) params.set("tag", tagInput.value);
+
+    let items = [];
+    try {
+      items = await api("/knowledge/sources?" + params.toString());
+    } catch (e) {
+      listWrap.innerHTML = "";
+      listWrap.append(h("div", {class: "kn-empty"},
+        h("div", {class: "kn-empty-icon"}, "!"),
+        h("h3", {}, "Couldn't load sources"),
+        h("p", {}, e.message)));
+      return;
+    }
+
+    listWrap.innerHTML = "";
+    if (!items.length) {
+      const empty = h("div", {class: "kn-empty"});
+      empty.append(h("div", {class: "kn-empty-icon"}, "\u25A2"));
+      empty.append(h("h3", {}, "No sources match these filters"));
+      empty.append(h("p", {},
+        "Try clearing the filters, or add a video, article, podcast, or playbook " +
+        "to the dataset to give the generator more material to draw from."));
+      const addBtn = h("button", {class: "kn-btn"}, "+ Add source");
+      addBtn.onclick = () => location.hash = "#/knowledge/new";
+      empty.append(addBtn);
+      listWrap.append(empty);
+      return;
+    }
+
+    if (mode === "grid") {
+      const grid = h("div", {class: "kn-card-grid"});
+      items.forEach(s => grid.append(renderCard(s)));
+      listWrap.append(grid);
+    } else {
+      listWrap.append(renderTable(items));
+    }
+  }
+
+  let debounce;
+  search.oninput = () => { clearTimeout(debounce); debounce = setTimeout(reload, 180); };
+  typeSel.onchange = reload;
+  activeSel.onchange = reload;
+  statusSel.onchange = reload;
+  tagInput.oninput = () => { clearTimeout(debounce); debounce = setTimeout(reload, 180); };
+  reload();
+}
+
+async function viewKnowledgeNew() {
+  const v = $("#view");
+  const page = h("div", {class: "kn-page"});
+  v.append(page);
+
+  // Mini header
+  const header = h("div", {class: "kn-header"});
+  header.append(h("div", {class: "kn-title"},
+    h("h1", {}, "Add knowledge source"),
+    h("p", {},
+      "Save a video, article, podcast, note, framework, or playbook. " +
+      "Optionally extract structured knowledge entries from the source text immediately.")));
+  const headerActions = h("div", {class: "kn-actions"});
+  const backBtn = h("button", {class: "kn-btn ghost"}, "\u2190 Back to dataset");
+  backBtn.onclick = () => location.hash = "#/knowledge";
+  headerActions.append(backBtn);
+  header.append(headerActions);
+  page.append(header);
+
+  // Form
+  const grid = h("div", {class: "kn-form-grid"});
+
+  // Left column: content
+  const left = h("div", {class: "kn-form-col"});
+  left.append(h("h3", {}, "Content"));
+
+  const titleField = h("div", {class: "kn-field"});
+  const title = h("input", {placeholder: "e.g. 'Jeb Blount — LinkedIn prospecting framework'"});
+  titleField.append(h("label", {}, "Title *"), title);
+  left.append(titleField);
+
+  const urlField = h("div", {class: "kn-field"});
+  const url = h("input", {placeholder: "https://…"});
+  urlField.append(h("label", {}, "Source URL"), url);
+  left.append(urlField);
+
+  const summaryField = h("div", {class: "kn-field"});
+  const summary = h("textarea", {placeholder: "One-paragraph summary of what this source teaches."});
+  summaryField.append(h("label", {}, "Summary"), summary);
+  left.append(summaryField);
+
+  const rawField = h("div", {class: "kn-field"});
+  const raw = h("textarea", {placeholder: "Paste the transcript, article body, or notes here. The extractor will read this."});
+  raw.style.minHeight = "180px";
+  rawField.append(
+    h("label", {}, "Source text / transcript"),
+    raw,
+    h("div", {class: "kn-help"},
+      "The extractor reads this text to generate principles and playbook entries. " +
+      "You can leave it blank for reference-only sources."),
+  );
+  left.append(rawField);
+
+  const notesField = h("div", {class: "kn-field"});
+  const notes = h("textarea", {placeholder: "Your personal notes — insights, 'why this matters', etc."});
+  notesField.append(h("label", {}, "Notes"), notes);
+  left.append(notesField);
+
+  // Right column: metadata
+  const right = h("div", {class: "kn-form-col"});
+  right.append(h("h3", {}, "Metadata"));
+
+  const typeField = h("div", {class: "kn-field"});
+  const typeSel = h("select");
+  (META.knowledge_source_types || []).forEach(t =>
+    typeSel.append(h("option", {value: t}, _ksTypeLabel(t))));
+  typeSel.value = "manual_entry";
+  typeField.append(h("label", {}, "Source type"), typeSel);
+  right.append(typeField);
+
+  const tagsField = h("div", {class: "kn-field"});
+  const tags = h("input", {placeholder: "trust, curiosity, btr, social_selling"});
+  tagsField.append(
+    h("label", {}, "Tags"),
+    tags,
+    h("div", {class: "kn-help"}, "Comma-separated. Used for filtering and relevance matching."),
+  );
+  right.append(tagsField);
+
+  const activeRow = h("label", {class: "kn-checkbox-row"});
+  const activeBox = h("input", {type: "checkbox"});
+  activeBox.checked = true;
+  activeRow.append(activeBox, h("span", {}, "Active and usable in generation"));
+  right.append(activeRow);
+
+  const actions = h("div", {class: "kn-form-actions"});
+  const saveBtn = h("button", {class: "kn-btn ghost"}, "Save source");
+  const saveExtractBtn = h("button", {class: "kn-btn"}, "Save and extract knowledge");
+  actions.append(saveBtn, saveExtractBtn);
+  right.append(actions);
+
+  grid.append(left, right);
+  page.append(grid);
+
+  function payload() {
+    return {
+      title: title.value.trim(),
+      source_type: typeSel.value,
+      source_url: url.value.trim() || null,
+      raw_text: raw.value || null,
+      summary: summary.value || null,
+      notes: notes.value || null,
+      tags: tags.value || "",
+      active: activeBox.checked,
+    };
+  }
+
+  saveBtn.onclick = async () => {
+    const p = payload();
+    if (!p.title) { _ksToast("Title is required.", {error: true}); title.focus(); return; }
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Saving…";
+    try {
+      const created = await api("/knowledge/sources", {method: "POST", body: p});
+      _ksToast("Source saved");
+      location.hash = "#/knowledge/" + created.id;
+    } catch (e) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save source";
+      _ksToast("Save failed: " + e.message, {error: true});
+    }
+  };
+  saveExtractBtn.onclick = async () => {
+    const p = payload();
+    if (!p.title) { _ksToast("Title is required.", {error: true}); title.focus(); return; }
+    p.extract_after_save = true;
+    saveExtractBtn.disabled = true;
+    saveExtractBtn.innerHTML = '<span class="kn-spinner"></span>Saving + extracting…';
+    try {
+      const created = await api("/knowledge/sources", {method: "POST", body: p});
+      _ksToast("Source saved and extraction queued");
+      location.hash = "#/knowledge/" + created.id;
+    } catch (e) {
+      saveExtractBtn.disabled = false;
+      saveExtractBtn.textContent = "Save and extract knowledge";
+      _ksToast("Save failed: " + e.message, {error: true});
+    }
+  };
+}
+
+async function viewKnowledgeDetail({id}) {
+  const v = $("#view");
+  let s;
+  try {
+    s = await api("/knowledge/sources/" + id);
+  } catch (e) {
+    v.append(h("div", {class: "kn-empty"},
+      h("div", {class: "kn-empty-icon"}, "!"),
+      h("h3", {}, "Couldn't load this source"),
+      h("p", {}, e.message),
+      h("a", {href: "#/knowledge", class: "kn-btn ghost"}, "Back to dataset"),
+    ));
+    return;
+  }
+
+  const page = h("div", {class: "kn-page"});
+  v.append(page);
+
+  // Detail header
+  const header = h("div", {class: "kn-detail-header"});
+  header.append(h("div", {class: "kn-detail-icon"}, _ksTypeIcon(s.source_type)));
+  const body = h("div", {class: "kn-detail-body"});
+  body.append(h("h1", {}, s.title || "(untitled)"));
+  const meta = h("div", {class: "kn-detail-meta"});
+  meta.append(h("span", {class: "kn-type " + _ksTypeClass(s.source_type)}, _ksTypeLabel(s.source_type)));
+  meta.append(h("span", {class: "kn-status " + _ksStatusClass(s.extraction_status)}, s.extraction_status || "RAW"));
+  meta.append(h("span", {class: "kn-entry-chip"},
+    h("span", {class: "kn-active-dot" + (s.active ? "" : " off")}),
+    s.active ? "Active" : "Inactive"));
+  meta.append(h("span", {class: "kn-entry-chip"},
+    "created " + (s.created_at || "").slice(0, 10)));
+  if (s.source_url) {
+    meta.append(h("a", {href: s.source_url, target: "_blank", class: "kn-entry-chip"},
+      "\u21D7 Open source"));
+  }
+  body.append(meta);
+
+  if (s.summary) body.append(h("div", {class: "kn-detail-summary"}, s.summary));
+
+  if ((s.tags || []).length) {
+    const tagRow = h("div", {class: "kn-detail-tags"});
+    (s.tags || []).forEach(t => tagRow.append(h("span", {class: "kn-tag"}, t)));
+    body.append(tagRow);
+  }
+
+  // Action buttons
+  const headerActions = h("div", {class: "kn-detail-actions"});
+  const backBtn = h("button", {class: "kn-btn ghost"}, "\u2190 Back");
+  backBtn.onclick = () => location.hash = "#/knowledge";
+  const toggleBtn = h("button", {class: "kn-btn ghost"}, s.active ? "Deactivate" : "Activate");
+  toggleBtn.onclick = async () => {
+    toggleBtn.disabled = true;
+    try {
+      await api("/knowledge/sources/" + id, {method: "PATCH", body: {active: !s.active}});
+      _ksToast("Source " + (!s.active ? "activated" : "deactivated"));
+      render();
+    } catch (e) {
+      toggleBtn.disabled = false;
+      _ksToast("Failed: " + e.message, {error: true});
+    }
+  };
+  const extractBtn = h("button", {class: "kn-btn"}, "Re-run extraction");
+  extractBtn.onclick = async () => {
+    extractBtn.disabled = true;
+    extractBtn.innerHTML = '<span class="kn-spinner"></span>Extracting…';
+    try {
+      await api("/knowledge/sources/" + id + "/extract", {method: "POST"});
+      _ksToast("Extraction complete");
+      render();
+    } catch (e) {
+      extractBtn.disabled = false;
+      extractBtn.textContent = "Re-run extraction";
+      _ksToast("Failed: " + e.message, {error: true});
+    }
+  };
+  const archBtn = h("button", {class: "kn-btn danger"}, "Archive");
+  archBtn.onclick = async () => {
+    if (!confirm("Archive this source? It will stop being used in generation.")) return;
+    try {
+      await api("/knowledge/sources/" + id + "/archive", {method: "POST"});
+      _ksToast("Source archived");
+      location.hash = "#/knowledge";
+    } catch (e) { _ksToast("Archive failed: " + e.message, {error: true}); }
+  };
+  headerActions.append(backBtn, toggleBtn, extractBtn, archBtn);
+  body.append(headerActions);
+
+  header.append(body);
+  page.append(header);
+
+  // Content sections
+  if (s.notes || s.raw_text) {
+    const contentSection = h("div", {class: "kn-section"});
+    contentSection.append(h("div", {class: "kn-section-head"},
+      h("h2", {}, "Content")));
+
+    if (s.notes) {
+      contentSection.append(h("div", {class: "kn-content-block"},
+        h("div", {class: "kn-content-label"}, "Notes"),
+        h("pre", {}, s.notes)));
+    }
+
+    if (s.raw_text) {
+      const rawBlock = h("div", {class: "kn-content-block"});
+      rawBlock.append(h("div", {class: "kn-content-label"},
+        "Raw text (" + s.raw_text.length + " chars)"));
+      const preview = s.raw_text.length > 600 ? s.raw_text.slice(0, 600) + "…" : s.raw_text;
+      const pre = h("pre", {}, preview);
+      rawBlock.append(pre);
+      if (s.raw_text.length > 600) {
+        const toggle = h("a", {href: "#", class: "kn-collapse-toggle"}, "Show full text");
+        let expanded = false;
+        toggle.onclick = (ev) => {
+          ev.preventDefault();
+          expanded = !expanded;
+          pre.textContent = expanded ? s.raw_text : preview;
+          toggle.textContent = expanded ? "Show less" : "Show full text";
+        };
+        rawBlock.append(toggle);
+      }
+      contentSection.append(rawBlock);
+    }
+    page.append(contentSection);
+  }
+
+  // Entries
+  const entries = s.entries || [];
+  const entrySection = h("div", {class: "kn-section"});
+  entrySection.append(h("div", {class: "kn-section-head"},
+    h("h2", {}, "Extracted knowledge entries"),
+    h("span", {class: "kn-section-count"}, String(entries.length))));
+
+  if (!entries.length) {
+    entrySection.append(h("div", {class: "kn-empty"},
+      h("div", {class: "kn-empty-icon"}, "\u25A2"),
+      h("h3", {}, "No entries extracted yet"),
+      h("p", {},
+        "Click 'Re-run extraction' above to generate starter entries from the source " +
+        "text. You can review, edit, deactivate, or delete each entry individually."),
+    ));
+  }
+
+  entries.forEach(e => {
+    const card = h("div", {class: "kn-entry-card" + (e.active ? "" : " inactive")});
+
+    const head = h("div", {class: "kn-entry-head"});
+    const titleRow = h("div", {class: "kn-entry-title"});
+    titleRow.append(h("span", {class: "kn-type " + _ksTypeClass("note")}, e.category || "other"));
+    titleRow.append(h("strong", {}, e.principle_name || "(unnamed)"));
+    if (!e.active) titleRow.append(h("span", {class: "kn-status archived"}, "inactive"));
+    head.append(titleRow);
+    head.append(h("span", {class: "kn-entry-conf"},
+      "conf " + ((e.confidence || 0).toFixed ? (e.confidence || 0).toFixed(2) : e.confidence)));
+    card.append(head);
+
+    if (e.description) card.append(h("div", {class: "kn-entry-desc"}, e.description));
+
+    const detailRows = [];
+    if (e.practical_use_case) detailRows.push(["Use case", e.practical_use_case]);
+    if (e.example_pattern) detailRows.push(["Example", e.example_pattern]);
+    if (e.anti_pattern) detailRows.push(["Anti-pattern", e.anti_pattern]);
+    if (e.allowed_contexts) detailRows.push(["Allowed", e.allowed_contexts]);
+    if (e.disallowed_contexts) detailRows.push(["Disallowed", e.disallowed_contexts]);
+    if (detailRows.length) {
+      const detail = h("div", {class: "kn-entry-detail"});
+      detailRows.forEach(([lbl, val]) => {
+        detail.append(h("div", {class: "lbl"}, lbl));
+        detail.append(h("div", {class: "val"}, val));
+      });
+      card.append(detail);
+    }
+
+    const actions = h("div", {class: "kn-entry-actions"});
+    const toggleE = h("a", {href: "#"}, e.active ? "Deactivate" : "Activate");
+    toggleE.onclick = async (ev) => {
+      ev.preventDefault();
+      try {
+        await api("/knowledge/entries/" + e.id, {method: "PATCH", body: {active: !e.active}});
+        _ksToast("Entry " + (!e.active ? "activated" : "deactivated"));
+        render();
+      } catch (err) { _ksToast("Failed: " + err.message, {error: true}); }
+    };
+    const delE = h("a", {href: "#", class: "danger"}, "Delete");
+    delE.onclick = async (ev) => {
+      ev.preventDefault();
+      if (!confirm("Delete this entry?")) return;
+      try {
+        await api("/knowledge/entries/" + e.id, {method: "DELETE"});
+        _ksToast("Entry deleted");
+        render();
+      } catch (err) { _ksToast("Failed: " + err.message, {error: true}); }
+    };
+    actions.append(toggleE, delE);
+    card.append(actions);
+
+    entrySection.append(card);
+  });
+  page.append(entrySection);
+}
+
+async function viewKnowledgePlaybooks() {
+  const v = $("#view");
+  const page = h("div", {class: "kn-page"});
+  v.append(page);
+  page.append(_ksKnowledgeHeader("playbooks"));
+
+  const intro = h("div", {class: "kn-section"});
+  intro.append(h("div", {class: "kn-section-head"},
+    h("h2", {}, "Industry playbooks")));
+  intro.append(h("div", {class: "kn-detail-summary"},
+    "Playbooks give the generator strategic intelligence for specific industries and " +
+    "deal types. Each playbook is a set of categorized entries — framings, angles, " +
+    "example phrases, and anti-patterns — that the generator mixes with the broader " +
+    "knowledge dataset when composing outreach."));
+  page.append(intro);
+
+  const grid = h("div", {class: "kn-playbook-grid"});
+  page.append(grid);
+
+  const loader = h("div", {class: "kn-empty"},
+    h("div", {}, h("span", {class: "kn-spinner"}), "Loading playbooks…"));
+  page.append(loader);
+
+  let books = [];
+  try {
+    books = await api("/knowledge/playbooks");
+  } catch (e) {
+    loader.remove();
+    page.append(h("div", {class: "kn-empty"},
+      h("div", {class: "kn-empty-icon"}, "!"),
+      h("h3", {}, "Couldn't load playbooks"),
+      h("p", {}, e.message)));
+    return;
+  }
+
+  loader.remove();
+
+  if (!books.length) {
+    page.append(h("div", {class: "kn-empty"},
+      h("div", {class: "kn-empty-icon"}, "\u2692"),
+      h("h3", {}, "No playbooks yet"),
+      h("p", {},
+        "Playbooks are seeded from the backend (e.g. the built-in BTR/CRE playbook). " +
+        "Once seeded, they show up here with their categories and entry counts.")));
+    return;
+  }
+
+  books.forEach(pb => {
+    const card = h("div", {class: "kn-playbook-card"});
+    card.append(h("h3", {}, pb.name || "(unnamed playbook)"));
+    if (pb.description) card.append(h("div", {class: "kn-pb-desc"}, pb.description));
+    if (pb.market_focus) {
+      card.append(h("div", {class: "kn-pb-desc"},
+        h("em", {}, "Market focus: " + pb.market_focus)));
+    }
+    if ((pb.categories || []).length) {
+      const catRow = h("div", {class: "kn-pb-cats"});
+      pb.categories.slice(0, 8).forEach(c => catRow.append(h("span", {class: "kn-tag"}, c)));
+      if (pb.categories.length > 8) {
+        catRow.append(h("span", {class: "kn-tag"}, "+" + (pb.categories.length - 8)));
+      }
+      card.append(catRow);
+    }
+    const metaRow = h("div", {class: "kn-pb-meta"});
+    metaRow.append(h("span", {},
+      h("strong", {}, String(pb.entry_count || 0)), " entries"));
+    metaRow.append(h("span", {},
+      h("strong", {}, String((pb.categories || []).length)), " categories"));
+    if (pb.created_at) metaRow.append(h("span", {}, (pb.created_at || "").slice(0, 10)));
+    card.append(metaRow);
+    grid.append(card);
+  });
+}
+
+async function viewSettings() {
+  const v = $("#view");
+  v.append(h("h2",{},"Settings"));
+  v.append(h("div",{class:"card"},
+    h("p",{},"AI provider: ", h("code",{},"mock"),
+      " (set ", h("code",{},"SIGNALSTACK_AI_PROVIDER=claude"), " to swap when wired)."),
+    h("p",{class:"muted"},"Prompt templates live in signalstack/ai/prompts/. Edit and redeploy.")));
+  v.append(h("div",{class:"card"},
+    h("h2",{},"Knowledge dataset"),
+    h("p",{class:"muted"},
+      "Manage the reusable strategy/style knowledge layer. " +
+      "Videos, articles, notes, podcasts, playbooks, frameworks."),
+    h("a",{href:"#/knowledge"},"Open Knowledge dataset →"),
+    " · ",
+    h("a",{href:"#/knowledge/playbooks"},"Industry playbooks →")));
+}
+
+render();
+</script>
+</body>
+</html>

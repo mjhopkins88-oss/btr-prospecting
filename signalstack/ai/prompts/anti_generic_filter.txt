@@ -1,0 +1,10 @@
+Reject any draft that:
+- Could be sent to anyone (fails the swap test).
+- Opens with "hope this finds you well", "I wanted to reach out",
+  "would love to connect", "saw your profile", or any congratulatory cliche.
+- Uses buzzwords: synergy, leverage, game-changer, best-in-class, circle back.
+- Claims familiarity that is not present in the stored facts.
+- Asks for a 30-minute call on the first touch.
+
+If a draft fails, rewrite it to anchor on a specific stored signal or
+profile field, and lower the ask.
