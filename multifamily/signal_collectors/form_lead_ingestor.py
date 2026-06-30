@@ -21,7 +21,10 @@ def collect():
     """Return mock inbound form-submission leads."""
     leads = []
 
-    # --- Scenario 1: Texas owner submits benchmark form (MOCK DATA) ------
+    # --- Scenario 1: Texas benchmark form submission (MOCK DATA, STRONG) -
+    # Paired with a known renewal inside the 120-day window — a real
+    # benchmark request from an in-footprint, well-fit, soon-to-renew
+    # owner is exactly the kind of lead that should reach Call Today.
     company = MultifamilyCompany(
         id=new_id(), name='Lone Star Multifamily Holdings (MOCK)',
         company_type='owner', is_owner_operator_developer=True,
@@ -37,18 +40,27 @@ def collect():
         detail={'form_name': 'Multifamily Insurance Benchmark Request'},
         property_id=prop.id, company_id=company.id,
     )
+    renewal_signal = MultifamilySignal(
+        id=new_id(), signal_type='renewal_date_known', source='form', confidence=0.9,
+        detail={'days_until_renewal': 45, 'renewal_date': '2026-08-14', 'self_reported': True},
+        property_id=prop.id, company_id=company.id,
+    )
     contact = MultifamilyContact(
         id=new_id(), full_name='J. Whitfield (MOCK)', title='VP of Risk Management',
         email='mock-contact-1@example.com', is_decision_maker=True, company_id=company.id,
     )
     leads.append(MultifamilyLead(
-        id=new_id(), company=company, property=prop, signals=[signal], contacts=[contact],
+        id=new_id(), company=company, property=prop, signals=[signal, renewal_signal], contacts=[contact],
         state='TX', city='Austin', primary_signal_type='benchmark_form_submit',
         primary_source='form', source_url=None, confidence=0.95,
         last_verified_at=utc_now_iso(), pain_flags=['premium_increase'],
+        relationship_flags=['prior_reply'],
     ))
 
-    # --- Scenario 2: California owner downloads renewal checklist (MOCK) -
+    # --- Scenario 2: California renewal checklist download (MOCK, STRONG) -
+    # Guide download paired with a known (but not imminent) renewal date —
+    # shows real inbound intent plus confirmed insurance timing, even
+    # though the renewal itself is still a few months out.
     company2 = MultifamilyCompany(
         id=new_id(), name='Pacific Coast Residential Group (MOCK)',
         company_type='owner', is_owner_operator_developer=True,
@@ -60,8 +72,13 @@ def collect():
     )
     signal2 = MultifamilySignal(
         id=new_id(), signal_type='guide_download', source='form',
-        source_url=None, confidence=0.8,
+        source_url=None, confidence=0.85,
         detail={'asset_name': 'Multifamily Renewal Readiness Checklist'},
+        property_id=prop2.id, company_id=company2.id,
+    )
+    renewal_signal2 = MultifamilySignal(
+        id=new_id(), signal_type='renewal_date_known', source='form', confidence=0.75,
+        detail={'days_until_renewal': 150, 'renewal_date': '2026-11-27', 'self_reported': True},
         property_id=prop2.id, company_id=company2.id,
     )
     contact2 = MultifamilyContact(
@@ -69,9 +86,9 @@ def collect():
         email='mock-contact-2@example.com', is_decision_maker=True, company_id=company2.id,
     )
     leads.append(MultifamilyLead(
-        id=new_id(), company=company2, property=prop2, signals=[signal2], contacts=[contact2],
+        id=new_id(), company=company2, property=prop2, signals=[signal2, renewal_signal2], contacts=[contact2],
         state='CA', city='Oakland', primary_signal_type='guide_download',
-        primary_source='form', source_url=None, confidence=0.8,
+        primary_source='form', source_url=None, confidence=0.85,
         last_verified_at=utc_now_iso(), pain_flags=['cat_exposed_geography'],
     ))
 

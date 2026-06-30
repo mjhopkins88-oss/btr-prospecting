@@ -14,6 +14,11 @@ from multifamily.scoring.multifamily_score_engine import score_lead
 from multifamily.scoring.multifamily_score_explanations import explain_why_warm, explain_likely_pain
 from multifamily.daily_brief.multifamily_next_best_action import next_best_action_for_lead
 
+# Higher rank sorts first — keeps Call Today/Hot leads at the top of every
+# dashboard list regardless of raw point ties, so the dashboard prioritizes
+# real inbound intent over generic trigger-based leads.
+_CATEGORY_PRIORITY_RANK = {'call_today': 4, 'hot': 3, 'warm': 2, 'nurture': 1, 'watchlist': 0}
+
 from multifamily.signal_collectors import (
     form_lead_ingestor, website_intent, search_console, google_ads,
     linkedin_lead_forms, permit_feed, news_monitor, crm_renewals,
@@ -85,7 +90,21 @@ def run_pipeline() -> Tuple[List[MultifamilyLead], List[MultifamilySourceRun]]:
         lead.suggested_opener = _build_opener(lead)
         lead.next_best_action = next_best_action_for_lead(lead)
 
+    leads = sort_leads_by_priority(leads)
+
     return leads, source_runs
+
+
+def sort_leads_by_priority(leads: List[MultifamilyLead]) -> List[MultifamilyLead]:
+    """Rank by score category first (Call Today > Hot > Warm > Nurture >
+    Watchlist), then by raw total — so real inbound intent always surfaces
+    above generic trigger-based leads, even on point ties."""
+    def _key(lead: MultifamilyLead):
+        if not lead.score:
+            return (-1, 0)
+        return (_CATEGORY_PRIORITY_RANK.get(lead.score.category, -1), lead.score.total)
+
+    return sorted(leads, key=_key, reverse=True)
 
 
 def filter_leads(

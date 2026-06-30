@@ -74,21 +74,40 @@ def test_pipeline_required_fields():
             f'{lead.company.name}: has a last_verified_at timestamp',
             bool(lead.last_verified_at),
         )
+        check(
+            f'{lead.company.name}: score has reason_codes',
+            bool(lead.score and lead.score.reason_codes) or bool(lead.score and lead.score.disqualified),
+        )
+        check(
+            f'{lead.company.name}: reasons and reason_codes are 1:1',
+            lead.score is not None and len(lead.score.reasons) == len(lead.score.reason_codes),
+        )
         if lead.score and not lead.score.disqualified:
             check(
-                f'{lead.company.name}: permit/news-only leads never reach Hot/Call Today',
+                f'{lead.company.name}: permit/news-only leads never reach Call Today',
                 not (
                     lead.primary_source in ('permit', 'news')
-                    and not (set(s.signal_type for s in lead.signals) & {
-                        'benchmark_form_submit', 'quote_request', 'meeting_request',
-                        'calculator_submit', 'linkedin_lead_form_submit', 'guide_download',
-                        'repeat_website_visit', 'paid_search_click', 'website_visit',
-                    })
-                    and lead.score.category in ('hot', 'call_today')
+                    and lead.score.category == 'call_today'
                 ),
             )
         if lead.state:
             check(f'{lead.company.name}: state (if set) is CA or TX', lead.state in SUPPORTED_STATES)
+
+    # At least one lead should demonstrate each disqualifier code given the
+    # mock data's deliberately thin/edge-case scenarios (Phase 2 requirement #5).
+    all_disqualifier_codes = {
+        code for lead in leads if lead.score for code in lead.score.disqualifier_codes
+    }
+    for expected_code in ('LOW_CONFIDENCE', 'MISSING_STATE', 'UNKNOWN_ASSET_TYPE', 'MISSING_TIMING', 'NO_INBOUND_SIGNAL'):
+        check(f'Mock data demonstrates disqualifier code {expected_code}', expected_code in all_disqualifier_codes)
+
+    # The new "stronger" inbound examples (Phase 2 requirement #6) should
+    # produce at least one Call Today/Hot lead, and it must be driven by
+    # real inbound intent, not a generic trigger.
+    call_today_or_hot = [l for l in leads if l.score and l.score.category in ('call_today', 'hot')]
+    check('At least one lead reaches Call Today or Hot', len(call_today_or_hot) > 0)
+    check('Every Call Today/Hot lead has real inbound intent (no NO_INBOUND_SIGNAL flag)',
+          all('NO_INBOUND_SIGNAL' not in l.score.disqualifier_codes for l in call_today_or_hot))
 
 
 def main():

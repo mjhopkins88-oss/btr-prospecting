@@ -6,16 +6,20 @@
  * TopNav / SubNav / CommandCenter components (see NAV_SECTIONS there).
  *
  * Navigation model:
- *   - 5 top-level sections (Command Center, Deals, Market Intel, Pipeline, Admin)
+ *   - 6 top-level sections (Command Center, Deals, Market Intel, Pipeline,
+ *     Multifamily, Admin)
  *   - Each section has 1..n child pages rendered as a secondary tab strip
  *   - Child `id` values map 1:1 to the existing `activeTab` routes so no
  *     downstream page component needs to change.
  *
  * Role visibility:
- *   - broker:   Command Center, Deals, Market Intel (Sunbelt Intelligence only)
- *   - producer: Command Center, Deals, Market Intel, Pipeline (My Pipeline)
- *   - admin:    Command Center, Deals, Market Intel, Pipeline (full), Admin*
+ *   - broker:   Command Center, Deals, Market Intel (Sunbelt Intelligence only), Multifamily
+ *   - producer: Command Center, Deals, Market Intel, Pipeline (My Pipeline), Multifamily
+ *   - admin:    Command Center, Deals, Market Intel, Pipeline (full), Multifamily, Admin*
  *   - *Admin section only shows when user.is_super_admin === true
+ *
+ * Multifamily Command is a standalone module, separate from the BTR lead
+ * queue — visible to every role, never merged into BTR routes/tabs.
  */
 
 import React from 'react';
@@ -82,6 +86,22 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: 'pipeline', label: 'My Pipeline' },
       { id: 'quoting', label: 'Quoting' },
       { id: 'underwriting', label: 'Underwriting Sheet' },
+    ],
+  },
+  {
+    id: 'multifamily_section',
+    label: 'Multifamily',
+    icon: '\u25C7', // ◇
+    children: [
+      { id: 'multifamily', label: 'Overview' },
+      { id: 'multifamily_inbound', label: 'Inbound Leads' },
+      { id: 'multifamily_website_intent', label: 'Website Intent' },
+      { id: 'multifamily_renewal', label: 'Renewal Opportunities' },
+      { id: 'multifamily_acquisition', label: 'Acquisition / Financing' },
+      { id: 'multifamily_construction', label: 'Construction Triggers' },
+      { id: 'multifamily_california', label: 'California' },
+      { id: 'multifamily_texas', label: 'Texas' },
+      { id: 'multifamily_outreach', label: 'Outreach Workbench' },
     ],
   },
   {

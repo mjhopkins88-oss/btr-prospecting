@@ -140,6 +140,14 @@ class MultifamilyLeadScore:
     relationship_warmth: int = 0
     penalties: int = 0
     reasons: List[str] = field(default_factory=list)
+    # Stable, machine-readable counterparts to `reasons` (e.g.
+    # 'INBOUND_BENCHMARK_FORM_SUBMIT', 'GATE_HOT_REQUIRES_QUALIFYING_SIGNAL')
+    # so API/UI consumers can branch on codes instead of parsing text.
+    reason_codes: List[str] = field(default_factory=list)
+    # Quality flags (e.g. 'LOW_CONFIDENCE', 'MISSING_STATE') — independent of
+    # the hard `disqualified` flag below, used to drive the Nurture quality
+    # cap and the daily brief's "needs more info" bucket.
+    disqualifier_codes: List[str] = field(default_factory=list)
     disqualified: bool = False
     disqualified_reason: Optional[str] = None
 

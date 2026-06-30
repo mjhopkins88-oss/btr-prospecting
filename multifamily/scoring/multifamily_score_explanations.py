@@ -4,6 +4,14 @@ used for the "why this lead is warm" and "likely insurance pain"
 fields on lead cards in the Multifamily Command UI.
 """
 from multifamily.types import MultifamilyLead
+from multifamily.scoring.multifamily_score_rules import DISQUALIFIER_CODE_DESCRIPTIONS
+
+_GATE_DOWNGRADE_CODES = {
+    'GATE_CALL_TODAY_REQUIRES_DIRECT_ACTION',
+    'GATE_CALL_TODAY_PERMIT_NEWS_ONLY',
+    'GATE_HOT_REQUIRES_QUALIFYING_SIGNAL',
+    'GATE_QUALITY_CAP_LOW_CONFIDENCE_OR_MISSING_STATE',
+}
 
 _SIGNAL_TYPE_LABELS = {
     'benchmark_form_submit': 'submitted an insurance benchmark request',
@@ -52,9 +60,15 @@ def explain_why_warm(lead: MultifamilyLead) -> str:
         parts.append('the account fit is strong (size/portfolio/role)')
 
     if not parts:
-        return f'{lead.company.name} matched on {lead.primary_source or "an unverified source"}; limited signal so far.'
+        explanation = f'{lead.company.name} matched on {lead.primary_source or "an unverified source"}; limited signal so far.'
+    else:
+        explanation = '; '.join(parts) + '.'
 
-    return '; '.join(parts) + '.'
+    gate_notes = [r for r, c in zip(score.reasons, score.reason_codes) if c in _GATE_DOWNGRADE_CODES]
+    if gate_notes:
+        explanation += ' ' + ' '.join(gate_notes)
+
+    return explanation
 
 
 def explain_likely_pain(lead: MultifamilyLead) -> str:
@@ -64,3 +78,15 @@ def explain_likely_pain(lead: MultifamilyLead) -> str:
     if lead.property.cat_exposed:
         return 'Likely pain: CAT-exposed geography may be driving renewal pricing concerns.'
     return 'No specific pain signal captured yet — confirm on first call.'
+
+
+def explain_disqualifiers(lead: MultifamilyLead) -> str:
+    """Human-readable rollup of why a lead needs more info, derived from
+    score.disqualifier_codes (LOW_CONFIDENCE, MISSING_STATE, etc.)."""
+    score = lead.score
+    if score is None:
+        return 'Not yet scored.'
+    codes = score.disqualifier_codes
+    if not codes:
+        return 'No data-quality issues flagged.'
+    return ' '.join(DISQUALIFIER_CODE_DESCRIPTIONS.get(code, code) for code in codes)
