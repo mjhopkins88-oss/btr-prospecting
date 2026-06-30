@@ -39,6 +39,16 @@ DECISION_MAKER_KEYWORDS = (
 
 REQUIRED_FIELDS = ['name', 'company', 'email', 'state', 'leadSituation', 'source']
 
+# Hard length caps — rejected outright with a normal validation error
+# (distinct from multifamily/spam_guard.py's probabilistic content
+# heuristics, which tag-but-don't-block).
+MAX_FIELD_LENGTHS = {
+    'name': 200, 'company': 200, 'role': 200, 'city': 100,
+    'notes': 4000, 'sourcePage': 300, 'sourceUrl': 500,
+    'utmSource': 200, 'utmMedium': 200, 'utmCampaign': 200,
+    'utmTerm': 200, 'utmContent': 200, 'referrer': 500, 'landingPage': 500,
+}
+
 
 class IntakeValidationError(Exception):
     def __init__(self, errors: List[str]):
@@ -101,6 +111,11 @@ def validate_intake(payload: Dict[str, Any]) -> List[str]:
         except (TypeError, ValueError):
             errors.append('numberOfUnits must be a whole number')
 
+    for field_name, max_len in MAX_FIELD_LENGTHS.items():
+        value = payload.get(field_name)
+        if value and len(str(value)) > max_len:
+            errors.append(f'{field_name} must be {max_len} characters or fewer')
+
     return errors
 
 
@@ -144,10 +159,22 @@ def _situation_signals(payload: Dict[str, Any], property_id: str, company_id: st
     return signals
 
 
-def build_lead_from_intake(payload: Dict[str, Any]) -> Tuple[Optional[MultifamilyLead], List[str]]:
+def build_lead_from_intake(
+    payload: Dict[str, Any],
+    *,
+    ip_hash: Optional[str] = None,
+    user_agent_summary: Optional[str] = None,
+    spam_status: str = 'clean',
+    spam_reason_codes: Optional[List[str]] = None,
+) -> Tuple[Optional[MultifamilyLead], List[str]]:
     """Validate, build, score, and explain a real MultifamilyLead from raw
     form input. Returns (lead, []) on success or (None, errors) if the
-    submission is incomplete/invalid."""
+    submission is incomplete/invalid.
+
+    `ip_hash`/`user_agent_summary`/`spam_status`/`spam_reason_codes` are
+    NOT read from `payload` — they're server-computed (multifamily/
+    spam_guard.py) and passed in explicitly by the route, so a submitter
+    can never just set spam_status=clean themselves."""
     errors = validate_intake(payload)
     if errors:
         return None, errors
@@ -196,6 +223,18 @@ def build_lead_from_intake(payload: Dict[str, Any]) -> Tuple[Optional[Multifamil
         source_page=_clean(payload.get('sourcePage')), confidence=0.9,
         last_verified_at=utc_now_iso(), pain_flags=pain_flags,
         notes=_clean(payload.get('notes')), is_demo=False,
+        utm_source=_clean(payload.get('utmSource')),
+        utm_medium=_clean(payload.get('utmMedium')),
+        utm_campaign=_clean(payload.get('utmCampaign')),
+        utm_term=_clean(payload.get('utmTerm')),
+        utm_content=_clean(payload.get('utmContent')),
+        referrer=_clean(payload.get('referrer')),
+        landing_page=_clean(payload.get('landingPage')),
+        offer_type=_clean(payload.get('offerType')),
+        spam_status=spam_status,
+        spam_reason_codes=spam_reason_codes or [],
+        submitted_ip_hash=ip_hash,
+        user_agent_summary=user_agent_summary,
     )
 
     lead.score = score_lead(lead)

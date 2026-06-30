@@ -42,6 +42,9 @@ SCORE_CATEGORIES = ['call_today', 'hot', 'warm', 'nurture', 'watchlist']
 # v1 launch states only
 SUPPORTED_STATES = ['CA', 'TX']
 
+# Spam/abuse triage states for real (non-demo) leads — see multifamily/spam_guard.py.
+SPAM_STATUSES = ['clean', 'suspicious', 'rejected']
+
 
 def new_id() -> str:
     return str(uuid.uuid4())
@@ -203,6 +206,25 @@ class MultifamilyLead:
     # must never show is_demo leads without a clear "Demo Data" label, and
     # real leads always take priority over demo leads in any given view.
     is_demo: bool = False
+
+    # ---- Source/UTM attribution (real intake only — see multifamily/intake.py) ----
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_term: Optional[str] = None
+    utm_content: Optional[str] = None
+    referrer: Optional[str] = None
+    landing_page: Optional[str] = None
+    offer_type: Optional[str] = None
+
+    # ---- Spam/abuse signal (real intake only — see multifamily/spam_guard.py) ----
+    # 'clean' | 'suspicious' | 'rejected'. Only 'rejected' leads are excluded
+    # from normal dashboard views (repository.get_real_leads()).
+    spam_status: str = 'clean'
+    spam_reason_codes: List[str] = field(default_factory=list)
+    submitted_ip_hash: Optional[str] = None
+    user_agent_summary: Optional[str] = None
+
     score: Optional[MultifamilyLeadScore] = None
     why_warm: Optional[str] = None
     likely_pain: Optional[str] = None

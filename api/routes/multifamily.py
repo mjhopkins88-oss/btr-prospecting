@@ -23,6 +23,7 @@ from multifamily.pipeline import (
 from multifamily.daily_brief.multifamily_daily_brief_builder import build_daily_brief
 from multifamily.intake import build_lead_from_intake
 from multifamily import repository
+from multifamily import spam_guard
 
 multifamily_bp = Blueprint('multifamily', __name__, url_prefix='/api/multifamily')
 
@@ -67,13 +68,58 @@ def create_lead():
     form or internal manual entry). Accepts: name, company, email, phone,
     role, state, city, assetType, numberOfUnits, leadSituation,
     renewalDate, projectStartDate, primaryConcern, notes, source,
-    sourcePage, sourceUrl. Scores the lead immediately and persists it."""
+    sourcePage, sourceUrl, plus utmSource/utmMedium/utmCampaign/utmTerm/
+    utmContent/referrer/landingPage/offerType and a hidden honeypot field
+    (multifamily/spam_guard.HONEYPOT_FIELD). Scores the lead immediately
+    and persists it.
+
+    Layered abuse protection (see multifamily/spam_guard.py):
+      - oversized payloads and rate-limited IPs/emails are rejected
+        outright (413 / 429) before any lead is built
+      - field validation still returns clean, specific 400 errors for
+        legitimate users
+      - honeypot / garbage-content detection never blocks the request
+        (so a bot gets the same 201 a real user would) — it only tags
+        the persisted lead's spam_status so it's excluded from normal
+        dashboard views
+    """
+    if not spam_guard.check_payload_size(request.content_length):
+        return jsonify({'success': False, 'errors': ['Submission too large.']}), 413
+
     payload = request.get_json(silent=True) or {}
-    lead, errors = build_lead_from_intake(payload)
+
+    ip = spam_guard.get_client_ip(dict(request.headers), request.remote_addr)
+    ip_hash = spam_guard.hash_ip(ip)
+    user_agent_summary = spam_guard.summarize_user_agent(request.headers.get('User-Agent'))
+    email = (payload.get('email') or '').strip().lower() or None
+
+    rate_limit_reason = spam_guard.check_rate_limit(ip_hash, email)
+    if rate_limit_reason:
+        event_type = 'rate_limited_ip' if rate_limit_reason == 'RATE_LIMIT_IP' else 'rate_limited_email'
+        repository.record_intake_event(event_type, ip_hash, email)
+        return jsonify({'success': False, 'errors': ['Too many submissions from this source. Please try again later.']}), 429
+
+    spam_status, spam_reason_codes = spam_guard.classify_spam(payload)
+
+    lead, errors = build_lead_from_intake(
+        payload, ip_hash=ip_hash, user_agent_summary=user_agent_summary,
+        spam_status=spam_status, spam_reason_codes=spam_reason_codes,
+    )
     if errors:
+        repository.record_intake_event('invalid', ip_hash, email, {'errors': errors})
         return jsonify({'success': False, 'errors': errors}), 400
 
     repository.insert_lead(lead)
+
+    if spam_status == 'rejected':
+        event_type = 'rejected_honeypot' if 'HONEYPOT_FILLED' in spam_reason_codes else 'rejected_garbage'
+    elif spam_status == 'suspicious':
+        event_type = 'accepted_suspicious'
+    else:
+        event_type = 'accepted_clean'
+    repository.record_intake_event(event_type, ip_hash, email, {'spam_reason_codes': spam_reason_codes})
+
+    # Always a normal-looking success — never reveal spam detection to the submitter.
     return jsonify({'success': True, 'lead': dataclasses.asdict(lead)}), 201
 
 
@@ -157,3 +203,18 @@ def get_overview():
         'by_source': by_source,
         'source_runs': [dataclasses.asdict(r) for r in source_runs],
     })
+
+
+@multifamily_bp.route('/admin/intake-stats', methods=['GET'])
+def get_intake_stats():
+    """Admin/debug view: recent submissions (including rejected/suspicious
+    — repository.get_intake_stats() does NOT filter by spam_status, unlike
+    every other endpoint in this blueprint), spam-status counts, rate
+    limit hits, and source/campaign breakdown.
+
+    NOTE: like the rest of this blueprint, this route has no server-side
+    auth check of its own — it's gated client-side (Multifamily Admin
+    tab, super_admin only), consistent with the multifamily blueprint's
+    current security model. Adding real session-based auth here is a
+    reasonable follow-up once the blueprint as a whole gets an auth pass."""
+    return jsonify(repository.get_intake_stats())

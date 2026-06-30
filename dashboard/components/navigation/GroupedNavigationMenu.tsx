@@ -102,6 +102,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: 'multifamily_california', label: 'California' },
       { id: 'multifamily_texas', label: 'Texas' },
       { id: 'multifamily_outreach', label: 'Outreach Workbench' },
+      { id: 'multifamily_admin', label: 'Admin' }, // super_admin only — see getNavForUser in static/vendor/app.js
     ],
   },
   {

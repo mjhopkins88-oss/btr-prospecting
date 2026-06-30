@@ -1407,10 +1407,16 @@ function App({
     user: user
   }), activeTab === 'dev_network' && /*#__PURE__*/React.createElement(DeveloperNetworkPanel, null), activeTab === 'corridors' && /*#__PURE__*/React.createElement(DevelopmentCorridorsPanel, null), activeTab === 'dev_momentum' && /*#__PURE__*/React.createElement(MomentumEnginePanel, null), activeTab === 'signal_discovery' && user && user.is_super_admin && /*#__PURE__*/React.createElement(SignalDiscoveryPanel, null), activeTab === 'multifamily' && /*#__PURE__*/React.createElement(MultifamilyOverviewPanel, {
     activeTab: activeTab,
-    setActiveTab: setActiveTab
-  }), activeTab.startsWith('multifamily_') && /*#__PURE__*/React.createElement(MultifamilyLeadListView, {
+    setActiveTab: setActiveTab,
+    user: user
+  }), activeTab === 'multifamily_admin' && /*#__PURE__*/React.createElement(MultifamilyAdminPanel, {
     activeTab: activeTab,
-    setActiveTab: setActiveTab
+    setActiveTab: setActiveTab,
+    user: user
+  }), activeTab.startsWith('multifamily_') && activeTab !== 'multifamily_admin' && /*#__PURE__*/React.createElement(MultifamilyLeadListView, {
+    activeTab: activeTab,
+    setActiveTab: setActiveTab,
+    user: user
   }), activeTab === 'quoting' && (!user || user.role !== 'admin') && (() => {
     setActiveTab(ROLE_DEFAULT_TAB[user?.role] || 'command');
     return null;
@@ -5655,7 +5661,8 @@ const NAV_SECTIONS = [
       { id: 'multifamily_construction', label: 'Construction Triggers' },
       { id: 'multifamily_california', label: 'California' },
       { id: 'multifamily_texas', label: 'Texas' },
-      { id: 'multifamily_outreach', label: 'Outreach Workbench' }
+      { id: 'multifamily_outreach', label: 'Outreach Workbench' },
+      { id: 'multifamily_admin', label: 'Admin' }
     ]
   },
   {
@@ -5678,6 +5685,7 @@ function getNavForUser(user) {
   } else if (role === 'producer') {
     ['quoting', 'underwriting'].forEach(t => hiddenTabs.add(t));
   }
+  if (!isSuperAdmin) hiddenTabs.add('multifamily_admin');
 
   // Per-role hidden sections
   const hiddenSections = new Set();
@@ -7930,6 +7938,11 @@ const MF_TABS = [{
   label: 'Outreach Workbench',
   endpoint: '/api/multifamily/outreach-workbench',
   kind: 'leads'
+}, {
+  id: 'multifamily_admin',
+  label: 'Admin',
+  endpoint: '/api/multifamily/admin/intake-stats',
+  kind: 'admin'
 }];
 const MF_LEAD_SITUATIONS = [{
   value: 'renewal',
@@ -8047,6 +8060,10 @@ function mfPrimaryConcernLabel(lead) {
   const found = MF_PRIMARY_CONCERNS.find(c => c.value === flag);
   return found ? found.label : flag;
 }
+function mfSourceAttributionLabel(lead) {
+  const parts = [lead.utm_source, lead.utm_medium, lead.utm_campaign].filter(Boolean);
+  return parts.length ? parts.join(' / ') : null;
+}
 function MultifamilyLeadCard({
   lead
 }) {
@@ -8054,10 +8071,12 @@ function MultifamilyLeadCard({
   const color = mfCategoryColor(score.category);
   const contact = (lead.contacts || [])[0];
   const primaryConcern = mfPrimaryConcernLabel(lead);
+  const attribution = mfSourceAttributionLabel(lead);
+  const isSuspicious = lead.spam_status === 'suspicious';
   return /*#__PURE__*/React.createElement("div", {
     style: {
       background: 'rgba(15,22,36,0.95)',
-      border: '1px solid rgba(255,255,255,0.08)',
+      border: '1px solid ' + (isSuspicious ? 'rgba(250,204,21,0.4)' : 'rgba(255,255,255,0.08)'),
       borderLeft: '3px solid ' + color,
       borderRadius: '8px',
       padding: '14px 16px',
@@ -8086,7 +8105,10 @@ function MultifamilyLeadCard({
     }
   }, lead.company && lead.company.name), /*#__PURE__*/React.createElement("span", {
     style: lead.is_demo ? mfPillStyle('#f97316') : mfPillStyle('#34d399')
-  }, lead.is_demo ? 'DEMO DATA' : 'REAL')), /*#__PURE__*/React.createElement("div", {
+  }, lead.is_demo ? 'DEMO DATA' : 'REAL'), isSuspicious && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#facc15'),
+    title: (lead.spam_reason_codes || []).join(', ')
+  }, "\u26A0 SUSPICIOUS")), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.8rem',
       color: '#94a3b8',
@@ -8124,7 +8146,10 @@ function MultifamilyLeadCard({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#a78bfa')
-  }, lead.primary_source), /*#__PURE__*/React.createElement("span", {
+  }, lead.primary_source), attribution && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#60a5fa'),
+    title: "utm_source / utm_medium / utm_campaign"
+  }, attribution), /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#22d3ee')
   }, mfLeadSituationLabel(lead)), primaryConcern && /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#fb7185')
@@ -8201,8 +8226,10 @@ function MultifamilyLeadCard({
 }
 function MultifamilyTabBar({
   activeTab,
-  setActiveTab
+  setActiveTab,
+  user
 }) {
+  const visibleTabs = MF_TABS.filter(tab => tab.kind !== 'admin' || user && user.is_super_admin);
   return /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
@@ -8210,7 +8237,7 @@ function MultifamilyTabBar({
       marginBottom: '1rem',
       flexWrap: 'wrap'
     }
-  }, MF_TABS.map(tab => /*#__PURE__*/React.createElement("button", {
+  }, visibleTabs.map(tab => /*#__PURE__*/React.createElement("button", {
     key: tab.id,
     onClick: () => setActiveTab(tab.id),
     style: {
@@ -8588,7 +8615,8 @@ function MultifamilyAddLeadModal({
 }
 function MultifamilyOverviewPanel({
   activeTab,
-  setActiveTab
+  setActiveTab,
+  user
 }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -8619,7 +8647,8 @@ function MultifamilyOverviewPanel({
     onAddLead: () => setShowAddModal(true)
   }), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
     activeTab: activeTab,
-    setActiveTab: setActiveTab
+    setActiveTab: setActiveTab,
+    user: user
   }), showAddModal && /*#__PURE__*/React.createElement(MultifamilyAddLeadModal, {
     onClose: () => setShowAddModal(false),
     onCreated: () => load()
@@ -8729,9 +8758,193 @@ function MultifamilyOverviewPanel({
     }
   }, /*#__PURE__*/React.createElement("span", null, run.source), /*#__PURE__*/React.createElement("span", null, run.records_found, " records", run.notes ? ' · ' + run.notes : '')))));
 }
+function MultifamilyAdminPanel({
+  activeTab,
+  setActiveTab,
+  user
+}) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/multifamily/admin/intake-stats');
+      const json = await res.json();
+      setData(json);
+    } catch (e) {
+      console.error('[MultifamilyCommand]', e);
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
+  if (!user || !user.is_super_admin) {
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        maxWidth: '1000px',
+        margin: '0 auto'
+      }
+    }, /*#__PURE__*/React.createElement(MultifamilyHeader, null), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
+      activeTab: activeTab,
+      setActiveTab: setActiveTab,
+      user: user
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        textAlign: 'center',
+        padding: '3rem',
+        color: '#ef4444'
+      }
+    }, "Admin access required."));
+  }
+  const spamColor = {
+    clean: '#34d399',
+    suspicious: '#facc15',
+    rejected: '#ef4444'
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: '1000px',
+      margin: '0 auto'
+    }
+  }, /*#__PURE__*/React.createElement(MultifamilyHeader, null), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
+    activeTab: activeTab,
+    setActiveTab: setActiveTab,
+    user: user
+  }), loading && !data && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'center',
+      padding: '3rem',
+      color: '#f59e0b',
+      fontFamily: "'Orbitron', sans-serif"
+    }
+  }, "LOADING INTAKE STATS..."), !loading && data && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+      gap: '12px',
+      marginBottom: '1.5rem'
+    }
+  }, Object.entries(data.counts_by_spam_status || {}).map(([status, count]) => /*#__PURE__*/React.createElement("div", {
+    key: status,
+    style: {
+      background: 'rgba(15,22,36,0.95)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '8px',
+      padding: '14px 16px',
+      textAlign: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.6rem',
+      color: '#64748b',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '6px'
+    }
+  }, status.toUpperCase()), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '1.4rem',
+      fontWeight: 700,
+      color: spamColor[status] || '#f1f5f9',
+      fontFamily: "'Orbitron', sans-serif"
+    }
+  }, count))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(15,22,36,0.95)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '8px',
+      padding: '14px 16px',
+      textAlign: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.6rem',
+      color: '#64748b',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '6px'
+    }
+  }, "RATE LIMIT HITS"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '1.4rem',
+      fontWeight: 700,
+      color: '#f97316',
+      fontFamily: "'Orbitron', sans-serif"
+    }
+  }, data.rate_limit_hits ?? 0))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '16px',
+      marginBottom: '1.5rem'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, "SOURCE BREAKDOWN"), Object.entries(data.source_breakdown || {}).map(([k, v]) => /*#__PURE__*/React.createElement("div", {
+    key: k,
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      padding: '4px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, k), /*#__PURE__*/React.createElement("span", null, v)))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, "CAMPAIGN BREAKDOWN"), Object.keys(data.campaign_breakdown || {}).length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#475569'
+    }
+  }, "No campaign data yet."), Object.entries(data.campaign_breakdown || {}).map(([k, v]) => /*#__PURE__*/React.createElement("div", {
+    key: k,
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      padding: '4px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, k), /*#__PURE__*/React.createElement("span", null, v))))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, "RECENT SUBMISSIONS"), (data.recent_submissions || []).map(row => /*#__PURE__*/React.createElement("div", {
+    key: row.id,
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: '6px',
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      padding: '8px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, row.company_name, " (", row.contact_email || 'no email', ")"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(spamColor[row.spam_status] || '#64748b')
+  }, row.spam_status), ' ', row.source, row.utm_source ? ' · ' + row.utm_source : '', row.score_total != null ? ' · score ' + row.score_total + ' (' + row.score_category + ')' : '')))));
+}
 function MultifamilyLeadListView({
   activeTab,
-  setActiveTab
+  setActiveTab,
+  user
 }) {
   const tab = MF_TABS.find(t => t.id === activeTab) || MF_TABS[1];
   const [data, setData] = useState(null);
@@ -8763,7 +8976,8 @@ function MultifamilyLeadListView({
     onAddLead: () => setShowAddModal(true)
   }), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
     activeTab: activeTab,
-    setActiveTab: setActiveTab
+    setActiveTab: setActiveTab,
+    user: user
   }), showAddModal && /*#__PURE__*/React.createElement(MultifamilyAddLeadModal, {
     onClose: () => setShowAddModal(false),
     onCreated: () => load()

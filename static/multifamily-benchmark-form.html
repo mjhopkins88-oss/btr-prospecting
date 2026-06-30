@@ -73,6 +73,18 @@
     .result.ok { display: block; background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.3); color: #34d399; }
     .result.err { display: block; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #ef4444; }
     .conditional { display: none; }
+    /* Honeypot — visually hidden but still in the DOM/tab order's reach
+       for naive bots that fill every input. Real users never see or
+       focus it (off-screen, aria-hidden, no tabstop, no autofill). */
+    .hp-wrap {
+        position: absolute;
+        left: -9999px;
+        top: -9999px;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+    }
+    .consent { font-size: 0.72rem; color: #64748b; line-height: 1.5; margin-top: 0.75rem; }
 </style>
 </head>
 <body>
@@ -83,6 +95,18 @@
         insurance pricing has moved this year — no obligation, no hard sell. California and Texas only for now.
     </p>
     <form id="benchmark-form">
+        <div class="hp-wrap" aria-hidden="true">
+            <label for="website_url">Leave this field blank</label>
+            <input type="text" id="website_url" name="website_url" tabindex="-1" autocomplete="off">
+        </div>
+        <input type="hidden" name="utmSource" id="utmSource">
+        <input type="hidden" name="utmMedium" id="utmMedium">
+        <input type="hidden" name="utmCampaign" id="utmCampaign">
+        <input type="hidden" name="utmTerm" id="utmTerm">
+        <input type="hidden" name="utmContent" id="utmContent">
+        <input type="hidden" name="referrer" id="referrer">
+        <input type="hidden" name="landingPage" id="landingPage">
+        <input type="hidden" name="offerType" id="offerType" value="multifamily_benchmark_review">
         <div class="grid">
             <label>Name *
                 <input name="name" required>
@@ -153,6 +177,10 @@
             </label>
         </div>
         <div class="result" id="result"></div>
+        <p class="consent">
+            By submitting this form, you agree to be contacted about your multifamily insurance program by phone,
+            email, or text. We don't sell your information to third parties.
+        </p>
         <div class="actions">
             <button type="submit" id="submit-btn">Request My Benchmark Review</button>
         </div>
@@ -166,6 +194,25 @@
     var situationSelect = document.getElementById('leadSituation');
     var renewalField = document.getElementById('renewalDateField');
     var constructionField = document.getElementById('projectStartDateField');
+
+    // Populate UTM/referrer/landing-page hidden fields from the URL and
+    // browser at load time, so they're captured even if the visitor
+    // edits nothing else on the page.
+    (function captureAttribution() {
+        var params = new URLSearchParams(window.location.search);
+        var map = {
+            utmSource: 'utm_source', utmMedium: 'utm_medium', utmCampaign: 'utm_campaign',
+            utmTerm: 'utm_term', utmContent: 'utm_content',
+        };
+        Object.keys(map).forEach(function (fieldId) {
+            var value = params.get(map[fieldId]);
+            if (value) document.getElementById(fieldId).value = value;
+        });
+        document.getElementById('referrer').value = document.referrer || '';
+        document.getElementById('landingPage').value = window.location.href;
+        var offer = params.get('offer');
+        if (offer) document.getElementById('offerType').value = offer;
+    })();
 
     function updateConditionalFields() {
         renewalField.style.display = situationSelect.value === 'renewal' ? 'block' : 'none';
