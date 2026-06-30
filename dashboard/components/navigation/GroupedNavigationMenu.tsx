@@ -1,25 +1,31 @@
 /**
  * GroupedNavigationMenu - BTR Command workflow-based navigation
  *
- * Canonical reference for the Command Center navigation architecture.
- * The live implementation is inlined in static/vendor/app.js as the
- * TopNav / SubNav / CommandCenter components (see NAV_SECTIONS there).
+ * Canonical reference for the BTR Command Center's OWN navigation
+ * architecture (this file covers BTR only). The live implementation is
+ * inlined in static/vendor/app.js as the TopNav / SubNav / CommandCenter
+ * components (see NAV_SECTIONS there).
  *
  * Navigation model:
- *   - 6 top-level sections (Command Center, Deals, Market Intel, Pipeline,
- *     Multifamily, Admin)
+ *   - 5 top-level sections (Command Center, Deals, Market Intel, Pipeline,
+ *     Admin)
  *   - Each section has 1..n child pages rendered as a secondary tab strip
  *   - Child `id` values map 1:1 to the existing `activeTab` routes so no
  *     downstream page component needs to change.
  *
  * Role visibility:
- *   - broker:   Command Center, Deals, Market Intel (Sunbelt Intelligence only), Multifamily
- *   - producer: Command Center, Deals, Market Intel, Pipeline (My Pipeline), Multifamily
- *   - admin:    Command Center, Deals, Market Intel, Pipeline (full), Multifamily, Admin*
+ *   - broker:   Command Center, Deals, Market Intel (Sunbelt Intelligence only)
+ *   - producer: Command Center, Deals, Market Intel, Pipeline (My Pipeline)
+ *   - admin:    Command Center, Deals, Market Intel, Pipeline (full), Admin*
  *   - *Admin section only shows when user.is_super_admin === true
  *
- * Multifamily Command is a standalone module, separate from the BTR lead
- * queue — visible to every role, never merged into BTR routes/tabs.
+ * BTR Command and Multifamily Command are two separate top-level
+ * workspaces, switched via CommandSwitcher (static/vendor/app.js) — NOT
+ * via a section in this file's NAV_SECTIONS. When Multifamily Command is
+ * the active workspace, NONE of this BTR nav renders; Multifamily's own
+ * tab bar (MultifamilyTabBar, built from MF_TABS in static/vendor/app.js)
+ * renders instead, with its own super-admin gating for the Admin tab.
+ * The two workspaces never mix leads, nav, or styling.
  */
 
 import React from 'react';
@@ -88,24 +94,12 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: 'underwriting', label: 'Underwriting Sheet' },
     ],
   },
-  {
-    id: 'multifamily_section',
-    label: 'Multifamily',
-    icon: '\u25C7', // ◇
-    children: [
-      { id: 'multifamily', label: 'Overview' },
-      { id: 'multifamily_inbound', label: 'Inbound Leads' },
-      { id: 'multifamily_website_intent', label: 'Website Intent' },
-      { id: 'multifamily_renewal', label: 'Renewal Opportunities' },
-      { id: 'multifamily_acquisition', label: 'Acquisition / Financing' },
-      { id: 'multifamily_construction', label: 'Construction Triggers' },
-      { id: 'multifamily_construction_timing', label: 'Construction Timing' }, // Phase 5: stage-timing intelligence, see multifamily/stage_timing.py
-      { id: 'multifamily_california', label: 'California' },
-      { id: 'multifamily_texas', label: 'Texas' },
-      { id: 'multifamily_outreach', label: 'Outreach Workbench' },
-      { id: 'multifamily_admin', label: 'Admin' }, // super_admin only — see getNavForUser in static/vendor/app.js
-    ],
-  },
+  // No 'multifamily_section' here — Multifamily Command is its own
+  // top-level workspace (CommandSwitcher), not a BTR nav section. Its
+  // tabs (Overview, Inbound Leads, Website Intent, Renewal Opportunities,
+  // Acquisition/Financing, Construction Triggers, Construction Timing,
+  // California, Texas, Outreach Workbench, Admin) live in MF_TABS in
+  // static/vendor/app.js.
   {
     id: 'admin_section',
     label: 'Admin',

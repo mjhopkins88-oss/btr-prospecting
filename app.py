@@ -5622,6 +5622,23 @@ def index():
     """Serve the main HTML app"""
     return send_from_directory('static', 'index.html')
 
+@app.route('/command')
+@app.route('/multifamily')
+@app.route('/multifamily/<path:subpath>')
+def spa_workspace_routes(subpath=None):
+    """Serve the same SPA shell for the BTR/Multifamily command-switcher
+    routes (/command, /multifamily, /multifamily/<tab>) so direct
+    navigation and page refresh work. All routing past this point is
+    client-side in app.js, which reads window.location.pathname on load
+    to pick the active workspace/tab.
+
+    Note: the existing 404 handler (below) already falls back to
+    index.html for any unmatched non-/api/ path, so these routes are
+    not strictly load-bearing today — they exist to make the
+    officially-supported workspace paths explicit rather than relying
+    on an incidental fallback."""
+    return send_from_directory('static', 'index.html')
+
 @app.route('/favicon.ico')
 def favicon():
     """Prevent favicon 404 errors"""
