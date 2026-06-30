@@ -99,9 +99,11 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: 'multifamily_renewal', label: 'Renewal Opportunities' },
       { id: 'multifamily_acquisition', label: 'Acquisition / Financing' },
       { id: 'multifamily_construction', label: 'Construction Triggers' },
+      { id: 'multifamily_construction_timing', label: 'Construction Timing' }, // Phase 5: stage-timing intelligence, see multifamily/stage_timing.py
       { id: 'multifamily_california', label: 'California' },
       { id: 'multifamily_texas', label: 'Texas' },
       { id: 'multifamily_outreach', label: 'Outreach Workbench' },
+      { id: 'multifamily_admin', label: 'Admin' }, // super_admin only — see getNavForUser in static/vendor/app.js
     ],
   },
   {

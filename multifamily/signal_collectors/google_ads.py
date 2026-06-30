@@ -27,7 +27,7 @@ def collect():
         property_id=prop.id, company_id=company.id,
     )
     leads.append(MultifamilyLead(
-        id=new_id(), company=company, property=prop, signals=[signal],
+        id=new_id(), is_demo=True, company=company, property=prop, signals=[signal],
         state='CA', city='Sacramento', primary_signal_type='paid_search_click',
         primary_source='google_ads', source_url=signal.source_url, confidence=0.45,
         last_verified_at=utc_now_iso(), pain_flags=['cat_exposed_geography'],
@@ -52,7 +52,7 @@ def collect():
         property_id=prop2.id, company_id=company2.id,
     )
     leads.append(MultifamilyLead(
-        id=new_id(), company=company2, property=prop2, signals=[signal2],
+        id=new_id(), is_demo=True, company=company2, property=prop2, signals=[signal2],
         state='TX', city='Midland', primary_signal_type='paid_search_click',
         primary_source='google_ads', source_url=signal2.source_url, confidence=0.5,
         last_verified_at=utc_now_iso(),

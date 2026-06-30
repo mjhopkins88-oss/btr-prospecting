@@ -16,9 +16,16 @@ from typing import Any, Dict, List, Optional
 # ---------------------------------------------------------------------------
 
 SIGNAL_SOURCES = [
-    'website', 'form', 'search_console', 'google_ads', 'linkedin_lead_form',
+    'website', 'form', 'benchmark_form', 'search_console', 'google_ads', 'linkedin_lead_form',
     'permit', 'news', 'crm', 'manual',
 ]
+
+# Sources that represent a real prospect taking inbound action (vs. a
+# third-party trigger feed). Used to bucket leads into "Inbound Leads"
+# regardless of whether the data is real or mock/demo.
+INBOUND_INTENT_SOURCES = {
+    'form', 'benchmark_form', 'manual', 'website', 'search_console', 'google_ads', 'linkedin_lead_form',
+}
 
 SIGNAL_TYPES = [
     'benchmark_form_submit', 'quote_request', 'meeting_request',
@@ -34,6 +41,9 @@ SCORE_CATEGORIES = ['call_today', 'hot', 'warm', 'nurture', 'watchlist']
 
 # v1 launch states only
 SUPPORTED_STATES = ['CA', 'TX']
+
+# Spam/abuse triage states for real (non-demo) leads — see multifamily/spam_guard.py.
+SPAM_STATUSES = ['clean', 'suspicious', 'rejected']
 
 
 def new_id() -> str:
@@ -185,10 +195,36 @@ class MultifamilyLead:
     primary_signal_type: Optional[str] = None
     primary_source: Optional[str] = None
     source_url: Optional[str] = None
+    source_page: Optional[str] = None
     confidence: float = 0.5
     last_verified_at: str = field(default_factory=utc_now_iso)
     pain_flags: List[str] = field(default_factory=list)
     relationship_flags: List[str] = field(default_factory=list)
+    notes: Optional[str] = None
+    # True for mock/demo leads from the signal collectors; False for real
+    # leads captured through POST /api/multifamily/leads. The dashboard
+    # must never show is_demo leads without a clear "Demo Data" label, and
+    # real leads always take priority over demo leads in any given view.
+    is_demo: bool = False
+
+    # ---- Source/UTM attribution (real intake only — see multifamily/intake.py) ----
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_term: Optional[str] = None
+    utm_content: Optional[str] = None
+    referrer: Optional[str] = None
+    landing_page: Optional[str] = None
+    offer_type: Optional[str] = None
+
+    # ---- Spam/abuse signal (real intake only — see multifamily/spam_guard.py) ----
+    # 'clean' | 'suspicious' | 'rejected'. Only 'rejected' leads are excluded
+    # from normal dashboard views (repository.get_real_leads()).
+    spam_status: str = 'clean'
+    spam_reason_codes: List[str] = field(default_factory=list)
+    submitted_ip_hash: Optional[str] = None
+    user_agent_summary: Optional[str] = None
+
     score: Optional[MultifamilyLeadScore] = None
     why_warm: Optional[str] = None
     likely_pain: Optional[str] = None

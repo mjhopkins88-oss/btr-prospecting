@@ -3,6 +3,12 @@ API Routes: Multifamily Command
 Flask Blueprint for the standalone multifamily insurance lead
 intelligence module. Entirely separate from the BTR `li_*` lead queue —
 multifamily leads are never merged into BTR endpoints/tables.
+
+Real leads (captured via POST /api/multifamily/leads) always take
+priority over mock/demo leads. Mock data is a per-view fallback only —
+every `/leads/*` view independently falls back to demo data (clearly
+flagged via `is_demo` on each lead, and `is_demo_data` on aggregate
+responses) only when it has zero matching real leads.
 """
 import dataclasses
 
@@ -11,114 +17,230 @@ from flask import Blueprint, request, jsonify
 from multifamily.pipeline import (
     run_pipeline, filter_leads, website_intent_leads,
     renewal_opportunity_leads, acquisition_trigger_leads,
-    construction_trigger_leads, inbound_leads,
+    construction_trigger_leads, inbound_leads, with_demo_fallback,
+    sort_leads_by_priority,
 )
 from multifamily.daily_brief.multifamily_daily_brief_builder import build_daily_brief
+from multifamily.intake import build_lead_from_intake
+from multifamily import repository
+from multifamily import spam_guard
+from multifamily.stage_timing import compute_stage_timing
 
 multifamily_bp = Blueprint('multifamily', __name__, url_prefix='/api/multifamily')
 
 
 def _serialize_leads(leads):
-    return [dataclasses.asdict(l) for l in leads]
+    """Serialize leads for an API response, attaching LIVE construction
+    stage-timing intelligence (Phase 5) to each one. stage_timing is
+    never stored on the lead or persisted — "days in stage" grows every
+    day regardless of resubmission, so it's always recomputed fresh here
+    rather than frozen at whatever moment the lead was scored/saved."""
+    result = []
+    for lead in leads:
+        d = dataclasses.asdict(lead)
+        d['stage_timing'] = compute_stage_timing(lead)
+        result.append(d)
+    return result
 
 
-def _run():
-    """Re-run the (mock) pipeline for this request.
+def _real_and_mock():
+    """Real (persisted) leads + the mock/demo pipeline output, both ranked
+    Call Today > Hot > Warm > Nurture > Watchlist. The mock pipeline is
+    pure/in-memory and cheap at demo-data volume, so it's recomputed per
+    request rather than cached."""
+    real_leads = repository.get_real_leads()
+    mock_leads, source_runs = run_pipeline()
+    return real_leads, mock_leads, source_runs
 
-    The pipeline is pure/in-memory and cheap at mock-data volume, so we
-    recompute per-request rather than caching — keeps this endpoint
-    trivially correct as collectors are swapped for real integrations.
-    """
-    leads, source_runs = run_pipeline()
-    return leads, source_runs
+
+def _view(filter_fn):
+    real_leads, mock_leads, _ = _real_and_mock()
+    leads = with_demo_fallback(real_leads, mock_leads, filter_fn)
+    return jsonify({
+        'leads': _serialize_leads(leads),
+        'count': len(leads),
+        'is_demo_data': bool(leads) and all(l.is_demo for l in leads),
+    })
 
 
 @multifamily_bp.route('/leads', methods=['GET'])
 def get_leads():
     """GET /api/multifamily/leads?state=&category=&source=&signal_type="""
-    leads, _ = _run()
-    leads = filter_leads(
-        leads,
-        state=request.args.get('state'),
-        category=request.args.get('category'),
-        source=request.args.get('source'),
-        signal_type=request.args.get('signal_type'),
+    state = request.args.get('state')
+    category = request.args.get('category')
+    source = request.args.get('source')
+    signal_type = request.args.get('signal_type')
+    return _view(lambda ls: filter_leads(ls, state=state, category=category, source=source, signal_type=signal_type))
+
+
+@multifamily_bp.route('/leads', methods=['POST'])
+def create_lead():
+    """POST /api/multifamily/leads — real lead intake (public benchmark
+    form or internal manual entry). Accepts: name, company, email, phone,
+    role, state, city, assetType, numberOfUnits, leadSituation,
+    renewalDate, projectStartDate, primaryConcern, notes, source,
+    sourcePage, sourceUrl, plus utmSource/utmMedium/utmCampaign/utmTerm/
+    utmContent/referrer/landingPage/offerType and a hidden honeypot field
+    (multifamily/spam_guard.HONEYPOT_FIELD). Scores the lead immediately
+    and persists it.
+
+    Layered abuse protection (see multifamily/spam_guard.py):
+      - oversized payloads and rate-limited IPs/emails are rejected
+        outright (413 / 429) before any lead is built
+      - field validation still returns clean, specific 400 errors for
+        legitimate users
+      - honeypot / garbage-content detection never blocks the request
+        (so a bot gets the same 201 a real user would) — it only tags
+        the persisted lead's spam_status so it's excluded from normal
+        dashboard views
+    """
+    if not spam_guard.check_payload_size(request.content_length):
+        return jsonify({'success': False, 'errors': ['Submission too large.']}), 413
+
+    payload = request.get_json(silent=True) or {}
+
+    ip = spam_guard.get_client_ip(dict(request.headers), request.remote_addr)
+    ip_hash = spam_guard.hash_ip(ip)
+    user_agent_summary = spam_guard.summarize_user_agent(request.headers.get('User-Agent'))
+    email = (payload.get('email') or '').strip().lower() or None
+
+    rate_limit_reason = spam_guard.check_rate_limit(ip_hash, email)
+    if rate_limit_reason:
+        event_type = 'rate_limited_ip' if rate_limit_reason == 'RATE_LIMIT_IP' else 'rate_limited_email'
+        repository.record_intake_event(event_type, ip_hash, email)
+        return jsonify({'success': False, 'errors': ['Too many submissions from this source. Please try again later.']}), 429
+
+    spam_status, spam_reason_codes = spam_guard.classify_spam(payload)
+
+    lead, errors = build_lead_from_intake(
+        payload, ip_hash=ip_hash, user_agent_summary=user_agent_summary,
+        spam_status=spam_status, spam_reason_codes=spam_reason_codes,
     )
-    return jsonify({'leads': _serialize_leads(leads), 'count': len(leads)})
+    if errors:
+        repository.record_intake_event('invalid', ip_hash, email, {'errors': errors})
+        return jsonify({'success': False, 'errors': errors}), 400
+
+    repository.insert_lead(lead)
+
+    if spam_status == 'rejected':
+        event_type = 'rejected_honeypot' if 'HONEYPOT_FILLED' in spam_reason_codes else 'rejected_garbage'
+    elif spam_status == 'suspicious':
+        event_type = 'accepted_suspicious'
+    else:
+        event_type = 'accepted_clean'
+    repository.record_intake_event(event_type, ip_hash, email, {'spam_reason_codes': spam_reason_codes})
+
+    # Always a normal-looking success — never reveal spam detection to the submitter.
+    lead_dict = dataclasses.asdict(lead)
+    lead_dict['stage_timing'] = compute_stage_timing(lead)
+    return jsonify({'success': True, 'lead': lead_dict}), 201
 
 
 @multifamily_bp.route('/leads/inbound', methods=['GET'])
 def get_inbound_leads():
-    leads, _ = _run()
-    leads = inbound_leads(leads)
-    return jsonify({'leads': _serialize_leads(leads), 'count': len(leads)})
+    return _view(inbound_leads)
 
 
 @multifamily_bp.route('/leads/website-intent', methods=['GET'])
 def get_website_intent_leads():
-    leads, _ = _run()
-    leads = website_intent_leads(leads)
-    return jsonify({'leads': _serialize_leads(leads), 'count': len(leads)})
+    return _view(website_intent_leads)
 
 
 @multifamily_bp.route('/leads/renewal-opportunities', methods=['GET'])
 def get_renewal_opportunities():
-    leads, _ = _run()
-    leads = renewal_opportunity_leads(leads)
-    return jsonify({'leads': _serialize_leads(leads), 'count': len(leads)})
+    return _view(renewal_opportunity_leads)
 
 
 @multifamily_bp.route('/leads/acquisition-triggers', methods=['GET'])
 def get_acquisition_triggers():
-    leads, _ = _run()
-    leads = acquisition_trigger_leads(leads)
-    return jsonify({'leads': _serialize_leads(leads), 'count': len(leads)})
+    return _view(acquisition_trigger_leads)
 
 
 @multifamily_bp.route('/leads/construction-triggers', methods=['GET'])
 def get_construction_triggers():
-    leads, _ = _run()
-    leads = construction_trigger_leads(leads)
-    return jsonify({'leads': _serialize_leads(leads), 'count': len(leads)})
+    return _view(construction_trigger_leads)
+
+
+@multifamily_bp.route('/leads/construction-timing', methods=['GET'])
+def get_construction_timing():
+    """Phase 5: construction-trigger leads ranked by timing urgency
+    (overdue first, then due_soon, then on_track/completed/unknown) —
+    a focused ops view for "is this stalled?" rather than the raw,
+    score-ranked /leads/construction-triggers list. Pure analytics on
+    top of the same leads; does not affect scoring."""
+    _URGENCY_RANK = {'overdue': 3, 'due_soon': 2, 'on_track': 1, 'unknown': 0, 'completed': -1}
+    real_leads, mock_leads, _ = _real_and_mock()
+    leads = with_demo_fallback(real_leads, mock_leads, construction_trigger_leads)
+
+    def _urgency(lead):
+        timing = compute_stage_timing(lead)
+        return _URGENCY_RANK.get(timing['timing_status'], 0) if timing else 0
+
+    leads = sorted(leads, key=_urgency, reverse=True)
+    return jsonify({
+        'leads': _serialize_leads(leads),
+        'count': len(leads),
+        'is_demo_data': bool(leads) and all(l.is_demo for l in leads),
+    })
 
 
 @multifamily_bp.route('/leads/california', methods=['GET'])
 def get_california_leads():
-    leads, _ = _run()
-    leads = filter_leads(leads, state='CA')
-    return jsonify({'leads': _serialize_leads(leads), 'count': len(leads)})
+    return _view(lambda ls: filter_leads(ls, state='CA'))
 
 
 @multifamily_bp.route('/leads/texas', methods=['GET'])
 def get_texas_leads():
-    leads, _ = _run()
-    leads = filter_leads(leads, state='TX')
-    return jsonify({'leads': _serialize_leads(leads), 'count': len(leads)})
+    return _view(lambda ls: filter_leads(ls, state='TX'))
 
 
 @multifamily_bp.route('/outreach-workbench', methods=['GET'])
 def get_outreach_workbench():
-    """Leads worth an outreach touch today. `_run()` already returns leads
-    ranked Call Today > Hot > Warm > Nurture > Watchlist (then by score), so
-    we only need to filter to the actionable tiers here."""
-    leads, _ = _run()
-    ranked = [
-        l for l in leads
-        if l.score and not l.score.disqualified and l.score.category in ('call_today', 'hot', 'warm')
-    ]
-    return jsonify({'leads': _serialize_leads(ranked), 'count': len(ranked)})
+    """Leads worth an outreach touch today, ranked Call Today > Hot > Warm."""
+    def _actionable(ls):
+        return [l for l in ls if l.score and not l.score.disqualified and l.score.category in ('call_today', 'hot', 'warm')]
+    return _view(_actionable)
+
+
+def _stage_timing_summary(leads):
+    """Phase 5: counts of construction-trigger leads by timing status,
+    for the overview/daily-brief widgets. Pure analytics — read-only."""
+    counts = {'on_track': 0, 'due_soon': 0, 'overdue': 0, 'completed': 0, 'unknown': 0}
+    for lead in leads:
+        timing = compute_stage_timing(lead)
+        if timing:
+            counts[timing['timing_status']] = counts.get(timing['timing_status'], 0) + 1
+    return counts
 
 
 @multifamily_bp.route('/daily-brief', methods=['GET'])
 def get_daily_brief():
-    leads, _ = _run()
-    return jsonify(build_daily_brief(leads))
+    real_leads, mock_leads, _ = _real_and_mock()
+    leads = real_leads if real_leads else mock_leads
+    leads = sort_leads_by_priority(leads)
+    brief = build_daily_brief(leads)
+    brief['is_demo_data'] = bool(leads) and all(l.is_demo for l in leads)
+
+    # Phase 5: surface stalled/due-soon construction leads in the brief
+    # without touching multifamily_daily_brief_builder.py's own contract.
+    timed = [(l, compute_stage_timing(l)) for l in leads]
+    stalled = [(l, t) for l, t in timed if t and t['timing_status'] in ('overdue', 'due_soon')]
+    stalled.sort(key=lambda pair: pair[1]['timing_status'] == 'overdue', reverse=True)
+    brief['stalled_construction_leads'] = [
+        {'lead_id': l.id, 'company': l.company.name, 'property': l.property.name,
+         'city': l.city, 'state': l.state, **t}
+        for l, t in stalled
+    ]
+    return jsonify(brief)
 
 
 @multifamily_bp.route('/overview', methods=['GET'])
 def get_overview():
     """Summary stats for the Multifamily Overview dashboard section."""
-    leads, source_runs = _run()
+    real_leads, mock_leads, source_runs = _real_and_mock()
+    leads = real_leads if real_leads else mock_leads
+    is_demo_data = bool(leads) and all(l.is_demo for l in leads)
+
     scored = [l for l in leads if l.score]
     by_category = {}
     for l in scored:
@@ -133,8 +255,40 @@ def get_overview():
 
     return jsonify({
         'total_leads': len(leads),
+        'real_lead_count': len(real_leads),
+        'is_demo_data': is_demo_data,
         'by_category': by_category,
         'by_state': by_state,
         'by_source': by_source,
         'source_runs': [dataclasses.asdict(r) for r in source_runs],
+        # Phase 5: construction stage-timing breakdown (pure analytics —
+        # never affects scoring/category).
+        'construction_stage_timing': _stage_timing_summary(leads),
     })
+
+
+@multifamily_bp.route('/admin/intake-stats', methods=['GET'])
+def get_intake_stats():
+    """Admin/debug view: recent submissions (including rejected/suspicious
+    — repository.get_intake_stats() does NOT filter by spam_status, unlike
+    every other endpoint in this blueprint), spam-status counts, rate
+    limit hits, and source/campaign breakdown.
+
+    Server-side gated with the app's existing require_auth/require_super_admin
+    decorators (app.py) — same check used by every other super-admin-only
+    route (e.g. /api/admin/users/<id>/disable). Imported lazily inside the
+    function body rather than at module level: app.py imports this blueprint
+    (to register it) before require_auth/require_super_admin are defined
+    further down in app.py, so a top-level `from app import ...` here would
+    be a circular import. By the time any request actually reaches this
+    handler, app.py has finished loading and `app` is already the fully
+    initialized entry in sys.modules, so the deferred import just looks it
+    up — it doesn't re-execute app.py or create a real cycle."""
+    import app as _app
+
+    @_app.require_auth
+    @_app.require_super_admin
+    def _authorized():
+        return jsonify(repository.get_intake_stats())
+
+    return _authorized()

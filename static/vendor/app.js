@@ -1407,10 +1407,16 @@ function App({
     user: user
   }), activeTab === 'dev_network' && /*#__PURE__*/React.createElement(DeveloperNetworkPanel, null), activeTab === 'corridors' && /*#__PURE__*/React.createElement(DevelopmentCorridorsPanel, null), activeTab === 'dev_momentum' && /*#__PURE__*/React.createElement(MomentumEnginePanel, null), activeTab === 'signal_discovery' && user && user.is_super_admin && /*#__PURE__*/React.createElement(SignalDiscoveryPanel, null), activeTab === 'multifamily' && /*#__PURE__*/React.createElement(MultifamilyOverviewPanel, {
     activeTab: activeTab,
-    setActiveTab: setActiveTab
-  }), activeTab.startsWith('multifamily_') && /*#__PURE__*/React.createElement(MultifamilyLeadListView, {
+    setActiveTab: setActiveTab,
+    user: user
+  }), activeTab === 'multifamily_admin' && /*#__PURE__*/React.createElement(MultifamilyAdminPanel, {
     activeTab: activeTab,
-    setActiveTab: setActiveTab
+    setActiveTab: setActiveTab,
+    user: user
+  }), activeTab.startsWith('multifamily_') && activeTab !== 'multifamily_admin' && /*#__PURE__*/React.createElement(MultifamilyLeadListView, {
+    activeTab: activeTab,
+    setActiveTab: setActiveTab,
+    user: user
   }), activeTab === 'quoting' && (!user || user.role !== 'admin') && (() => {
     setActiveTab(ROLE_DEFAULT_TAB[user?.role] || 'command');
     return null;
@@ -5653,9 +5659,11 @@ const NAV_SECTIONS = [
       { id: 'multifamily_renewal', label: 'Renewal Opportunities' },
       { id: 'multifamily_acquisition', label: 'Acquisition / Financing' },
       { id: 'multifamily_construction', label: 'Construction Triggers' },
+      { id: 'multifamily_construction_timing', label: 'Construction Timing' },
       { id: 'multifamily_california', label: 'California' },
       { id: 'multifamily_texas', label: 'Texas' },
-      { id: 'multifamily_outreach', label: 'Outreach Workbench' }
+      { id: 'multifamily_outreach', label: 'Outreach Workbench' },
+      { id: 'multifamily_admin', label: 'Admin' }
     ]
   },
   {
@@ -5678,6 +5686,7 @@ function getNavForUser(user) {
   } else if (role === 'producer') {
     ['quoting', 'underwriting'].forEach(t => hiddenTabs.add(t));
   }
+  if (!isSuperAdmin) hiddenTabs.add('multifamily_admin');
 
   // Per-role hidden sections
   const hiddenSections = new Set();
@@ -7916,6 +7925,11 @@ const MF_TABS = [{
   endpoint: '/api/multifamily/leads/construction-triggers',
   kind: 'leads'
 }, {
+  id: 'multifamily_construction_timing',
+  label: 'Construction Timing',
+  endpoint: '/api/multifamily/leads/construction-timing',
+  kind: 'leads'
+}, {
   id: 'multifamily_california',
   label: 'California',
   endpoint: '/api/multifamily/leads/california',
@@ -7930,7 +7944,85 @@ const MF_TABS = [{
   label: 'Outreach Workbench',
   endpoint: '/api/multifamily/outreach-workbench',
   kind: 'leads'
+}, {
+  id: 'multifamily_admin',
+  label: 'Admin',
+  endpoint: '/api/multifamily/admin/intake-stats',
+  kind: 'admin'
 }];
+const MF_LEAD_SITUATIONS = [{
+  value: 'renewal',
+  label: 'Renewal coming up'
+}, {
+  value: 'acquisition',
+  label: 'Acquisition'
+}, {
+  value: 'refinance',
+  label: 'Refinance'
+}, {
+  value: 'construction',
+  label: 'Construction project'
+}, {
+  value: 'operating',
+  label: 'Just operating — no specific trigger'
+}, {
+  value: 'benchmark',
+  label: 'Want a general benchmark/review'
+}];
+const MF_ASSET_TYPES = [{
+  value: 'garden',
+  label: 'Garden-style'
+}, {
+  value: 'mid_rise',
+  label: 'Mid-rise'
+}, {
+  value: 'high_rise',
+  label: 'High-rise'
+}, {
+  value: 'mixed_use',
+  label: 'Mixed-use'
+}];
+const MF_PRIMARY_CONCERNS = [{
+  value: 'premium_increase',
+  label: 'Premium increase'
+}, {
+  value: 'deductible_concern',
+  label: 'Deductible concern'
+}, {
+  value: 'lender_requirement',
+  label: 'Lender requirement'
+}, {
+  value: 'cat_exposed_geography',
+  label: 'CAT-exposed geography'
+}, {
+  value: 'builders_risk_need',
+  label: "Builder's risk need"
+}, {
+  value: 'gl_excess_concern',
+  label: 'GL / excess concern'
+}];
+const MF_LEAD_SITUATION_LABELS = {
+  renewal_date_known: 'Renewal',
+  acquisition: 'Acquisition',
+  refinance: 'Refinance',
+  financing: 'Financing',
+  permit_filed: 'Construction (permit filed)',
+  planning_approval: 'Construction (planning approval)',
+  groundbreaking: 'Construction (groundbreaking)',
+  vertical_construction: 'Construction (underway)',
+  completion: 'Construction (completing)',
+  portfolio_growth: 'Portfolio growth',
+  benchmark_form_submit: 'Benchmark request',
+  quote_request: 'Quote request',
+  meeting_request: 'Meeting request',
+  guide_download: 'Guide download',
+  calculator_submit: 'Calculator use',
+  website_visit: 'Website visit',
+  repeat_website_visit: 'Repeat website visit',
+  keyword_intent: 'Search intent',
+  paid_search_click: 'Paid search click',
+  linkedin_lead_form_submit: 'LinkedIn lead form'
+};
 function mfCategoryColor(cat) {
   return {
     call_today: '#ef4444',
@@ -7960,15 +8052,46 @@ function mfPillStyle(color) {
     color
   };
 }
+function mfLeadSituationLabel(lead) {
+  const fromSignal = (lead.signals || []).map(s => s.detail && s.detail.lead_situation).find(Boolean);
+  if (fromSignal) {
+    const found = MF_LEAD_SITUATIONS.find(s => s.value === fromSignal);
+    return found ? found.label : fromSignal;
+  }
+  return MF_LEAD_SITUATION_LABELS[lead.primary_signal_type] || lead.primary_signal_type || 'Unknown';
+}
+function mfPrimaryConcernLabel(lead) {
+  const flag = (lead.pain_flags || [])[0];
+  if (!flag) return null;
+  const found = MF_PRIMARY_CONCERNS.find(c => c.value === flag);
+  return found ? found.label : flag;
+}
+function mfSourceAttributionLabel(lead) {
+  const parts = [lead.utm_source, lead.utm_medium, lead.utm_campaign].filter(Boolean);
+  return parts.length ? parts.join(' / ') : null;
+}
+function mfStageTimingColor(status) {
+  return {
+    overdue: '#ef4444',
+    due_soon: '#facc15',
+    on_track: '#34d399',
+    completed: '#60a5fa',
+    unknown: '#64748b'
+  }[status] || '#64748b';
+}
 function MultifamilyLeadCard({
   lead
 }) {
   const score = lead.score || {};
   const color = mfCategoryColor(score.category);
+  const contact = (lead.contacts || [])[0];
+  const primaryConcern = mfPrimaryConcernLabel(lead);
+  const attribution = mfSourceAttributionLabel(lead);
+  const isSuspicious = lead.spam_status === 'suspicious';
   return /*#__PURE__*/React.createElement("div", {
     style: {
       background: 'rgba(15,22,36,0.95)',
-      border: '1px solid rgba(255,255,255,0.08)',
+      border: '1px solid ' + (isSuspicious ? 'rgba(250,204,21,0.4)' : 'rgba(255,255,255,0.08)'),
       borderLeft: '3px solid ' + color,
       borderRadius: '8px',
       padding: '14px 16px',
@@ -7984,17 +8107,35 @@ function MultifamilyLeadCard({
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
       fontSize: '1rem',
       fontWeight: 700,
       color: '#f1f5f9'
     }
-  }, lead.company && lead.company.name), /*#__PURE__*/React.createElement("div", {
+  }, lead.company && lead.company.name), /*#__PURE__*/React.createElement("span", {
+    style: lead.is_demo ? mfPillStyle('#f97316') : mfPillStyle('#34d399')
+  }, lead.is_demo ? 'DEMO DATA' : 'REAL'), isSuspicious && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#facc15'),
+    title: (lead.spam_reason_codes || []).join(', ')
+  }, "\u26A0 SUSPICIOUS")), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.8rem',
       color: '#94a3b8',
       marginTop: '2px'
     }
-  }, lead.property && lead.property.name, " \xB7 ", lead.city || '?', ", ", lead.state || '?')), /*#__PURE__*/React.createElement("div", {
+  }, lead.property && lead.property.name, " \xB7 ", lead.city || '?', ", ", lead.state || '?', lead.property && lead.property.asset_type && /*#__PURE__*/React.createElement(React.Fragment, null, " \xB7 ", lead.property.asset_type.replace(/_/g, ' ')), lead.property && lead.property.unit_count != null && /*#__PURE__*/React.createElement(React.Fragment, null, " \xB7 ", lead.property.unit_count, " units")), contact && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#64748b',
+      marginTop: '2px'
+    }
+  }, contact.full_name, contact.title ? ' — ' + contact.title : '', contact.email ? ' · ' + contact.email : '')), /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: 'right'
     }
@@ -8020,9 +8161,14 @@ function MultifamilyLeadCard({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#a78bfa')
-  }, lead.primary_source), /*#__PURE__*/React.createElement("span", {
+  }, lead.primary_source), attribution && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#60a5fa'),
+    title: "utm_source / utm_medium / utm_campaign"
+  }, attribution), /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#22d3ee')
-  }, lead.primary_signal_type), /*#__PURE__*/React.createElement("span", {
+  }, mfLeadSituationLabel(lead)), primaryConcern && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#fb7185')
+  }, primaryConcern), /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#34d399')
   }, "confidence ", (lead.confidence ?? 0).toFixed(2)), score.disqualified && /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#ef4444')
@@ -8059,7 +8205,31 @@ function MultifamilyLeadCard({
       color: '#cbd5e1',
       marginBottom: '4px'
     }
-  }, /*#__PURE__*/React.createElement("b", null, "Next best action:"), " ", lead.next_best_action), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("b", null, "Next best action:"), " ", lead.next_best_action), lead.stage_timing && /*#__PURE__*/React.createElement("div", {
+  style: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '8px',
+    background: mfStageTimingColor(lead.stage_timing.timing_status) + '14',
+    border: '1px solid ' + mfStageTimingColor(lead.stage_timing.timing_status) + '40',
+    borderRadius: '6px',
+    padding: '8px 10px',
+    marginBottom: '8px'
+  }
+}, /*#__PURE__*/React.createElement("span", {
+  style: mfPillStyle(mfStageTimingColor(lead.stage_timing.timing_status))
+}, lead.stage_timing.timing_status.replace(/_/g, ' ').toUpperCase()), /*#__PURE__*/React.createElement("span", {
+  style: {
+    fontSize: '0.78rem',
+    color: '#cbd5e1'
+  }
+}, lead.stage_timing.explanation)), lead.notes && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.8rem',
+      color: '#cbd5e1',
+      marginBottom: '4px'
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "Notes:"), " ", lead.notes), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.8rem',
       color: '#94a3b8',
@@ -8070,13 +8240,15 @@ function MultifamilyLeadCard({
     style: {
       display: 'flex',
       justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: '4px',
       fontSize: '0.7rem',
       color: '#475569',
       marginTop: '8px',
       borderTop: '1px solid rgba(255,255,255,0.05)',
       paddingTop: '8px'
     }
-  }, /*#__PURE__*/React.createElement("span", null, lead.source_url ? /*#__PURE__*/React.createElement("a", {
+  }, /*#__PURE__*/React.createElement("span", null, lead.source_page || 'no source page', " \xB7 ", lead.source_url ? /*#__PURE__*/React.createElement("a", {
     href: lead.source_url,
     target: "_blank",
     rel: "noreferrer",
@@ -8087,8 +8259,10 @@ function MultifamilyLeadCard({
 }
 function MultifamilyTabBar({
   activeTab,
-  setActiveTab
+  setActiveTab,
+  user
 }) {
+  const visibleTabs = MF_TABS.filter(tab => tab.kind !== 'admin' || user && user.is_super_admin);
   return /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
@@ -8096,7 +8270,7 @@ function MultifamilyTabBar({
       marginBottom: '1rem',
       flexWrap: 'wrap'
     }
-  }, MF_TABS.map(tab => /*#__PURE__*/React.createElement("button", {
+  }, visibleTabs.map(tab => /*#__PURE__*/React.createElement("button", {
     key: tab.id,
     onClick: () => setActiveTab(tab.id),
     style: {
@@ -8112,12 +8286,19 @@ function MultifamilyTabBar({
     }
   }, tab.label)));
 }
-function MultifamilyHeader() {
+function MultifamilyHeader({
+  onAddLead
+}) {
   return /*#__PURE__*/React.createElement("div", {
     style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      flexWrap: 'wrap',
+      gap: '12px',
       marginBottom: '1.5rem'
     }
-  }, /*#__PURE__*/React.createElement("h2", {
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", {
     style: {
       fontFamily: "'Orbitron', sans-serif",
       fontSize: '1.3rem',
@@ -8133,14 +8314,346 @@ function MultifamilyHeader() {
       fontSize: '0.8rem',
       margin: '0.25rem 0 0'
     }
-  }, "Multifamily insurance lead intelligence \u2014 California & Texas. Inbound leads, website intent, renewals, and acquisition/construction triggers. Separate from the BTR queue."));
+  }, "Multifamily insurance lead intelligence \u2014 California & Texas. Inbound leads, website intent, renewals, and acquisition/construction triggers. Separate from the BTR queue.")), onAddLead && /*#__PURE__*/React.createElement("button", {
+    onClick: onAddLead,
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      padding: '0.6rem 1rem',
+      borderRadius: '0.5rem',
+      fontSize: '0.8rem',
+      fontWeight: 700,
+      cursor: 'pointer',
+      fontFamily: "'Inter', sans-serif",
+      whiteSpace: 'nowrap'
+    }
+  }, "+ Add Multifamily Lead"));
+}
+const MF_EMPTY_LEAD_FORM = {
+  name: '',
+  company: '',
+  email: '',
+  phone: '',
+  role: '',
+  state: 'TX',
+  city: '',
+  assetType: '',
+  numberOfUnits: '',
+  leadSituation: 'benchmark',
+  renewalDate: '',
+  projectStartDate: '',
+  primaryConcern: '',
+  notes: '',
+  sourcePage: 'Internal — Manual Entry',
+  sourceUrl: ''
+};
+function mfFieldStyle() {
+  return {
+    width: '100%',
+    background: 'rgba(255,255,255,0.04)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: '6px',
+    padding: '0.5rem 0.6rem',
+    color: '#f1f5f9',
+    fontSize: '0.85rem',
+    fontFamily: "'Inter', sans-serif",
+    marginTop: '4px'
+  };
+}
+function mfLabelStyle() {
+  return {
+    fontSize: '0.7rem',
+    color: '#94a3b8',
+    fontFamily: "'Inter', sans-serif"
+  };
+}
+function MultifamilyAddLeadModal({
+  onClose,
+  onCreated
+}) {
+  const [form, setForm] = useState(MF_EMPTY_LEAD_FORM);
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState(null);
+  const update = field => e => setForm(f => ({
+    ...f,
+    [field]: e.target.value
+  }));
+  const submit = async e => {
+    e.preventDefault();
+    setSubmitting(true);
+    setResult(null);
+    try {
+      const res = await fetch('/api/multifamily/leads', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          ...form,
+          source: 'manual'
+        })
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setResult({
+          ok: true,
+          message: `Lead created — scored ${json.lead.score.total} (${json.lead.score.category}).`
+        });
+        if (onCreated) onCreated(json.lead);
+        setForm(MF_EMPTY_LEAD_FORM);
+      } else {
+        setResult({
+          ok: false,
+          message: (json.errors || ['Submission failed.']).join('; ')
+        });
+      }
+    } catch (err) {
+      setResult({
+        ok: false,
+        message: 'Network error: ' + err.message
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0,0,0,0.6)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 2000
+    },
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: '#0f1624',
+      border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: '12px',
+      padding: '1.5rem',
+      width: '560px',
+      maxWidth: '92vw',
+      maxHeight: '88vh',
+      overflowY: 'auto'
+    },
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: '1rem'
+    }
+  }, /*#__PURE__*/React.createElement("h3", {
+    style: {
+      fontFamily: "'Orbitron', sans-serif",
+      fontSize: '1rem',
+      color: '#f59e0b',
+      margin: 0
+    }
+  }, "+ ADD MULTIFAMILY LEAD"), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    style: {
+      background: 'transparent',
+      border: 'none',
+      color: '#64748b',
+      fontSize: '1.2rem',
+      cursor: 'pointer'
+    }
+  }, "\xD7")), /*#__PURE__*/React.createElement("form", {
+    onSubmit: submit
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Name *", /*#__PURE__*/React.createElement("input", {
+    required: true,
+    style: mfFieldStyle(),
+    value: form.name,
+    onChange: update('name')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Company *", /*#__PURE__*/React.createElement("input", {
+    required: true,
+    style: mfFieldStyle(),
+    value: form.company,
+    onChange: update('company')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Email *", /*#__PURE__*/React.createElement("input", {
+    required: true,
+    type: "email",
+    style: mfFieldStyle(),
+    value: form.email,
+    onChange: update('email')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Phone", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.phone,
+    onChange: update('phone')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Role / Title", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.role,
+    onChange: update('role')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "State *", /*#__PURE__*/React.createElement("select", {
+    required: true,
+    style: mfFieldStyle(),
+    value: form.state,
+    onChange: update('state')
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "TX"
+  }, "Texas"), /*#__PURE__*/React.createElement("option", {
+    value: "CA"
+  }, "California"))), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "City", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.city,
+    onChange: update('city')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Asset Type", /*#__PURE__*/React.createElement("select", {
+    style: mfFieldStyle(),
+    value: form.assetType,
+    onChange: update('assetType')
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "\u2014"), MF_ASSET_TYPES.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o.value,
+    value: o.value
+  }, o.label)))), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "# of Units", /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    min: "0",
+    style: mfFieldStyle(),
+    value: form.numberOfUnits,
+    onChange: update('numberOfUnits')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Lead Situation *", /*#__PURE__*/React.createElement("select", {
+    required: true,
+    style: mfFieldStyle(),
+    value: form.leadSituation,
+    onChange: update('leadSituation')
+  }, MF_LEAD_SITUATIONS.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o.value,
+    value: o.value
+  }, o.label)))), form.leadSituation === 'renewal' && /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Renewal Date", /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    style: mfFieldStyle(),
+    value: form.renewalDate,
+    onChange: update('renewalDate')
+  })), form.leadSituation === 'construction' && /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Project Start Date", /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    style: mfFieldStyle(),
+    value: form.projectStartDate,
+    onChange: update('projectStartDate')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Primary Concern", /*#__PURE__*/React.createElement("select", {
+    style: mfFieldStyle(),
+    value: form.primaryConcern,
+    onChange: update('primaryConcern')
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "\u2014"), MF_PRIMARY_CONCERNS.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o.value,
+    value: o.value
+  }, o.label)))), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Source Page", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.sourcePage,
+    onChange: update('sourcePage')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: {
+      ...mfLabelStyle(),
+      gridColumn: '1 / -1'
+    }
+  }, "Source URL", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.sourceUrl,
+    onChange: update('sourceUrl')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: {
+      ...mfLabelStyle(),
+      gridColumn: '1 / -1'
+    }
+  }, "Notes", /*#__PURE__*/React.createElement("textarea", {
+    rows: "3",
+    style: mfFieldStyle(),
+    value: form.notes,
+    onChange: update('notes')
+  }))), result && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '12px',
+      padding: '8px 12px',
+      borderRadius: '6px',
+      fontSize: '0.8rem',
+      background: result.ok ? 'rgba(52,211,153,0.1)' : 'rgba(239,68,68,0.1)',
+      color: result.ok ? '#34d399' : '#ef4444',
+      border: '1px solid ' + (result.ok ? 'rgba(52,211,153,0.3)' : 'rgba(239,68,68,0.3)')
+    }
+  }, result.message), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'flex-end',
+      gap: '8px',
+      marginTop: '16px'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: onClose,
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.1)',
+      color: '#94a3b8',
+      padding: '0.55rem 1rem',
+      borderRadius: '0.5rem',
+      cursor: 'pointer',
+      fontSize: '0.8rem'
+    }
+  }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    disabled: submitting,
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      padding: '0.55rem 1.1rem',
+      borderRadius: '0.5rem',
+      fontWeight: 700,
+      cursor: submitting ? 'not-allowed' : 'pointer',
+      opacity: submitting ? 0.6 : 1,
+      fontSize: '0.8rem'
+    }
+  }, submitting ? 'Submitting…' : 'Submit Lead')))));
 }
 function MultifamilyOverviewPanel({
   activeTab,
-  setActiveTab
+  setActiveTab,
+  user
 }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showAddModal, setShowAddModal] = useState(false);
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -8163,9 +8676,15 @@ function MultifamilyOverviewPanel({
       maxWidth: '1000px',
       margin: '0 auto'
     }
-  }, /*#__PURE__*/React.createElement(MultifamilyHeader, null), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
+  }, /*#__PURE__*/React.createElement(MultifamilyHeader, {
+    onAddLead: () => setShowAddModal(true)
+  }), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
     activeTab: activeTab,
-    setActiveTab: setActiveTab
+    setActiveTab: setActiveTab,
+    user: user
+  }), showAddModal && /*#__PURE__*/React.createElement(MultifamilyAddLeadModal, {
+    onClose: () => setShowAddModal(false),
+    onCreated: () => load()
   }), loading && !data && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: 'center',
@@ -8173,7 +8692,17 @@ function MultifamilyOverviewPanel({
       color: '#f59e0b',
       fontFamily: "'Orbitron', sans-serif"
     }
-  }, "LOADING MULTIFAMILY DATA..."), !loading && data && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, "LOADING MULTIFAMILY DATA..."), !loading && data && /*#__PURE__*/React.createElement(React.Fragment, null, data.is_demo_data && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(249,115,22,0.1)',
+      border: '1px solid rgba(249,115,22,0.3)',
+      borderRadius: '8px',
+      padding: '10px 14px',
+      marginBottom: '1rem',
+      fontSize: '0.8rem',
+      color: '#f97316'
+    }
+  }, "\u26A0 Showing demo data \u2014 no real leads have been captured yet. Submit one via \u201C+ Add Multifamily Lead\u201D or the public benchmark form."), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'grid',
       gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
@@ -8231,6 +8760,12 @@ function MultifamilyOverviewPanel({
       color: '#94a3b8',
       marginBottom: '0.5rem'
     }
+  }, "Real leads captured: ", data.real_lead_count ?? 0), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.8rem',
+      color: '#94a3b8',
+      marginBottom: '0.5rem'
+    }
   }, "By state: ", Object.entries(data.by_state || {}).map(([k, v]) => `${k}: ${v}`).join(' · ')), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.8rem',
@@ -8256,13 +8791,198 @@ function MultifamilyOverviewPanel({
     }
   }, /*#__PURE__*/React.createElement("span", null, run.source), /*#__PURE__*/React.createElement("span", null, run.records_found, " records", run.notes ? ' · ' + run.notes : '')))));
 }
+function MultifamilyAdminPanel({
+  activeTab,
+  setActiveTab,
+  user
+}) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/multifamily/admin/intake-stats');
+      const json = await res.json();
+      setData(json);
+    } catch (e) {
+      console.error('[MultifamilyCommand]', e);
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
+  if (!user || !user.is_super_admin) {
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        maxWidth: '1000px',
+        margin: '0 auto'
+      }
+    }, /*#__PURE__*/React.createElement(MultifamilyHeader, null), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
+      activeTab: activeTab,
+      setActiveTab: setActiveTab,
+      user: user
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        textAlign: 'center',
+        padding: '3rem',
+        color: '#ef4444'
+      }
+    }, "Admin access required."));
+  }
+  const spamColor = {
+    clean: '#34d399',
+    suspicious: '#facc15',
+    rejected: '#ef4444'
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: '1000px',
+      margin: '0 auto'
+    }
+  }, /*#__PURE__*/React.createElement(MultifamilyHeader, null), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
+    activeTab: activeTab,
+    setActiveTab: setActiveTab,
+    user: user
+  }), loading && !data && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'center',
+      padding: '3rem',
+      color: '#f59e0b',
+      fontFamily: "'Orbitron', sans-serif"
+    }
+  }, "LOADING INTAKE STATS..."), !loading && data && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+      gap: '12px',
+      marginBottom: '1.5rem'
+    }
+  }, Object.entries(data.counts_by_spam_status || {}).map(([status, count]) => /*#__PURE__*/React.createElement("div", {
+    key: status,
+    style: {
+      background: 'rgba(15,22,36,0.95)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '8px',
+      padding: '14px 16px',
+      textAlign: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.6rem',
+      color: '#64748b',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '6px'
+    }
+  }, status.toUpperCase()), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '1.4rem',
+      fontWeight: 700,
+      color: spamColor[status] || '#f1f5f9',
+      fontFamily: "'Orbitron', sans-serif"
+    }
+  }, count))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(15,22,36,0.95)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '8px',
+      padding: '14px 16px',
+      textAlign: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.6rem',
+      color: '#64748b',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '6px'
+    }
+  }, "RATE LIMIT HITS"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '1.4rem',
+      fontWeight: 700,
+      color: '#f97316',
+      fontFamily: "'Orbitron', sans-serif"
+    }
+  }, data.rate_limit_hits ?? 0))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '16px',
+      marginBottom: '1.5rem'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, "SOURCE BREAKDOWN"), Object.entries(data.source_breakdown || {}).map(([k, v]) => /*#__PURE__*/React.createElement("div", {
+    key: k,
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      padding: '4px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, k), /*#__PURE__*/React.createElement("span", null, v)))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, "CAMPAIGN BREAKDOWN"), Object.keys(data.campaign_breakdown || {}).length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#475569'
+    }
+  }, "No campaign data yet."), Object.entries(data.campaign_breakdown || {}).map(([k, v]) => /*#__PURE__*/React.createElement("div", {
+    key: k,
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      padding: '4px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, k), /*#__PURE__*/React.createElement("span", null, v))))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, "RECENT SUBMISSIONS"), (data.recent_submissions || []).map(row => /*#__PURE__*/React.createElement("div", {
+    key: row.id,
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: '6px',
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      padding: '8px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, row.company_name, " (", row.contact_email || 'no email', ")"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(spamColor[row.spam_status] || '#64748b')
+  }, row.spam_status), ' ', row.source, row.utm_source ? ' · ' + row.utm_source : '', row.score_total != null ? ' · score ' + row.score_total + ' (' + row.score_category + ')' : '')))));
+}
 function MultifamilyLeadListView({
   activeTab,
-  setActiveTab
+  setActiveTab,
+  user
 }) {
   const tab = MF_TABS.find(t => t.id === activeTab) || MF_TABS[1];
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showAddModal, setShowAddModal] = useState(false);
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -8285,10 +9005,26 @@ function MultifamilyLeadListView({
       maxWidth: '1000px',
       margin: '0 auto'
     }
-  }, /*#__PURE__*/React.createElement(MultifamilyHeader, null), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
+  }, /*#__PURE__*/React.createElement(MultifamilyHeader, {
+    onAddLead: () => setShowAddModal(true)
+  }), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
     activeTab: activeTab,
-    setActiveTab: setActiveTab
-  }), /*#__PURE__*/React.createElement("div", {
+    setActiveTab: setActiveTab,
+    user: user
+  }), showAddModal && /*#__PURE__*/React.createElement(MultifamilyAddLeadModal, {
+    onClose: () => setShowAddModal(false),
+    onCreated: () => load()
+  }), data && data.is_demo_data && leads.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(249,115,22,0.1)',
+      border: '1px solid rgba(249,115,22,0.3)',
+      borderRadius: '8px',
+      padding: '10px 14px',
+      marginBottom: '1rem',
+      fontSize: '0.8rem',
+      color: '#f97316'
+    }
+  }, "\u26A0 Showing demo data for this view \u2014 no real leads here yet."), /*#__PURE__*/React.createElement("div", {
     style: {
       maxHeight: '65vh',
       overflowY: 'auto'
