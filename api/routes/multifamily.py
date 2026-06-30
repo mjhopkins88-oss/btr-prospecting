@@ -62,16 +62,48 @@ def _requester_is_super_admin():
         return False
 
 
-def _serialize_lead(lead, is_admin, stage_result=None):
+def _signal_timeline(lead):
+    """Chronological signal timeline derived from the lead's own signals
+    (lead_json is the source of truth — no DB query needed, works for real
+    and demo leads alike)."""
+    items = []
+    for s in (lead.signals or []):
+        items.append({
+            'id': s.id, 'signal_type': s.signal_type, 'source': s.source,
+            'source_url': s.source_url, 'confidence': s.confidence,
+            'occurred_at': s.occurred_at, 'detail': s.detail or {},
+        })
+    items.sort(key=lambda x: (x.get('occurred_at') or ''))
+    return items
+
+
+def _serialize_lead(lead, is_admin, stage_result=None, with_history=False):
     """Serialize one lead, attaching LIVE timing intelligence (never
     persisted — it's time-dependent) and redacting admin-only fields for
-    non-super-admins."""
+    non-super-admins. With `with_history` (the single-lead drawer), also
+    attach the full attribution history (Phase C)."""
     d = dataclasses.asdict(lead)
     d['stage_timing'] = compute_stage_timing(lead)
     sr = stage_result or detect_process_stage(lead)
     d['process_stage'] = dataclasses.asdict(sr)
-    # Coarse, non-sensitive suspicious flag for everyone (drives the badge).
     d['is_suspicious'] = (getattr(lead, 'spam_status', 'clean') == 'suspicious')
+    # Signal architecture (Phase C): cheap, always-on.
+    d['signal_count'] = len(lead.signals or [])
+    d['signal_timeline'] = _signal_timeline(lead)
+    if with_history:
+        if lead.is_demo:
+            # Demo leads aren't persisted; derive a one-touch summary from
+            # the lead's own source/UTM fields.
+            d['attribution'] = {
+                'first_touch': {'source': lead.primary_source, 'utm_source': lead.utm_source,
+                                'utm_campaign': lead.utm_campaign, 'occurred_at': lead.last_verified_at},
+                'latest_touch': {'source': lead.primary_source, 'utm_source': lead.utm_source,
+                                 'utm_campaign': lead.utm_campaign, 'occurred_at': lead.last_verified_at},
+                'conversion_source': lead.primary_source, 'touches': [],
+                'utm_history': [], 'landing_page_history': [], 'referrer_history': [],
+            }
+        else:
+            d['attribution'] = repository.get_attribution_summary(lead.id)
     if not is_admin:
         for f in _ADMIN_ONLY_LEAD_FIELDS:
             d.pop(f, None)
@@ -471,7 +503,7 @@ def get_lead(lead_id):
     lead, err = _find_lead(lead_id)
     if err:
         return err
-    return jsonify({'lead': _serialize_lead(lead, _requester_is_super_admin()), 'is_demo': lead.is_demo})
+    return jsonify({'lead': _serialize_lead(lead, _requester_is_super_admin(), with_history=True), 'is_demo': lead.is_demo})
 
 
 @multifamily_bp.route('/leads/<lead_id>/outreach', methods=['GET'])

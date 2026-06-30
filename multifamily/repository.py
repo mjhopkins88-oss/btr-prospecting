@@ -498,6 +498,19 @@ def get_source_performance() -> Dict[str, Any]:
     total_rows = fetch_all(f"SELECT COUNT(*) AS n FROM multifamily_leads WHERE {real}")
     total_real_leads = int(total_rows[0]['n']) if total_rows else 0
 
+    # Signal-based view (Phase C): per-source / per-type signal counts over
+    # real, non-rejected signals — additive to the lead-source aggregates.
+    sig_where = "is_demo = 0 AND spam_status != 'rejected'"
+    signals_by_source = {
+        (r['k'] or 'unknown'): r['n'] for r in fetch_all(
+            f"SELECT COALESCE(NULLIF(source, ''), 'unknown') AS k, COUNT(*) AS n FROM multifamily_signals WHERE {sig_where} GROUP BY source")
+    }
+    signals_by_type = {
+        (r['k'] or 'unknown'): r['n'] for r in fetch_all(
+            f"SELECT COALESCE(NULLIF(signal_type, ''), 'unknown') AS k, COUNT(*) AS n FROM multifamily_signals WHERE {sig_where} GROUP BY signal_type")
+    }
+    total_signal_rows = sum(signals_by_source.values())
+
     return {
         'total_real_leads': total_real_leads,
         'leads_by_source': leads_by_source,
@@ -510,6 +523,10 @@ def get_source_performance() -> Dict[str, Any]:
         'best_landing_page': best_landing_page,
         'worst_source': worst_source,
         'leads_missing_attribution': leads_missing_attribution,
+        # Phase C signal-history view.
+        'total_signals': total_signal_rows,
+        'signals_by_source': signals_by_source,
+        'signals_by_type': signals_by_type,
     }
 
 
@@ -732,6 +749,43 @@ def get_attribution_for_lead(lead_id: str) -> List[Dict[str, Any]]:
         'WHERE lead_id = ? ORDER BY occurred_at ASC, created_at ASC',
         [lead_id],
     )
+
+
+# Sources that represent a real "conversion" (a form/manual submission),
+# used to pick the conversion touch from the attribution history.
+_CONVERSION_SOURCES = {'benchmark_form', 'form', 'manual', 'linkedin_lead_form'}
+
+
+def get_attribution_summary(lead_id: str) -> Dict[str, Any]:
+    """Derive first-touch / latest-touch / conversion source plus the
+    UTM / landing-page / referrer path from a lead's append-only
+    attribution touches (Phase C)."""
+    touches = get_attribution_for_lead(lead_id)
+    if not touches:
+        return {
+            'first_touch': None, 'latest_touch': None, 'conversion_source': None,
+            'touches': [], 'utm_history': [], 'landing_page_history': [], 'referrer_history': [],
+        }
+    first, latest = touches[0], touches[-1]
+    conversion = next((t for t in touches if t.get('source') in _CONVERSION_SOURCES), first)
+    utm_history = [
+        {'utm_source': t.get('utm_source'), 'utm_medium': t.get('utm_medium'),
+         'utm_campaign': t.get('utm_campaign'), 'occurred_at': t.get('occurred_at')}
+        for t in touches if any(t.get(k) for k in ('utm_source', 'utm_medium', 'utm_campaign'))
+    ]
+    landing_history = [t.get('landing_page') for t in touches if t.get('landing_page')]
+    referrer_history = [t.get('referrer') for t in touches if t.get('referrer')]
+    return {
+        'first_touch': {'source': first.get('source'), 'utm_source': first.get('utm_source'),
+                        'utm_campaign': first.get('utm_campaign'), 'occurred_at': first.get('occurred_at')},
+        'latest_touch': {'source': latest.get('source'), 'utm_source': latest.get('utm_source'),
+                         'utm_campaign': latest.get('utm_campaign'), 'occurred_at': latest.get('occurred_at')},
+        'conversion_source': conversion.get('source'),
+        'touches': touches,
+        'utm_history': utm_history,
+        'landing_page_history': landing_history,
+        'referrer_history': referrer_history,
+    }
 
 
 def delete_attribution_for_lead(lead_id: str) -> None:
