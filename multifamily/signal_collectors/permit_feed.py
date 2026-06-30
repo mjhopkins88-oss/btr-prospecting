@@ -5,10 +5,20 @@ Real integration (not yet built): municipal/county open-permit-data
 portals (all public records — no scraping of private/authenticated
 systems).
 """
+from datetime import datetime, timedelta
+
 from multifamily.types import (
     MultifamilyLead, MultifamilyCompany, MultifamilyProperty,
     MultifamilySignal, new_id, utc_now_iso,
 )
+
+
+def _days_ago_iso(days):
+    """Backdated occurred_at timestamp — demonstrates Phase 5 stage-timing
+    intelligence (multifamily/stage_timing.py) against this mock data,
+    since `occurred_at: utc_now_iso()`'s default would always show as
+    "0 days in stage" and never demonstrate a stalled/due-soon lead."""
+    return (datetime.utcnow() - timedelta(days=days)).isoformat()
 
 
 def collect():
@@ -31,10 +41,13 @@ def collect():
         id=new_id(), name='Westshore Commons (MOCK)', city='Long Beach', state='CA',
         unit_count=160, asset_type='mid_rise', cat_exposed=True, company_id=company.id,
     )
+    # Backdated 75 days — past the ~60-day permit_filed -> planning_approval
+    # benchmark, so Phase 5 stage timing flags this lead as overdue/stalled.
     signal = MultifamilySignal(
         id=new_id(), signal_type='permit_filed', source='permit',
         source_url='https://example.gov/permits/MOCK-CA-2026-00417', confidence=0.6,
         detail={'permit_number': 'MOCK-CA-2026-00417', 'permit_type': 'New Multifamily Construction'},
+        occurred_at=_days_ago_iso(75),
         property_id=prop.id, company_id=company.id,
     )
     leads.append(MultifamilyLead(
@@ -59,10 +72,14 @@ def collect():
         id=new_id(), name='Cypress Creek Residences (MOCK)', city='Houston', state='TX',
         unit_count=240, asset_type='garden', company_id=company2.id,
     )
+    # Backdated 230 days — within the ~270-day vertical_construction ->
+    # completion benchmark but past the 80% due-soon threshold (216 days),
+    # so Phase 5 stage timing flags this lead as due_soon.
     signal2 = MultifamilySignal(
         id=new_id(), signal_type='vertical_construction', source='permit',
         source_url='https://example.gov/permits/MOCK-TX-2026-08821', confidence=0.65,
         detail={'permit_number': 'MOCK-TX-2026-08821', 'stage': 'Vertical construction underway'},
+        occurred_at=_days_ago_iso(230),
         property_id=prop2.id, company_id=company2.id,
     )
     leads.append(MultifamilyLead(

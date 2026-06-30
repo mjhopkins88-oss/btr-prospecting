@@ -24,12 +24,23 @@ from multifamily.daily_brief.multifamily_daily_brief_builder import build_daily_
 from multifamily.intake import build_lead_from_intake
 from multifamily import repository
 from multifamily import spam_guard
+from multifamily.stage_timing import compute_stage_timing
 
 multifamily_bp = Blueprint('multifamily', __name__, url_prefix='/api/multifamily')
 
 
 def _serialize_leads(leads):
-    return [dataclasses.asdict(l) for l in leads]
+    """Serialize leads for an API response, attaching LIVE construction
+    stage-timing intelligence (Phase 5) to each one. stage_timing is
+    never stored on the lead or persisted — "days in stage" grows every
+    day regardless of resubmission, so it's always recomputed fresh here
+    rather than frozen at whatever moment the lead was scored/saved."""
+    result = []
+    for lead in leads:
+        d = dataclasses.asdict(lead)
+        d['stage_timing'] = compute_stage_timing(lead)
+        result.append(d)
+    return result
 
 
 def _real_and_mock():
@@ -120,7 +131,9 @@ def create_lead():
     repository.record_intake_event(event_type, ip_hash, email, {'spam_reason_codes': spam_reason_codes})
 
     # Always a normal-looking success — never reveal spam detection to the submitter.
-    return jsonify({'success': True, 'lead': dataclasses.asdict(lead)}), 201
+    lead_dict = dataclasses.asdict(lead)
+    lead_dict['stage_timing'] = compute_stage_timing(lead)
+    return jsonify({'success': True, 'lead': lead_dict}), 201
 
 
 @multifamily_bp.route('/leads/inbound', methods=['GET'])
@@ -148,6 +161,29 @@ def get_construction_triggers():
     return _view(construction_trigger_leads)
 
 
+@multifamily_bp.route('/leads/construction-timing', methods=['GET'])
+def get_construction_timing():
+    """Phase 5: construction-trigger leads ranked by timing urgency
+    (overdue first, then due_soon, then on_track/completed/unknown) —
+    a focused ops view for "is this stalled?" rather than the raw,
+    score-ranked /leads/construction-triggers list. Pure analytics on
+    top of the same leads; does not affect scoring."""
+    _URGENCY_RANK = {'overdue': 3, 'due_soon': 2, 'on_track': 1, 'unknown': 0, 'completed': -1}
+    real_leads, mock_leads, _ = _real_and_mock()
+    leads = with_demo_fallback(real_leads, mock_leads, construction_trigger_leads)
+
+    def _urgency(lead):
+        timing = compute_stage_timing(lead)
+        return _URGENCY_RANK.get(timing['timing_status'], 0) if timing else 0
+
+    leads = sorted(leads, key=_urgency, reverse=True)
+    return jsonify({
+        'leads': _serialize_leads(leads),
+        'count': len(leads),
+        'is_demo_data': bool(leads) and all(l.is_demo for l in leads),
+    })
+
+
 @multifamily_bp.route('/leads/california', methods=['GET'])
 def get_california_leads():
     return _view(lambda ls: filter_leads(ls, state='CA'))
@@ -166,12 +202,35 @@ def get_outreach_workbench():
     return _view(_actionable)
 
 
+def _stage_timing_summary(leads):
+    """Phase 5: counts of construction-trigger leads by timing status,
+    for the overview/daily-brief widgets. Pure analytics — read-only."""
+    counts = {'on_track': 0, 'due_soon': 0, 'overdue': 0, 'completed': 0, 'unknown': 0}
+    for lead in leads:
+        timing = compute_stage_timing(lead)
+        if timing:
+            counts[timing['timing_status']] = counts.get(timing['timing_status'], 0) + 1
+    return counts
+
+
 @multifamily_bp.route('/daily-brief', methods=['GET'])
 def get_daily_brief():
     real_leads, mock_leads, _ = _real_and_mock()
     leads = real_leads if real_leads else mock_leads
-    brief = build_daily_brief(sort_leads_by_priority(leads))
+    leads = sort_leads_by_priority(leads)
+    brief = build_daily_brief(leads)
     brief['is_demo_data'] = bool(leads) and all(l.is_demo for l in leads)
+
+    # Phase 5: surface stalled/due-soon construction leads in the brief
+    # without touching multifamily_daily_brief_builder.py's own contract.
+    timed = [(l, compute_stage_timing(l)) for l in leads]
+    stalled = [(l, t) for l, t in timed if t and t['timing_status'] in ('overdue', 'due_soon')]
+    stalled.sort(key=lambda pair: pair[1]['timing_status'] == 'overdue', reverse=True)
+    brief['stalled_construction_leads'] = [
+        {'lead_id': l.id, 'company': l.company.name, 'property': l.property.name,
+         'city': l.city, 'state': l.state, **t}
+        for l, t in stalled
+    ]
     return jsonify(brief)
 
 
@@ -202,6 +261,9 @@ def get_overview():
         'by_state': by_state,
         'by_source': by_source,
         'source_runs': [dataclasses.asdict(r) for r in source_runs],
+        # Phase 5: construction stage-timing breakdown (pure analytics —
+        # never affects scoring/category).
+        'construction_stage_timing': _stage_timing_summary(leads),
     })
 
 

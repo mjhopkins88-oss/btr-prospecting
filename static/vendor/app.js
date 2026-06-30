@@ -5659,6 +5659,7 @@ const NAV_SECTIONS = [
       { id: 'multifamily_renewal', label: 'Renewal Opportunities' },
       { id: 'multifamily_acquisition', label: 'Acquisition / Financing' },
       { id: 'multifamily_construction', label: 'Construction Triggers' },
+      { id: 'multifamily_construction_timing', label: 'Construction Timing' },
       { id: 'multifamily_california', label: 'California' },
       { id: 'multifamily_texas', label: 'Texas' },
       { id: 'multifamily_outreach', label: 'Outreach Workbench' },
@@ -7924,6 +7925,11 @@ const MF_TABS = [{
   endpoint: '/api/multifamily/leads/construction-triggers',
   kind: 'leads'
 }, {
+  id: 'multifamily_construction_timing',
+  label: 'Construction Timing',
+  endpoint: '/api/multifamily/leads/construction-timing',
+  kind: 'leads'
+}, {
   id: 'multifamily_california',
   label: 'California',
   endpoint: '/api/multifamily/leads/california',
@@ -8064,6 +8070,15 @@ function mfSourceAttributionLabel(lead) {
   const parts = [lead.utm_source, lead.utm_medium, lead.utm_campaign].filter(Boolean);
   return parts.length ? parts.join(' / ') : null;
 }
+function mfStageTimingColor(status) {
+  return {
+    overdue: '#ef4444',
+    due_soon: '#facc15',
+    on_track: '#34d399',
+    completed: '#60a5fa',
+    unknown: '#64748b'
+  }[status] || '#64748b';
+}
 function MultifamilyLeadCard({
   lead
 }) {
@@ -8190,7 +8205,25 @@ function MultifamilyLeadCard({
       color: '#cbd5e1',
       marginBottom: '4px'
     }
-  }, /*#__PURE__*/React.createElement("b", null, "Next best action:"), " ", lead.next_best_action), lead.notes && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("b", null, "Next best action:"), " ", lead.next_best_action), lead.stage_timing && /*#__PURE__*/React.createElement("div", {
+  style: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '8px',
+    background: mfStageTimingColor(lead.stage_timing.timing_status) + '14',
+    border: '1px solid ' + mfStageTimingColor(lead.stage_timing.timing_status) + '40',
+    borderRadius: '6px',
+    padding: '8px 10px',
+    marginBottom: '8px'
+  }
+}, /*#__PURE__*/React.createElement("span", {
+  style: mfPillStyle(mfStageTimingColor(lead.stage_timing.timing_status))
+}, lead.stage_timing.timing_status.replace(/_/g, ' ').toUpperCase()), /*#__PURE__*/React.createElement("span", {
+  style: {
+    fontSize: '0.78rem',
+    color: '#cbd5e1'
+  }
+}, lead.stage_timing.explanation)), lead.notes && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.8rem',
       color: '#cbd5e1',
