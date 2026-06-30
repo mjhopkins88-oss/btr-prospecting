@@ -212,9 +212,21 @@ def get_intake_stats():
     every other endpoint in this blueprint), spam-status counts, rate
     limit hits, and source/campaign breakdown.
 
-    NOTE: like the rest of this blueprint, this route has no server-side
-    auth check of its own — it's gated client-side (Multifamily Admin
-    tab, super_admin only), consistent with the multifamily blueprint's
-    current security model. Adding real session-based auth here is a
-    reasonable follow-up once the blueprint as a whole gets an auth pass."""
-    return jsonify(repository.get_intake_stats())
+    Server-side gated with the app's existing require_auth/require_super_admin
+    decorators (app.py) — same check used by every other super-admin-only
+    route (e.g. /api/admin/users/<id>/disable). Imported lazily inside the
+    function body rather than at module level: app.py imports this blueprint
+    (to register it) before require_auth/require_super_admin are defined
+    further down in app.py, so a top-level `from app import ...` here would
+    be a circular import. By the time any request actually reaches this
+    handler, app.py has finished loading and `app` is already the fully
+    initialized entry in sys.modules, so the deferred import just looks it
+    up — it doesn't re-execute app.py or create a real cycle."""
+    import app as _app
+
+    @_app.require_auth
+    @_app.require_super_admin
+    def _authorized():
+        return jsonify(repository.get_intake_stats())
+
+    return _authorized()
