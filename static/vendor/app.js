@@ -963,14 +963,15 @@ function normalizeLinkedIn(v) {
 // page background/title are shown, plus keeps the URL in sync.
 const MF_SUBPATH_TO_TAB = {
   '': 'multifamily',
+  'call-today': 'multifamily_call_today',
   'inbound-leads': 'multifamily_inbound',
   'website-intent': 'multifamily_website_intent',
   'renewal-opportunities': 'multifamily_renewal',
   'acquisition-triggers': 'multifamily_acquisition',
   'construction-triggers': 'multifamily_construction',
-  'construction-timing': 'multifamily_construction_timing',
-  'california': 'multifamily_california',
-  'texas': 'multifamily_texas',
+  'completion': 'multifamily_completion',
+  'nurture': 'multifamily_nurture',
+  'source-performance': 'multifamily_source_performance',
   'outreach-workbench': 'multifamily_outreach',
   'admin': 'multifamily_admin'
 };
@@ -1512,7 +1513,15 @@ function App({
     activeTab: activeTab,
     setActiveTab: setActiveTab,
     user: user
-  }), activeTab.startsWith('multifamily_') && activeTab !== 'multifamily_admin' && /*#__PURE__*/React.createElement(MultifamilyLeadListView, {
+  }), activeTab === 'multifamily_source_performance' && /*#__PURE__*/React.createElement(MultifamilySourcePerformancePanel, {
+    activeTab: activeTab,
+    setActiveTab: setActiveTab,
+    user: user
+  }), activeTab === 'multifamily_outreach' && /*#__PURE__*/React.createElement(MultifamilyOutreachWorkbenchPanel, {
+    activeTab: activeTab,
+    setActiveTab: setActiveTab,
+    user: user
+  }), activeTab.startsWith('multifamily_') && !['multifamily_admin', 'multifamily_source_performance', 'multifamily_outreach'].includes(activeTab) && /*#__PURE__*/React.createElement(MultifamilyLeadListView, {
     activeTab: activeTab,
     setActiveTab: setActiveTab,
     user: user
@@ -7999,14 +8008,19 @@ function SignalIntelligencePanel() {
   }, 'PRIORITY: ' + (p.priority_score * 100).toFixed(0))))))));
 }
 // ===================================================================
-// MULTIFAMILY COMMAND — standalone module, separate from the BTR queue.
-// California + Texas only (v1). Inbound lead delivery first.
+// MULTIFAMILY COMMAND — standalone command center, separate from BTR.
+// California + Texas only (v1). Real leads first; demo data is fallback.
 // ===================================================================
 const MF_TABS = [{
   id: 'multifamily',
   label: 'Overview',
   endpoint: '/api/multifamily/overview',
   kind: 'overview'
+}, {
+  id: 'multifamily_call_today',
+  label: 'Call Today',
+  endpoint: '/api/multifamily/leads/call-today',
+  kind: 'leads'
 }, {
   id: 'multifamily_inbound',
   label: 'Inbound Leads',
@@ -8029,32 +8043,32 @@ const MF_TABS = [{
   kind: 'leads'
 }, {
   id: 'multifamily_construction',
-  label: 'Construction Triggers',
+  label: "Construction / Builder's Risk",
   endpoint: '/api/multifamily/leads/construction-triggers',
   kind: 'leads'
 }, {
-  id: 'multifamily_construction_timing',
-  label: 'Construction Timing',
-  endpoint: '/api/multifamily/leads/construction-timing',
+  id: 'multifamily_completion',
+  label: 'Completion / Lease-Up',
+  endpoint: '/api/multifamily/leads/completion',
   kind: 'leads'
 }, {
-  id: 'multifamily_california',
-  label: 'California',
-  endpoint: '/api/multifamily/leads/california',
+  id: 'multifamily_nurture',
+  label: 'Nurture',
+  endpoint: '/api/multifamily/leads/nurture',
   kind: 'leads'
 }, {
-  id: 'multifamily_texas',
-  label: 'Texas',
-  endpoint: '/api/multifamily/leads/texas',
-  kind: 'leads'
+  id: 'multifamily_source_performance',
+  label: 'Source Performance',
+  endpoint: '/api/multifamily/source-performance',
+  kind: 'source'
 }, {
   id: 'multifamily_outreach',
   label: 'Outreach Workbench',
   endpoint: '/api/multifamily/outreach-workbench',
-  kind: 'leads'
+  kind: 'outreach'
 }, {
   id: 'multifamily_admin',
-  label: 'Admin',
+  label: 'Multifamily Admin',
   endpoint: '/api/multifamily/admin/intake-stats',
   kind: 'admin'
 }];
@@ -8109,6 +8123,34 @@ const MF_PRIMARY_CONCERNS = [{
   value: 'gl_excess_concern',
   label: 'GL / excess concern'
 }];
+const MF_ACTIVITY_TYPES = [{
+  value: 'called',
+  label: 'Called'
+}, {
+  value: 'emailed',
+  label: 'Emailed'
+}, {
+  value: 'linkedin_sent',
+  label: 'LinkedIn sent (manual)'
+}, {
+  value: 'replied',
+  label: 'Replied'
+}, {
+  value: 'meeting_booked',
+  label: 'Meeting booked'
+}, {
+  value: 'not_a_fit',
+  label: 'Not a fit'
+}, {
+  value: 'moved_to_nurture',
+  label: 'Moved to nurture'
+}, {
+  value: 'needs_info',
+  label: 'Needs info'
+}, {
+  value: 'follow_up_due',
+  label: 'Follow-up due'
+}];
 const MF_LEAD_SITUATION_LABELS = {
   renewal_date_known: 'Renewal',
   acquisition: 'Acquisition',
@@ -8131,6 +8173,18 @@ const MF_LEAD_SITUATION_LABELS = {
   paid_search_click: 'Paid search click',
   linkedin_lead_form_submit: 'LinkedIn lead form'
 };
+const MF_PROCESS_STAGE_LABELS = {
+  inbound_request: 'Inbound Request',
+  renewal_window: 'Renewal Window',
+  acquisition_due_diligence: 'Acquisition / Due Diligence',
+  refinance_or_financing: 'Refinance / Financing',
+  entitlement_or_permit: 'Entitlement / Permit',
+  construction_loan_closing: "Construction Loan / Builder's Risk",
+  construction_start: 'Construction Start',
+  completion_or_lease_up: 'Completion / Lease-Up',
+  post_renewal: 'Post-Renewal',
+  general_watchlist: 'General Watchlist'
+};
 function mfCategoryColor(cat) {
   return {
     call_today: '#ef4444',
@@ -8149,6 +8203,18 @@ function mfCategoryLabel(cat) {
     watchlist: 'WATCHLIST'
   }[cat] || (cat || 'UNSCORED').toUpperCase();
 }
+function mfWindowColor(w) {
+  return {
+    immediate: '#ef4444',
+    this_week: '#f97316',
+    next_30_days: '#f59e0b',
+    next_60_days: '#3b82f6',
+    next_90_days: '#6366f1',
+    nurture: '#64748b',
+    too_early: '#64748b',
+    too_late: '#94a3b8'
+  }[w] || '#64748b';
+}
 function mfPillStyle(color) {
   return {
     fontSize: '0.6rem',
@@ -8163,42 +8229,51 @@ function mfPillStyle(color) {
 function mfLeadSituationLabel(lead) {
   const fromSignal = (lead.signals || []).map(s => s.detail && s.detail.lead_situation).find(Boolean);
   if (fromSignal) {
-    const found = MF_LEAD_SITUATIONS.find(s => s.value === fromSignal);
-    return found ? found.label : fromSignal;
+    const f = MF_LEAD_SITUATIONS.find(s => s.value === fromSignal);
+    return f ? f.label : fromSignal;
   }
   return MF_LEAD_SITUATION_LABELS[lead.primary_signal_type] || lead.primary_signal_type || 'Unknown';
 }
 function mfPrimaryConcernLabel(lead) {
   const flag = (lead.pain_flags || [])[0];
   if (!flag) return null;
-  const found = MF_PRIMARY_CONCERNS.find(c => c.value === flag);
-  return found ? found.label : flag;
+  const f = MF_PRIMARY_CONCERNS.find(c => c.value === flag);
+  return f ? f.label : flag;
 }
 function mfSourceAttributionLabel(lead) {
   const parts = [lead.utm_source, lead.utm_medium, lead.utm_campaign].filter(Boolean);
   return parts.length ? parts.join(' / ') : null;
 }
-function mfStageTimingColor(status) {
-  return {
-    overdue: '#ef4444',
-    due_soon: '#facc15',
-    on_track: '#34d399',
-    completed: '#60a5fa',
-    unknown: '#64748b'
-  }[status] || '#64748b';
+function MultifamilyProcessStageBadge({
+  ps
+}) {
+  if (!ps) return null;
+  const color = mfWindowColor(ps.outreach_window);
+  const label = MF_PROCESS_STAGE_LABELS[ps.process_stage] || ps.process_stage;
+  return /*#__PURE__*/React.createElement("span", {
+    style: {
+      ...mfPillStyle(color),
+      display: 'inline-flex',
+      gap: '4px',
+      alignItems: 'center'
+    },
+    title: ps.timing_reason
+  }, label, " \xB7 ", ps.urgency_label);
 }
 function MultifamilyLeadCard({
-  lead
+  lead,
+  onOpen
 }) {
   const score = lead.score || {};
   const color = mfCategoryColor(score.category);
   const contact = (lead.contacts || [])[0];
   const primaryConcern = mfPrimaryConcernLabel(lead);
   const attribution = mfSourceAttributionLabel(lead);
-  const isSuspicious = lead.spam_status === 'suspicious';
+  const ps = lead.process_stage;
+  const isSuspicious = lead.is_suspicious;
   return /*#__PURE__*/React.createElement("div", {
     style: {
-      background: 'rgba(15,22,36,0.95)',
+      background: 'rgba(15,22,36,0.97)',
       border: '1px solid ' + (isSuspicious ? 'rgba(250,204,21,0.4)' : 'rgba(255,255,255,0.08)'),
       borderLeft: '3px solid ' + color,
       borderRadius: '8px',
@@ -8229,8 +8304,7 @@ function MultifamilyLeadCard({
   }, lead.company && lead.company.name), /*#__PURE__*/React.createElement("span", {
     style: lead.is_demo ? mfPillStyle('#f97316') : mfPillStyle('#34d399')
   }, lead.is_demo ? 'DEMO DATA' : 'REAL'), isSuspicious && /*#__PURE__*/React.createElement("span", {
-    style: mfPillStyle('#facc15'),
-    title: (lead.spam_reason_codes || []).join(', ')
+    style: mfPillStyle('#facc15')
   }, "\u26A0 SUSPICIOUS")), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.8rem',
@@ -8243,7 +8317,7 @@ function MultifamilyLeadCard({
       color: '#64748b',
       marginTop: '2px'
     }
-  }, contact.full_name, contact.title ? ' — ' + contact.title : '', contact.email ? ' · ' + contact.email : '')), /*#__PURE__*/React.createElement("div", {
+  }, contact.full_name, contact.title ? ' — ' + contact.title : '', contact.email ? ' · ' + contact.email : '', contact.phone ? ' · ' + contact.phone : '')), /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: 'right'
     }
@@ -8267,35 +8341,32 @@ function MultifamilyLeadCard({
       flexWrap: 'wrap',
       margin: '8px 0'
     }
-  }, /*#__PURE__*/React.createElement("span", {
+  }, /*#__PURE__*/React.createElement(MultifamilyProcessStageBadge, {
+    ps: ps
+  }), /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#a78bfa')
   }, lead.primary_source), attribution && /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#60a5fa'),
     title: "utm_source / utm_medium / utm_campaign"
-  }, attribution), /*#__PURE__*/React.createElement("span", {
+  }, attribution), lead.offer_type && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#38bdf8')
+  }, lead.offer_type), /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#22d3ee')
   }, mfLeadSituationLabel(lead)), primaryConcern && /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#fb7185')
   }, primaryConcern), /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#34d399')
-  }, "confidence ", (lead.confidence ?? 0).toFixed(2)), score.disqualified && /*#__PURE__*/React.createElement("span", {
-    style: mfPillStyle('#ef4444')
-  }, "disqualified: ", score.disqualified_reason), (score.disqualifier_codes || []).map(code => /*#__PURE__*/React.createElement("span", {
+  }, "confidence ", (lead.confidence ?? 0).toFixed(2)), (score.disqualifier_codes || []).map(code => /*#__PURE__*/React.createElement("span", {
     key: code,
     style: mfPillStyle('#f97316'),
     title: code
-  }, "\u26A0 ", code.replace(/_/g, ' ').toLowerCase()))), score.total != null && /*#__PURE__*/React.createElement("div", {
+  }, "\u26A0 ", code.replace(/_/g, ' ').toLowerCase()))), ps && ps.timing_reason && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: '0.65rem',
-      color: '#64748b',
-      marginBottom: '8px',
-      fontFamily: "'JetBrains Mono', monospace"
+      fontSize: '0.8rem',
+      color: '#cbd5e1',
+      marginBottom: '4px'
     }
-  }, "inbound ", score.inbound_intent ?? 0, "/40 \xB7 timing ", score.insurance_timing ?? 0, "/25 \xB7 fit ", score.account_fit ?? 0, "/20 \xB7 pain ", score.pain_potential ?? 0, "/10 \xB7 relationship ", score.relationship_warmth ?? 0, "/5", score.penalties > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, " \xB7 ", /*#__PURE__*/React.createElement("span", {
-    style: {
-      color: '#ef4444'
-    }
-  }, "-", score.penalties, " penalties"))), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("b", null, "Why now:"), " ", ps.timing_reason), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.8rem',
       color: '#cbd5e1',
@@ -8313,31 +8384,13 @@ function MultifamilyLeadCard({
       color: '#cbd5e1',
       marginBottom: '4px'
     }
-  }, /*#__PURE__*/React.createElement("b", null, "Next best action:"), " ", lead.next_best_action), lead.stage_timing && /*#__PURE__*/React.createElement("div", {
-  style: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: '8px',
-    background: mfStageTimingColor(lead.stage_timing.timing_status) + '14',
-    border: '1px solid ' + mfStageTimingColor(lead.stage_timing.timing_status) + '40',
-    borderRadius: '6px',
-    padding: '8px 10px',
-    marginBottom: '8px'
-  }
-}, /*#__PURE__*/React.createElement("span", {
-  style: mfPillStyle(mfStageTimingColor(lead.stage_timing.timing_status))
-}, lead.stage_timing.timing_status.replace(/_/g, ' ').toUpperCase()), /*#__PURE__*/React.createElement("span", {
-  style: {
-    fontSize: '0.78rem',
-    color: '#cbd5e1'
-  }
-}, lead.stage_timing.explanation)), lead.notes && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("b", null, "Next best action:"), " ", lead.next_best_action), ps && ps.recommended_contact_roles && ps.recommended_contact_roles.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: '0.8rem',
-      color: '#cbd5e1',
+      fontSize: '0.78rem',
+      color: '#94a3b8',
       marginBottom: '4px'
     }
-  }, /*#__PURE__*/React.createElement("b", null, "Notes:"), " ", lead.notes), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("b", null, "Who to ask for:"), " ", ps.recommended_contact_roles.join(' · ')), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.8rem',
       color: '#94a3b8',
@@ -8363,14 +8416,32 @@ function MultifamilyLeadCard({
     style: {
       color: '#22d3ee'
     }
-  }, "source") : 'no source URL'), /*#__PURE__*/React.createElement("span", null, "Last verified ", lead.last_verified_at ? String(lead.last_verified_at).slice(0, 10) : '?')));
+  }, "source") : 'no source URL'), /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: 'flex',
+      gap: '10px',
+      alignItems: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "Last verified ", lead.last_verified_at ? String(lead.last_verified_at).slice(0, 10) : '?'), onOpen && /*#__PURE__*/React.createElement("button", {
+    onClick: () => onOpen(lead.id),
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(245,158,11,0.4)',
+      color: '#f59e0b',
+      borderRadius: '4px',
+      padding: '2px 8px',
+      cursor: 'pointer',
+      fontSize: '0.7rem',
+      fontWeight: 600
+    }
+  }, "Details \u2192"))));
 }
 function MultifamilyTabBar({
   activeTab,
   setActiveTab,
   user
 }) {
-  const visibleTabs = MF_TABS.filter(tab => tab.kind !== 'admin' || user && user.is_super_admin);
+  const visible = MF_TABS.filter(t => t.kind !== 'admin' || user && user.is_super_admin);
   return /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
@@ -8378,12 +8449,12 @@ function MultifamilyTabBar({
       marginBottom: '1rem',
       flexWrap: 'wrap'
     }
-  }, visibleTabs.map(tab => /*#__PURE__*/React.createElement("button", {
+  }, visible.map(tab => /*#__PURE__*/React.createElement("button", {
     key: tab.id,
     onClick: () => setActiveTab(tab.id),
     style: {
-      background: activeTab === tab.id ? 'rgba(245,158,11,0.1)' : 'transparent',
-      border: '1px solid ' + (activeTab === tab.id ? 'rgba(245,158,11,0.35)' : 'rgba(255,255,255,0.06)'),
+      background: activeTab === tab.id ? 'rgba(245,158,11,0.12)' : 'rgba(255,255,255,0.02)',
+      border: '1px solid ' + (activeTab === tab.id ? 'rgba(245,158,11,0.4)' : 'rgba(255,255,255,0.06)'),
       color: activeTab === tab.id ? '#f59e0b' : '#64748b',
       padding: '0.35rem 0.75rem',
       borderRadius: '4px',
@@ -8404,7 +8475,7 @@ function MultifamilyHeader({
       alignItems: 'flex-start',
       flexWrap: 'wrap',
       gap: '12px',
-      marginBottom: '1.5rem'
+      marginBottom: '1.25rem'
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", {
     style: {
@@ -8422,7 +8493,7 @@ function MultifamilyHeader({
       fontSize: '0.8rem',
       margin: '0.25rem 0 0'
     }
-  }, "Multifamily insurance lead intelligence \u2014 California & Texas. Inbound leads, website intent, renewals, and acquisition/construction triggers. Separate from the BTR queue.")), onAddLead && /*#__PURE__*/React.createElement("button", {
+  }, "Multifamily insurance lead intelligence \u2014 California & Texas. Who to call today, why now, what to say, and what follow-up is due.")), onAddLead && /*#__PURE__*/React.createElement("button", {
     onClick: onAddLead,
     style: {
       background: '#f59e0b',
@@ -8437,6 +8508,69 @@ function MultifamilyHeader({
       whiteSpace: 'nowrap'
     }
   }, "+ Add Multifamily Lead"));
+}
+function MultifamilyEmptyState({
+  title,
+  what,
+  onAddLead
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'center',
+      padding: '2.5rem 1.5rem',
+      background: 'rgba(15,22,36,0.6)',
+      border: '1px dashed rgba(255,255,255,0.12)',
+      borderRadius: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: "'Orbitron', sans-serif",
+      color: '#f59e0b',
+      fontSize: '0.9rem',
+      marginBottom: '8px'
+    }
+  }, title), /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#94a3b8',
+      fontSize: '0.85rem',
+      maxWidth: '520px',
+      margin: '0 auto 16px',
+      lineHeight: 1.5
+    }
+  }, what), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '8px',
+      justifyContent: 'center',
+      flexWrap: 'wrap'
+    }
+  }, onAddLead && /*#__PURE__*/React.createElement("button", {
+    onClick: onAddLead,
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      padding: '0.5rem 1rem',
+      borderRadius: '0.5rem',
+      fontWeight: 700,
+      cursor: 'pointer',
+      fontSize: '0.8rem'
+    }
+  }, "+ Add a lead manually"), /*#__PURE__*/React.createElement("a", {
+    href: "/static/multifamily-benchmark-form.html",
+    target: "_blank",
+    rel: "noreferrer",
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(245,158,11,0.4)',
+      color: '#f59e0b',
+      padding: '0.5rem 1rem',
+      borderRadius: '0.5rem',
+      fontWeight: 600,
+      fontSize: '0.8rem',
+      textDecoration: 'none'
+    }
+  }, "Open public benchmark form")));
 }
 const MF_EMPTY_LEAD_FORM = {
   name: '',
@@ -8483,9 +8617,9 @@ function MultifamilyAddLeadModal({
   const [form, setForm] = useState(MF_EMPTY_LEAD_FORM);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
-  const update = field => e => setForm(f => ({
-    ...f,
-    [field]: e.target.value
+  const update = f => e => setForm(s => ({
+    ...s,
+    [f]: e.target.value
   }));
   const submit = async e => {
     e.preventDefault();
@@ -8695,15 +8829,6 @@ function MultifamilyAddLeadModal({
       ...mfLabelStyle(),
       gridColumn: '1 / -1'
     }
-  }, "Source URL", /*#__PURE__*/React.createElement("input", {
-    style: mfFieldStyle(),
-    value: form.sourceUrl,
-    onChange: update('sourceUrl')
-  })), /*#__PURE__*/React.createElement("label", {
-    style: {
-      ...mfLabelStyle(),
-      gridColumn: '1 / -1'
-    }
   }, "Notes", /*#__PURE__*/React.createElement("textarea", {
     rows: "3",
     style: mfFieldStyle(),
@@ -8754,6 +8879,616 @@ function MultifamilyAddLeadModal({
     }
   }, submitting ? 'Submitting…' : 'Submit Lead')))));
 }
+
+// ---- Lead detail drawer (7 sections; Raw/debug admin-only) ----
+function mfCopy(text) {
+  try {
+    navigator.clipboard.writeText(text);
+  } catch (e) {}
+}
+function MultifamilyDrawerSection({
+  title,
+  children
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '1.25rem'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#f59e0b',
+      fontFamily: "'Orbitron', sans-serif",
+      letterSpacing: '0.06em',
+      marginBottom: '8px'
+    }
+  }, title), children);
+}
+function mfKV(k, v) {
+  return /*#__PURE__*/React.createElement("div", {
+    key: k,
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      gap: '12px',
+      fontSize: '0.78rem',
+      padding: '3px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#64748b'
+    }
+  }, k), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#cbd5e1',
+      textAlign: 'right',
+      wordBreak: 'break-word'
+    }
+  }, v == null || v === '' ? '—' : String(v)));
+}
+function MultifamilyLeadDrawer({
+  leadId,
+  user,
+  onClose
+}) {
+  const [data, setData] = useState(null);
+  const [outreach, setOutreach] = useState(null);
+  const [activities, setActivities] = useState([]);
+  const [section, setSection] = useState('summary');
+  const [actForm, setActForm] = useState({
+    activity_type: 'called',
+    note: '',
+    next_follow_up_date: ''
+  });
+  const [actResult, setActResult] = useState(null);
+  const isAdmin = user && user.is_super_admin;
+  const loadActivities = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/multifamily/leads/${leadId}/activities`);
+      if (r.ok) {
+        const j = await r.json();
+        setActivities(j.activities || []);
+      }
+    } catch (e) {}
+  }, [leadId]);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch(`/api/multifamily/leads/${leadId}`);
+        const j = await r.json();
+        if (alive) setData(j);
+      } catch (e) {
+        if (alive) setData(null);
+      }
+      try {
+        const r = await fetch(`/api/multifamily/leads/${leadId}/outreach`);
+        const j = await r.json();
+        if (alive) setOutreach(j.outreach);
+      } catch (e) {}
+      loadActivities();
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [leadId, loadActivities]);
+  const submitActivity = async e => {
+    e.preventDefault();
+    setActResult(null);
+    try {
+      const r = await fetch(`/api/multifamily/leads/${leadId}/activity`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(actForm)
+      });
+      const j = await r.json();
+      if (r.ok && j.success) {
+        setActResult({
+          ok: true,
+          message: 'Logged.'
+        });
+        setActForm({
+          activity_type: 'called',
+          note: '',
+          next_follow_up_date: ''
+        });
+        loadActivities();
+      } else {
+        setActResult({
+          ok: false,
+          message: (j.errors || ['Failed.']).join('; ')
+        });
+      }
+    } catch (err) {
+      setActResult({
+        ok: false,
+        message: 'Network error: ' + err.message
+      });
+    }
+  };
+  const lead = data && data.lead;
+  const ps = lead && lead.process_stage;
+  const score = lead && lead.score || {};
+  const sections = [{
+    id: 'summary',
+    label: 'Summary'
+  }, {
+    id: 'scoring',
+    label: 'Scoring'
+  }, {
+    id: 'timing',
+    label: 'Timing / Stage'
+  }, {
+    id: 'source',
+    label: 'Source'
+  }, {
+    id: 'outreach',
+    label: 'Outreach'
+  }, {
+    id: 'activity',
+    label: 'Notes / Activity'
+  }];
+  if (isAdmin) sections.push({
+    id: 'raw',
+    label: 'Raw / Debug'
+  });
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0,0,0,0.55)',
+      zIndex: 2100,
+      display: 'flex',
+      justifyContent: 'flex-end'
+    },
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: '620px',
+      maxWidth: '96vw',
+      height: '100%',
+      background: '#0d1422',
+      borderLeft: '1px solid rgba(255,255,255,0.1)',
+      overflowY: 'auto',
+      padding: '1.25rem'
+    },
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      marginBottom: '0.75rem'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '1.05rem',
+      fontWeight: 700,
+      color: '#f1f5f9'
+    }
+  }, lead ? lead.company.name : 'Loading…'), lead && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.78rem',
+      color: '#94a3b8'
+    }
+  }, lead.property && lead.property.name, " \xB7 ", lead.city || '?', ", ", lead.state || '?'), lead && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '6px',
+      marginTop: '6px',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: lead.is_demo ? mfPillStyle('#f97316') : mfPillStyle('#34d399')
+  }, lead.is_demo ? 'DEMO DATA' : 'REAL'), /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(mfCategoryColor(score.category))
+  }, score.total ?? '—', " \xB7 ", mfCategoryLabel(score.category)), /*#__PURE__*/React.createElement(MultifamilyProcessStageBadge, {
+    ps: ps
+  }), lead.is_suspicious && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#facc15')
+  }, "\u26A0 SUSPICIOUS"))), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    style: {
+      background: 'transparent',
+      border: 'none',
+      color: '#64748b',
+      fontSize: '1.4rem',
+      cursor: 'pointer'
+    }
+  }, "\xD7")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '4px',
+      flexWrap: 'wrap',
+      marginBottom: '1rem',
+      borderBottom: '1px solid rgba(255,255,255,0.06)',
+      paddingBottom: '8px'
+    }
+  }, sections.map(s => /*#__PURE__*/React.createElement("button", {
+    key: s.id,
+    onClick: () => setSection(s.id),
+    style: {
+      background: section === s.id ? 'rgba(245,158,11,0.12)' : 'transparent',
+      border: 'none',
+      borderBottom: section === s.id ? '2px solid #f59e0b' : '2px solid transparent',
+      color: section === s.id ? '#f59e0b' : '#64748b',
+      padding: '4px 10px',
+      cursor: 'pointer',
+      fontSize: '0.72rem',
+      fontWeight: 600
+    }
+  }, s.label))), !lead && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#64748b',
+      padding: '2rem',
+      textAlign: 'center'
+    }
+  }, "Loading lead\u2026"), lead && section === 'summary' && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+    title: "SUMMARY"
+  }, ps && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.82rem',
+      color: '#cbd5e1',
+      marginBottom: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "Why now:"), " ", ps.timing_reason), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.82rem',
+      color: '#cbd5e1',
+      marginBottom: '6px'
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "Why warm:"), " ", lead.why_warm), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.82rem',
+      color: '#cbd5e1',
+      marginBottom: '6px'
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "Likely pain:"), " ", lead.likely_pain), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.82rem',
+      color: '#cbd5e1',
+      marginBottom: '6px'
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "Next best action:"), " ", lead.next_best_action), ps && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.8rem',
+      color: '#94a3b8',
+      marginBottom: '6px'
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "Who to ask for:"), " ", (ps.recommended_contact_roles || []).join(' · ')), (lead.contacts || []).map((c, i) => mfKV('Contact', `${c.full_name}${c.title ? ' — ' + c.title : ''}${c.email ? ' · ' + c.email : ''}${c.phone ? ' · ' + c.phone : ''}`)), mfKV('Asset type', lead.property && lead.property.asset_type), mfKV('Units', lead.property && lead.property.unit_count), mfKV('Lead situation', mfLeadSituationLabel(lead)), mfKV('Primary concern', mfPrimaryConcernLabel(lead)), lead.notes && mfKV('Notes', lead.notes)), lead && section === 'scoring' && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+    title: "SCORING BREAKDOWN"
+  }, mfKV('Total', `${score.total} (${score.category})`), mfKV('Inbound intent', `${score.inbound_intent ?? 0} / 40`), mfKV('Insurance timing', `${score.insurance_timing ?? 0} / 25`), mfKV('Account fit', `${score.account_fit ?? 0} / 20`), mfKV('Pain potential', `${score.pain_potential ?? 0} / 10`), mfKV('Relationship warmth', `${score.relationship_warmth ?? 0} / 5`), mfKV('Penalties', `-${score.penalties ?? 0}`), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '10px',
+      fontSize: '0.7rem',
+      color: '#64748b'
+    }
+  }, "REASON CODES"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '4px',
+      flexWrap: 'wrap',
+      marginTop: '4px'
+    }
+  }, (score.reason_codes || []).map(c => /*#__PURE__*/React.createElement("span", {
+    key: c,
+    style: mfPillStyle('#34d399')
+  }, c))), (score.disqualifier_codes || []).length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '10px',
+      fontSize: '0.7rem',
+      color: '#64748b'
+    }
+  }, "DISQUALIFIER CODES"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '4px',
+      flexWrap: 'wrap',
+      marginTop: '4px'
+    }
+  }, (score.disqualifier_codes || []).map(c => /*#__PURE__*/React.createElement("span", {
+    key: c,
+    style: mfPillStyle('#f97316')
+  }, c))))), lead && section === 'timing' && ps && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+    title: "TIMING / PROCESS STAGE"
+  }, mfKV('Process stage', MF_PROCESS_STAGE_LABELS[ps.process_stage] || ps.process_stage), mfKV('Outreach window', ps.urgency_label), mfKV('Confidence', ps.timing_confidence), mfKV('Reason', ps.timing_reason), mfKV('Message angle', ps.recommended_message_angle), lead.stage_timing && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '10px',
+      fontSize: '0.7rem',
+      color: '#64748b'
+    }
+  }, "CONSTRUCTION STAGE TIMING"), mfKV('Stage', lead.stage_timing.stage_label), mfKV('Status', lead.stage_timing.timing_status), mfKV('Days in stage', lead.stage_timing.days_in_stage), mfKV('Detail', lead.stage_timing.explanation))), lead && section === 'source' && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+    title: "SOURCE ATTRIBUTION"
+  }, mfKV('Source', lead.primary_source), mfKV('Source page', lead.source_page), mfKV('Source URL', lead.source_url), mfKV('Offer type', lead.offer_type), mfKV('UTM source', lead.utm_source), mfKV('UTM medium', lead.utm_medium), mfKV('UTM campaign', lead.utm_campaign), mfKV('UTM term', lead.utm_term), mfKV('UTM content', lead.utm_content), mfKV('Referrer', lead.referrer), mfKV('Landing page', lead.landing_page), mfKV('Last verified', lead.last_verified_at ? String(lead.last_verified_at).slice(0, 19) : null)), lead && section === 'outreach' && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+    title: "OUTREACH"
+  }, !outreach && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#64748b'
+    }
+  }, "Loading drafts\u2026"), outreach && [['Call opener', outreach.call_opener], ['Email subject', outreach.email_draft.subject], ['Email body', outreach.email_draft.body], ['LinkedIn (manual)', outreach.linkedin_draft], ['Follow-up 1', outreach.follow_up_1], ['Follow-up 2', outreach.follow_up_2], ['Soft bump', outreach.soft_bump]].map(([label, text]) => /*#__PURE__*/React.createElement("div", {
+    key: label,
+    style: {
+      marginBottom: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#94a3b8',
+      fontWeight: 600
+    }
+  }, label), /*#__PURE__*/React.createElement("button", {
+    onClick: () => mfCopy(text),
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.1)',
+      color: '#64748b',
+      borderRadius: '4px',
+      padding: '1px 8px',
+      cursor: 'pointer',
+      fontSize: '0.65rem'
+    }
+  }, "Copy")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      whiteSpace: 'pre-wrap',
+      fontSize: '0.78rem',
+      color: '#cbd5e1',
+      background: 'rgba(255,255,255,0.03)',
+      borderRadius: '6px',
+      padding: '8px',
+      marginTop: '4px'
+    }
+  }, text))), outreach && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#94a3b8',
+      fontWeight: 600,
+      marginBottom: '4px'
+    }
+  }, "Discovery questions"), outreach.discovery_questions.map((q, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      fontSize: '0.78rem',
+      color: '#cbd5e1',
+      marginBottom: '3px'
+    }
+  }, "\u2022 ", q)))), lead && section === 'activity' && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+    title: "NOTES / ACTIVITY"
+  }, lead.is_demo && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#f97316',
+      marginBottom: '8px'
+    }
+  }, "This is demo data \u2014 activity logging is for real leads."), /*#__PURE__*/React.createElement("form", {
+    onSubmit: submitActivity,
+    style: {
+      background: 'rgba(255,255,255,0.03)',
+      borderRadius: '8px',
+      padding: '10px',
+      marginBottom: '12px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Activity", /*#__PURE__*/React.createElement("select", {
+    style: mfFieldStyle(),
+    value: actForm.activity_type,
+    onChange: e => setActForm(s => ({
+      ...s,
+      activity_type: e.target.value
+    }))
+  }, MF_ACTIVITY_TYPES.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o.value,
+    value: o.value
+  }, o.label)))), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Follow-up date", /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    style: mfFieldStyle(),
+    value: actForm.next_follow_up_date,
+    onChange: e => setActForm(s => ({
+      ...s,
+      next_follow_up_date: e.target.value
+    }))
+  })), /*#__PURE__*/React.createElement("label", {
+    style: {
+      ...mfLabelStyle(),
+      gridColumn: '1 / -1'
+    }
+  }, "Note", /*#__PURE__*/React.createElement("textarea", {
+    rows: "2",
+    style: mfFieldStyle(),
+    value: actForm.note,
+    onChange: e => setActForm(s => ({
+      ...s,
+      note: e.target.value
+    }))
+  }))), actResult && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      marginTop: '6px',
+      color: actResult.ok ? '#34d399' : '#ef4444'
+    }
+  }, actResult.message), /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'right',
+      marginTop: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      padding: '0.4rem 0.9rem',
+      borderRadius: '0.4rem',
+      fontWeight: 700,
+      cursor: 'pointer',
+      fontSize: '0.75rem'
+    }
+  }, "Log activity"))), activities.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#64748b',
+      fontSize: '0.8rem'
+    }
+  }, "No activity logged yet."), activities.map(a => /*#__PURE__*/React.createElement("div", {
+    key: a.id,
+    style: {
+      borderLeft: '2px solid rgba(245,158,11,0.4)',
+      paddingLeft: '10px',
+      marginBottom: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.78rem',
+      color: '#f1f5f9'
+    }
+  }, /*#__PURE__*/React.createElement("b", null, a.activity_type), a.next_follow_up_date ? ` · follow-up ${a.next_follow_up_date}` : ''), a.note && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.76rem',
+      color: '#cbd5e1'
+    }
+  }, a.note), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#475569'
+    }
+  }, a.user_email || 'system', " \xB7 ", String(a.created_at).slice(0, 19))))), lead && section === 'raw' && isAdmin && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+    title: "RAW / DEBUG (ADMIN ONLY)"
+  }, mfKV('Spam status', lead.spam_status), mfKV('Spam reason codes', (lead.spam_reason_codes || []).join(', ')), mfKV('Submitted IP hash', lead.submitted_ip_hash), mfKV('User agent', lead.user_agent_summary), /*#__PURE__*/React.createElement("pre", {
+    style: {
+      marginTop: '10px',
+      fontSize: '0.66rem',
+      color: '#64748b',
+      background: 'rgba(0,0,0,0.3)',
+      padding: '8px',
+      borderRadius: '6px',
+      overflowX: 'auto',
+      maxHeight: '40vh'
+    }
+  }, JSON.stringify(lead, null, 2)))));
+}
+
+// ---- Overview (home base) ----
+function MultifamilyMissionCard({
+  title,
+  item
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '8px',
+      padding: '12px 14px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.62rem',
+      color: '#f59e0b',
+      fontFamily: "'Orbitron', sans-serif",
+      letterSpacing: '0.05em',
+      marginBottom: '6px'
+    }
+  }, title), !item && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#475569',
+      fontSize: '0.8rem'
+    }
+  }, "Nothing queued."), item && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.9rem',
+      fontWeight: 700,
+      color: '#f1f5f9'
+    }
+  }, item.company), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.74rem',
+      color: '#94a3b8'
+    }
+  }, item.contact || 'no contact', item.city ? ` · ${item.city}, ${item.state || ''}` : item.state ? ` · ${item.state}` : ''), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '6px',
+      flexWrap: 'wrap',
+      margin: '6px 0'
+    }
+  }, item.category && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(mfCategoryColor(item.category))
+  }, item.score ?? '', " \xB7 ", mfCategoryLabel(item.category)), item.urgency_label && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#f59e0b')
+  }, item.urgency_label), item.source && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#a78bfa')
+  }, item.source)), item.reason && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.76rem',
+      color: '#cbd5e1'
+    }
+  }, item.reason), item.next_best_action && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.76rem',
+      color: '#94a3b8',
+      marginTop: '4px'
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "Do:"), " ", item.next_best_action), item.email_draft && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.73rem',
+      color: '#64748b',
+      marginTop: '6px',
+      whiteSpace: 'pre-wrap',
+      background: 'rgba(255,255,255,0.03)',
+      padding: '6px',
+      borderRadius: '6px',
+      maxHeight: '120px',
+      overflowY: 'auto'
+    }
+  }, /*#__PURE__*/React.createElement("b", null, item.email_draft.subject), '\n', item.email_draft.body)));
+}
+function MultifamilyCountTile({
+  label,
+  value,
+  color
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '8px',
+      padding: '12px 14px',
+      textAlign: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.58rem',
+      color: '#64748b',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '6px'
+    }
+  }, label), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '1.35rem',
+      fontWeight: 700,
+      color: color || '#f1f5f9',
+      fontFamily: "'Orbitron', sans-serif"
+    }
+  }, value));
+}
 function MultifamilyOverviewPanel({
   activeTab,
   setActiveTab,
@@ -8761,13 +9496,13 @@ function MultifamilyOverviewPanel({
 }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [drawerId, setDrawerId] = useState(null);
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/multifamily/overview');
-      const json = await res.json();
-      setData(json);
+      const r = await fetch('/api/multifamily/overview');
+      setData(await r.json());
     } catch (e) {
       console.error('[MultifamilyCommand]', e);
       setData(null);
@@ -8778,21 +9513,28 @@ function MultifamilyOverviewPanel({
   useEffect(() => {
     load();
   }, [load]);
-  const cats = ['call_today', 'hot', 'warm', 'nurture', 'watchlist'];
+  const c = data && data.counts || {};
+  const m = data && data.mission || {};
+  const tiles = [['CALL TODAY', c.call_today || 0, '#ef4444'], ['HOT', c.hot || 0, '#f97316'], ['WARM', c.warm || 0, '#f59e0b'], ['NEW INBOUND', c.new_inbound || 0, '#34d399'], ['RENEWAL WINDOW', c.renewal_window || 0, '#3b82f6'], ['ACQ / FINANCING', c.acquisition_financing || 0, '#a78bfa'], ["CONSTR / B-RISK", c.construction_buildersrisk || 0, '#22d3ee'], ['COMPLETION', c.completion_leaseup || 0, '#60a5fa'], ['NURTURE', c.nurture || 0, '#64748b']];
+  if (user && user.is_super_admin) tiles.push(['SUSPICIOUS', c.suspicious || 0, '#facc15']);
   return /*#__PURE__*/React.createElement("div", {
     style: {
-      maxWidth: '1000px',
+      maxWidth: '1040px',
       margin: '0 auto'
     }
   }, /*#__PURE__*/React.createElement(MultifamilyHeader, {
-    onAddLead: () => setShowAddModal(true)
+    onAddLead: () => setShowAdd(true)
   }), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
     activeTab: activeTab,
     setActiveTab: setActiveTab,
     user: user
-  }), showAddModal && /*#__PURE__*/React.createElement(MultifamilyAddLeadModal, {
-    onClose: () => setShowAddModal(false),
+  }), showAdd && /*#__PURE__*/React.createElement(MultifamilyAddLeadModal, {
+    onClose: () => setShowAdd(false),
     onCreated: () => load()
+  }), drawerId && /*#__PURE__*/React.createElement(MultifamilyLeadDrawer, {
+    leadId: drawerId,
+    user: user,
+    onClose: () => setDrawerId(null)
   }), loading && !data && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: 'center',
@@ -8810,94 +9552,81 @@ function MultifamilyOverviewPanel({
       fontSize: '0.8rem',
       color: '#f97316'
     }
-  }, "\u26A0 Showing demo data \u2014 no real leads have been captured yet. Submit one via \u201C+ Add Multifamily Lead\u201D or the public benchmark form."), /*#__PURE__*/React.createElement("div", {
+  }, "\u26A0 Showing demo data \u2014 no real leads captured yet. Add one via \u201C+ Add Multifamily Lead\u201D or the public benchmark form."), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-      gap: '12px',
-      marginBottom: '1.5rem'
+      gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+      gap: '10px',
+      marginBottom: '1.25rem'
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, tiles.map(t => /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+    key: t[0],
+    label: t[0],
+    value: t[1],
+    color: t[2]
+  }))), /*#__PURE__*/React.createElement("div", {
     style: {
-      background: 'rgba(15,22,36,0.95)',
-      border: '1px solid rgba(255,255,255,0.08)',
-      borderRadius: '8px',
-      padding: '14px 16px',
-      textAlign: 'center'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.6rem',
-      color: '#64748b',
+      fontSize: '0.7rem',
+      color: '#f59e0b',
       fontFamily: "'Orbitron', sans-serif",
-      marginBottom: '6px'
+      letterSpacing: '0.06em',
+      marginBottom: '8px'
     }
-  }, "TOTAL LEADS"), /*#__PURE__*/React.createElement("div", {
+  }, "TODAY'S MULTIFAMILY MISSION"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: '1.4rem',
-      fontWeight: 700,
-      color: '#f1f5f9',
-      fontFamily: "'Orbitron', sans-serif"
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+      gap: '10px',
+      marginBottom: '1.25rem'
     }
-  }, data.total_leads)), cats.map(cat => /*#__PURE__*/React.createElement("div", {
-    key: cat,
+  }, /*#__PURE__*/React.createElement(MultifamilyMissionCard, {
+    title: "BEST FIRST CALL",
+    item: m.best_first_call
+  }), /*#__PURE__*/React.createElement(MultifamilyMissionCard, {
+    title: "BEST EMAIL DRAFT",
+    item: m.best_email_draft
+  }), /*#__PURE__*/React.createElement(MultifamilyMissionCard, {
+    title: "BEST FOLLOW-UP",
+    item: m.best_followup
+  }), /*#__PURE__*/React.createElement(MultifamilyMissionCard, {
+    title: "BEST NURTURE ACTION",
+    item: m.best_nurture_action
+  }), /*#__PURE__*/React.createElement(MultifamilyMissionCard, {
+    title: "LEAD NEEDING INFO",
+    item: m.lead_needing_info
+  })), /*#__PURE__*/React.createElement("div", {
     style: {
-      background: 'rgba(15,22,36,0.95)',
-      border: '1px solid rgba(255,255,255,0.08)',
-      borderRadius: '8px',
-      padding: '14px 16px',
-      textAlign: 'center'
+      display: 'flex',
+      gap: '20px',
+      flexWrap: 'wrap',
+      fontSize: '0.8rem',
+      color: '#94a3b8',
+      marginBottom: '0.75rem'
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", null, "Real leads captured: ", /*#__PURE__*/React.createElement("b", {
     style: {
-      fontSize: '0.6rem',
-      color: '#64748b',
-      fontFamily: "'Orbitron', sans-serif",
-      marginBottom: '6px'
+      color: '#f1f5f9'
     }
-  }, mfCategoryLabel(cat)), /*#__PURE__*/React.createElement("div", {
+  }, data.real_lead_count ?? 0)), /*#__PURE__*/React.createElement("span", null, "Top source: ", /*#__PURE__*/React.createElement("b", {
     style: {
-      fontSize: '1.4rem',
-      fontWeight: 700,
-      color: mfCategoryColor(cat),
-      fontFamily: "'Orbitron', sans-serif"
+      color: '#f1f5f9'
     }
-  }, data.by_category && data.by_category[cat] || 0)))), /*#__PURE__*/React.createElement("div", {
+  }, data.top_source || '—')), /*#__PURE__*/React.createElement("span", null, "Top campaign: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#f1f5f9'
+    }
+  }, data.top_campaign || '—'))), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.8rem',
       color: '#94a3b8',
-      marginBottom: '0.5rem'
-    }
-  }, "Real leads captured: ", data.real_lead_count ?? 0), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.8rem',
-      color: '#94a3b8',
-      marginBottom: '0.5rem'
+      marginBottom: '0.4rem'
     }
   }, "By state: ", Object.entries(data.by_state || {}).map(([k, v]) => `${k}: ${v}`).join(' · ')), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.8rem',
-      color: '#94a3b8',
-      marginBottom: '1rem'
+      color: '#94a3b8'
     }
-  }, "By source: ", Object.entries(data.by_source || {}).map(([k, v]) => `${k}: ${v}`).join(' · ')), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.65rem',
-      color: '#475569',
-      fontFamily: "'Orbitron', sans-serif",
-      marginBottom: '0.5rem'
-    }
-  }, "SOURCE RUNS (MOCK INTEGRATIONS)"), (data.source_runs || []).map(run => /*#__PURE__*/React.createElement("div", {
-    key: run.id,
-    style: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      fontSize: '0.75rem',
-      color: '#94a3b8',
-      padding: '4px 0',
-      borderBottom: '1px solid rgba(255,255,255,0.04)'
-    }
-  }, /*#__PURE__*/React.createElement("span", null, run.source), /*#__PURE__*/React.createElement("span", null, run.records_found, " records", run.notes ? ' · ' + run.notes : '')))));
+  }, "By source: ", Object.entries(data.by_source || {}).map(([k, v]) => `${k}: ${v}`).join(' · '))));
 }
 function MultifamilyAdminPanel({
   activeTab,
@@ -8909,11 +9638,9 @@ function MultifamilyAdminPanel({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/multifamily/admin/intake-stats');
-      const json = await res.json();
-      setData(json);
+      const r = await fetch('/api/multifamily/admin/intake-stats');
+      setData(r.ok ? await r.json() : null);
     } catch (e) {
-      console.error('[MultifamilyCommand]', e);
       setData(null);
     } finally {
       setLoading(false);
@@ -8968,52 +9695,16 @@ function MultifamilyAdminPanel({
       gap: '12px',
       marginBottom: '1.5rem'
     }
-  }, Object.entries(data.counts_by_spam_status || {}).map(([status, count]) => /*#__PURE__*/React.createElement("div", {
-    key: status,
-    style: {
-      background: 'rgba(15,22,36,0.95)',
-      border: '1px solid rgba(255,255,255,0.08)',
-      borderRadius: '8px',
-      padding: '14px 16px',
-      textAlign: 'center'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.6rem',
-      color: '#64748b',
-      fontFamily: "'Orbitron', sans-serif",
-      marginBottom: '6px'
-    }
-  }, status.toUpperCase()), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '1.4rem',
-      fontWeight: 700,
-      color: spamColor[status] || '#f1f5f9',
-      fontFamily: "'Orbitron', sans-serif"
-    }
-  }, count))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: 'rgba(15,22,36,0.95)',
-      border: '1px solid rgba(255,255,255,0.08)',
-      borderRadius: '8px',
-      padding: '14px 16px',
-      textAlign: 'center'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.6rem',
-      color: '#64748b',
-      fontFamily: "'Orbitron', sans-serif",
-      marginBottom: '6px'
-    }
-  }, "RATE LIMIT HITS"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '1.4rem',
-      fontWeight: 700,
-      color: '#f97316',
-      fontFamily: "'Orbitron', sans-serif"
-    }
-  }, data.rate_limit_hits ?? 0))), /*#__PURE__*/React.createElement("div", {
+  }, Object.entries(data.counts_by_spam_status || {}).map(([s, n]) => /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+    key: s,
+    label: s.toUpperCase(),
+    value: n,
+    color: spamColor[s]
+  })), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+    label: "RATE LIMIT HITS",
+    value: data.rate_limit_hits || 0,
+    color: "#f97316"
+  })), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'grid',
       gridTemplateColumns: '1fr 1fr',
@@ -9080,7 +9771,404 @@ function MultifamilyAdminPanel({
     }
   }, /*#__PURE__*/React.createElement("span", null, row.company_name, " (", row.contact_email || 'no email', ")"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle(spamColor[row.spam_status] || '#64748b')
-  }, row.spam_status), ' ', row.source, row.utm_source ? ' · ' + row.utm_source : '', row.score_total != null ? ' · score ' + row.score_total + ' (' + row.score_category + ')' : '')))));
+  }, row.spam_status), " ", row.source, row.utm_source ? ' · ' + row.utm_source : '', row.score_total != null ? ' · score ' + row.score_total + ' (' + row.score_category + ')' : '')))));
+}
+function mfBreakdownTable(title, obj) {
+  const entries = Object.entries(obj || {}).sort((a, b) => b[1] - a[1]);
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, title), entries.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#475569'
+    }
+  }, "No data yet."), entries.map(([k, v]) => /*#__PURE__*/React.createElement("div", {
+    key: k,
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      padding: '4px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      wordBreak: 'break-word'
+    }
+  }, k), /*#__PURE__*/React.createElement("span", null, v))));
+}
+function MultifamilySourcePerformancePanel({
+  activeTab,
+  setActiveTab,
+  user
+}) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/multifamily/source-performance');
+        setData(await r.json());
+      } catch (e) {
+        setData(null);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: '1040px',
+      margin: '0 auto'
+    }
+  }, /*#__PURE__*/React.createElement(MultifamilyHeader, {
+    onAddLead: () => setShowAdd(true)
+  }), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
+    activeTab: activeTab,
+    setActiveTab: setActiveTab,
+    user: user
+  }), showAdd && /*#__PURE__*/React.createElement(MultifamilyAddLeadModal, {
+    onClose: () => setShowAdd(false),
+    onCreated: () => {
+      setShowAdd(false);
+      window.location.reload && null;
+    }
+  }), loading && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'center',
+      padding: '3rem',
+      color: '#f59e0b',
+      fontFamily: "'Orbitron', sans-serif"
+    }
+  }, "LOADING SOURCE PERFORMANCE..."), !loading && data && data.total_real_leads === 0 && /*#__PURE__*/React.createElement(MultifamilyEmptyState, {
+    title: "SOURCE PERFORMANCE",
+    what: "This page shows where your real multifamily leads come from \u2014 by source, landing page, offer type, and campaign \u2014 once you've captured some. It uses the UTM and source data attached at intake.",
+    onAddLead: () => setShowAdd(true)
+  }), !loading && data && data.total_real_leads > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '20px',
+      flexWrap: 'wrap',
+      fontSize: '0.82rem',
+      color: '#94a3b8',
+      marginBottom: '1rem'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "Real leads: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#f1f5f9'
+    }
+  }, data.total_real_leads)), /*#__PURE__*/React.createElement("span", null, "Best landing page: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#34d399'
+    }
+  }, data.best_landing_page ? `${data.best_landing_page.landing_page} (${data.best_landing_page.leads})` : '—')), /*#__PURE__*/React.createElement("span", null, "Worst source (avg score): ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#ef4444'
+    }
+  }, data.worst_source ? `${data.worst_source.source} (${data.worst_source.avg_score})` : '—')), /*#__PURE__*/React.createElement("span", null, "Missing attribution: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#facc15'
+    }
+  }, data.leads_missing_attribution))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+      gap: '16px',
+      marginBottom: '1.25rem'
+    }
+  }, mfBreakdownTable('LEADS BY SOURCE', data.leads_by_source), mfBreakdownTable('LEADS BY SOURCE PAGE', data.leads_by_source_page), mfBreakdownTable('LEADS BY OFFER TYPE', data.leads_by_offer_type), mfBreakdownTable('LEADS BY CAMPAIGN', data.leads_by_campaign), mfBreakdownTable('CALL TODAY BY SOURCE', data.call_today_by_source)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, "CATEGORY BY SOURCE"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      overflowX: 'auto',
+      marginBottom: '1.25rem'
+    }
+  }, /*#__PURE__*/React.createElement("table", {
+    style: {
+      width: '100%',
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      borderCollapse: 'collapse'
+    }
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
+    style: {
+      color: '#64748b'
+    }
+  }, /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'left',
+      padding: '4px 8px'
+    }
+  }, "Source"), ['call_today', 'hot', 'warm', 'nurture', 'watchlist'].map(c => /*#__PURE__*/React.createElement("th", {
+    key: c,
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, mfCategoryLabel(c))))), /*#__PURE__*/React.createElement("tbody", null, Object.entries(data.by_source_category || {}).map(([src, cats]) => /*#__PURE__*/React.createElement("tr", {
+    key: src,
+    style: {
+      borderTop: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      padding: '4px 8px',
+      color: '#cbd5e1'
+    }
+  }, src), ['call_today', 'hot', 'warm', 'nurture', 'watchlist'].map(c => /*#__PURE__*/React.createElement("td", {
+    key: c,
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, cats[c] || 0))))))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, "SPAM / SUSPICIOUS RATE BY SOURCE"), Object.entries(data.spam_rate_by_source || {}).map(([src, r]) => /*#__PURE__*/React.createElement("div", {
+    key: src,
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      padding: '4px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, src), /*#__PURE__*/React.createElement("span", null, r.flagged, "/", r.total, " \xB7 ", r.rate_pct, "%")))));
+}
+function MultifamilyOutreachLeadRow({
+  lead,
+  onOpen
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [bundle, setBundle] = useState(null);
+  const toggle = async () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && !bundle) {
+      try {
+        const r = await fetch(`/api/multifamily/leads/${lead.id}/outreach`);
+        const j = await r.json();
+        setBundle(j.outreach);
+      } catch (e) {}
+    }
+  };
+  const score = lead.score || {};
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderLeft: '3px solid ' + mfCategoryColor(score.category),
+      borderRadius: '8px',
+      padding: '12px 14px',
+      marginBottom: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700,
+      color: '#f1f5f9'
+    }
+  }, lead.company.name), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#94a3b8'
+    }
+  }, " \xB7 ", lead.city || '?', ", ", lead.state || '?'), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '6px',
+      marginTop: '4px',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(mfCategoryColor(score.category))
+  }, score.total ?? '', " \xB7 ", mfCategoryLabel(score.category)), /*#__PURE__*/React.createElement(MultifamilyProcessStageBadge, {
+    ps: lead.process_stage
+  }), !lead.is_demo ? /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#34d399')
+  }, "REAL") : /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#f97316')
+  }, "DEMO"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '6px'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: toggle,
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(245,158,11,0.4)',
+      color: '#f59e0b',
+      borderRadius: '4px',
+      padding: '3px 10px',
+      cursor: 'pointer',
+      fontSize: '0.72rem',
+      fontWeight: 600
+    }
+  }, expanded ? 'Hide' : 'Drafts'), onOpen && /*#__PURE__*/React.createElement("button", {
+    onClick: () => onOpen(lead.id),
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.12)',
+      color: '#94a3b8',
+      borderRadius: '4px',
+      padding: '3px 10px',
+      cursor: 'pointer',
+      fontSize: '0.72rem'
+    }
+  }, "Details"))), expanded && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '10px'
+    }
+  }, !bundle && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#64748b',
+      fontSize: '0.8rem'
+    }
+  }, "Loading drafts\u2026"), bundle && [['Call opener', bundle.call_opener], ['Email subject', bundle.email_draft.subject], ['Email body', bundle.email_draft.body], ['LinkedIn (manual)', bundle.linkedin_draft], ['Follow-up 1', bundle.follow_up_1], ['Follow-up 2', bundle.follow_up_2], ['Soft bump', bundle.soft_bump]].map(([label, text]) => /*#__PURE__*/React.createElement("div", {
+    key: label,
+    style: {
+      marginBottom: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#94a3b8',
+      fontWeight: 600
+    }
+  }, label), /*#__PURE__*/React.createElement("button", {
+    onClick: () => mfCopy(text),
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.1)',
+      color: '#64748b',
+      borderRadius: '4px',
+      padding: '1px 8px',
+      cursor: 'pointer',
+      fontSize: '0.62rem'
+    }
+  }, "Copy")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      whiteSpace: 'pre-wrap',
+      fontSize: '0.76rem',
+      color: '#cbd5e1',
+      background: 'rgba(255,255,255,0.03)',
+      borderRadius: '6px',
+      padding: '8px',
+      marginTop: '3px'
+    }
+  }, text))), bundle && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#94a3b8',
+      fontWeight: 600,
+      marginBottom: '3px'
+    }
+  }, "Discovery questions"), bundle.discovery_questions.map((q, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      fontSize: '0.76rem',
+      color: '#cbd5e1'
+    }
+  }, "\u2022 ", q)))));
+}
+function MultifamilyOutreachWorkbenchPanel({
+  activeTab,
+  setActiveTab,
+  user
+}) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [drawerId, setDrawerId] = useState(null);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch('/api/multifamily/outreach-workbench');
+      setData(await r.json());
+    } catch (e) {
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
+  const leads = data && data.leads || [];
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: '1000px',
+      margin: '0 auto'
+    }
+  }, /*#__PURE__*/React.createElement(MultifamilyHeader, {
+    onAddLead: () => setShowAdd(true)
+  }), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
+    activeTab: activeTab,
+    setActiveTab: setActiveTab,
+    user: user
+  }), showAdd && /*#__PURE__*/React.createElement(MultifamilyAddLeadModal, {
+    onClose: () => setShowAdd(false),
+    onCreated: () => load()
+  }), drawerId && /*#__PURE__*/React.createElement(MultifamilyLeadDrawer, {
+    leadId: drawerId,
+    user: user,
+    onClose: () => setDrawerId(null)
+  }), data && data.is_demo_data && leads.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(249,115,22,0.1)',
+      border: '1px solid rgba(249,115,22,0.3)',
+      borderRadius: '8px',
+      padding: '10px 14px',
+      marginBottom: '1rem',
+      fontSize: '0.8rem',
+      color: '#f97316'
+    }
+  }, "\u26A0 Showing demo data for this view \u2014 no real leads here yet."), loading && !data && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'center',
+      padding: '3rem',
+      color: '#f59e0b',
+      fontFamily: "'Orbitron', sans-serif"
+    }
+  }, "LOADING OUTREACH WORKBENCH..."), !loading && leads.length === 0 && /*#__PURE__*/React.createElement(MultifamilyEmptyState, {
+    title: "OUTREACH WORKBENCH",
+    what: "Call-Today, Hot, and Warm leads show up here with ready-to-use, stage-specific drafts: call opener, email, LinkedIn note, follow-ups, a soft bump, and discovery questions. Nothing is ever sent automatically.",
+    onAddLead: () => setShowAdd(true)
+  }), !loading && leads.map(l => /*#__PURE__*/React.createElement(MultifamilyOutreachLeadRow, {
+    key: l.id,
+    lead: l,
+    onOpen: setDrawerId
+  })));
 }
 function MultifamilyLeadListView({
   activeTab,
@@ -9090,13 +10178,13 @@ function MultifamilyLeadListView({
   const tab = MF_TABS.find(t => t.id === activeTab) || MF_TABS[1];
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [drawerId, setDrawerId] = useState(null);
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(tab.endpoint);
-      const json = await res.json();
-      setData(json);
+      const r = await fetch(tab.endpoint);
+      setData(await r.json());
     } catch (e) {
       console.error('[MultifamilyCommand]', e);
       setData(null);
@@ -9114,14 +10202,18 @@ function MultifamilyLeadListView({
       margin: '0 auto'
     }
   }, /*#__PURE__*/React.createElement(MultifamilyHeader, {
-    onAddLead: () => setShowAddModal(true)
+    onAddLead: () => setShowAdd(true)
   }), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
     activeTab: activeTab,
     setActiveTab: setActiveTab,
     user: user
-  }), showAddModal && /*#__PURE__*/React.createElement(MultifamilyAddLeadModal, {
-    onClose: () => setShowAddModal(false),
+  }), showAdd && /*#__PURE__*/React.createElement(MultifamilyAddLeadModal, {
+    onClose: () => setShowAdd(false),
     onCreated: () => load()
+  }), drawerId && /*#__PURE__*/React.createElement(MultifamilyLeadDrawer, {
+    leadId: drawerId,
+    user: user,
+    onClose: () => setDrawerId(null)
   }), data && data.is_demo_data && leads.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       background: 'rgba(249,115,22,0.1)',
@@ -9134,7 +10226,7 @@ function MultifamilyLeadListView({
     }
   }, "\u26A0 Showing demo data for this view \u2014 no real leads here yet."), /*#__PURE__*/React.createElement("div", {
     style: {
-      maxHeight: '65vh',
+      maxHeight: '68vh',
       overflowY: 'auto'
     }
   }, loading && !data && /*#__PURE__*/React.createElement("div", {
@@ -9144,15 +10236,14 @@ function MultifamilyLeadListView({
       color: '#f59e0b',
       fontFamily: "'Orbitron', sans-serif"
     }
-  }, "LOADING MULTIFAMILY DATA..."), !loading && leads.length === 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      textAlign: 'center',
-      padding: '2rem',
-      color: '#475569'
-    }
-  }, "No leads in this section yet."), !loading && leads.map(lead => /*#__PURE__*/React.createElement(MultifamilyLeadCard, {
+  }, "LOADING MULTIFAMILY DATA..."), !loading && leads.length === 0 && /*#__PURE__*/React.createElement(MultifamilyEmptyState, {
+    title: tab.label.toUpperCase(),
+    what: `This view lists ${tab.label} leads. When a real lead matches, it appears here first; otherwise you'll see clearly-labeled demo data. Capture your first real lead to populate it.`,
+    onAddLead: () => setShowAdd(true)
+  }), !loading && leads.map(lead => /*#__PURE__*/React.createElement(MultifamilyLeadCard, {
     key: lead.id,
-    lead: lead
+    lead: lead,
+    onOpen: setDrawerId
   }))));
 }
 function CapitalFlowPanel() {

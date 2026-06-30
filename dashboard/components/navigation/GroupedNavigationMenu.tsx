@@ -95,10 +95,11 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   // No 'multifamily_section' here — Multifamily Command is its own
-  // top-level workspace (CommandSwitcher), not a BTR nav section. Its
-  // tabs (Overview, Inbound Leads, Website Intent, Renewal Opportunities,
-  // Acquisition/Financing, Construction Triggers, Construction Timing,
-  // California, Texas, Outreach Workbench, Admin) live in MF_TABS in
+  // top-level workspace (CommandSwitcher), not a BTR nav section. Its 12
+  // tabs (Overview, Call Today, Inbound Leads, Website Intent, Renewal
+  // Opportunities, Acquisition/Financing, Construction/Builder's Risk,
+  // Completion/Lease-Up, Nurture, Source Performance, Outreach Workbench,
+  // and super-admin-only Multifamily Admin) live in MF_TABS in
   // static/vendor/app.js.
   {
     id: 'admin_section',

@@ -107,6 +107,20 @@ def ensure_schema() -> None:
         )
     ''')
 
+    # Manual follow-up/activity tracking (Part 7). Entirely separate from
+    # the BTR crm_* tables — Multifamily and BTR data never mix.
+    execute('''
+        CREATE TABLE IF NOT EXISTS multifamily_activities (
+            id TEXT PRIMARY KEY,
+            lead_id TEXT NOT NULL,
+            activity_type TEXT NOT NULL,
+            note TEXT,
+            next_follow_up_date TEXT,
+            user_email TEXT,
+            created_at TIMESTAMP
+        )
+    ''')
+
     try:
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_leads_created ON multifamily_leads(created_at DESC)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_leads_state ON multifamily_leads(state)')
@@ -114,6 +128,8 @@ def ensure_schema() -> None:
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_events_ip_created ON multifamily_intake_events(ip_hash, created_at DESC)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_events_email_created ON multifamily_intake_events(email, created_at DESC)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_events_type_created ON multifamily_intake_events(event_type, created_at DESC)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_activities_lead ON multifamily_activities(lead_id, created_at DESC)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_activities_followup ON multifamily_activities(next_follow_up_date)')
     except Exception:
         pass
     _SCHEMA_READY = True
@@ -310,3 +326,177 @@ def get_intake_stats(recent_limit: int = 20) -> Dict[str, Any]:
         'source_breakdown': source_breakdown,
         'campaign_breakdown': campaign_breakdown,
     }
+
+
+# ---------------------------------------------------------------------------
+# Source Performance (Part 8) — aggregations over real leads' source/UTM data.
+# Demo leads carry no meaningful attribution, so these are real-lead-only;
+# the API/UI shows an empty state when there are zero real leads.
+# ---------------------------------------------------------------------------
+
+def get_source_performance() -> Dict[str, Any]:
+    ensure_schema()
+    # Operational breakdowns exclude rejected spam (not real opportunities).
+    real = "is_demo = 0 AND spam_status != 'rejected'"
+
+    def _counts(expr: str, where: str = real, label_default: str = 'unknown') -> Dict[str, int]:
+        rows = fetch_all(
+            f"SELECT {expr} AS k, COUNT(*) AS n FROM multifamily_leads WHERE {where} GROUP BY {expr}"
+        )
+        return {(row['k'] or label_default): row['n'] for row in rows}
+
+    leads_by_source = _counts("COALESCE(NULLIF(utm_source, ''), source)")
+    leads_by_source_page = _counts("COALESCE(NULLIF(source_page, ''), 'unknown')")
+    leads_by_offer_type = _counts("COALESCE(NULLIF(offer_type, ''), 'unknown')")
+    leads_by_campaign = _counts("COALESCE(NULLIF(utm_campaign, ''), 'none')")
+
+    # Category × source (Call Today / Hot / Warm / Nurture / Watchlist by source).
+    cat_rows = fetch_all(
+        "SELECT COALESCE(NULLIF(utm_source, ''), source) AS src, score_category AS cat, COUNT(*) AS n "
+        f"FROM multifamily_leads WHERE {real} GROUP BY src, cat"
+    )
+    by_source_category: Dict[str, Dict[str, int]] = {}
+    call_today_by_source: Dict[str, int] = {}
+    for row in cat_rows:
+        src = row['src'] or 'unknown'
+        cat = row['cat'] or 'unscored'
+        by_source_category.setdefault(src, {})[cat] = row['n']
+        if cat == 'call_today':
+            call_today_by_source[src] = call_today_by_source.get(src, 0) + row['n']
+
+    # Spam/suspicious rate by source (over ALL real leads, incl. rejected).
+    spam_rows = fetch_all(
+        "SELECT COALESCE(NULLIF(utm_source, ''), source) AS src, "
+        "SUM(CASE WHEN spam_status IN ('suspicious', 'rejected') THEN 1 ELSE 0 END) AS flagged, "
+        "COUNT(*) AS total "
+        "FROM multifamily_leads WHERE is_demo = 0 GROUP BY src"
+    )
+    spam_rate_by_source = {
+        (row['src'] or 'unknown'): {
+            'flagged': int(row['flagged'] or 0),
+            'total': int(row['total'] or 0),
+            'rate_pct': round(100.0 * (row['flagged'] or 0) / row['total'], 1) if row['total'] else 0.0,
+        }
+        for row in spam_rows
+    }
+
+    # Best landing page (most leads) and worst source (lowest avg score).
+    landing_rows = fetch_all(
+        "SELECT landing_page AS lp, COUNT(*) AS n FROM multifamily_leads "
+        f"WHERE {real} AND landing_page IS NOT NULL AND landing_page != '' GROUP BY landing_page ORDER BY n DESC LIMIT 1"
+    )
+    best_landing_page = ({'landing_page': landing_rows[0]['lp'], 'leads': landing_rows[0]['n']}
+                         if landing_rows else None)
+
+    avg_rows = fetch_all(
+        "SELECT COALESCE(NULLIF(utm_source, ''), source) AS src, ROUND(AVG(score_total), 1) AS avg_score, COUNT(*) AS n "
+        f"FROM multifamily_leads WHERE {real} AND score_total IS NOT NULL GROUP BY src HAVING COUNT(*) >= 1 ORDER BY avg_score ASC LIMIT 1"
+    )
+    worst_source = ({'source': avg_rows[0]['src'], 'avg_score': avg_rows[0]['avg_score'], 'leads': avg_rows[0]['n']}
+                    if avg_rows else None)
+
+    missing_rows = fetch_all(
+        "SELECT COUNT(*) AS n FROM multifamily_leads "
+        f"WHERE {real} AND (utm_source IS NULL OR utm_source = '') AND (utm_campaign IS NULL OR utm_campaign = '') "
+        "AND (referrer IS NULL OR referrer = '')"
+    )
+    leads_missing_attribution = int(missing_rows[0]['n']) if missing_rows else 0
+
+    total_rows = fetch_all(f"SELECT COUNT(*) AS n FROM multifamily_leads WHERE {real}")
+    total_real_leads = int(total_rows[0]['n']) if total_rows else 0
+
+    return {
+        'total_real_leads': total_real_leads,
+        'leads_by_source': leads_by_source,
+        'leads_by_source_page': leads_by_source_page,
+        'leads_by_offer_type': leads_by_offer_type,
+        'leads_by_campaign': leads_by_campaign,
+        'by_source_category': by_source_category,
+        'call_today_by_source': call_today_by_source,
+        'spam_rate_by_source': spam_rate_by_source,
+        'best_landing_page': best_landing_page,
+        'worst_source': worst_source,
+        'leads_missing_attribution': leads_missing_attribution,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Manual activity tracking (Part 7). Multifamily-only — never touches the
+# BTR crm_* tables. Activities meaningfully attach to REAL leads (demo lead
+# ids regenerate each pipeline run).
+# ---------------------------------------------------------------------------
+
+def insert_activity(lead_id: str, activity_type: str, note: Optional[str] = None,
+                    next_follow_up_date: Optional[str] = None, user_email: Optional[str] = None) -> Dict[str, Any]:
+    ensure_schema()
+    from multifamily.types import new_id, utc_now_iso
+    row = {
+        'id': new_id(),
+        'lead_id': lead_id,
+        'activity_type': activity_type,
+        'note': note,
+        'next_follow_up_date': next_follow_up_date or None,
+        'user_email': (user_email or '').lower() or None,
+        'created_at': utc_now_iso(),
+    }
+    execute(
+        'INSERT INTO multifamily_activities (id, lead_id, activity_type, note, next_follow_up_date, user_email, created_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?)',
+        list(row.values()),
+    )
+    return row
+
+
+def get_activities_for_lead(lead_id: str) -> List[Dict[str, Any]]:
+    ensure_schema()
+    return fetch_all(
+        'SELECT id, lead_id, activity_type, note, next_follow_up_date, user_email, created_at '
+        'FROM multifamily_activities WHERE lead_id = ? ORDER BY created_at DESC',
+        [lead_id],
+    )
+
+
+def _activities_with_lead(where: str, params: List[Any]) -> List[Dict[str, Any]]:
+    """Activity rows LEFT JOINed to their lead for display fields (company/
+    state/category). Lead fields are NULL for activities on demo leads."""
+    return fetch_all(
+        'SELECT a.id, a.lead_id, a.activity_type, a.note, a.next_follow_up_date, a.user_email, a.created_at, '
+        'l.company_name, l.state, l.city, l.score_category '
+        'FROM multifamily_activities a LEFT JOIN multifamily_leads l ON a.lead_id = l.id '
+        f'WHERE {where}',
+        params,
+    )
+
+
+def get_followups_due(today_date: str) -> List[Dict[str, Any]]:
+    """Activities whose next_follow_up_date is on or before `today_date`
+    (YYYY-MM-DD), newest follow-up first."""
+    ensure_schema()
+    return _activities_with_lead(
+        "a.next_follow_up_date IS NOT NULL AND a.next_follow_up_date != '' AND a.next_follow_up_date <= ? "
+        "ORDER BY a.next_follow_up_date ASC",
+        [today_date],
+    )
+
+
+def get_activities_by_type(activity_types: List[str]) -> List[Dict[str, Any]]:
+    ensure_schema()
+    if not activity_types:
+        return []
+    placeholders = ', '.join(['?'] * len(activity_types))
+    return _activities_with_lead(
+        f"a.activity_type IN ({placeholders}) ORDER BY a.created_at DESC",
+        list(activity_types),
+    )
+
+
+def last_activity_at_by_lead() -> Dict[str, str]:
+    ensure_schema()
+    rows = fetch_all('SELECT lead_id, MAX(created_at) AS last_at FROM multifamily_activities GROUP BY lead_id')
+    return {row['lead_id']: row['last_at'] for row in rows}
+
+
+def delete_activities_for_lead(lead_id: str) -> None:
+    """Used by tests to clean up after themselves."""
+    ensure_schema()
+    execute('DELETE FROM multifamily_activities WHERE lead_id = ?', [lead_id])

@@ -45,6 +45,13 @@ SUPPORTED_STATES = ['CA', 'TX']
 # Spam/abuse triage states for real (non-demo) leads — see multifamily/spam_guard.py.
 SPAM_STATUSES = ['clean', 'suspicious', 'rejected']
 
+# Manual activity types for lightweight follow-up tracking (Part 7).
+# No automation — these are logged by an operator after a manual action.
+ACTIVITY_TYPES = [
+    'called', 'emailed', 'linkedin_sent', 'replied', 'meeting_booked',
+    'not_a_fit', 'moved_to_nurture', 'needs_info', 'follow_up_due',
+]
+
 
 def new_id() -> str:
     return str(uuid.uuid4())
@@ -174,12 +181,16 @@ class MultifamilySourceRun:
 
 
 @dataclass
-class MultifamilyOutreachTask:
+class MultifamilyActivity:
+    """A manually-logged outreach/follow-up activity on a lead (Part 7).
+    Persisted in the multifamily_activities table. Never auto-generated —
+    an operator logs it after a real call/email/LinkedIn touch."""
     id: str
     lead_id: str
-    channel: str  # call | email | linkedin
-    suggested_opener: str
-    next_best_action: str
+    activity_type: str  # one of ACTIVITY_TYPES
+    note: Optional[str] = None
+    next_follow_up_date: Optional[str] = None  # ISO date (YYYY-MM-DD)
+    user_email: Optional[str] = None
     created_at: str = field(default_factory=utc_now_iso)
 
 
