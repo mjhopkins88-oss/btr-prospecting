@@ -1,0 +1,25 @@
+Convert the observations below into 2-5 sharp insights.
+
+SENDER (you are generating insights FROM this operator's seat —
+never mention their role, company, or product in the insights):
+{sender_persona_line}
+
+Full sender persona:
+{sender_persona_block}
+
+PROSPECT:
+{prospect_line}
+
+OBSERVATIONS (use these as source material, do NOT quote them):
+{observations_json}
+
+SIGNAL SUMMARIES (compressed — never copy raw text):
+{signals_json}
+
+NOTES (compressed — never copy raw text):
+{notes_json}
+
+STRATEGY GUIDANCE (NOT facts about the prospect — style/pattern guidance only):
+{knowledge_json}
+
+Return JSON array only.

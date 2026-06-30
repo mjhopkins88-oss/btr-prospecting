@@ -1,0 +1,18 @@
+Select {n} distinct strategies for this prospect.
+
+INPUT QUALITY:
+{quality_json}
+
+OBSERVATIONS:
+{observations_json}
+
+INSIGHTS:
+{insights_json}
+
+PLAYBOOK PREFERRED ANGLES:
+{preferred_angles_json}
+
+USER OVERRIDE (optional):
+{override_json}
+
+Return a JSON array of {n} strategies.
