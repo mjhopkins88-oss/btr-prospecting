@@ -1036,6 +1036,7 @@
                     {activeTab === 'corridors' && <DevelopmentCorridorsPanel />}
                     {activeTab === 'dev_momentum' && <MomentumEnginePanel />}
                     {activeTab === 'signal_discovery' && user && user.is_super_admin && <SignalDiscoveryPanel />}
+                    {activeTab === 'multifamily' && <MultifamilyCommandPanel />}
                     {/* Route guards: redirect to default tab if user navigates to a tab they shouldn't see */}
                     {activeTab === 'quoting' && (!user || user.role !== 'admin') && (() => { setActiveTab(ROLE_DEFAULT_TAB[user?.role] || 'search'); return null; })()}
                     {activeTab === 'underwriting' && (!user || user.role !== 'admin') && (() => { setActiveTab(ROLE_DEFAULT_TAB[user?.role] || 'search'); return null; })()}
@@ -1142,6 +1143,9 @@
                     { id: 'corridors', label: 'Dev Corridors' },
                     { id: 'dev_momentum', label: 'Momentum Engine' },
                 ]},
+                { label: 'Multifamily', items: [
+                    { id: 'multifamily', label: 'Multifamily Command' },
+                ]},
             ],
             producer: [
                 { label: 'Prospecting', items: [
@@ -1160,6 +1164,9 @@
                     { id: 'dev_network', label: 'Developer Networks' },
                     { id: 'corridors', label: 'Dev Corridors' },
                     { id: 'dev_momentum', label: 'Momentum Engine' },
+                ]},
+                { label: 'Multifamily', items: [
+                    { id: 'multifamily', label: 'Multifamily Command' },
                 ]},
                 { label: 'Pipeline', items: [
                     { id: 'pipeline', label: 'My Pipeline' },
@@ -1184,6 +1191,9 @@
                     { id: 'corridors', label: 'Dev Corridors' },
                     { id: 'dev_momentum', label: 'Momentum Engine' },
                     { id: 'signal_discovery', label: 'Signal Discovery' },
+                ]},
+                { label: 'Multifamily', items: [
+                    { id: 'multifamily', label: 'Multifamily Command' },
                 ]},
                 { label: 'Pipeline', items: [
                     { id: 'pipeline', label: 'My Pipeline' },
@@ -1774,6 +1784,156 @@
                         ))
                     )
                 )
+            );
+        }
+
+        // ===================================================================
+        // MULTIFAMILY COMMAND — standalone module, separate from the BTR queue.
+        // California + Texas only (v1). Inbound lead delivery first.
+        // ===================================================================
+        const MF_SUBTABS = [
+            { key: 'overview', label: 'Overview', endpoint: '/api/multifamily/overview' },
+            { key: 'inbound', label: 'Inbound Leads', endpoint: '/api/multifamily/leads/inbound' },
+            { key: 'website_intent', label: 'Website Intent', endpoint: '/api/multifamily/leads/website-intent' },
+            { key: 'renewal', label: 'Renewal Opportunities', endpoint: '/api/multifamily/leads/renewal-opportunities' },
+            { key: 'acquisition', label: 'Acquisition / Financing', endpoint: '/api/multifamily/leads/acquisition-triggers' },
+            { key: 'construction', label: 'Construction Triggers', endpoint: '/api/multifamily/leads/construction-triggers' },
+            { key: 'california', label: 'California', endpoint: '/api/multifamily/leads/california' },
+            { key: 'texas', label: 'Texas', endpoint: '/api/multifamily/leads/texas' },
+            { key: 'outreach', label: 'Outreach Workbench', endpoint: '/api/multifamily/outreach-workbench' },
+        ];
+
+        function mfCategoryColor(cat) {
+            return { call_today: '#ef4444', hot: '#f97316', warm: '#f59e0b', nurture: '#3b82f6', watchlist: '#64748b' }[cat] || '#64748b';
+        }
+        function mfCategoryLabel(cat) {
+            return { call_today: 'CALL TODAY', hot: 'HOT', warm: 'WARM', nurture: 'NURTURE', watchlist: 'WATCHLIST' }[cat] || (cat || 'UNSCORED').toUpperCase();
+        }
+        function mfPillStyle(color) {
+            return { fontSize: '0.6rem', fontFamily: "'Orbitron', sans-serif", background: color + '14', border: '1px solid ' + color + '40', borderRadius: '4px', padding: '2px 6px', color };
+        }
+
+        function MultifamilyLeadCard({ lead }) {
+            const score = lead.score || {};
+            const color = mfCategoryColor(score.category);
+            return (
+                <div style={{ background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderLeft: '3px solid ' + color, borderRadius: '8px', padding: '14px 16px', marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+                        <div>
+                            <div style={{ fontSize: '1rem', fontWeight: 700, color: '#f1f5f9' }}>{lead.company && lead.company.name}</div>
+                            <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '2px' }}>
+                                {lead.property && lead.property.name} &middot; {lead.city || '?'}, {lead.state || '?'}
+                            </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '1.3rem', fontWeight: 700, color, fontFamily: "'Orbitron', sans-serif" }}>{score.total ?? '—'}</div>
+                            <div style={{ fontSize: '0.6rem', color, fontFamily: "'Orbitron', sans-serif" }}>{mfCategoryLabel(score.category)}</div>
+                        </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', margin: '8px 0' }}>
+                        <span style={mfPillStyle('#a78bfa')}>{lead.primary_source}</span>
+                        <span style={mfPillStyle('#22d3ee')}>{lead.primary_signal_type}</span>
+                        <span style={mfPillStyle('#34d399')}>confidence {(lead.confidence ?? 0).toFixed(2)}</span>
+                        {score.disqualified && <span style={mfPillStyle('#ef4444')}>disqualified: {score.disqualified_reason}</span>}
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: '#cbd5e1', marginBottom: '4px' }}><b>Why warm:</b> {lead.why_warm}</div>
+                    <div style={{ fontSize: '0.8rem', color: '#cbd5e1', marginBottom: '4px' }}><b>Likely pain:</b> {lead.likely_pain}</div>
+                    <div style={{ fontSize: '0.8rem', color: '#cbd5e1', marginBottom: '4px' }}><b>Next best action:</b> {lead.next_best_action}</div>
+                    <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '4px', fontStyle: 'italic' }}>&ldquo;{lead.suggested_opener}&rdquo;</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: '#475569', marginTop: '8px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '8px' }}>
+                        <span>{lead.source_url ? <a href={lead.source_url} target="_blank" rel="noreferrer" style={{ color: '#22d3ee' }}>source</a> : 'no source URL'}</span>
+                        <span>Last verified {lead.last_verified_at ? String(lead.last_verified_at).slice(0, 10) : '?'}</span>
+                    </div>
+                </div>
+            );
+        }
+
+        function MultifamilyOverview({ data }) {
+            if (!data) return null;
+            const cats = ['call_today', 'hot', 'warm', 'nurture', 'watchlist'];
+            return (
+                <React.Fragment>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '1.5rem' }}>
+                        <div style={{ background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px 16px', textAlign: 'center' }}>
+                            <div style={{ fontSize: '0.6rem', color: '#64748b', fontFamily: "'Orbitron', sans-serif", marginBottom: '6px' }}>TOTAL LEADS</div>
+                            <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#f1f5f9', fontFamily: "'Orbitron', sans-serif" }}>{data.total_leads}</div>
+                        </div>
+                        {cats.map(cat => (
+                            <div key={cat} style={{ background: 'rgba(15,22,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '14px 16px', textAlign: 'center' }}>
+                                <div style={{ fontSize: '0.6rem', color: '#64748b', fontFamily: "'Orbitron', sans-serif", marginBottom: '6px' }}>{mfCategoryLabel(cat)}</div>
+                                <div style={{ fontSize: '1.4rem', fontWeight: 700, color: mfCategoryColor(cat), fontFamily: "'Orbitron', sans-serif" }}>{(data.by_category && data.by_category[cat]) || 0}</div>
+                            </div>
+                        ))}
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>By state: {Object.entries(data.by_state || {}).map(([k, v]) => `${k}: ${v}`).join(' · ')}</div>
+                    <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '1rem' }}>By source: {Object.entries(data.by_source || {}).map(([k, v]) => `${k}: ${v}`).join(' · ')}</div>
+                    <div style={{ fontSize: '0.65rem', color: '#475569', fontFamily: "'Orbitron', sans-serif", marginBottom: '0.5rem' }}>SOURCE RUNS (MOCK INTEGRATIONS)</div>
+                    {(data.source_runs || []).map(run => (
+                        <div key={run.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#94a3b8', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                            <span>{run.source}</span>
+                            <span>{run.records_found} records{run.notes ? ' · ' + run.notes : ''}</span>
+                        </div>
+                    ))}
+                </React.Fragment>
+            );
+        }
+
+        function MultifamilyCommandPanel() {
+            const [activeSub, setActiveSub] = useState('overview');
+            const [data, setData] = useState(null);
+            const [loading, setLoading] = useState(true);
+
+            const load = useCallback(async () => {
+                setLoading(true);
+                const tab = MF_SUBTABS.find(t => t.key === activeSub);
+                try {
+                    const res = await fetch(tab.endpoint);
+                    const json = await res.json();
+                    setData(json);
+                } catch (e) {
+                    console.error('[MultifamilyCommand]', e);
+                    setData(null);
+                } finally {
+                    setLoading(false);
+                }
+            }, [activeSub]);
+
+            useEffect(() => { load(); }, [load]);
+
+            const leads = (data && data.leads) || [];
+
+            return (
+                <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
+                    <div style={{ marginBottom: '1.5rem' }}>
+                        <h2 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '1.3rem', fontWeight: 900, background: 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 }}>MULTIFAMILY COMMAND</h2>
+                        <p style={{ color: '#64748b', fontSize: '0.8rem', margin: '0.25rem 0 0' }}>
+                            Multifamily insurance lead intelligence &mdash; California &amp; Texas. Inbound leads, website intent,
+                            renewals, and acquisition/construction triggers. Separate from the BTR queue.
+                        </p>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.35rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+                        {MF_SUBTABS.map(tab => (
+                            <button key={tab.key} onClick={() => setActiveSub(tab.key)} style={{
+                                background: activeSub === tab.key ? 'rgba(245,158,11,0.1)' : 'transparent',
+                                border: '1px solid ' + (activeSub === tab.key ? 'rgba(245,158,11,0.35)' : 'rgba(255,255,255,0.06)'),
+                                color: activeSub === tab.key ? '#f59e0b' : '#64748b', padding: '0.35rem 0.75rem', borderRadius: '4px', cursor: 'pointer',
+                                fontSize: '0.65rem', fontWeight: 600, fontFamily: "'Orbitron', sans-serif",
+                            }}>{tab.label}</button>
+                        ))}
+                    </div>
+                    <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+                        {loading && !data && (
+                            <div style={{ textAlign: 'center', padding: '3rem', color: '#f59e0b', fontFamily: "'Orbitron', sans-serif" }}>LOADING MULTIFAMILY DATA...</div>
+                        )}
+                        {!loading && activeSub === 'overview' && <MultifamilyOverview data={data} />}
+                        {!loading && activeSub !== 'overview' && leads.length === 0 && (
+                            <div style={{ textAlign: 'center', padding: '2rem', color: '#475569' }}>No leads in this section yet.</div>
+                        )}
+                        {!loading && activeSub !== 'overview' && leads.map(lead => (
+                            <MultifamilyLeadCard key={lead.id} lead={lead} />
+                        ))}
+                    </div>
+                </div>
             );
         }
 

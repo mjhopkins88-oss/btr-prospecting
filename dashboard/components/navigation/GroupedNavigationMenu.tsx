@@ -99,6 +99,10 @@ export const NAV_GROUPS: Record<string, NavGroup[]> = {
         { id: 'dev_momentum', label: 'Momentum Engine' },
       ],
     },
+    {
+      label: 'Multifamily',
+      items: [{ id: 'multifamily', label: 'Multifamily Command' }],
+    },
   ],
   producer: [
     {
@@ -119,6 +123,10 @@ export const NAV_GROUPS: Record<string, NavGroup[]> = {
         { id: 'corridors', label: 'Dev Corridors' },
         { id: 'dev_momentum', label: 'Momentum Engine' },
       ],
+    },
+    {
+      label: 'Multifamily',
+      items: [{ id: 'multifamily', label: 'Multifamily Command' }],
     },
     {
       label: 'Pipeline',
@@ -148,6 +156,10 @@ export const NAV_GROUPS: Record<string, NavGroup[]> = {
         { id: 'dev_momentum', label: 'Momentum Engine' },
         { id: 'signal_discovery', label: 'Signal Discovery' },
       ],
+    },
+    {
+      label: 'Multifamily',
+      items: [{ id: 'multifamily', label: 'Multifamily Command' }],
     },
     {
       label: 'Pipeline',

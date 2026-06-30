@@ -1976,6 +1976,13 @@ app.register_blueprint(momentum_bp)
 app.register_blueprint(corridors_bp)
 app.register_blueprint(signal_discovery_bp)
 
+# ===================================================================
+# MULTIFAMILY COMMAND — standalone module, separate from the BTR queue
+# ===================================================================
+from api.routes.multifamily import multifamily_bp
+
+app.register_blueprint(multifamily_bp)
+
 
 # ===================================================================
 # AUTH HELPERS & MIDDLEWARE

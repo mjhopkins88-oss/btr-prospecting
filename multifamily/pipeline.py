@@ -1,0 +1,128 @@
+"""
+Multifamily Command pipeline orchestrator.
+
+Runs all signal collectors (currently mock/stub), dedupes, scores,
+explains, and attaches a suggested opener + next-best-action to every
+lead. Entirely in-memory — no DB writes — so it can be exercised from
+the demo/test scripts and the Flask API layer alike.
+"""
+from typing import Any, Dict, List, Optional, Tuple
+
+from multifamily.types import MultifamilyLead, MultifamilySourceRun, new_id, utc_now_iso
+from multifamily.dedupe import dedupe_leads
+from multifamily.scoring.multifamily_score_engine import score_lead
+from multifamily.scoring.multifamily_score_explanations import explain_why_warm, explain_likely_pain
+from multifamily.daily_brief.multifamily_next_best_action import next_best_action_for_lead
+
+from multifamily.signal_collectors import (
+    form_lead_ingestor, website_intent, search_console, google_ads,
+    linkedin_lead_forms, permit_feed, news_monitor, crm_renewals,
+)
+from multifamily.outreach import (
+    renewal_opener_generator, acquisition_opener_generator,
+    construction_opener_generator, website_intent_opener_generator,
+    nepq_multifamily_angle_builder,
+)
+
+COLLECTORS: List[Tuple[str, Any]] = [
+    ('form', form_lead_ingestor.collect),
+    ('website', website_intent.collect),
+    ('search_console', search_console.collect),
+    ('google_ads', google_ads.collect),
+    ('linkedin_lead_form', linkedin_lead_forms.collect),
+    ('permit', permit_feed.collect),
+    ('news', news_monitor.collect),
+    ('crm', crm_renewals.collect),
+]
+
+_RENEWAL_TYPES = {'renewal_date_known'}
+_ACQUISITION_TYPES = {'acquisition', 'refinance', 'financing'}
+_CONSTRUCTION_TYPES = {
+    'permit_filed', 'planning_approval', 'groundbreaking', 'vertical_construction', 'completion',
+}
+_WEBSITE_INTENT_TYPES = {
+    'website_visit', 'repeat_website_visit', 'keyword_intent', 'paid_search_click',
+    'calculator_submit', 'guide_download',
+}
+
+
+def _build_opener(lead: MultifamilyLead) -> str:
+    signal_types = {s.signal_type for s in lead.signals}
+    if signal_types & _RENEWAL_TYPES:
+        return renewal_opener_generator.generate(lead)
+    if signal_types & _ACQUISITION_TYPES:
+        return acquisition_opener_generator.generate(lead)
+    if signal_types & _CONSTRUCTION_TYPES:
+        return construction_opener_generator.generate(lead)
+    if signal_types & _WEBSITE_INTENT_TYPES:
+        return website_intent_opener_generator.generate(lead)
+    return nepq_multifamily_angle_builder.build_angle(lead)
+
+
+def run_pipeline() -> Tuple[List[MultifamilyLead], List[MultifamilySourceRun]]:
+    """Run every signal collector, then dedupe/score/explain every lead."""
+    leads: List[MultifamilyLead] = []
+    source_runs: List[MultifamilySourceRun] = []
+
+    for source_name, collector_fn in COLLECTORS:
+        run = MultifamilySourceRun(id=new_id(), source=source_name, started_at=utc_now_iso())
+        try:
+            collected = collector_fn()
+        except Exception as exc:  # collector failures must never crash the pipeline
+            collected = []
+            run.notes = f'collector_error: {exc}'
+        run.completed_at = utc_now_iso()
+        run.records_found = len(collected)
+        source_runs.append(run)
+        leads.extend(collected)
+
+    leads = dedupe_leads(leads)
+
+    for lead in leads:
+        lead.score = score_lead(lead)
+        lead.why_warm = explain_why_warm(lead)
+        lead.likely_pain = explain_likely_pain(lead)
+        lead.suggested_opener = _build_opener(lead)
+        lead.next_best_action = next_best_action_for_lead(lead)
+
+    return leads, source_runs
+
+
+def filter_leads(
+    leads: List[MultifamilyLead],
+    state: Optional[str] = None,
+    category: Optional[str] = None,
+    source: Optional[str] = None,
+    signal_type: Optional[str] = None,
+) -> List[MultifamilyLead]:
+    result = leads
+    if state:
+        result = [l for l in result if l.state == state]
+    if category:
+        result = [l for l in result if l.score and l.score.category == category]
+    if source:
+        result = [l for l in result if l.primary_source == source]
+    if signal_type:
+        result = [l for l in result if any(s.signal_type == signal_type for s in l.signals)]
+    return result
+
+
+def website_intent_leads(leads: List[MultifamilyLead]) -> List[MultifamilyLead]:
+    return [l for l in leads if {s.signal_type for s in l.signals} & _WEBSITE_INTENT_TYPES]
+
+
+def renewal_opportunity_leads(leads: List[MultifamilyLead]) -> List[MultifamilyLead]:
+    return [l for l in leads if {s.signal_type for s in l.signals} & _RENEWAL_TYPES or l.primary_source == 'crm']
+
+
+def acquisition_trigger_leads(leads: List[MultifamilyLead]) -> List[MultifamilyLead]:
+    return [l for l in leads if {s.signal_type for s in l.signals} & _ACQUISITION_TYPES]
+
+
+def construction_trigger_leads(leads: List[MultifamilyLead]) -> List[MultifamilyLead]:
+    return [l for l in leads if {s.signal_type for s in l.signals} & _CONSTRUCTION_TYPES]
+
+
+def inbound_leads(leads: List[MultifamilyLead]) -> List[MultifamilyLead]:
+    inbound_sources = {'form', 'website', 'search_console', 'google_ads', 'linkedin_lead_form'}
+    return [l for l in leads if l.primary_source in inbound_sources]
