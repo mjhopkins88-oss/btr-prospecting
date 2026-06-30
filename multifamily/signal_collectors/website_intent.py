@@ -15,11 +15,13 @@ def collect():
     """Return mock website-intent leads."""
     leads = []
 
-    # --- Scenario 6: Repeat website visitor from California page (MOCK) --
+    # --- Scenario 6: Repeat website visitor from California page (MOCK, STRONG) --
+    # Six visits across two high-intent pages in a week, plus a decision-
+    # maker role on file — escalating engagement, not a one-off bounce.
     company = MultifamilyCompany(
         id=new_id(), name='Golden Gate Apartment Partners (MOCK)',
         company_type='operator', is_owner_operator_developer=True,
-        portfolio_property_count=3,
+        portfolio_property_count=3, decision_maker_role='Director of Risk',
     )
     prop = MultifamilyProperty(
         id=new_id(), name='Mission Bay Flats (MOCK)', city='San Francisco', state='CA',
@@ -27,15 +29,17 @@ def collect():
     )
     signal = MultifamilySignal(
         id=new_id(), signal_type='repeat_website_visit', source='website',
-        source_url='https://example.com/multifamily-insurance', confidence=0.55,
-        detail={'page': '/multifamily-insurance', 'visit_count': 4},
+        source_url='https://example.com/multifamily-insurance/quote', confidence=0.6,
+        detail={'page': '/multifamily-insurance/quote', 'visit_count': 6, 'pages_viewed': [
+            '/multifamily-insurance', '/multifamily-insurance/quote',
+        ]},
         property_id=prop.id, company_id=company.id,
     )
     leads.append(MultifamilyLead(
         id=new_id(), company=company, property=prop, signals=[signal],
         state='CA', city='San Francisco', primary_signal_type='repeat_website_visit',
-        primary_source='website', source_url=signal.source_url, confidence=0.55,
-        last_verified_at=utc_now_iso(),
+        primary_source='website', source_url=signal.source_url, confidence=0.6,
+        last_verified_at=utc_now_iso(), pain_flags=['cat_exposed_geography'],
     ))
 
     # --- Additional mock: single website visit, Texas (low intent) -------

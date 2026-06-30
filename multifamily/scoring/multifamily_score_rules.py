@@ -43,16 +43,22 @@ INSURANCE_TIMING_POINTS = {
     'planning_approval': 12,
 }
 
-# A "very strong timing trigger" — alone, can justify Hot alongside the
-# inbound-intent-OR-strong-timing gate below.
-STRONG_TIMING_SIGNAL_TYPES = {
-    'renewal_within_120', 'acquisition', 'refinance', 'financing',
-    'groundbreaking', 'vertical_construction',
-}
+# "Known renewal timing" — either renewal bucket — is one of the three
+# qualifying paths to Hot (Phase 2 quality rule #3).
+RENEWAL_TIMING_KEYS = {'renewal_within_120', 'renewal_known_beyond_120'}
 
-# Sources that, on their own (no inbound intent signal present), should cap
-# a lead at Warm — "Permit/news-only leads should usually be Nurture or
-# Warm, not Hot."
+# A "very strong" acquisition/construction trigger — the other non-inbound
+# qualifying path to Hot. Deliberately narrower than INSURANCE_TIMING_POINTS:
+# refinance/financing/permit_filed/planning_approval are real timing signals
+# (they still earn points below) but are NOT considered strong enough, on
+# their own, to unlock Hot — only an active acquisition or construction
+# actually underway is.
+VERY_STRONG_TRIGGER_SIGNAL_TYPES = {'acquisition', 'groundbreaking', 'vertical_construction'}
+
+# Sources that, by themselves (no signal from any other source), make a lead
+# "permit-only" or "news-only". These leads can never be Call Today, and can
+# only be Hot via a very-strong trigger / renewal-timing / inbound signal
+# (see VERY_STRONG_TRIGGER_SIGNAL_TYPES / RENEWAL_TIMING_KEYS above).
 LOW_TRUST_ONLY_SOURCES = {'permit', 'news'}
 
 # Signal types that are themselves a direct form submission — missing
@@ -100,3 +106,25 @@ PENALTY_UNKNOWN_ASSET_TYPE = 3
 PENALTY_UNKNOWN_STATE = 5
 
 UNKNOWN_ASSET_TYPE_VALUES = {None, '', 'unknown'}
+
+# ---- Confidence floor ------------------------------------------------------
+
+# Below this, a lead is flagged LOW_CONFIDENCE and capped at Nurture
+# regardless of raw point total — thin/low-certainty signals (e.g. a vague
+# news mention) shouldn't surface as Hot/Call Today just because other
+# components happen to add up.
+CONFIDENCE_THRESHOLD = 0.4
+
+# ---- Disqualifier codes -----------------------------------------------------
+# Quality flags surfaced on every score (MultifamilyLeadScore.disqualifier_codes)
+# so the dashboard and daily brief can explain exactly why a lead needs more
+# info, independent of the hard "missing source type" disqualification.
+
+DISQUALIFIER_CODE_DESCRIPTIONS = {
+    'MISSING_SOURCE': 'No recognized source type — lead cannot be scored or routed.',
+    'LOW_CONFIDENCE': f'Signal confidence is below {CONFIDENCE_THRESHOLD} — capped at Nurture.',
+    'MISSING_STATE': 'Property state is missing or outside the CA/TX launch footprint.',
+    'UNKNOWN_ASSET_TYPE': 'Asset type is missing or unknown.',
+    'MISSING_TIMING': 'No insurance-timing signal (renewal, acquisition, financing, or construction) present.',
+    'NO_INBOUND_SIGNAL': 'No inbound-intent signal (form, calculator, guide download, repeat visit, paid click, or LinkedIn form) present.',
+}

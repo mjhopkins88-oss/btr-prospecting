@@ -15,10 +15,16 @@ def collect():
     """Return mock news-derived leads."""
     leads = []
 
-    # --- Scenario 3: Texas acquisition/financing announcement (MOCK) -----
+    # --- Scenario 3: Texas news-only acquisition lead (MOCK, NEAR-MISS) --
+    # Acquisition is a "very strong" trigger (Phase 2 Hot-eligibility
+    # rule) and this account has excellent fit (large portfolio owner,
+    # named decision-maker) plus two pain flags — but it's a news-only
+    # lead with zero inbound intent, so it can never be Call Today, and
+    # realistically lands in Nurture given the timing-trigger point cap.
     company = MultifamilyCompany(
         id=new_id(), name='Meridian Multifamily Capital (MOCK)',
         company_type='owner', is_owner_operator_developer=True, portfolio_property_count=12,
+        decision_maker_role='Chief Financial Officer',
     )
     prop = MultifamilyProperty(
         id=new_id(), name='Riverwalk Apartments (MOCK)', city='Fort Worth', state='TX',
@@ -34,7 +40,7 @@ def collect():
         id=new_id(), company=company, property=prop, signals=[signal],
         state='TX', city='Fort Worth', primary_signal_type='acquisition',
         primary_source='news', source_url=signal.source_url, confidence=0.7,
-        last_verified_at=utc_now_iso(), pain_flags=['lender_requirement'],
+        last_verified_at=utc_now_iso(), pain_flags=['lender_requirement', 'gl_excess_concern'],
     ))
 
     # --- Scenario 7: Low-confidence news-only lead (MOCK DATA) -----------

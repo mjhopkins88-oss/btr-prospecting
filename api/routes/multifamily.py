@@ -98,12 +98,14 @@ def get_texas_leads():
 
 @multifamily_bp.route('/outreach-workbench', methods=['GET'])
 def get_outreach_workbench():
-    """Leads worth an outreach touch today, ranked by score."""
+    """Leads worth an outreach touch today. `_run()` already returns leads
+    ranked Call Today > Hot > Warm > Nurture > Watchlist (then by score), so
+    we only need to filter to the actionable tiers here."""
     leads, _ = _run()
-    ranked = sorted(
-        (l for l in leads if l.score and not l.score.disqualified and l.score.category in ('call_today', 'hot', 'warm')),
-        key=lambda l: l.score.total, reverse=True,
-    )
+    ranked = [
+        l for l in leads
+        if l.score and not l.score.disqualified and l.score.category in ('call_today', 'hot', 'warm')
+    ]
     return jsonify({'leads': _serialize_leads(ranked), 'count': len(ranked)})
 
 

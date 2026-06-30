@@ -1835,7 +1835,16 @@
                         <span style={mfPillStyle('#22d3ee')}>{lead.primary_signal_type}</span>
                         <span style={mfPillStyle('#34d399')}>confidence {(lead.confidence ?? 0).toFixed(2)}</span>
                         {score.disqualified && <span style={mfPillStyle('#ef4444')}>disqualified: {score.disqualified_reason}</span>}
+                        {(score.disqualifier_codes || []).map(code => (
+                            <span key={code} style={mfPillStyle('#f97316')} title={code}>&#9888; {code.replace(/_/g, ' ').toLowerCase()}</span>
+                        ))}
                     </div>
+                    {score.total != null && (
+                        <div style={{ fontSize: '0.65rem', color: '#64748b', marginBottom: '8px', fontFamily: "'JetBrains Mono', monospace" }}>
+                            inbound {score.inbound_intent ?? 0}/40 &middot; timing {score.insurance_timing ?? 0}/25 &middot; fit {score.account_fit ?? 0}/20 &middot; pain {score.pain_potential ?? 0}/10 &middot; relationship {score.relationship_warmth ?? 0}/5
+                            {score.penalties > 0 && <> &middot; <span style={{ color: '#ef4444' }}>-{score.penalties} penalties</span></>}
+                        </div>
+                    )}
                     <div style={{ fontSize: '0.8rem', color: '#cbd5e1', marginBottom: '4px' }}><b>Why warm:</b> {lead.why_warm}</div>
                     <div style={{ fontSize: '0.8rem', color: '#cbd5e1', marginBottom: '4px' }}><b>Likely pain:</b> {lead.likely_pain}</div>
                     <div style={{ fontSize: '0.8rem', color: '#cbd5e1', marginBottom: '4px' }}><b>Next best action:</b> {lead.next_best_action}</div>
