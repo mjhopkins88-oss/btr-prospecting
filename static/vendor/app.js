@@ -953,16 +953,111 @@ function normalizeLinkedIn(v) {
   return 'https://' + s.replace(/^\/+/, '');
 }
 
+// ======= COMMAND SWITCHER (BTR Command vs Multifamily Command) =======
+// Workspace-level routing: this is a thin layer above the existing
+// activeTab system, not a replacement for it. Multifamily tab ids are
+// already uniquely prefixed ('multifamily', 'multifamily_inbound', ...)
+// so existing activeTab === 'x' routing in App's render needs no changes
+// at all — this only controls which nav chrome (BTR TopNav/SubNav vs.
+// nothing — Multifamily renders its own MultifamilyTabBar per panel) and
+// page background/title are shown, plus keeps the URL in sync.
+const MF_SUBPATH_TO_TAB = {
+  '': 'multifamily',
+  'inbound-leads': 'multifamily_inbound',
+  'website-intent': 'multifamily_website_intent',
+  'renewal-opportunities': 'multifamily_renewal',
+  'acquisition-triggers': 'multifamily_acquisition',
+  'construction-triggers': 'multifamily_construction',
+  'construction-timing': 'multifamily_construction_timing',
+  'california': 'multifamily_california',
+  'texas': 'multifamily_texas',
+  'outreach-workbench': 'multifamily_outreach',
+  'admin': 'multifamily_admin'
+};
+const MF_TAB_TO_SUBPATH = Object.fromEntries(Object.entries(MF_SUBPATH_TO_TAB).map(([subpath, tab]) => [tab, subpath]));
+function getInitialWorkspaceAndTab() {
+  const path = window.location.pathname;
+  if (path === '/multifamily' || path.startsWith('/multifamily/')) {
+    const subpath = path.replace(/^\/multifamily\/?/, '').replace(/\/$/, '');
+    const tab = MF_SUBPATH_TO_TAB[subpath] !== undefined ? MF_SUBPATH_TO_TAB[subpath] : 'multifamily';
+    return {
+      workspace: 'multifamily',
+      tab
+    };
+  }
+  return {
+    workspace: 'btr',
+    tab: 'command'
+  };
+}
+function CommandSwitcher({
+  activeWorkspace,
+  setActiveTab
+}) {
+  const switchStyle = isActive => ({
+    background: isActive ? activeWorkspace === 'multifamily' ? 'rgba(37,99,235,0.12)' : 'rgba(16,185,129,0.12)' : 'transparent',
+    border: '1px solid ' + (isActive ? activeWorkspace === 'multifamily' ? 'rgba(37,99,235,0.4)' : 'rgba(16,185,129,0.4)' : 'rgba(100,116,139,0.25)'),
+    color: isActive ? activeWorkspace === 'multifamily' ? '#2563eb' : '#10b981' : '#64748b',
+    padding: '0.5rem 1.1rem',
+    borderRadius: '0.6rem',
+    fontFamily: "'Orbitron', sans-serif",
+    fontSize: '0.78rem',
+    fontWeight: 800,
+    letterSpacing: '0.04em',
+    cursor: 'pointer',
+    transition: 'all 0.15s'
+  });
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '0.5rem',
+      marginBottom: '1rem',
+      paddingBottom: '0.75rem',
+      borderBottom: '1px solid rgba(100,116,139,0.18)'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    style: switchStyle(activeWorkspace === 'btr'),
+    onClick: () => setActiveTab('command')
+  }, "BTR COMMAND"), /*#__PURE__*/React.createElement("button", {
+    style: switchStyle(activeWorkspace === 'multifamily'),
+    onClick: () => setActiveTab('multifamily')
+  }, "MULTIFAMILY COMMAND"));
+}
+
 // ======= MAIN APP =======
 function App({
   user,
   onLogout
 }) {
-  const [activeTab, setActiveTab] = useState('command');
+  const [activeTab, setActiveTab] = useState(function() { return getInitialWorkspaceAndTab().tab; });
+  const [activeWorkspace, setActiveWorkspace] = useState(function() { return getInitialWorkspaceAndTab().workspace; });
   useEffect(function() {
     var handler = function(e) { if (e.detail && e.detail.tab) setActiveTab(e.detail.tab); };
     window.addEventListener('btr-navigate', handler);
     return function() { window.removeEventListener('btr-navigate', handler); };
+  }, []);
+  // Keep activeWorkspace, the browser URL, the page background, and the
+  // document title all in sync with activeTab — this is the ONLY place
+  // that needs to know about workspace switching; every existing
+  // activeTab === 'x' routing check elsewhere in this file is untouched,
+  // since BTR and Multifamily tab ids were already uniquely prefixed.
+  useEffect(function() {
+    var isMultifamily = activeTab === 'multifamily' || activeTab.indexOf('multifamily_') === 0;
+    setActiveWorkspace(isMultifamily ? 'multifamily' : 'btr');
+    document.title = isMultifamily ? 'Multifamily Command' : 'BTR Command';
+    document.body.style.background = isMultifamily ? '#EAF2FB' : '';
+    var targetPath = isMultifamily ? '/multifamily' + (MF_TAB_TO_SUBPATH[activeTab] ? '/' + MF_TAB_TO_SUBPATH[activeTab] : '') : '/command';
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState(null, '', targetPath);
+    }
+  }, [activeTab]);
+  useEffect(function() {
+    var onPopState = function() {
+      var next = getInitialWorkspaceAndTab();
+      setActiveTab(next.tab);
+    };
+    window.addEventListener('popstate', onPopState);
+    return function() { window.removeEventListener('popstate', onPopState); };
   }, []);
   const [prospects, setProspects] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -1317,17 +1412,21 @@ function App({
     style: styles.container
   }, /*#__PURE__*/React.createElement(Header, {
     user: user,
-    onLogout: onLogout
+    onLogout: onLogout,
+    activeWorkspace: activeWorkspace
+  }), /*#__PURE__*/React.createElement(CommandSwitcher, {
+    activeWorkspace: activeWorkspace,
+    setActiveTab: setActiveTab
   }), /*#__PURE__*/React.createElement(CommandPalette, {
     activeTab: activeTab,
     setActiveTab: setActiveTab,
     user: user,
     prospects: prospects
-  }), /*#__PURE__*/React.createElement(TopNav, {
+  }), activeWorkspace === 'btr' && /*#__PURE__*/React.createElement(TopNav, {
     activeTab: activeTab,
     setActiveTab: setActiveTab,
     user: user
-  }), /*#__PURE__*/React.createElement(SubNav, {
+  }), activeWorkspace === 'btr' && /*#__PURE__*/React.createElement(SubNav, {
     activeTab: activeTab,
     setActiveTab: setActiveTab,
     user: user
@@ -1746,8 +1845,10 @@ function AssistantChat({ user }) {
 
 function Header({
   user,
-  onLogout
+  onLogout,
+  activeWorkspace
 }) {
+  const isMultifamily = activeWorkspace === 'multifamily';
   return /*#__PURE__*/React.createElement("div", {
     style: {
       ...styles.header,
@@ -1756,21 +1857,40 @@ function Header({
       alignItems: 'center',
       textAlign: 'left'
     }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("img", {
+  }, /*#__PURE__*/React.createElement("div", null, isMultifamily ? /*#__PURE__*/React.createElement("h1", {
+    style: {
+      ...styles.title,
+      fontSize: '1.8rem',
+      margin: 0,
+      fontFamily: "'Orbitron', sans-serif",
+      fontWeight: 900,
+      background: 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)',
+      WebkitBackgroundClip: 'text',
+      WebkitTextFillColor: 'transparent'
+    }
+  }, "MULTIFAMILY COMMAND") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("img", {
     src: "/static/logo-btr-command.svg",
     alt: "BTR Command",
-    style: { height: '36px', width: 'auto', display: 'block', marginBottom: '0.25rem' },
-    onError: function(e) { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }
+    style: {
+      height: '36px',
+      width: 'auto',
+      display: 'block',
+      marginBottom: '0.25rem'
+    },
+    onError: function (e) {
+      e.target.style.display = 'none';
+      e.target.nextSibling.style.display = 'block';
+    }
   }), /*#__PURE__*/React.createElement("h1", {
     style: {
       ...styles.title,
       fontSize: '1.8rem',
       display: 'none'
     }
-  }, "BTR COMMAND"), /*#__PURE__*/React.createElement("p", {
+  }, "BTR COMMAND")), /*#__PURE__*/React.createElement("p", {
     className: "text-sm text-slate-400 mt-0.5"
-  }, "Real\u2011Time Operator & Capital Intelligence"), /*#__PURE__*/React.createElement("div", {
-    className: "h-[2px] mt-2 w-48 bg-gradient-to-r from-emerald-400/90 via-emerald-400/30 to-transparent rounded-full"
+  }, isMultifamily ? "Multifamily Insurance Lead Intelligence — California & Texas" : "Real‑Time Operator & Capital Intelligence"), /*#__PURE__*/React.createElement("div", {
+    className: isMultifamily ? "h-[2px] mt-2 w-48 bg-gradient-to-r from-amber-400/90 via-amber-400/30 to-transparent rounded-full" : "h-[2px] mt-2 w-48 bg-gradient-to-r from-emerald-400/90 via-emerald-400/30 to-transparent rounded-full"
   })), user && /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-3 flex-shrink-0"
   }, /*#__PURE__*/React.createElement(DensityToggle, null), /*#__PURE__*/React.createElement("span", {
@@ -5649,30 +5769,17 @@ const NAV_SECTIONS = [
     ]
   },
   {
-    id: 'multifamily_section',
-    label: 'Multifamily',
-    icon: '\u25C7', // ◇
-    children: [
-      { id: 'multifamily', label: 'Overview' },
-      { id: 'multifamily_inbound', label: 'Inbound Leads' },
-      { id: 'multifamily_website_intent', label: 'Website Intent' },
-      { id: 'multifamily_renewal', label: 'Renewal Opportunities' },
-      { id: 'multifamily_acquisition', label: 'Acquisition / Financing' },
-      { id: 'multifamily_construction', label: 'Construction Triggers' },
-      { id: 'multifamily_construction_timing', label: 'Construction Timing' },
-      { id: 'multifamily_california', label: 'California' },
-      { id: 'multifamily_texas', label: 'Texas' },
-      { id: 'multifamily_outreach', label: 'Outreach Workbench' },
-      { id: 'multifamily_admin', label: 'Admin' }
-    ]
-  },
-  {
     id: 'admin_section',
     label: 'Admin',
     icon: '\u2699', // ⚙
     children: [{ id: 'admin', label: 'Admin' }]
   }
 ];
+// Multifamily Command is its own top-level workspace now (see
+// CommandSwitcher / MF_TABS below), not a BTR subnav section — it used
+// to be a 'multifamily_section' entry here. Its own tab bar
+// (MultifamilyTabBar, built from MF_TABS) already does its own
+// super-admin gating for the Admin tab, independent of this file.
 
 // Role-aware hiding: filter both sections and their children by role
 function getNavForUser(user) {
@@ -5686,7 +5793,8 @@ function getNavForUser(user) {
   } else if (role === 'producer') {
     ['quoting', 'underwriting'].forEach(t => hiddenTabs.add(t));
   }
-  if (!isSuperAdmin) hiddenTabs.add('multifamily_admin');
+  // (Multifamily Admin gating now lives in MultifamilyTabBar/MF_TABS,
+  // since Multifamily is its own workspace, not a BTR nav section.)
 
   // Per-role hidden sections
   const hiddenSections = new Set();
