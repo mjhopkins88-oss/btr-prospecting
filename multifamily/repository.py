@@ -215,6 +215,10 @@ def ensure_schema() -> None:
     except Exception:
         pass
 
+    # A match candidate references both the incoming lead and the existing
+    # candidate lead (added after the table's initial create).
+    _safe_add_column('multifamily_lead_match_candidates', 'incoming_lead_id', 'TEXT')
+
     _backfill_signals_from_lead_json()
     _SCHEMA_READY = True
 
@@ -793,19 +797,20 @@ def delete_source_run(run_db_id: str) -> None:
 # ---- Match candidates (review queue) --------------------------------------
 
 def insert_match_candidate(incoming_signal_id: Optional[str], candidate_lead_id: str, match_tier: str,
-                           match_reasons: Optional[List[str]] = None, score: float = 0.0) -> Dict[str, Any]:
+                           match_reasons: Optional[List[str]] = None, score: float = 0.0,
+                           incoming_lead_id: Optional[str] = None) -> Dict[str, Any]:
     ensure_schema()
     from multifamily.types import new_id, utc_now_iso
     row = {
         'id': new_id(), 'incoming_signal_id': incoming_signal_id, 'candidate_lead_id': candidate_lead_id,
-        'match_tier': match_tier, 'match_reasons': match_reasons or [], 'score': score,
-        'status': 'pending', 'created_at': utc_now_iso(),
+        'incoming_lead_id': incoming_lead_id, 'match_tier': match_tier, 'match_reasons': match_reasons or [],
+        'score': score, 'status': 'pending', 'created_at': utc_now_iso(),
     }
     execute(
-        'INSERT INTO multifamily_lead_match_candidates (id, incoming_signal_id, candidate_lead_id, match_tier, '
-        'match_reasons_json, score, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [row['id'], incoming_signal_id, candidate_lead_id, match_tier, json.dumps(row['match_reasons']), score,
-         'pending', row['created_at']],
+        'INSERT INTO multifamily_lead_match_candidates (id, incoming_signal_id, candidate_lead_id, incoming_lead_id, '
+        'match_tier, match_reasons_json, score, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [row['id'], incoming_signal_id, candidate_lead_id, incoming_lead_id, match_tier,
+         json.dumps(row['match_reasons']), score, 'pending', row['created_at']],
     )
     return row
 
@@ -813,9 +818,12 @@ def insert_match_candidate(incoming_signal_id: Optional[str], candidate_lead_id:
 def get_match_candidates(status: str = 'pending') -> List[Dict[str, Any]]:
     ensure_schema()
     rows = fetch_all(
-        'SELECT c.id, c.incoming_signal_id, c.candidate_lead_id, c.match_tier, c.match_reasons_json, c.score, '
-        'c.status, c.resolved_by, c.created_at, c.resolved_at, l.company_name, l.state, l.city '
-        'FROM multifamily_lead_match_candidates c LEFT JOIN multifamily_leads l ON c.candidate_lead_id = l.id '
+        'SELECT c.id, c.incoming_signal_id, c.incoming_lead_id, c.candidate_lead_id, c.match_tier, c.match_reasons_json, '
+        'c.score, c.status, c.resolved_by, c.created_at, c.resolved_at, l.company_name, l.state, l.city, '
+        'il.company_name AS incoming_company_name, il.state AS incoming_state, il.city AS incoming_city '
+        'FROM multifamily_lead_match_candidates c '
+        'LEFT JOIN multifamily_leads l ON c.candidate_lead_id = l.id '
+        'LEFT JOIN multifamily_leads il ON c.incoming_lead_id = il.id '
         'WHERE c.status = ? ORDER BY c.created_at DESC',
         [status],
     )

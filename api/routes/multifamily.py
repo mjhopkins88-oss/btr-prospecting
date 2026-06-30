@@ -30,6 +30,7 @@ from multifamily.stage_timing import compute_stage_timing
 from multifamily.timing import detect_process_stage
 from multifamily.timing.process_stage_types import OUTREACH_WINDOW_RANK
 from multifamily.outreach.outreach_bundle_builder import build_outreach_bundle
+from multifamily import matching as mf_matching
 
 multifamily_bp = Blueprint('multifamily', __name__, url_prefix='/api/multifamily')
 
@@ -160,26 +161,55 @@ def create_lead():
         repository.record_intake_event('invalid', ip_hash, email, {'errors': errors})
         return jsonify({'success': False, 'errors': errors}), 400
 
-    repository.insert_lead(lead)
-    # Signal-architecture phase: persist this lead's signals as queryable
-    # rows and record its first attribution touch. (Phase A is additive —
-    # behavior is otherwise identical; Phase B adds matching/merge here.)
-    repository.persist_lead_signals(lead)
-    repository.record_lead_attribution_touch(lead, touch_type='first')
+    # ---- Matching / merge (signal-architecture Phase B) ----
+    # Rejected/spam submissions are persisted for audit but NEVER matched,
+    # merged, or used to strengthen an existing lead.
+    merged_into = None
+    review_count = 0
+    if spam_status == 'rejected':
+        repository.insert_lead(lead)
+        repository.persist_lead_signals(lead)
+        repository.record_lead_attribution_touch(lead, touch_type='first')
+    else:
+        result = mf_matching.classify(lead, repository.get_real_leads())
+        auto = result.get('auto')
+        if auto:
+            # High-confidence match -> fold into the survivor, re-score.
+            # No new card is created.
+            mf_matching.merge_incoming_on_intake(auto.lead, lead)
+            merged_into = auto.lead.id
+            lead = repository.get_lead_by_id(auto.lead.id) or auto.lead
+        else:
+            repository.insert_lead(lead)
+            repository.persist_lead_signals(lead)
+            repository.record_lead_attribution_touch(lead, touch_type='first')
+            primary_sig_id = lead.signals[0].id if lead.signals else None
+            for cand in result.get('review', []):
+                repository.insert_match_candidate(
+                    incoming_signal_id=primary_sig_id, candidate_lead_id=cand.lead.id,
+                    match_tier='review', match_reasons=cand.reasons, score=cand.score,
+                    incoming_lead_id=lead.id,
+                )
+                review_count += 1
 
     if spam_status == 'rejected':
         event_type = 'rejected_honeypot' if 'HONEYPOT_FILLED' in spam_reason_codes else 'rejected_garbage'
+    elif merged_into:
+        event_type = 'accepted_merged'
     elif spam_status == 'suspicious':
         event_type = 'accepted_suspicious'
     else:
         event_type = 'accepted_clean'
-    repository.record_intake_event(event_type, ip_hash, email, {'spam_reason_codes': spam_reason_codes})
+    repository.record_intake_event(event_type, ip_hash, email, {
+        'spam_reason_codes': spam_reason_codes, 'merged_into': merged_into, 'review_candidates': review_count,
+    })
 
     # Always a normal-looking success — never reveal spam detection to the
     # submitter. Serialized through the same redaction path as every other
     # endpoint (an anonymous public submitter is non-admin -> spam fields
     # stripped), with live process-stage + stage-timing attached.
     lead_dict = _serialize_lead(lead, _requester_is_super_admin())
+    lead_dict['merged_into_existing'] = bool(merged_into)
     return jsonify({'success': True, 'lead': lead_dict}), 201
 
 
@@ -453,6 +483,70 @@ def get_lead_outreach(lead_id):
     if err:
         return err
     return jsonify({'lead_id': lead_id, 'company': lead.company.name, 'outreach': build_outreach_bundle(lead)})
+
+
+def _admin_only(fn):
+    """Run `fn` only for an authenticated super-admin (same lazy-import
+    pattern as /admin/intake-stats)."""
+    import app as _app
+
+    @_app.require_auth
+    @_app.require_super_admin
+    def _authorized():
+        return fn()
+
+    return _authorized()
+
+
+@multifamily_bp.route('/match-candidates', methods=['GET'])
+def get_match_candidates():
+    """Data-quality review queue: possible-duplicate leads needing a human
+    to confirm or dismiss a merge. Super-admin only."""
+    def _fn():
+        return jsonify({'candidates': repository.get_match_candidates(status=request.args.get('status', 'pending'))})
+    return _admin_only(_fn)
+
+
+@multifamily_bp.route('/match-candidates/<candidate_id>/merge', methods=['POST'])
+def merge_match_candidate(candidate_id):
+    """Confirm a review candidate: merge the incoming lead into the
+    existing (survivor) lead and tombstone the incoming. Super-admin only."""
+    from flask import g
+
+    def _fn():
+        cand = repository.get_match_candidate(candidate_id)
+        if not cand:
+            return jsonify({'success': False, 'error': 'Candidate not found'}), 404
+        if cand.get('status') != 'pending':
+            return jsonify({'success': False, 'error': 'Candidate already resolved'}), 409
+        survivor_id = cand.get('candidate_lead_id')   # the existing/older lead survives
+        loser_id = cand.get('incoming_lead_id')        # the newer incoming lead is folded in
+        if not survivor_id or not loser_id:
+            return jsonify({'success': False, 'error': 'Candidate is missing lead references'}), 422
+        survivor = mf_matching.merge_existing(survivor_id, loser_id)
+        if not survivor:
+            return jsonify({'success': False, 'error': 'Merge failed (lead missing)'}), 422
+        resolver = (g.user or {}).get('email') if getattr(g, 'user', None) else None
+        repository.resolve_match_candidate(candidate_id, 'merged', resolved_by=resolver)
+        return jsonify({'success': True, 'survivor_id': survivor_id, 'merged_lead_id': loser_id})
+
+    return _admin_only(_fn)
+
+
+@multifamily_bp.route('/match-candidates/<candidate_id>/dismiss', methods=['POST'])
+def dismiss_match_candidate(candidate_id):
+    """Dismiss a review candidate (leave both leads separate). Super-admin only."""
+    from flask import g
+
+    def _fn():
+        cand = repository.get_match_candidate(candidate_id)
+        if not cand:
+            return jsonify({'success': False, 'error': 'Candidate not found'}), 404
+        resolver = (g.user or {}).get('email') if getattr(g, 'user', None) else None
+        repository.resolve_match_candidate(candidate_id, 'dismissed', resolved_by=resolver)
+        return jsonify({'success': True})
+
+    return _admin_only(_fn)
 
 
 @multifamily_bp.route('/source-performance', methods=['GET'])
