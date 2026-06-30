@@ -2805,6 +2805,13 @@ def dashboard_finance():
     _finance_cache['ts'] = now
     return jsonify(result)
 
+# ===================================================================
+# MULTIFAMILY COMMAND — standalone module, separate from the BTR queue
+# ===================================================================
+from api.routes.multifamily import multifamily_bp
+
+app.register_blueprint(multifamily_bp)
+
 
 # ===================================================================
 # AUTH HELPERS & MIDDLEWARE
