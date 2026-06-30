@@ -161,6 +161,11 @@ def create_lead():
         return jsonify({'success': False, 'errors': errors}), 400
 
     repository.insert_lead(lead)
+    # Signal-architecture phase: persist this lead's signals as queryable
+    # rows and record its first attribution touch. (Phase A is additive —
+    # behavior is otherwise identical; Phase B adds matching/merge here.)
+    repository.persist_lead_signals(lead)
+    repository.record_lead_attribution_touch(lead, touch_type='first')
 
     if spam_status == 'rejected':
         event_type = 'rejected_honeypot' if 'HONEYPOT_FILLED' in spam_reason_codes else 'rejected_garbage'

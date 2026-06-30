@@ -52,6 +52,22 @@ ACTIVITY_TYPES = [
     'not_a_fit', 'moved_to_nurture', 'needs_info', 'follow_up_due',
 ]
 
+# ---- Signal architecture / dedupe-merge (signal-architecture phase) ----
+# Source-attribution touch types (multifamily_source_attribution).
+ATTRIBUTION_TOUCH_TYPES = ['first', 'latest', 'conversion', 'touch']
+
+# How confidently an incoming signal matched an existing lead.
+#   auto    -> exact email OR exact normalized company+property+contact (auto-merge)
+#   review  -> a fuzzy/partial match that needs a human to confirm
+#   none    -> no candidate found (new lead)
+MATCH_TIERS = ['auto', 'review', 'none']
+
+# Lifecycle of a queued match candidate (multifamily_lead_match_candidates).
+MATCH_CANDIDATE_STATUSES = ['pending', 'merged', 'dismissed']
+
+# Whether a lead row is the live survivor or has been merged away.
+MERGE_STATUSES = ['active', 'merged']
+
 
 def new_id() -> str:
     return str(uuid.uuid4())
@@ -178,6 +194,55 @@ class MultifamilySourceRun:
     records_found: int = 0
     is_mock: bool = True
     notes: Optional[str] = None
+    # Persisted source-run accounting (multifamily_source_runs). Future
+    # automated collectors open a run, then close it with these counts.
+    run_id: Optional[str] = None          # external/batch run id (defaults to `id`)
+    status: str = 'running'               # running | success | error
+    records_created: int = 0
+    records_updated: int = 0
+    records_merged: int = 0
+    records_rejected: int = 0
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+
+
+@dataclass
+class MultifamilySourceAttribution:
+    """One attribution touch on a lead (multifamily_source_attribution).
+    Append-only — first/latest/conversion are derived from the touch
+    history, and the UTM/landing/referrer path is the ordered list of
+    these rows."""
+    id: str
+    lead_id: str
+    touch_type: str  # one of ATTRIBUTION_TOUCH_TYPES
+    source: Optional[str] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_term: Optional[str] = None
+    utm_content: Optional[str] = None
+    referrer: Optional[str] = None
+    landing_page: Optional[str] = None
+    offer_type: Optional[str] = None
+    occurred_at: str = field(default_factory=utc_now_iso)
+    created_at: str = field(default_factory=utc_now_iso)
+
+
+@dataclass
+class MultifamilyLeadMatchCandidate:
+    """A possible match between an incoming signal/lead and an existing
+    lead that needs human review (multifamily_lead_match_candidates).
+    Auto-tier matches are merged immediately and never queued here."""
+    id: str
+    incoming_signal_id: Optional[str]
+    candidate_lead_id: str
+    match_tier: str  # one of MATCH_TIERS ('review' for queued candidates)
+    match_reasons: List[str] = field(default_factory=list)
+    score: float = 0.0
+    status: str = 'pending'  # one of MATCH_CANDIDATE_STATUSES
+    resolved_by: Optional[str] = None
+    created_at: str = field(default_factory=utc_now_iso)
+    resolved_at: Optional[str] = None
 
 
 @dataclass
