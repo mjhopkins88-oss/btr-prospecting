@@ -10013,7 +10013,7 @@ function MultifamilyAdminPanel({
     }
   }, /*#__PURE__*/React.createElement("span", null, row.company_name, " (", row.contact_email || 'no email', ")"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle(spamColor[row.spam_status] || '#64748b')
-  }, row.spam_status), " ", row.source, row.utm_source ? ' · ' + row.utm_source : '', row.score_total != null ? ' · score ' + row.score_total + ' (' + row.score_category + ')' : ''))), /*#__PURE__*/React.createElement(MultifamilyDataQualityView, null), /*#__PURE__*/React.createElement(MultifamilySourceRunsView, null), /*#__PURE__*/React.createElement(MultifamilyRecentNotificationsView, null)));
+  }, row.spam_status), " ", row.source, row.utm_source ? ' · ' + row.utm_source : '', row.score_total != null ? ' · score ' + row.score_total + ' (' + row.score_category + ')' : ''))), /*#__PURE__*/React.createElement(MultifamilyDataQualityView, null), /*#__PURE__*/React.createElement(MultifamilySerpRunnerView, null), /*#__PURE__*/React.createElement(MultifamilySourceRunsView, null), /*#__PURE__*/React.createElement(MultifamilyRecentNotificationsView, null)));
 }
 function mfBreakdownTable(title, obj) {
   const entries = Object.entries(obj || {}).sort((a, b) => b[1] - a[1]);
@@ -10065,6 +10065,41 @@ function MultifamilySourcePerformancePanel({
       }
     })();
   }, []);
+  const serpBlock = data && data.serp && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  style: {
+    fontSize: '0.65rem',
+    color: '#475569',
+    fontFamily: "'Orbitron', sans-serif",
+    marginBottom: '0.5rem',
+    marginTop: '1.25rem'
+  }
+}, "SERP SOURCE PERFORMANCE"), /*#__PURE__*/React.createElement("div", {
+  style: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+    gap: '10px',
+    marginBottom: '1.25rem'
+  }
+}, [['Signals received', data.serp.signals_received], ['Leads created', data.serp.leads_created], ['Leads merged away', data.serp.leads_merged_away], ['Review candidates', data.serp.review_candidates_pending], ['Hot leads', data.serp.hot_leads], ['Call today leads', data.serp.call_today_leads], ['Collection runs', data.serp.collection_runs], ['Total rejected', data.serp.total_rejected_across_runs]].map(([label, value]) => /*#__PURE__*/React.createElement("div", {
+  key: label,
+  style: {
+    background: 'rgba(255,255,255,0.02)',
+    border: '1px solid rgba(255,255,255,0.06)',
+    borderRadius: '6px',
+    padding: '8px 10px'
+  }
+}, /*#__PURE__*/React.createElement("div", {
+  style: {
+    fontSize: '0.6rem',
+    color: '#64748b'
+  }
+}, label), /*#__PURE__*/React.createElement("div", {
+  style: {
+    fontSize: '1.1rem',
+    fontWeight: 700,
+    color: '#f1f5f9'
+  }
+}, value ?? 0)))));
   return /*#__PURE__*/React.createElement("div", {
     style: {
       maxWidth: '1040px',
@@ -10192,7 +10227,7 @@ function MultifamilySourcePerformancePanel({
       padding: '4px 0',
       borderBottom: '1px solid rgba(255,255,255,0.04)'
     }
-  }, /*#__PURE__*/React.createElement("span", null, src), /*#__PURE__*/React.createElement("span", null, r.flagged, "/", r.total, " \xB7 ", r.rate_pct, "%")))), /*#__PURE__*/React.createElement(MultifamilySourceRoiView, null));
+  }, /*#__PURE__*/React.createElement("span", null, src), /*#__PURE__*/React.createElement("span", null, r.flagged, "/", r.total, " \xB7 ", r.rate_pct, "%")))), /*#__PURE__*/React.createElement(MultifamilySourceRoiView, null), serpBlock);
 }
 function _mfTitleCase(s) {
   return (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -11208,6 +11243,273 @@ function MultifamilyDataQualityView() {
     }
   }, "Dismiss")))));
 }
+function MultifamilySerpRunnerView() {
+  const [config, setConfig] = useState(null);
+  const [form, setForm] = useState({
+    category: '',
+    state: '',
+    city: '',
+    lookbackDays: 30,
+    limit: 10,
+    dryRun: true
+  });
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/multifamily/admin/serp-config');
+        const j = r.ok ? await r.json() : null;
+        if (j) {
+          setConfig(j);
+          setForm(f => ({
+            ...f,
+            category: (j.categories || [])[0] || '',
+            state: (j.launch_states || [])[0] || ''
+          }));
+        }
+      } catch (e) {}
+    })();
+  }, []);
+  const update = field => e => {
+    const value = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+    setForm(f => ({
+      ...f,
+      [field]: value
+    }));
+  };
+  const run = async () => {
+    setRunning(true);
+    setError(null);
+    setResult(null);
+    try {
+      const r = await fetch('/api/multifamily/admin/serp-run', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          category: form.category,
+          state: form.state,
+          city: form.city || undefined,
+          lookbackDays: Number(form.lookbackDays) || 30,
+          limit: Number(form.limit) || 10,
+          dryRun: form.dryRun
+        })
+      });
+      const j = await r.json();
+      if (!r.ok || j.error) {
+        setError(j.error || `HTTP ${r.status}`);
+      } else {
+        setResult(j);
+      }
+    } catch (e) {
+      setError('Request failed.');
+    } finally {
+      setRunning(false);
+    }
+  };
+  const inputStyle = {
+    background: 'rgba(255,255,255,0.03)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    color: '#e2e8f0',
+    borderRadius: '4px',
+    padding: '4px 8px',
+    fontSize: '0.75rem'
+  };
+  const labelStyle = {
+    fontSize: '0.62rem',
+    color: '#64748b',
+    marginBottom: '2px',
+    display: 'block'
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '1.5rem'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, "RUN SERP SEARCH"), !config && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#475569'
+    }
+  }, "Loading\u2026"), config && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '10px',
+      flexWrap: 'wrap',
+      alignItems: 'flex-end',
+      marginBottom: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: labelStyle
+  }, "Category"), /*#__PURE__*/React.createElement("select", {
+    value: form.category,
+    onChange: update('category'),
+    style: inputStyle
+  }, (config.categories || []).map(c => /*#__PURE__*/React.createElement("option", {
+    key: c,
+    value: c
+  }, _mfTitleCase(c))))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: labelStyle
+  }, "State"), /*#__PURE__*/React.createElement("select", {
+    value: form.state,
+    onChange: update('state'),
+    style: inputStyle
+  }, /*#__PURE__*/React.createElement("optgroup", {
+    label: "Launch states"
+  }, (config.launch_states || []).map(s => /*#__PURE__*/React.createElement("option", {
+    key: s,
+    value: s
+  }, s))), /*#__PURE__*/React.createElement("optgroup", {
+    label: "Future states"
+  }, (config.future_states || []).map(s => /*#__PURE__*/React.createElement("option", {
+    key: s,
+    value: s
+  }, s))))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: labelStyle
+  }, "City (optional)"), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    value: form.city,
+    onChange: update('city'),
+    style: inputStyle,
+    placeholder: "e.g. Austin"
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: labelStyle
+  }, "Lookback days"), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    min: "1",
+    max: "365",
+    value: form.lookbackDays,
+    onChange: update('lookbackDays'),
+    style: {
+      ...inputStyle,
+      width: '70px'
+    }
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: labelStyle
+  }, "Result limit"), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    min: "1",
+    max: "20",
+    value: form.limit,
+    onChange: update('limit'),
+    style: {
+      ...inputStyle,
+      width: '60px'
+    }
+  })), /*#__PURE__*/React.createElement("label", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '4px',
+      fontSize: '0.72rem',
+      color: '#94a3b8'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: form.dryRun,
+    onChange: update('dryRun')
+  }), "Dry run"), /*#__PURE__*/React.createElement("button", {
+    onClick: run,
+    disabled: running,
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(245,158,11,0.4)',
+      color: '#f59e0b',
+      borderRadius: '4px',
+      padding: '5px 14px',
+      cursor: 'pointer',
+      fontSize: '0.75rem',
+      fontWeight: 600,
+      opacity: running ? 0.6 : 1
+    }
+  }, running ? 'Running…' : 'Run SERP Search')), error && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#ef4444',
+      marginBottom: '10px'
+    }
+  }, error), result && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '16px',
+      flexWrap: 'wrap',
+      fontSize: '0.78rem',
+      color: '#94a3b8',
+      marginBottom: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "Found: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#e2e8f0'
+    }
+  }, result.found)), result.dry_run ? /*#__PURE__*/React.createElement("span", null, "Would ingest: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#34d399'
+    }
+  }, result.accepted_would_ingest)) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", null, "Created: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#34d399'
+    }
+  }, result.created)), /*#__PURE__*/React.createElement("span", null, "Merged: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#38bdf8'
+    }
+  }, result.merged)), /*#__PURE__*/React.createElement("span", null, "Review candidates: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#facc15'
+    }
+  }, result.review_candidates))), /*#__PURE__*/React.createElement("span", null, "Rejected: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#ef4444'
+    }
+  }, result.rejected))), result.warnings && result.warnings.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#f59e0b',
+      marginBottom: '8px'
+    }
+  }, result.warnings.join(' · ')), /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxHeight: '260px',
+      overflowY: 'auto'
+    }
+  }, (result.results || []).map((row, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: '6px',
+      fontSize: '0.72rem',
+      color: '#94a3b8',
+      padding: '5px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      maxWidth: '55%'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(row.accepted ? '#34d399' : '#64748b')
+  }, row.accepted ? 'accepted' : 'rejected'), ' ', row.title || row.url), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#64748b'
+    }
+  }, (row.reason_codes || []).join(', ')))), (result.results || []).length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#475569'
+    }
+  }, "No results found for this search."))));
+}
 function MultifamilySourceRunsView() {
   const [runs, setRuns] = useState(null);
   useEffect(() => {
@@ -11264,7 +11566,7 @@ function MultifamilySourceRunsView() {
     }
   }, /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle(statusColor[run.status] || '#64748b')
-  }, run.status || 'unknown'), " ", run.source, run.started_at ? ' · ' + String(run.started_at).slice(0, 19).replace('T', ' ') : ''), /*#__PURE__*/React.createElement("span", null, 'found ' + (run.records_found || 0), ' · created ' + (run.records_created || 0), ' · merged ' + (run.records_merged || 0), ' · rejected ' + (run.records_rejected || 0)))));
+  }, run.status || 'unknown'), " ", run.source, (run.category ? ' · ' + run.category : ''), (run.state ? ' · ' + run.state : ''), run.started_at ? ' · ' + String(run.started_at).slice(0, 19).replace('T', ' ') : ''), /*#__PURE__*/React.createElement("span", null, 'found ' + (run.records_found || 0), ' · created ' + (run.records_created || 0), ' · merged ' + (run.records_merged || 0), ' · rejected ' + (run.records_rejected || 0)))));
 }
 const MF_OUTCOME_TYPES = ['meeting_booked', 'submission_received', 'sov_received', 'loss_runs_received', 'application_received', 'quote_started', 'quote_sent', 'won', 'lost', 'not_a_fit', 'nurture', 'dead'];
 function mfOutcomeLabel(t) {
