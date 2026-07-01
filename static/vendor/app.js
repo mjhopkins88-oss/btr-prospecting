@@ -8226,6 +8226,21 @@ function mfPillStyle(color) {
     color
   };
 }
+function mfDemoBannerStyle() {
+  // Compact, low-key demo-data notice — a thin label, not an alert box.
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '5px',
+    background: 'rgba(148,163,184,0.08)',
+    border: '1px solid rgba(148,163,184,0.18)',
+    borderRadius: '6px',
+    padding: '3px 10px',
+    marginBottom: '0.85rem',
+    fontSize: '0.7rem',
+    color: '#94a3b8'
+  };
+}
 function mfLeadSituationLabel(lead) {
   const fromSignal = (lead.signals || []).map(s => s.detail && s.detail.lead_situation).find(Boolean);
   if (fromSignal) {
@@ -8239,10 +8254,6 @@ function mfPrimaryConcernLabel(lead) {
   if (!flag) return null;
   const f = MF_PRIMARY_CONCERNS.find(c => c.value === flag);
   return f ? f.label : flag;
-}
-function mfSourceAttributionLabel(lead) {
-  const parts = [lead.utm_source, lead.utm_medium, lead.utm_campaign].filter(Boolean);
-  return parts.length ? parts.join(' / ') : null;
 }
 function MultifamilyProcessStageBadge({
   ps
@@ -8264,11 +8275,14 @@ function MultifamilyLeadCard({
   lead,
   onOpen
 }) {
+  // Kept deliberately focused: company, contact/location, score/category,
+  // source, process stage, why now, next best action. Everything else
+  // (UTM/attribution, offer type, confidence, signal count, disqualifier
+  // codes, why-warm/likely-pain, suggested opener, source URL/last
+  // verified) lives one click away in the lead drawer.
   const score = lead.score || {};
   const color = mfCategoryColor(score.category);
   const contact = (lead.contacts || [])[0];
-  const primaryConcern = mfPrimaryConcernLabel(lead);
-  const attribution = mfSourceAttributionLabel(lead);
   const ps = lead.process_stage;
   const isSuspicious = lead.is_suspicious;
   return /*#__PURE__*/React.createElement("div", {
@@ -8277,8 +8291,8 @@ function MultifamilyLeadCard({
       border: '1px solid ' + (isSuspicious ? 'rgba(250,204,21,0.4)' : 'rgba(255,255,255,0.08)'),
       borderLeft: '3px solid ' + color,
       borderRadius: '8px',
-      padding: '14px 16px',
-      marginBottom: '10px'
+      padding: '13px 15px',
+      marginBottom: '9px'
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -8303,27 +8317,21 @@ function MultifamilyLeadCard({
     }
   }, lead.company && lead.company.name), /*#__PURE__*/React.createElement("span", {
     style: lead.is_demo ? mfPillStyle('#f97316') : mfPillStyle('#34d399')
-  }, lead.is_demo ? 'DEMO DATA' : 'REAL'), isSuspicious && /*#__PURE__*/React.createElement("span", {
+  }, lead.is_demo ? 'DEMO' : 'REAL'), isSuspicious && /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#facc15')
-  }, "\u26A0 SUSPICIOUS")), /*#__PURE__*/React.createElement("div", {
+  }, "⚠ SUSPICIOUS")), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: '0.8rem',
+      fontSize: '0.78rem',
       color: '#94a3b8',
-      marginTop: '2px'
+      marginTop: '3px'
     }
-  }, lead.property && lead.property.name, " \xB7 ", lead.city || '?', ", ", lead.state || '?', lead.property && lead.property.asset_type && /*#__PURE__*/React.createElement(React.Fragment, null, " \xB7 ", lead.property.asset_type.replace(/_/g, ' ')), lead.property && lead.property.unit_count != null && /*#__PURE__*/React.createElement(React.Fragment, null, " \xB7 ", lead.property.unit_count, " units")), contact && /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.75rem',
-      color: '#64748b',
-      marginTop: '2px'
-    }
-  }, contact.full_name, contact.title ? ' — ' + contact.title : '', contact.email ? ' · ' + contact.email : '', contact.phone ? ' · ' + contact.phone : '')), /*#__PURE__*/React.createElement("div", {
+  }, contact && contact.full_name ? contact.full_name + ' \xB7 ' : '', lead.city || '?', ", ", lead.state || '?', lead.property && lead.property.unit_count != null && /*#__PURE__*/React.createElement(React.Fragment, null, " \xB7 ", lead.property.unit_count, " units"))), /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: 'right'
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: '1.3rem',
+      fontSize: '1.25rem',
       fontWeight: 700,
       color,
       fontFamily: "'Orbitron', sans-serif"
@@ -8345,87 +8353,25 @@ function MultifamilyLeadCard({
     ps: ps
   }), /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#a78bfa')
-  }, lead.primary_source), attribution && /*#__PURE__*/React.createElement("span", {
-    style: mfPillStyle('#60a5fa'),
-    title: "utm_source / utm_medium / utm_campaign"
-  }, attribution), lead.offer_type && /*#__PURE__*/React.createElement("span", {
-    style: mfPillStyle('#38bdf8')
-  }, lead.offer_type), /*#__PURE__*/React.createElement("span", {
-    style: mfPillStyle('#22d3ee')
-  }, mfLeadSituationLabel(lead)), primaryConcern && /*#__PURE__*/React.createElement("span", {
-    style: mfPillStyle('#fb7185')
-  }, primaryConcern), /*#__PURE__*/React.createElement("span", {
-    style: mfPillStyle('#34d399')
-  }, "confidence ", (lead.confidence ?? 0).toFixed(2)), lead.signal_count > 1 && /*#__PURE__*/React.createElement("span", {
-    style: mfPillStyle('#818cf8'),
-    title: "signals combined on this lead"
-  }, lead.signal_count, " signals"), (score.disqualifier_codes || []).map(code => /*#__PURE__*/React.createElement("span", {
-    key: code,
-    style: mfPillStyle('#f97316'),
-    title: code
-  }, "\u26A0 ", code.replace(/_/g, ' ').toLowerCase()))), ps && ps.timing_reason && /*#__PURE__*/React.createElement("div", {
+  }, lead.primary_source)), ps && ps.timing_reason && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: '0.8rem',
+      fontSize: '0.78rem',
       color: '#cbd5e1',
       marginBottom: '4px'
     }
-  }, /*#__PURE__*/React.createElement("b", null, "Why now:"), " ", ps.timing_reason), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.8rem',
-      color: '#cbd5e1',
-      marginBottom: '4px'
-    }
-  }, /*#__PURE__*/React.createElement("b", null, "Why warm:"), " ", lead.why_warm), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.8rem',
-      color: '#cbd5e1',
-      marginBottom: '4px'
-    }
-  }, /*#__PURE__*/React.createElement("b", null, "Likely pain:"), " ", lead.likely_pain), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.8rem',
-      color: '#cbd5e1',
-      marginBottom: '4px'
-    }
-  }, /*#__PURE__*/React.createElement("b", null, "Next best action:"), " ", lead.next_best_action), ps && ps.recommended_contact_roles && ps.recommended_contact_roles.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("b", null, "Why now:"), " ", ps.timing_reason), lead.next_best_action && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.78rem',
       color: '#94a3b8',
-      marginBottom: '4px'
+      marginBottom: '2px'
     }
-  }, /*#__PURE__*/React.createElement("b", null, "Who to ask for:"), " ", ps.recommended_contact_roles.join(' · ')), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.8rem',
-      color: '#94a3b8',
-      marginBottom: '4px',
-      fontStyle: 'italic'
-    }
-  }, "\u201C", lead.suggested_opener, "\u201D"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("b", null, "Next:"), " ", lead.next_best_action), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
-      justifyContent: 'space-between',
-      flexWrap: 'wrap',
-      gap: '4px',
-      fontSize: '0.7rem',
-      color: '#475569',
-      marginTop: '8px',
-      borderTop: '1px solid rgba(255,255,255,0.05)',
-      paddingTop: '8px'
+      justifyContent: 'flex-end',
+      marginTop: '6px'
     }
-  }, /*#__PURE__*/React.createElement("span", null, lead.source_page || 'no source page', " \xB7 ", lead.source_url ? /*#__PURE__*/React.createElement("a", {
-    href: lead.source_url,
-    target: "_blank",
-    rel: "noreferrer",
-    style: {
-      color: '#22d3ee'
-    }
-  }, "source") : 'no source URL'), /*#__PURE__*/React.createElement("span", {
-    style: {
-      display: 'flex',
-      gap: '10px',
-      alignItems: 'center'
-    }
-  }, /*#__PURE__*/React.createElement("span", null, "Last verified ", lead.last_verified_at ? String(lead.last_verified_at).slice(0, 10) : '?'), onOpen && /*#__PURE__*/React.createElement("button", {
+  }, onOpen && /*#__PURE__*/React.createElement("button", {
     onClick: () => onOpen(lead.id),
     style: {
       background: 'transparent',
@@ -8437,7 +8383,7 @@ function MultifamilyLeadCard({
       fontSize: '0.7rem',
       fontWeight: 600
     }
-  }, "Details \u2192"))));
+  }, "Details →")));
 }
 function MultifamilyTabBar({
   activeTab,
@@ -8471,46 +8417,65 @@ function MultifamilyTabBar({
 function MultifamilyHeader({
   onAddLead
 }) {
+  // No duplicate title here \u2014 the app shell's global header already shows
+  // "MULTIFAMILY COMMAND" once. This stays a slim, low-key subtitle +
+  // action row so the workspace doesn't repeat its own name on every tab.
   return /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       justifyContent: 'space-between',
-      alignItems: 'flex-start',
+      alignItems: 'center',
       flexWrap: 'wrap',
-      gap: '12px',
-      marginBottom: '1.25rem'
+      gap: '10px',
+      marginBottom: '1rem',
+      paddingBottom: '0.75rem',
+      borderBottom: '1px solid rgba(255,255,255,0.06)'
     }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", {
-    style: {
-      fontFamily: "'Orbitron', sans-serif",
-      fontSize: '1.3rem',
-      fontWeight: 900,
-      background: 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)',
-      WebkitBackgroundClip: 'text',
-      WebkitTextFillColor: 'transparent',
-      margin: 0
-    }
-  }, "MULTIFAMILY COMMAND"), /*#__PURE__*/React.createElement("p", {
+  }, /*#__PURE__*/React.createElement("p", {
     style: {
       color: '#64748b',
-      fontSize: '0.8rem',
-      margin: '0.25rem 0 0'
+      fontSize: '0.78rem',
+      margin: 0
     }
-  }, "Multifamily insurance lead intelligence \u2014 California & Texas. Who to call today, why now, what to say, and what follow-up is due.")), onAddLead && /*#__PURE__*/React.createElement("button", {
+  }, "Who to call today, why now, what to say, and what follow-up is due."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '8px',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("a", {
+    href: "/static/multifamily-benchmark-form.html",
+    target: "_blank",
+    rel: "noreferrer",
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.12)',
+      color: '#94a3b8',
+      padding: '0.5rem 0.85rem',
+      borderRadius: '0.5rem',
+      fontSize: '0.76rem',
+      fontWeight: 600,
+      cursor: 'pointer',
+      fontFamily: "'Inter', sans-serif",
+      whiteSpace: 'nowrap',
+      textDecoration: 'none',
+      display: 'inline-block'
+    }
+  }, "Open Benchmark Form"), onAddLead && /*#__PURE__*/React.createElement("button", {
     onClick: onAddLead,
     style: {
       background: '#f59e0b',
       border: 'none',
       color: '#0f172a',
-      padding: '0.6rem 1rem',
+      padding: '0.5rem 0.9rem',
       borderRadius: '0.5rem',
-      fontSize: '0.8rem',
+      fontSize: '0.76rem',
       fontWeight: 700,
       cursor: 'pointer',
       fontFamily: "'Inter', sans-serif",
       whiteSpace: 'nowrap'
     }
-  }, "+ Add Multifamily Lead"));
+  }, "+ Add Multifamily Lead")));
 }
 function MultifamilyEmptyState({
   title,
@@ -9436,8 +9401,8 @@ function MultifamilyMissionCard({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: '0.62rem',
-      color: '#f59e0b',
+      fontSize: '0.6rem',
+      color: '#64748b',
       fontFamily: "'Orbitron', sans-serif",
       letterSpacing: '0.05em',
       marginBottom: '6px'
@@ -9525,6 +9490,263 @@ function MultifamilyCountTile({
     }
   }, value));
 }
+function MultifamilyPrimaryMissionCard({
+  item
+}) {
+  if (!item) {
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: 'rgba(15,22,36,0.97)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        borderLeft: '4px solid rgba(245,158,11,0.4)',
+        borderRadius: '10px',
+        padding: '18px 20px',
+        marginBottom: '10px'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: '0.65rem',
+        color: '#f59e0b',
+        fontFamily: "'Orbitron', sans-serif",
+        letterSpacing: '0.05em',
+        marginBottom: '8px'
+      }
+    }, "TODAY'S BEST FIRST ACTION"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        color: '#475569',
+        fontSize: '0.85rem'
+      }
+    }, "Nothing queued right now — check back once new signals come in."));
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(245,158,11,0.3)',
+      borderLeft: '4px solid #f59e0b',
+      borderRadius: '10px',
+      padding: '18px 20px',
+      marginBottom: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#f59e0b',
+      fontFamily: "'Orbitron', sans-serif",
+      letterSpacing: '0.05em',
+      marginBottom: '8px'
+    }
+  }, "TODAY'S BEST FIRST ACTION"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '1.15rem',
+      fontWeight: 700,
+      color: '#f8fafc'
+    }
+  }, item.company), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.82rem',
+      color: '#94a3b8',
+      marginTop: '2px'
+    }
+  }, item.contact || 'no contact', item.city ? ` \xB7 ${item.city}, ${item.state || ''}` : item.state ? ` \xB7 ${item.state}` : ''), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '6px',
+      flexWrap: 'wrap',
+      margin: '8px 0'
+    }
+  }, item.category && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(mfCategoryColor(item.category))
+  }, item.score ?? '', " \xB7 ", mfCategoryLabel(item.category)), item.urgency_label && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#f59e0b')
+  }, item.urgency_label), item.source && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#a78bfa')
+  }, item.source)), item.reason && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.82rem',
+      color: '#cbd5e1',
+      marginBottom: '4px'
+    }
+  }, item.reason), item.next_best_action && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.8rem',
+      color: '#94a3b8'
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "Do:"), " ", item.next_best_action), item.email_draft && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.76rem',
+      color: '#64748b',
+      marginTop: '8px',
+      whiteSpace: 'pre-wrap',
+      background: 'rgba(255,255,255,0.03)',
+      padding: '8px',
+      borderRadius: '6px',
+      maxHeight: '140px',
+      overflowY: 'auto'
+    }
+  }, /*#__PURE__*/React.createElement("b", null, item.email_draft.subject), '\n', item.email_draft.body));
+}
+function MultifamilyNeedsAttentionPanel({
+  user,
+  leadNeedingInfo,
+  onOpen,
+  onCountsReady
+}) {
+  const [notifs, setNotifs] = useState(null);
+  useEffect(() => {
+    if (!user) {
+      setNotifs([]);
+      return;
+    }
+    (async () => {
+      try {
+        const r = await fetch('/api/multifamily/notifications?limit=50');
+        const j = r.ok ? await r.json() : null;
+        setNotifs(j ? j.notifications || [] : []);
+      } catch (e) {
+        setNotifs([]);
+      }
+    })();
+  }, [user]);
+  const overdue = (notifs || []).filter(n => n.type === 'followup_overdue');
+  const dueToday = (notifs || []).filter(n => n.type === 'followup_due_today');
+  const stale = (notifs || []).filter(n => n.type === 'hot_lead_stale');
+  const replied = (notifs || []).filter(n => n.type === 'lead_replied');
+  useEffect(() => {
+    if (notifs !== null && onCountsReady) onCountsReady(overdue.length + dueToday.length);
+  }, [notifs]);
+  if (!user) return null;
+  const groups = [['Overdue follow-ups', overdue, '#ef4444'], ['Due today', dueToday, '#f59e0b'], ['Stale hot leads', stale, '#f97316'], ['Replied — needs response', replied, '#34d399']];
+  const hasAny = groups.some(([, items]) => items.length > 0) || !!leadNeedingInfo;
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '10px',
+      padding: '14px 16px',
+      marginBottom: '1.25rem'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#64748b',
+      fontFamily: "'Orbitron', sans-serif",
+      letterSpacing: '0.05em',
+      marginBottom: '8px'
+    }
+  }, "NEEDS ATTENTION"), notifs === null && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#475569',
+      fontSize: '0.8rem'
+    }
+  }, "Loading…"), notifs !== null && !hasAny && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#475569',
+      fontSize: '0.8rem'
+    }
+  }, "Nothing needs attention right now."), groups.map(([label, items, color]) => items.length > 0 && /*#__PURE__*/React.createElement("div", {
+    key: label,
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '5px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)',
+      fontSize: '0.8rem'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(color)
+  }, items.length), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#cbd5e1',
+      fontWeight: 600
+    }
+  }, label), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#64748b',
+      fontSize: '0.76rem'
+    }
+  }, items[0].title, items.length > 1 ? ` +${items.length - 1} more` : ''))), leadNeedingInfo && /*#__PURE__*/React.createElement("div", {
+    onClick: () => onOpen && onOpen(leadNeedingInfo.lead_id),
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '5px 0',
+      fontSize: '0.8rem',
+      cursor: onOpen ? 'pointer' : 'default'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#facc15')
+  }, "Info"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#cbd5e1',
+      fontWeight: 600
+    }
+  }, leadNeedingInfo.company), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#64748b',
+      fontSize: '0.76rem'
+    }
+  }, "needs more info before outreach")));
+}
+function MultifamilySourceSnapshot({
+  data,
+  setActiveTab
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '10px',
+      padding: '14px 16px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#64748b',
+      fontFamily: "'Orbitron', sans-serif",
+      letterSpacing: '0.05em'
+    }
+  }, "SOURCE SNAPSHOT"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setActiveTab('multifamily_source_performance'),
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.12)',
+      color: '#94a3b8',
+      borderRadius: '4px',
+      padding: '3px 10px',
+      cursor: 'pointer',
+      fontSize: '0.7rem'
+    }
+  }, "View Source Performance →")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '24px',
+      flexWrap: 'wrap',
+      fontSize: '0.8rem',
+      color: '#94a3b8'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "Real leads captured: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#f1f5f9'
+    }
+  }, data.real_lead_count ?? 0)), /*#__PURE__*/React.createElement("span", null, "Top source: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#f1f5f9'
+    }
+  }, data.top_source || '—')), /*#__PURE__*/React.createElement("span", null, "Top campaign: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#f1f5f9'
+    }
+  }, data.top_campaign || '—'))));
+}
 function MultifamilyOverviewPanel({
   activeTab,
   setActiveTab,
@@ -9534,6 +9756,7 @@ function MultifamilyOverviewPanel({
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [drawerId, setDrawerId] = useState(null);
+  const [followupsDueCount, setFollowupsDueCount] = useState(null);
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -9551,8 +9774,9 @@ function MultifamilyOverviewPanel({
   }, [load]);
   const c = data && data.counts || {};
   const m = data && data.mission || {};
-  const tiles = [['CALL TODAY', c.call_today || 0, '#ef4444'], ['HOT', c.hot || 0, '#f97316'], ['WARM', c.warm || 0, '#f59e0b'], ['NEW INBOUND', c.new_inbound || 0, '#34d399'], ['RENEWAL WINDOW', c.renewal_window || 0, '#3b82f6'], ['ACQ / FINANCING', c.acquisition_financing || 0, '#a78bfa'], ["CONSTR / B-RISK", c.construction_buildersrisk || 0, '#22d3ee'], ['COMPLETION', c.completion_leaseup || 0, '#60a5fa'], ['NURTURE', c.nurture || 0, '#64748b']];
-  if (user && user.is_super_admin) tiles.push(['SUSPICIOUS', c.suspicious || 0, '#facc15']);
+  const tiles = [['CALL TODAY', c.call_today || 0, '#ef4444'], ['HOT', c.hot || 0, '#f97316'], ['WARM', c.warm || 0, '#f59e0b'], ['NEW INBOUND', c.new_inbound || 0, '#34d399'], ['FOLLOW-UPS DUE', followupsDueCount ?? 0, '#38bdf8'], ['RENEWAL WINDOW', c.renewal_window || 0, '#3b82f6'], ["CONSTR / B-RISK", c.construction_buildersrisk || 0, '#22d3ee']];
+  const primaryItem = data && data.best_first_action;
+  const secondaryEntries = [['Best email draft', m.best_email_draft], ['Best follow-up', m.best_followup], ['Best nurture action', m.best_nurture_action]].filter(([, item]) => item && (!primaryItem || item.lead_id !== primaryItem.lead_id));
   return /*#__PURE__*/React.createElement("div", {
     style: {
       maxWidth: '1040px',
@@ -9581,90 +9805,70 @@ function MultifamilyOverviewPanel({
   }, "LOADING MULTIFAMILY DATA..."), !loading && data && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(MultifamilyNotificationStrip, {
     user: user
   }), data.is_demo_data && /*#__PURE__*/React.createElement("div", {
+    style: mfDemoBannerStyle()
+  }, "● Demo data — no real leads captured yet. Add one via “+ Add Multifamily Lead” or the public benchmark form."), /*#__PURE__*/React.createElement("div", {
     style: {
-      background: 'rgba(249,115,22,0.1)',
-      border: '1px solid rgba(249,115,22,0.3)',
-      borderRadius: '8px',
-      padding: '10px 14px',
-      marginBottom: '1rem',
-      fontSize: '0.8rem',
-      color: '#f97316'
+      display: 'flex',
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '10px',
+      marginBottom: '1.25rem',
+      overflow: 'hidden',
+      flexWrap: 'wrap'
     }
-  }, "\u26A0 Showing demo data \u2014 no real leads captured yet. Add one via \u201C+ Add Multifamily Lead\u201D or the public benchmark form."), /*#__PURE__*/React.createElement(MultifamilyOutcomeSummaryTiles, null), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-      gap: '10px',
-      marginBottom: '1.25rem'
-    }
-  }, tiles.map(t => /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+  }, tiles.map((t, i) => /*#__PURE__*/React.createElement("div", {
     key: t[0],
-    label: t[0],
-    value: t[1],
-    color: t[2]
-  }))), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: '0.7rem',
-      color: '#f59e0b',
+      flex: '1 1 120px',
+      textAlign: 'center',
+      padding: '12px 10px',
+      borderLeft: i === 0 ? 'none' : '1px solid rgba(255,255,255,0.06)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.56rem',
+      color: '#64748b',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '5px',
+      letterSpacing: '0.03em'
+    }
+  }, t[0]), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '1.2rem',
+      fontWeight: 700,
+      color: t[1] > 0 ? t[2] : '#475569',
+      fontFamily: "'Orbitron', sans-serif"
+    }
+  }, t[1])))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#64748b',
       fontFamily: "'Orbitron', sans-serif",
       letterSpacing: '0.06em',
       marginBottom: '8px'
     }
-  }, "TODAY'S MULTIFAMILY MISSION"), /*#__PURE__*/React.createElement("div", {
+  }, "TODAY'S MULTIFAMILY MISSION"), /*#__PURE__*/React.createElement(MultifamilyPrimaryMissionCard, {
+    item: primaryItem
+  }), secondaryEntries.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-      gap: '10px',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+      gap: '8px',
       marginBottom: '1.25rem'
     }
-  }, /*#__PURE__*/React.createElement(MultifamilyMissionCard, {
-    title: "BEST FIRST CALL",
-    item: m.best_first_call
-  }), /*#__PURE__*/React.createElement(MultifamilyMissionCard, {
-    title: "BEST EMAIL DRAFT",
-    item: m.best_email_draft
-  }), /*#__PURE__*/React.createElement(MultifamilyMissionCard, {
-    title: "BEST FOLLOW-UP",
-    item: m.best_followup
-  }), /*#__PURE__*/React.createElement(MultifamilyMissionCard, {
-    title: "BEST NURTURE ACTION",
-    item: m.best_nurture_action
-  }), /*#__PURE__*/React.createElement(MultifamilyMissionCard, {
-    title: "LEAD NEEDING INFO",
-    item: m.lead_needing_info
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      gap: '20px',
-      flexWrap: 'wrap',
-      fontSize: '0.8rem',
-      color: '#94a3b8',
-      marginBottom: '0.75rem'
-    }
-  }, /*#__PURE__*/React.createElement("span", null, "Real leads captured: ", /*#__PURE__*/React.createElement("b", {
-    style: {
-      color: '#f1f5f9'
-    }
-  }, data.real_lead_count ?? 0)), /*#__PURE__*/React.createElement("span", null, "Top source: ", /*#__PURE__*/React.createElement("b", {
-    style: {
-      color: '#f1f5f9'
-    }
-  }, data.top_source || '—')), /*#__PURE__*/React.createElement("span", null, "Top campaign: ", /*#__PURE__*/React.createElement("b", {
-    style: {
-      color: '#f1f5f9'
-    }
-  }, data.top_campaign || '—'))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.8rem',
-      color: '#94a3b8',
-      marginBottom: '0.4rem'
-    }
-  }, "By state: ", Object.entries(data.by_state || {}).map(([k, v]) => `${k}: ${v}`).join(' · ')), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.8rem',
-      color: '#94a3b8'
-    }
-  }, "By source: ", Object.entries(data.by_source || {}).map(([k, v]) => `${k}: ${v}`).join(' · '))));
+  }, secondaryEntries.map(([title, item]) => /*#__PURE__*/React.createElement(MultifamilyMissionCard, {
+    key: title,
+    title: title.toUpperCase(),
+    item: item
+  }))), /*#__PURE__*/React.createElement(MultifamilyNeedsAttentionPanel, {
+    user: user,
+    leadNeedingInfo: m.lead_needing_info,
+    onOpen: setDrawerId,
+    onCountsReady: setFollowupsDueCount
+  }), /*#__PURE__*/React.createElement(MultifamilySourceSnapshot, {
+    data: data,
+    setActiveTab: setActiveTab
+  })));
 }
 function MultifamilyAdminPanel({
   activeTab,
@@ -10355,16 +10559,8 @@ function MultifamilyOutreachWorkbenchPanel({
     user: user,
     onClose: () => setDrawerId(null)
   }), data && data.is_demo_data && leads.length > 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: 'rgba(249,115,22,0.1)',
-      border: '1px solid rgba(249,115,22,0.3)',
-      borderRadius: '8px',
-      padding: '10px 14px',
-      marginBottom: '1rem',
-      fontSize: '0.8rem',
-      color: '#f97316'
-    }
-  }, "\u26A0 Showing demo data for this view \u2014 no real leads here yet."), loading && !data && /*#__PURE__*/React.createElement("div", {
+    style: mfDemoBannerStyle()
+  }, "\u25CF Demo data \u2014 no real leads for this view yet."), loading && !data && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: 'center',
       padding: '3rem',
@@ -10426,16 +10622,8 @@ function MultifamilyLeadListView({
     user: user,
     onClose: () => setDrawerId(null)
   }), data && data.is_demo_data && leads.length > 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: 'rgba(249,115,22,0.1)',
-      border: '1px solid rgba(249,115,22,0.3)',
-      borderRadius: '8px',
-      padding: '10px 14px',
-      marginBottom: '1rem',
-      fontSize: '0.8rem',
-      color: '#f97316'
-    }
-  }, "\u26A0 Showing demo data for this view \u2014 no real leads here yet."), /*#__PURE__*/React.createElement("div", {
+    style: mfDemoBannerStyle()
+  }, "\u25CF Demo data \u2014 no real leads for this view yet."), /*#__PURE__*/React.createElement("div", {
     style: {
       maxHeight: '68vh',
       overflowY: 'auto'
@@ -11212,48 +11400,6 @@ function MultifamilyNotificationStrip({
       whiteSpace: 'nowrap'
     }
   }, "Mark read")))));
-}
-function MultifamilyOutcomeSummaryTiles() {
-  const [roi, setRoi] = useState(null);
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await fetch('/api/multifamily/source-roi');
-        const j = r.ok ? await r.json() : null;
-        setRoi(j ? j.roi : null);
-      } catch (e) {
-        setRoi(null);
-      }
-    })();
-  }, []);
-  if (!roi) return null;
-  const buckets = Object.values(roi.source || {});
-  if (buckets.length === 0) return null;
-  const sum = key => buckets.reduce((acc, b) => acc + (b[key] || 0), 0);
-  const tiles = [['MEETINGS BOOKED', sum('meetings_booked'), '#34d399'], ['QUOTES SENT', sum('quotes_sent'), '#60a5fa'], ['WINS', sum('wins'), '#22d3ee'], ['LOSSES', sum('losses'), '#ef4444'], ['EST. REVENUE', `$${sum('estimated_revenue').toLocaleString()}`, '#facc15'], ['BOUND PREMIUM', `$${sum('bound_premium').toLocaleString()}`, '#a78bfa']];
-  return /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: '1.25rem'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.65rem',
-      color: '#475569',
-      fontFamily: "'Orbitron', sans-serif",
-      marginBottom: '0.5rem'
-    }
-  }, "OUTCOME SUMMARY"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-      gap: '10px'
-    }
-  }, tiles.map(t => /*#__PURE__*/React.createElement(MultifamilyCountTile, {
-    key: t[0],
-    label: t[0],
-    value: t[1],
-    color: t[2]
-  }))));
 }
 const MF_ROI_DIMENSIONS = [{
   value: 'source',
