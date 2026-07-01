@@ -17,12 +17,14 @@ from typing import Any, Dict, List, Optional
 
 SIGNAL_SOURCES = [
     'website', 'form', 'benchmark_form', 'search_console', 'google_ads', 'linkedin_lead_form',
-    'permit', 'news', 'crm', 'manual',
+    'permit', 'news', 'crm', 'manual', 'serp',
 ]
 
 # Sources that represent a real prospect taking inbound action (vs. a
 # third-party trigger feed). Used to bucket leads into "Inbound Leads"
-# regardless of whether the data is real or mock/demo.
+# regardless of whether the data is real or mock/demo. 'serp' is
+# deliberately excluded — a search-engine result is a third-party trigger,
+# not the prospect reaching out, same treatment as 'permit'/'news'.
 INBOUND_INTENT_SOURCES = {
     'form', 'benchmark_form', 'manual', 'website', 'search_console', 'google_ads', 'linkedin_lead_form',
 }
@@ -35,6 +37,13 @@ SIGNAL_TYPES = [
     'refinance', 'financing', 'permit_filed', 'planning_approval',
     'groundbreaking', 'vertical_construction', 'completion',
     'portfolio_growth',
+    # SERP-only market-context signals (multifamily/serp/). Deliberately
+    # absent from every scoring-weight table in multifamily_score_rules.py
+    # (INBOUND_INTENT_POINTS, INSURANCE_TIMING_POINTS, CALL_TODAY_GATE_
+    # SIGNAL_TYPES, VERY_STRONG_TRIGGER_SIGNAL_TYPES) — they contribute zero
+    # points and fall through to the timing detector's general_watchlist
+    # fallback, same as a generic website visit.
+    'insurance_market_pressure', 'market_mention',
 ]
 
 SCORE_CATEGORIES = ['call_today', 'hot', 'warm', 'nurture', 'watchlist']

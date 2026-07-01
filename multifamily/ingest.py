@@ -21,18 +21,30 @@ Hard boundaries (identical to the intake route):
 `ingest_batch(...)` runs many payloads under ONE source-run (the shape a
 scheduled collector uses). `dry_run_collector(...)` routes an existing mock
 collector's output through the pipeline once to prove the path end-to-end.
+
+`ingest_trigger_signal(...)`/`ingest_trigger_batch(...)` are the contactless
+counterparts (multifamily/intake_trigger.py's build_lead_from_trigger)
+for third-party trigger feeds (permit, news, SERP) that never have a named
+contact — same pipeline, different builder.
 """
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from multifamily import repository, matching as mf_matching, spam_guard
 from multifamily.intake import build_lead_from_intake
+from multifamily.intake_trigger import build_lead_from_trigger
 from multifamily.snapshots import snapshot_lead
 
 
-def _ingest_one(payload: Dict[str, Any], *, default_source: str) -> Dict[str, Any]:
+def _ingest_one(
+    payload: Dict[str, Any], *, default_source: str,
+    builder: Callable[..., Any] = build_lead_from_intake,
+) -> Dict[str, Any]:
     """Build + gate + match + merge/create a single payload. Returns a
     per-record result dict (no source-run bookkeeping — the caller owns that
-    so a batch can share one run)."""
+    so a batch can share one run). `builder` swaps in build_lead_from_trigger
+    for contactless trigger payloads; every other step (spam gate, source
+    assignment, rejected-path persistence, matching, merge, review
+    candidates, snapshot) is identical regardless of which builder is used."""
     result = {
         'action': None,          # 'created' | 'merged' | 'rejected' | 'invalid'
         'lead_id': None,
@@ -46,7 +58,7 @@ def _ingest_one(payload: Dict[str, Any], *, default_source: str) -> Dict[str, An
     spam_status, spam_reason_codes = spam_guard.classify_spam(payload)
     result['spam_status'] = spam_status
 
-    lead, errors = build_lead_from_intake(
+    lead, errors = builder(
         payload, spam_status=spam_status, spam_reason_codes=spam_reason_codes,
     )
     if errors:
@@ -99,14 +111,17 @@ def _ingest_one(payload: Dict[str, Any], *, default_source: str) -> Dict[str, An
     return result
 
 
-def ingest_signal(payload: Dict[str, Any], *, source: str = 'ingest') -> Dict[str, Any]:
+def ingest_signal(
+    payload: Dict[str, Any], *, source: str = 'ingest',
+    builder: Callable[..., Any] = build_lead_from_intake,
+) -> Dict[str, Any]:
     """Ingest a single signal payload under its own persisted source-run.
 
     Returns the per-record result plus `run_id`/`run_db_id` so a caller can
     correlate it with the row in `multifamily_source_runs`."""
     run = repository.start_source_run(source)
     try:
-        rec = _ingest_one(payload, default_source=source)
+        rec = _ingest_one(payload, default_source=source, builder=builder)
         status = 'success' if rec['action'] in ('created', 'merged') else 'partial'
         repository.finish_source_run(
             run['id'], status=status,
@@ -125,7 +140,10 @@ def ingest_signal(payload: Dict[str, Any], *, source: str = 'ingest') -> Dict[st
     return rec
 
 
-def ingest_batch(payloads: List[Dict[str, Any]], *, source: str = 'ingest') -> Dict[str, Any]:
+def ingest_batch(
+    payloads: List[Dict[str, Any]], *, source: str = 'ingest',
+    builder: Callable[..., Any] = build_lead_from_intake,
+) -> Dict[str, Any]:
     """Ingest many payloads under ONE source-run (the shape a scheduled
     collector uses). Individual bad payloads are counted, not fatal."""
     run = repository.start_source_run(source)
@@ -134,7 +152,7 @@ def ingest_batch(payloads: List[Dict[str, Any]], *, source: str = 'ingest') -> D
     errors: List[str] = []
     for payload in payloads:
         try:
-            rec = _ingest_one(payload, default_source=source)
+            rec = _ingest_one(payload, default_source=source, builder=builder)
         except Exception as exc:
             rejected += 1
             errors.append(str(exc))
@@ -160,6 +178,20 @@ def ingest_batch(payloads: List[Dict[str, Any]], *, source: str = 'ingest') -> D
         'records_merged': merged, 'records_rejected': rejected,
         'records': records,
     }
+
+
+def ingest_trigger_signal(payload: Dict[str, Any], *, source: str = 'ingest') -> Dict[str, Any]:
+    """Contactless-trigger counterpart to ingest_signal() — identical
+    pipeline (spam gate -> match -> merge/create -> source-run logging ->
+    snapshot), built via build_lead_from_trigger() instead of the
+    form-based builder. Used by third-party trigger feeds (permit, news,
+    multifamily/serp/) that never have a named contact."""
+    return ingest_signal(payload, source=source, builder=build_lead_from_trigger)
+
+
+def ingest_trigger_batch(payloads: List[Dict[str, Any]], *, source: str = 'ingest') -> Dict[str, Any]:
+    """Contactless-trigger counterpart to ingest_batch()."""
+    return ingest_batch(payloads, source=source, builder=build_lead_from_trigger)
 
 
 def _lead_to_ingest_payload(lead) -> Dict[str, Any]:
