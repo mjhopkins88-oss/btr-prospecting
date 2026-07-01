@@ -4,19 +4,39 @@ stage plus timing context. The detector gathers the context (renewal
 days, whether a permit was issued, completion recency, etc.); this engine
 is the single source of truth for stage + context -> window.
 """
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from multifamily.timing.process_stage_types import URGENCY_LABELS
 
-# Renewal-day thresholds (Part 4 rules 2 & 3).
-_RENEWAL_THIS_WEEK_MAX = 45        # <=45 days out -> this_week
-_RENEWAL_NEXT_30_MAX = 120         # 46-120 days   -> next_30_days
-_RENEWAL_NEXT_60_MAX = 150         # 121-150 days  -> next_60_days
-_RENEWAL_NEXT_90_MAX = 180         # 151-180 days  -> next_90_days
-                                    # >180 days     -> nurture
+# Renewal engagement bands (Strategy Research §3/§8) — continuous, no
+# gaps: rescue <=45 days, decision 46-90 days (BOR changes happen here),
+# open >90 days. Used for MESSAGE POSTURE (renewal_band(), below);
+# outreach_window scheduling (this_week/next_30_days/etc.) is a related
+# but separate axis derived from the same day count.
+_RESCUE_MAX_DAYS = 45
+_DECISION_MAX_DAYS = 90
+_RENEWAL_NURTURE_MIN_DAYS = 180     # >180 days out -> nurture (too far to act on yet)
 
 _COMPLETION_THIS_WEEK_MAX = 30     # completed/CO within 30 days -> this_week
 _COMPLETION_NEXT_30_MAX = 120      # within 120 days -> next_30_days; older -> too_late
+
+# Post-renewal is an ACTIVE outreach window for the first 6 weeks (no
+# deadline pressure, but maximum emotional salience) — beyond that it's
+# stale and process_stage_detector falls back to plain 'post_renewal'.
+POST_RENEWAL_ACTIVE_MAX_DAYS = 42
+
+
+def renewal_band(days_until_renewal: Optional[int]) -> Optional[str]:
+    """Continuous, gapless classification for message posture — 'rescue'
+    (speed/market-access framing) vs. 'decision'/'open' (analysis/
+    benchmarking framing). None when no renewal date is known."""
+    if days_until_renewal is None:
+        return None
+    if days_until_renewal <= _RESCUE_MAX_DAYS:
+        return 'rescue'
+    if days_until_renewal <= _DECISION_MAX_DAYS:
+        return 'decision'
+    return 'open'
 
 
 def assign_outreach_window(process_stage: str, context: Dict[str, Any]) -> str:
@@ -27,13 +47,13 @@ def assign_outreach_window(process_stage: str, context: Dict[str, Any]) -> str:
         days = context.get('days_until_renewal')
         if days is None:
             return 'next_30_days'  # known renewal, unknown precise date
-        if days <= _RENEWAL_THIS_WEEK_MAX:
+        band = renewal_band(days)
+        if band == 'rescue':
             return 'this_week'
-        if days <= _RENEWAL_NEXT_30_MAX:
+        if band == 'decision':
             return 'next_30_days'
-        if days <= _RENEWAL_NEXT_60_MAX:
-            return 'next_60_days'
-        if days <= _RENEWAL_NEXT_90_MAX:
+        # open (>90 days) — still worth scheduling, just not urgent yet.
+        if days <= _RENEWAL_NURTURE_MIN_DAYS:
             return 'next_90_days'
         return 'nurture'
 
@@ -62,6 +82,11 @@ def assign_outreach_window(process_stage: str, context: Dict[str, Any]) -> str:
         if days <= _COMPLETION_NEXT_30_MAX:
             return 'next_30_days'
         return 'too_late'
+
+    if process_stage == 'post_renewal_active':
+        # Active relationship-building window (Strategy Research §3) —
+        # no deadline, but a real window, not a cooldown.
+        return 'next_30_days'
 
     if process_stage == 'post_renewal':
         return 'nurture'

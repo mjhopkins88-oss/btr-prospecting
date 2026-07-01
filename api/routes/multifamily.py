@@ -31,7 +31,7 @@ from multifamily.types import (
     ACTIVITY_TYPES, OUTCOME_TYPES, CAMPAIGN_STATUSES, CAMPAIGN_TARGET_STATUSES, CAMPAIGN_TARGET_TOUCH_STEPS,
 )
 from multifamily.stage_timing import compute_stage_timing
-from multifamily.timing import detect_process_stage
+from multifamily.timing import detect_process_stage, estimate_first_renewal
 from multifamily.timing.process_stage_types import OUTREACH_WINDOW_RANK
 from multifamily.outreach.outreach_bundle_builder import build_outreach_bundle
 from multifamily import matching as mf_matching
@@ -145,6 +145,11 @@ def _serialize_lead(lead, is_admin, stage_result=None, with_history=False, curre
     d['signal_timeline'] = _signal_timeline(lead)
     # Funnel Phase 4: derived, read-only — never touches score_total/category.
     d['funnel_urgency'] = compute_funnel_urgency(lead)
+    # Section 8 item 2: first-renewal watchlist — derived, read-only, only
+    # set for acquisition-origin leads with a known close date.
+    first_renewal = estimate_first_renewal(lead)
+    d['first_renewal_estimate'] = first_renewal['first_renewal_estimate'] if first_renewal else None
+    d['renewal_window_opens_at'] = first_renewal['renewal_window_opens_at'] if first_renewal else None
     # Outcome tracking: cheap (bulk-fetched), always-on. Demo leads never
     # carry a persisted outcome.
     d['current_outcome'] = current_outcome

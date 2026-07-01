@@ -42,6 +42,12 @@ def build_timing_reason(process_stage: str, outreach_window: str, context: Dict[
     if process_stage == 'completion_or_lease_up':
         return f"Project completing / leasing up — transition from builder's risk to operating + GL. {urgency}."
 
+    if process_stage == 'post_renewal_active':
+        days = context.get('days_since_renewal')
+        if days is not None and days <= 13:
+            return f"They just signed — light touch only, no ask yet. {urgency}."
+        return f"Past renewal, still within the active window — good time to plant for next cycle. {urgency}."
+
     if process_stage == 'post_renewal':
         return f"Just past renewal — not the moment to disrupt, but a good time to plant for next cycle. {urgency}."
 
