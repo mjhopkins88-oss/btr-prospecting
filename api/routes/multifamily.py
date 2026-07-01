@@ -45,6 +45,7 @@ from multifamily.forms.form_variants import (
     FORM_VARIANTS, FORM_VARIANT_SLUGS, DEFAULT_FORM_VARIANT_SLUG,
     recommend_form_variant_for_situation, recommendation_reason_for_slug,
 )
+from multifamily.funnel.urgency import compute_funnel_urgency
 from multifamily.serp.serp_collector import run_serp_collection
 
 multifamily_bp = Blueprint('multifamily', __name__, url_prefix='/api/multifamily')
@@ -138,6 +139,8 @@ def _serialize_lead(lead, is_admin, stage_result=None, with_history=False, curre
     # Signal architecture (Phase C): cheap, always-on.
     d['signal_count'] = len(lead.signals or [])
     d['signal_timeline'] = _signal_timeline(lead)
+    # Funnel Phase 4: derived, read-only — never touches score_total/category.
+    d['funnel_urgency'] = compute_funnel_urgency(lead)
     # Outcome tracking: cheap (bulk-fetched), always-on. Demo leads never
     # carry a persisted outcome.
     d['current_outcome'] = current_outcome

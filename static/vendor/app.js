@@ -9079,7 +9079,10 @@ function MultifamilyLeadDrawer({
     ps: ps
   }), lead.is_suspicious && /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#facc15')
-  }, "\u26A0 SUSPICIOUS"))), /*#__PURE__*/React.createElement("button", {
+  }, "\u26A0 SUSPICIOUS"), lead.funnel_urgency && (lead.funnel_urgency.level === 'high' || lead.funnel_urgency.level === 'medium') && /*#__PURE__*/React.createElement("span", {
+    title: lead.funnel_urgency.reason || '',
+    style: mfPillStyle(lead.funnel_urgency.level === 'high' ? '#ef4444' : '#f59e0b')
+  }, "\u23F1 ", lead.funnel_urgency.level === 'high' ? 'URGENT' : 'UPCOMING DEADLINE'))), /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
     style: {
       background: 'transparent',

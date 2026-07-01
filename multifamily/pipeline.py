@@ -11,6 +11,7 @@ from typing import Any, Callable, List, Optional, Tuple
 
 from multifamily.types import MultifamilyLead, MultifamilySourceRun, INBOUND_INTENT_SOURCES, new_id, utc_now_iso
 from multifamily.dedupe import dedupe_leads
+from multifamily.funnel.urgency import compute_funnel_urgency
 
 
 def _stable_demo_id(lead: MultifamilyLead) -> str:
@@ -31,6 +32,12 @@ from multifamily.daily_brief.multifamily_next_best_action import next_best_actio
 # dashboard list regardless of raw point ties, so the dashboard prioritizes
 # real inbound intent over generic trigger-based leads.
 _CATEGORY_PRIORITY_RANK = {'call_today': 4, 'hot': 3, 'warm': 2, 'nurture': 1, 'watchlist': 0}
+
+# Funnel Phase 4: tie-break within the same category/score by how close
+# the lead's OWN reported deadline is (acquisition close, lender
+# deadline, etc.) — never overrides category or score, only breaks ties
+# between otherwise-equal leads.
+_URGENCY_PRIORITY_RANK = {'high': 3, 'medium': 2, 'low': 1, 'none': 0}
 
 from multifamily.signal_collectors import (
     form_lead_ingestor, website_intent, search_console, google_ads,
@@ -114,11 +121,14 @@ def run_pipeline() -> Tuple[List[MultifamilyLead], List[MultifamilySourceRun]]:
 def sort_leads_by_priority(leads: List[MultifamilyLead]) -> List[MultifamilyLead]:
     """Rank by score category first (Call Today > Hot > Warm > Nurture >
     Watchlist), then by raw total — so real inbound intent always surfaces
-    above generic trigger-based leads, even on point ties."""
+    above generic trigger-based leads, even on point ties. Funnel urgency
+    (Phase 4) only breaks ties WITHIN the same category+total — it never
+    changes scoring math or moves a lead into a different category."""
     def _key(lead: MultifamilyLead):
         if not lead.score:
-            return (-1, 0)
-        return (_CATEGORY_PRIORITY_RANK.get(lead.score.category, -1), lead.score.total)
+            return (-1, 0, 0)
+        urgency_rank = _URGENCY_PRIORITY_RANK.get(compute_funnel_urgency(lead).get('level'), 0)
+        return (_CATEGORY_PRIORITY_RANK.get(lead.score.category, -1), lead.score.total, urgency_rank)
 
     return sorted(leads, key=_key, reverse=True)
 
