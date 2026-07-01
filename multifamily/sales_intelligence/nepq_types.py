@@ -67,6 +67,13 @@ CONVERSATION_MODES = [
     'objection_resolution', 'follow_up',
 ]
 
+# Which kind of next-touch follow_up_strategy_engine picked, and which
+# MessagePackage field carries that touch's copy.
+FOLLOW_UP_TYPES = [
+    'info_request_reminder', 'first_follow_up', 'second_follow_up', 'soft_bump',
+    'meeting_confirmation_follow_up', 'nurture_reconnect', 'no_further_action',
+]
+
 
 # ---------------------------------------------------------------------------
 # Dataclasses
@@ -185,6 +192,19 @@ class ObjectionResponse:
 
 
 @dataclass
+class FollowUpStrategy:
+    """Which next touch to make on a lead that hasn't converted yet, and
+    when — derived from prior activity + the current conversation
+    strategy, never from scoring math."""
+    follow_up_type: str
+    message_field: Optional[str]  # which MessagePackage field carries this touch's copy (None = no further outreach)
+    recommended_wait_days: int
+    reasoning: str
+    is_final_attempt: bool = False
+    conversation_mode: str = 'follow_up'
+
+
+@dataclass
 class SalesIntelligenceReasoning:
     selected_strategy: str
     selected_nepq_stage: str
@@ -210,4 +230,5 @@ class SalesIntelligencePackage:
     question_path: QuestionPath
     messages: MessagePackage
     objection_playbook: List[ObjectionResponse]
+    follow_up_strategy: FollowUpStrategy
     reasoning: SalesIntelligenceReasoning
