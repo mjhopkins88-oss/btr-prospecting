@@ -666,6 +666,53 @@ def get_source_performance() -> Dict[str, Any]:
         'total_signals': total_signal_rows,
         'signals_by_source': signals_by_source,
         'signals_by_type': signals_by_type,
+        # SERP source performance (Multifamily SERP Phase C).
+        'serp': _serp_source_performance(leads_by_source, by_source_category, call_today_by_source, signals_by_source),
+    }
+
+
+def _serp_source_performance(
+    leads_by_source: Dict[str, int], by_source_category: Dict[str, Dict[str, int]],
+    call_today_by_source: Dict[str, int], signals_by_source: Dict[str, int],
+) -> Dict[str, Any]:
+    """SERP-specific rollup, additive to the generic per-source breakdown
+    already computed above: leads merged away (tombstoned into an
+    existing lead — not visible in the active-lead counts above), pending
+    review candidates raised by SERP-sourced signals, and aggregate
+    source-run totals (found/created/merged/rejected) from every logged
+    'serp' collection run."""
+    merged_rows = fetch_all(
+        "SELECT COUNT(*) AS n FROM multifamily_leads WHERE is_demo = 0 AND source = 'serp' AND merge_status = 'merged'"
+    )
+    leads_merged_away = int(merged_rows[0]['n']) if merged_rows else 0
+
+    review_rows = fetch_all(
+        "SELECT COUNT(*) AS n FROM multifamily_lead_match_candidates mc "
+        "JOIN multifamily_leads l ON mc.incoming_lead_id = l.id "
+        "WHERE l.source = 'serp' AND mc.status = 'pending'"
+    )
+    review_candidates_pending = int(review_rows[0]['n']) if review_rows else 0
+
+    run_rows = fetch_all(
+        "SELECT COUNT(*) AS runs, COALESCE(SUM(records_found), 0) AS found, "
+        "COALESCE(SUM(records_created), 0) AS created, COALESCE(SUM(records_merged), 0) AS merged, "
+        "COALESCE(SUM(records_rejected), 0) AS rejected "
+        "FROM multifamily_source_runs WHERE source = 'serp'"
+    )
+    run_totals = run_rows[0] if run_rows else {}
+
+    return {
+        'signals_received': signals_by_source.get('serp', 0),
+        'leads_created': leads_by_source.get('serp', 0),
+        'leads_merged_away': leads_merged_away,
+        'review_candidates_pending': review_candidates_pending,
+        'hot_leads': by_source_category.get('serp', {}).get('hot', 0),
+        'call_today_leads': call_today_by_source.get('serp', 0),
+        'collection_runs': int(run_totals.get('runs') or 0),
+        'total_found_across_runs': int(run_totals.get('found') or 0),
+        'total_created_across_runs': int(run_totals.get('created') or 0),
+        'total_merged_across_runs': int(run_totals.get('merged') or 0),
+        'total_rejected_across_runs': int(run_totals.get('rejected') or 0),
     }
 
 
@@ -965,14 +1012,16 @@ def finish_source_run(run_db_id: str, status: str = 'success', records_found: in
     )
 
 
-def get_source_runs(limit: int = 50) -> List[Dict[str, Any]]:
+def get_source_runs(limit: int = 50, source: Optional[str] = None) -> List[Dict[str, Any]]:
     ensure_schema()
+    where = 'WHERE source = ?' if source else ''
+    params = ([source] if source else []) + [limit]
     rows = fetch_all(
         'SELECT id, source, run_id, started_at, finished_at, status, records_found, records_created, '
         'records_updated, records_merged, records_rejected, errors_json, warnings_json, '
         'category, state, query, created_at '
-        'FROM multifamily_source_runs ORDER BY created_at DESC LIMIT ?',
-        [limit],
+        f'FROM multifamily_source_runs {where} ORDER BY created_at DESC LIMIT ?',
+        params,
     )
     for r in rows:
         for k in ('errors_json', 'warnings_json'):

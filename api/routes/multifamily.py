@@ -39,6 +39,8 @@ from multifamily.sales_intelligence.follow_up_suggestions import (
     attach_follow_up_suggestions as _attach_follow_up_suggestions,
 )
 from multifamily.sales_intelligence.tone_guardrails import check_message_package, worst_status
+from multifamily.serp.query_templates import SerpQueryConfig, SERP_CATEGORIES, SERP_LAUNCH_STATES, SERP_FUTURE_STATES
+from multifamily.serp.serp_collector import run_serp_collection
 
 multifamily_bp = Blueprint('multifamily', __name__, url_prefix='/api/multifamily')
 
@@ -685,10 +687,57 @@ def get_match_candidates():
 
 @multifamily_bp.route('/admin/source-runs', methods=['GET'])
 def get_source_runs():
-    """Source-run history (populated by future automated collectors —
-    Phase E). Super-admin only."""
+    """Source-run history (populated by automated/manual collectors,
+    including the SERP admin runner below). Super-admin only. Optional
+    `?source=serp` filters to one collector's runs."""
     def _fn():
-        return jsonify({'source_runs': repository.get_source_runs(limit=int(request.args.get('limit', 50)))})
+        return jsonify({'source_runs': repository.get_source_runs(
+            limit=int(request.args.get('limit', 50)), source=request.args.get('source'),
+        )})
+    return _admin_only(_fn)
+
+
+@multifamily_bp.route('/admin/serp-config', methods=['GET'])
+def get_serp_config():
+    """Static config for the SERP admin runner's dropdowns — single
+    source of truth is multifamily/serp/query_templates.py. Super-admin
+    only (matches the runner itself)."""
+    def _fn():
+        return jsonify({
+            'categories': SERP_CATEGORIES,
+            'launch_states': SERP_LAUNCH_STATES,
+            'future_states': SERP_FUTURE_STATES,
+        })
+    return _admin_only(_fn)
+
+
+@multifamily_bp.route('/admin/serp-run', methods=['POST'])
+def run_serp_search():
+    """Manually trigger one Multifamily SERP category/state search
+    (Multifamily SERP Phase C). This is the only control surface for SERP
+    in this phase — there is no automated scheduling yet. Runs every
+    query template for the given category/state[/city], filters results,
+    and (unless dryRun) ingests accepted ones as contactless trigger
+    signals through the same real pipeline as any other collector
+    (spam gate -> matching -> merge/create -> source-run logging ->
+    snapshot). Super-admin only. Never sends anything, never scrapes
+    LinkedIn, never calls any API beyond the existing SerpAPI client."""
+    def _fn():
+        payload = request.get_json(silent=True) or {}
+        try:
+            config = SerpQueryConfig(
+                category=(payload.get('category') or ''),
+                state=(payload.get('state') or ''),
+                city=(payload.get('city') or None),
+                lookback_days=int(payload.get('lookbackDays', 30)),
+                limit=int(payload.get('limit', 10)),
+                confidence_threshold=float(payload.get('confidenceThreshold', 0.35)),
+            )
+        except (ValueError, TypeError) as exc:
+            return jsonify({'success': False, 'error': str(exc)}), 400
+        dry_run = bool(payload.get('dryRun', False))
+        result = run_serp_collection(config, dry_run=dry_run)
+        return jsonify({'success': result.get('error') is None, **result})
     return _admin_only(_fn)
 
 
