@@ -1521,7 +1521,11 @@ function App({
     activeTab: activeTab,
     setActiveTab: setActiveTab,
     user: user
-  }), activeTab.startsWith('multifamily_') && !['multifamily_admin', 'multifamily_source_performance', 'multifamily_outreach'].includes(activeTab) && /*#__PURE__*/React.createElement(MultifamilyLeadListView, {
+  }), activeTab === 'multifamily_campaigns' && /*#__PURE__*/React.createElement(MultifamilyCampaignsPanel, {
+    activeTab: activeTab,
+    setActiveTab: setActiveTab,
+    user: user
+  }), activeTab.startsWith('multifamily_') && !['multifamily_admin', 'multifamily_source_performance', 'multifamily_outreach', 'multifamily_campaigns'].includes(activeTab) && /*#__PURE__*/React.createElement(MultifamilyLeadListView, {
     activeTab: activeTab,
     setActiveTab: setActiveTab,
     user: user
@@ -8067,6 +8071,11 @@ const MF_TABS = [{
   endpoint: '/api/multifamily/outreach-workbench',
   kind: 'outreach'
 }, {
+  id: 'multifamily_campaigns',
+  label: 'Pilot Campaigns',
+  endpoint: '/api/multifamily/campaigns',
+  kind: 'campaigns'
+}, {
   id: 'multifamily_admin',
   label: 'Multifamily Admin',
   endpoint: '/api/multifamily/admin/intake-stats',
@@ -11019,6 +11028,941 @@ function MultifamilyOutreachLeadRow({
       color: '#94a3b8'
     }
   }, activityMsg)))));
+}
+function MultifamilyNewCampaignModal({
+  onClose,
+  onCreated
+}) {
+  const [form, setForm] = useState({
+    name: '',
+    pageVariant: 'benchmark',
+    description: '',
+    targetState: '',
+    targetCity: '',
+    targetSegment: '',
+    campaignSource: 'manual_outreach',
+    utmSource: 'manual_outreach',
+    utmMedium: 'email',
+    utmCampaign: ''
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const set = key => e => setForm(s => ({
+    ...s,
+    [key]: e.target.value
+  }));
+  const submit = async e => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch('/api/multifamily/campaigns', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(form)
+      });
+      const j = await r.json();
+      if (r.ok && j.success) {
+        onCreated(j.campaign);
+      } else {
+        setError((j.errors || ['Failed to create campaign.']).join('; '));
+      }
+    } catch (err) {
+      setError('Network error: ' + err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0,0,0,0.55)',
+      zIndex: 2100,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center'
+    },
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: '460px',
+      maxHeight: '85vh',
+      overflowY: 'auto',
+      background: 'rgba(15,22,36,0.98)',
+      border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: '10px',
+      padding: '1.25rem'
+    },
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.95rem',
+      fontWeight: 700,
+      color: '#f1f5f9',
+      marginBottom: '1rem'
+    }
+  }, "New Pilot Campaign"), /*#__PURE__*/React.createElement("form", {
+    onSubmit: submit
+  }, /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Name *", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    required: true,
+    value: form.name,
+    onChange: set('name'),
+    placeholder: "e.g. Texas Renewal Pressure Test"
+  })), /*#__PURE__*/React.createElement("label", {
+    style: {
+      ...mfLabelStyle(),
+      marginTop: '8px',
+      display: 'block'
+    }
+  }, "Offer Page *", /*#__PURE__*/React.createElement("select", {
+    style: mfFieldStyle(),
+    value: form.pageVariant,
+    onChange: set('pageVariant')
+  }, MF_OFFER_PAGE_OPTIONS.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o.slug,
+    value: o.slug
+  }, o.label)))), /*#__PURE__*/React.createElement("label", {
+    style: {
+      ...mfLabelStyle(),
+      marginTop: '8px',
+      display: 'block'
+    }
+  }, "Description", /*#__PURE__*/React.createElement("textarea", {
+    style: {
+      ...mfFieldStyle(),
+      minHeight: '50px'
+    },
+    value: form.description,
+    onChange: set('description')
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '8px',
+      marginTop: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Target State", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.targetState,
+    onChange: set('targetState'),
+    placeholder: "TX"
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Target City", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.targetCity,
+    onChange: set('targetCity')
+  }))), /*#__PURE__*/React.createElement("label", {
+    style: {
+      ...mfLabelStyle(),
+      marginTop: '8px',
+      display: 'block'
+    }
+  }, "Target Segment", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.targetSegment,
+    onChange: set('targetSegment'),
+    placeholder: "e.g. garden-style, 150-300 units"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr 1fr',
+      gap: '8px',
+      marginTop: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "UTM Source", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.utmSource,
+    onChange: set('utmSource')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "UTM Medium", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.utmMedium,
+    onChange: set('utmMedium')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "UTM Campaign", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.utmCampaign,
+    onChange: set('utmCampaign'),
+    placeholder: "tx_renewal_q3"
+  }))), error && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#ef4444',
+      fontSize: '0.75rem',
+      marginTop: '8px'
+    }
+  }, error), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'flex-end',
+      gap: '8px',
+      marginTop: '1rem'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: onClose,
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.12)',
+      color: '#94a3b8',
+      padding: '0.5rem 0.9rem',
+      borderRadius: '0.5rem',
+      cursor: 'pointer',
+      fontSize: '0.78rem'
+    }
+  }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    disabled: busy,
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      padding: '0.5rem 0.9rem',
+      borderRadius: '0.5rem',
+      fontWeight: 700,
+      cursor: busy ? 'not-allowed' : 'pointer',
+      fontSize: '0.78rem'
+    }
+  }, busy ? 'Creating…' : 'Create Campaign')))));
+}
+function MultifamilyCampaignRow({
+  campaign,
+  onOpen
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    onClick: () => onOpen(campaign.id),
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '8px',
+      padding: '12px 14px',
+      marginBottom: '8px',
+      cursor: 'pointer',
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.9rem',
+      fontWeight: 700,
+      color: '#f1f5f9'
+    }
+  }, campaign.name), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.72rem',
+      color: '#94a3b8',
+      marginTop: '3px'
+    }
+  }, (MF_OFFER_PAGE_OPTIONS.find(o => o.slug === campaign.page_variant) || {}).label || campaign.page_variant, campaign.last_activity_at ? ` · last activity ${String(campaign.last_activity_at).slice(0, 10)}` : '')), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '18px',
+      alignItems: 'center',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(campaign.status === 'active' ? '#34d399' : campaign.status === 'paused' ? '#facc15' : campaign.status === 'completed' ? '#64748b' : '#a78bfa')
+  }, campaign.status), [['Targets', campaign.target_count], ['Contacted', campaign.contacted_count], ['Converted', campaign.converted_count], ['Meetings', campaign.meeting_count]].map(([label, value]) => /*#__PURE__*/React.createElement("div", {
+    key: label,
+    style: {
+      textAlign: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.6rem',
+      color: '#64748b'
+    }
+  }, label), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.9rem',
+      fontWeight: 700,
+      color: '#f1f5f9'
+    }
+  }, value || 0)))));
+}
+function MultifamilyCampaignsPanel({
+  activeTab,
+  setActiveTab,
+  user
+}) {
+  const [campaigns, setCampaigns] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [showNew, setShowNew] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch('/api/multifamily/campaigns');
+      const j = r.ok ? await r.json() : {
+        campaigns: []
+      };
+      setCampaigns(j.campaigns || []);
+    } catch (e) {
+      setCampaigns([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
+  if (selectedId) {
+    return /*#__PURE__*/React.createElement(MultifamilyCampaignDetailView, {
+      campaignId: selectedId,
+      onBack: () => {
+        setSelectedId(null);
+        load();
+      },
+      activeTab: activeTab,
+      setActiveTab: setActiveTab,
+      user: user
+    });
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: '1040px',
+      margin: '0 auto'
+    }
+  }, /*#__PURE__*/React.createElement(MultifamilyHeader, {
+    onAddLead: () => {}
+  }), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
+    activeTab: activeTab,
+    setActiveTab: setActiveTab,
+    user: user
+  }), showNew && /*#__PURE__*/React.createElement(MultifamilyNewCampaignModal, {
+    onClose: () => setShowNew(false),
+    onCreated: c => {
+      setShowNew(false);
+      load();
+      setSelectedId(c.id);
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: '1rem'
+    }
+  }, /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: '#64748b',
+      fontSize: '0.78rem',
+      margin: 0
+    }
+  }, "Pilot Campaigns \u2014 controlled outbound/manual prospecting efforts, each tied to one offer page. Generate tracked links, track conversion, learn what works."), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowNew(true),
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      padding: '0.5rem 0.9rem',
+      borderRadius: '0.5rem',
+      fontWeight: 700,
+      cursor: 'pointer',
+      fontSize: '0.78rem',
+      whiteSpace: 'nowrap'
+    }
+  }, "+ New Campaign")), loading && !campaigns && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'center',
+      padding: '3rem',
+      color: '#f59e0b',
+      fontFamily: "'Orbitron', sans-serif"
+    }
+  }, "LOADING CAMPAIGNS..."), !loading && campaigns && campaigns.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'center',
+      padding: '2.5rem 1.5rem',
+      background: 'rgba(15,22,36,0.6)',
+      border: '1px dashed rgba(255,255,255,0.12)',
+      borderRadius: '10px',
+      color: '#64748b'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.85rem',
+      marginBottom: '10px'
+    }
+  }, "No pilot campaigns yet."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.76rem',
+      marginBottom: '14px'
+    }
+  }, "Create one to start testing the funnel with real, targeted prospects."), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowNew(true),
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      padding: '0.5rem 0.9rem',
+      borderRadius: '0.5rem',
+      fontWeight: 700,
+      cursor: 'pointer',
+      fontSize: '0.78rem'
+    }
+  }, "+ New Campaign")), !loading && campaigns && campaigns.length > 0 && campaigns.map(c => /*#__PURE__*/React.createElement(MultifamilyCampaignRow, {
+    key: c.id,
+    campaign: c,
+    onOpen: setSelectedId
+  })));
+}
+function MultifamilyNewTargetModal({
+  campaignId,
+  onClose,
+  onCreated
+}) {
+  const [form, setForm] = useState({
+    company: '',
+    contactName: '',
+    email: '',
+    phone: '',
+    linkedinUrl: '',
+    city: '',
+    state: '',
+    segment: '',
+    notes: ''
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const set = key => e => setForm(s => ({
+    ...s,
+    [key]: e.target.value
+  }));
+  const submit = async e => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/multifamily/campaigns/${campaignId}/targets`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(form)
+      });
+      const j = await r.json();
+      if (r.ok && j.success) {
+        onCreated(j.target);
+      } else {
+        setError((j.errors || ['Failed to add target.']).join('; '));
+      }
+    } catch (err) {
+      setError('Network error: ' + err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0,0,0,0.55)',
+      zIndex: 2100,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center'
+    },
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: '420px',
+      maxHeight: '85vh',
+      overflowY: 'auto',
+      background: 'rgba(15,22,36,0.98)',
+      border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: '10px',
+      padding: '1.25rem'
+    },
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.95rem',
+      fontWeight: 700,
+      color: '#f1f5f9',
+      marginBottom: '1rem'
+    }
+  }, "Add Campaign Target"), /*#__PURE__*/React.createElement("form", {
+    onSubmit: submit
+  }, /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Company", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.company,
+    onChange: set('company')
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '8px',
+      marginTop: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Contact Name", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.contactName,
+    onChange: set('contactName')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Email", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    type: "email",
+    value: form.email,
+    onChange: set('email')
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '8px',
+      marginTop: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Phone", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.phone,
+    onChange: set('phone')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "LinkedIn URL", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.linkedinUrl,
+    onChange: set('linkedinUrl')
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '8px',
+      marginTop: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "City", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.city,
+    onChange: set('city')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "State", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.state,
+    onChange: set('state'),
+    placeholder: "TX"
+  }))), /*#__PURE__*/React.createElement("label", {
+    style: {
+      ...mfLabelStyle(),
+      marginTop: '8px',
+      display: 'block'
+    }
+  }, "Segment", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.segment,
+    onChange: set('segment'),
+    placeholder: "e.g. garden-style, 150-300 units"
+  })), /*#__PURE__*/React.createElement("label", {
+    style: {
+      ...mfLabelStyle(),
+      marginTop: '8px',
+      display: 'block'
+    }
+  }, "Notes", /*#__PURE__*/React.createElement("textarea", {
+    style: {
+      ...mfFieldStyle(),
+      minHeight: '50px'
+    },
+    value: form.notes,
+    onChange: set('notes')
+  })), error && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#ef4444',
+      fontSize: '0.75rem',
+      marginTop: '8px'
+    }
+  }, error), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'flex-end',
+      gap: '8px',
+      marginTop: '1rem'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: onClose,
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.12)',
+      color: '#94a3b8',
+      padding: '0.5rem 0.9rem',
+      borderRadius: '0.5rem',
+      cursor: 'pointer',
+      fontSize: '0.78rem'
+    }
+  }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    disabled: busy,
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      padding: '0.5rem 0.9rem',
+      borderRadius: '0.5rem',
+      fontWeight: 700,
+      cursor: busy ? 'not-allowed' : 'pointer',
+      fontSize: '0.78rem'
+    }
+  }, busy ? 'Adding…' : 'Add Target')))));
+}
+const MF_CAMPAIGN_TARGET_STATUS_OPTIONS = [{
+  value: 'planned',
+  label: 'Planned'
+}, {
+  value: 'contacted',
+  label: 'Contacted'
+}, {
+  value: 'replied',
+  label: 'Replied'
+}, {
+  value: 'meeting_booked',
+  label: 'Meeting Booked'
+}, {
+  value: 'converted',
+  label: 'Converted'
+}, {
+  value: 'not_fit',
+  label: 'Not a Fit'
+}, {
+  value: 'nurture',
+  label: 'Nurture'
+}];
+function mfTargetStatusColor(status) {
+  if (status === 'converted') return '#34d399';
+  if (status === 'meeting_booked') return '#60a5fa';
+  if (status === 'replied') return '#a78bfa';
+  if (status === 'contacted') return '#f59e0b';
+  if (status === 'not_fit') return '#ef4444';
+  if (status === 'nurture') return '#facc15';
+  return '#64748b';
+}
+function MultifamilyCampaignTargetRow({
+  target,
+  onChanged
+}) {
+  const [status, setStatus] = useState(target.status);
+  const [notes, setNotes] = useState(target.notes || '');
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    setSaved(false);
+    try {
+      const r = await fetch(`/api/multifamily/campaign-targets/${target.id}/status`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          status,
+          notes
+        })
+      });
+      if (r.ok) {
+        setSaved(true);
+        onChanged();
+      }
+    } catch (e) {}
+    setBusy(false);
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '8px',
+      padding: '13px 15px',
+      marginBottom: '9px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.85rem',
+      fontWeight: 700,
+      color: '#f1f5f9'
+    }
+  }, target.company || '(no company)'), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.72rem',
+      color: '#94a3b8'
+    }
+  }, target.contact_name || 'no contact', target.email ? ` · ${target.email}` : '', target.city ? ` · ${target.city}, ${target.state || ''}` : '')), /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(mfTargetStatusColor(target.status))
+  }, target.status.replace(/_/g, ' '))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      marginTop: '6px',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#60a5fa',
+      wordBreak: 'break-all',
+      flex: '1 1 260px'
+    }
+  }, target.tracked_url), /*#__PURE__*/React.createElement("button", {
+    onClick: () => mfCopy(window.location.origin + target.tracked_url),
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.1)',
+      color: '#64748b',
+      borderRadius: '4px',
+      padding: '1px 8px',
+      cursor: 'pointer',
+      fontSize: '0.65rem',
+      flexShrink: 0
+    }
+  }, "Copy Link")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px',
+      marginTop: '6px',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("select", {
+    value: status,
+    onChange: e => setStatus(e.target.value),
+    style: {
+      ...mfFieldStyle(),
+      width: 'auto',
+      padding: '4px 6px',
+      fontSize: '0.72rem'
+    }
+  }, MF_CAMPAIGN_TARGET_STATUS_OPTIONS.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o.value,
+    value: o.value
+  }, o.label))), /*#__PURE__*/React.createElement("input", {
+    value: notes,
+    onChange: e => setNotes(e.target.value),
+    placeholder: "Add a note\u2026",
+    style: {
+      ...mfFieldStyle(),
+      width: 'auto',
+      flex: '1 1 160px',
+      padding: '4px 6px',
+      fontSize: '0.72rem'
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: save,
+    disabled: busy,
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      borderRadius: '4px',
+      padding: '4px 10px',
+      cursor: busy ? 'not-allowed' : 'pointer',
+      fontSize: '0.7rem',
+      fontWeight: 700
+    }
+  }, busy ? 'Saving…' : 'Save'), saved && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#34d399'
+    }
+  }, "Saved."), target.lead_id && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#a78bfa')
+  }, "has lead")));
+}
+function MultifamilyCampaignDetailView({
+  campaignId,
+  onBack,
+  activeTab,
+  setActiveTab,
+  user
+}) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [showNewTarget, setShowNewTarget] = useState(false);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`/api/multifamily/campaigns/${campaignId}`);
+      const j = r.ok ? await r.json() : null;
+      setData(j);
+    } catch (e) {
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [campaignId]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  const campaign = data && data.campaign;
+  const targets = data && data.targets || [];
+  const contacted = targets.filter(t => t.status !== 'planned').length;
+  const converted = targets.filter(t => t.status === 'converted').length;
+  const meetings = targets.filter(t => t.status === 'meeting_booked').length;
+  const conversionRate = targets.length ? Math.round(converted / targets.length * 100) : 0;
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: '1040px',
+      margin: '0 auto'
+    }
+  }, /*#__PURE__*/React.createElement(MultifamilyHeader, {
+    onAddLead: () => {}
+  }), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
+    activeTab: activeTab,
+    setActiveTab: setActiveTab,
+    user: user
+  }), showNewTarget && /*#__PURE__*/React.createElement(MultifamilyNewTargetModal, {
+    campaignId: campaignId,
+    onClose: () => setShowNewTarget(false),
+    onCreated: () => {
+      setShowNewTarget(false);
+      load();
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: onBack,
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.12)',
+      color: '#94a3b8',
+      padding: '0.4rem 0.8rem',
+      borderRadius: '0.5rem',
+      cursor: 'pointer',
+      fontSize: '0.74rem',
+      marginBottom: '1rem'
+    }
+  }, "\u2190 Back to Campaigns"), loading && !data && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'center',
+      padding: '3rem',
+      color: '#f59e0b',
+      fontFamily: "'Orbitron', sans-serif"
+    }
+  }, "LOADING CAMPAIGN..."), !loading && campaign && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '10px',
+      padding: '14px 16px',
+      marginBottom: '1rem'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      flexWrap: 'wrap',
+      gap: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '1.05rem',
+      fontWeight: 700,
+      color: '#f1f5f9'
+    }
+  }, campaign.name), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.76rem',
+      color: '#94a3b8',
+      marginTop: '3px'
+    }
+  }, (MF_OFFER_PAGE_OPTIONS.find(o => o.slug === campaign.page_variant) || {}).label || campaign.page_variant, campaign.target_state ? ` · ${campaign.target_state}` : '', campaign.target_city ? `, ${campaign.target_city}` : ''), campaign.description && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.78rem',
+      color: '#cbd5e1',
+      marginTop: '6px'
+    }
+  }, campaign.description)), /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(campaign.status === 'active' ? '#34d399' : campaign.status === 'paused' ? '#facc15' : campaign.status === 'completed' ? '#64748b' : '#a78bfa')
+  }, campaign.status))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+      gap: '10px',
+      marginBottom: '1.25rem'
+    }
+  }, [['Targets', targets.length, '#f1f5f9'], ['Contacted', contacted, '#f59e0b'], ['Converted', converted, '#34d399'], ['Meetings', meetings, '#60a5fa'], ['Conversion Rate', `${conversionRate}%`, '#a78bfa']].map(([label, value, color]) => /*#__PURE__*/React.createElement("div", {
+    key: label,
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '8px',
+      padding: '10px 12px',
+      textAlign: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.58rem',
+      color: '#64748b'
+    }
+  }, label.toUpperCase()), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '1.15rem',
+      fontWeight: 700,
+      color
+    }
+  }, value)))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#64748b',
+      fontFamily: "'Orbitron', sans-serif",
+      letterSpacing: '0.06em'
+    }
+  }, "TARGETS"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowNewTarget(true),
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      padding: '0.4rem 0.8rem',
+      borderRadius: '0.5rem',
+      fontWeight: 700,
+      cursor: 'pointer',
+      fontSize: '0.74rem'
+    }
+  }, "+ Add Target")), targets.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#64748b',
+      fontSize: '0.8rem',
+      padding: '1rem 0'
+    }
+  }, "No targets yet \u2014 add prospects to start tracking outreach."), targets.map(t => /*#__PURE__*/React.createElement(MultifamilyCampaignTargetRow, {
+    key: t.id,
+    target: t,
+    onChanged: load
+  }))));
 }
 function MultifamilyOutreachWorkbenchPanel({
   activeTab,
