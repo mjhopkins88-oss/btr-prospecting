@@ -297,6 +297,26 @@ def test_demo_leads_never_logged():
     check('demo lead never gets a decision logged', repository.get_sales_intelligence_history(demo.id) == [])
 
 
+def test_service_entry_point_and_type_aliases():
+    from multifamily.sales_intelligence.sales_intelligence_service import generate_sales_intelligence_for_lead
+    from multifamily.sales_intelligence import nepq_types as t
+
+    lead = mk_lead('Serviceflow Renewal', 'renewal_date_known', 'form', lead_situation='renewal', renewal_days=30)
+    output = generate_sales_intelligence_for_lead(lead)
+    check('generate_sales_intelligence_for_lead returns a full package', output.strategy is not None and output.messages is not None)
+    check('generate_sales_intelligence_for_lead output is a SalesIntelligenceOutput', isinstance(output, t.SalesIntelligenceOutput))
+
+    check('SalesIntelligenceOutput aliases SalesIntelligencePackage', t.SalesIntelligenceOutput is t.SalesIntelligencePackage)
+    check('OutreachPackage aliases MessagePackage', t.OutreachPackage is t.MessagePackage)
+    check('ObjectionGuidance aliases ObjectionResponse', t.ObjectionGuidance is t.ObjectionResponse)
+    check('ReasoningExplanation aliases SalesIntelligenceReasoning', t.ReasoningExplanation is t.SalesIntelligenceReasoning)
+    check('LeadTemperature/LeadOrigin/InsuranceScenario/SalesStage/BuyerAwarenessLevel/ResistanceRisk/ConversationMode/RecommendedAction all defined',
+          all([t.LeadTemperature, t.LeadOrigin, t.InsuranceScenario, t.SalesStage, t.BuyerAwarenessLevel,
+               t.ResistanceRisk, t.ConversationMode, t.RecommendedAction]))
+
+    repository.delete_sales_intelligence_events_for_lead(lead.id)
+
+
 def main():
     try:
         test_inbound_benchmark_selects_connection_then_discovery()
@@ -316,6 +336,7 @@ def main():
         test_reasoning_explainer_completeness()
         test_decision_log_dedup_and_regenerate()
         test_demo_leads_never_logged()
+        test_service_entry_point_and_type_aliases()
     finally:
         for lid in _ids:
             repository.delete_sales_intelligence_events_for_lead(lid)

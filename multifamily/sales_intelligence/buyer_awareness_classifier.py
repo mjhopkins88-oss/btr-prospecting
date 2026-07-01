@@ -10,7 +10,7 @@ _RESEARCH_SIGNALS = {'benchmark_form_submit', 'linkedin_lead_form_submit', 'calc
 _LOW_INTENT_WEB_SIGNALS = {'website_visit', 'repeat_website_visit', 'keyword_intent', 'paid_search_click', 'guide_download'}
 _ACQUISITION_SIGNALS = {'acquisition', 'refinance', 'financing'}
 _CONSTRUCTION_SIGNALS = {'permit_filed', 'planning_approval', 'groundbreaking', 'vertical_construction'}
-_TRIGGER_ONLY_SOURCES = {'permit', 'news'}
+_TRIGGER_ONLY_SOURCES = {'permit', 'news', 'serp'}
 
 
 def classify_buyer_awareness(lead: MultifamilyLead) -> str:

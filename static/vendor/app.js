@@ -1521,7 +1521,11 @@ function App({
     activeTab: activeTab,
     setActiveTab: setActiveTab,
     user: user
-  }), activeTab.startsWith('multifamily_') && !['multifamily_admin', 'multifamily_source_performance', 'multifamily_outreach'].includes(activeTab) && /*#__PURE__*/React.createElement(MultifamilyLeadListView, {
+  }), activeTab === 'multifamily_campaigns' && /*#__PURE__*/React.createElement(MultifamilyCampaignsPanel, {
+    activeTab: activeTab,
+    setActiveTab: setActiveTab,
+    user: user
+  }), activeTab.startsWith('multifamily_') && !['multifamily_admin', 'multifamily_source_performance', 'multifamily_outreach', 'multifamily_campaigns'].includes(activeTab) && /*#__PURE__*/React.createElement(MultifamilyLeadListView, {
     activeTab: activeTab,
     setActiveTab: setActiveTab,
     user: user
@@ -8067,6 +8071,11 @@ const MF_TABS = [{
   endpoint: '/api/multifamily/outreach-workbench',
   kind: 'outreach'
 }, {
+  id: 'multifamily_campaigns',
+  label: 'Pilot Campaigns',
+  endpoint: '/api/multifamily/campaigns',
+  kind: 'campaigns'
+}, {
   id: 'multifamily_admin',
   label: 'Multifamily Admin',
   endpoint: '/api/multifamily/admin/intake-stats',
@@ -8084,6 +8093,9 @@ const MF_LEAD_SITUATIONS = [{
 }, {
   value: 'construction',
   label: 'Construction project'
+}, {
+  value: 'completion',
+  label: 'Completion / lease-up transition'
 }, {
   value: 'operating',
   label: 'Just operating — no specific trigger'
@@ -9076,7 +9088,10 @@ function MultifamilyLeadDrawer({
     ps: ps
   }), lead.is_suspicious && /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#facc15')
-  }, "\u26A0 SUSPICIOUS"))), /*#__PURE__*/React.createElement("button", {
+  }, "\u26A0 SUSPICIOUS"), lead.funnel_urgency && (lead.funnel_urgency.level === 'high' || lead.funnel_urgency.level === 'medium') && /*#__PURE__*/React.createElement("span", {
+    title: lead.funnel_urgency.reason || '',
+    style: mfPillStyle(lead.funnel_urgency.level === 'high' ? '#ef4444' : '#f59e0b')
+  }, "\u23F1 ", lead.funnel_urgency.level === 'high' ? 'URGENT' : 'UPCOMING DEADLINE'))), /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
     style: {
       background: 'transparent',
@@ -9254,7 +9269,11 @@ function MultifamilyLeadDrawer({
       color: '#cbd5e1',
       marginBottom: '3px'
     }
-  }, "\u2022 ", q)))), lead && section === 'activity' && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+  }, "\u2022 ", q)))), lead && section === 'outreach' && /*#__PURE__*/React.createElement(MultifamilyOutboundLinkView, {
+    lead: lead,
+    leadId: leadId,
+    onLinkGenerated: refreshLead
+  }), lead && section === 'activity' && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
     title: "NOTES / ACTIVITY"
   }, lead.is_demo && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -9747,6 +9766,67 @@ function MultifamilySourceSnapshot({
     }
   }, data.top_campaign || '—'))));
 }
+const _MF_OVERVIEW_CAMPAIGN_SECTION = (funnel, setActiveTab) => /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  style: {
+    fontSize: '0.68rem',
+    color: '#64748b',
+    fontFamily: "'Orbitron', sans-serif",
+    letterSpacing: '0.06em',
+    marginBottom: '8px'
+  }
+}, "PILOT CAMPAIGNS"), /*#__PURE__*/React.createElement("div", {
+  style: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+    gap: '10px',
+    marginBottom: '1.25rem'
+  }
+}, /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+  label: "ACTIVE CAMPAIGNS",
+  value: funnel.active_campaigns || 0,
+  color: "#34d399"
+}), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+  label: "CAMPAIGN CONVERSIONS",
+  value: funnel.campaign_conversions || 0,
+  color: "#60a5fa"
+}), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+  label: "TARGETS NEEDING FOLLOW-UP",
+  value: funnel.campaign_targets_needing_followup || 0,
+  color: "#f59e0b"
+}), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+  label: "BEST CAMPAIGN",
+  value: funnel.best_campaign ? `${funnel.best_campaign.name || funnel.best_campaign.campaign_id} (${funnel.best_campaign.conversion_rate_pct}%)` : '—',
+  color: "#a78bfa"
+})), (funnel.best_performing_offer_page || funnel.recently_converted_campaign_target) && /*#__PURE__*/React.createElement("div", {
+  style: {
+    display: 'flex',
+    gap: '20px',
+    flexWrap: 'wrap',
+    fontSize: '0.78rem',
+    color: '#94a3b8',
+    marginBottom: '1.25rem'
+  }
+}, funnel.best_performing_offer_page && /*#__PURE__*/React.createElement("span", null, "Best-performing offer page: ", /*#__PURE__*/React.createElement("b", {
+  style: {
+    color: '#f1f5f9'
+  }
+}, (MF_OFFER_PAGE_OPTIONS.find(o => o.slug === funnel.best_performing_offer_page.page_variant) || {}).label || funnel.best_performing_offer_page.page_variant, ' ', "(", funnel.best_performing_offer_page.conversion_rate_pct, "%)")), funnel.recently_converted_campaign_target && /*#__PURE__*/React.createElement("span", null, "Recently converted: ", /*#__PURE__*/React.createElement("b", {
+  style: {
+    color: '#34d399'
+  }
+}, funnel.recently_converted_campaign_target.company, " via \"", funnel.recently_converted_campaign_target.campaign_name, "\""))), /*#__PURE__*/React.createElement("button", {
+  onClick: () => setActiveTab('multifamily_campaigns'),
+  style: {
+    background: 'transparent',
+    border: '1px solid rgba(255,255,255,0.12)',
+    color: '#94a3b8',
+    padding: '0.4rem 0.8rem',
+    borderRadius: '0.5rem',
+    cursor: 'pointer',
+    fontSize: '0.74rem',
+    marginBottom: '1.25rem'
+  }
+}, "View Pilot Campaigns \u2192"));
 function MultifamilyOverviewPanel({
   activeTab,
   setActiveTab,
@@ -9774,6 +9854,9 @@ function MultifamilyOverviewPanel({
   }, [load]);
   const c = data && data.counts || {};
   const m = data && data.mission || {};
+  const funnel = data && data.funnel || {};
+  const newFormsByOffer = funnel.new_forms_by_offer || {};
+  const totalNewForms = Object.values(newFormsByOffer).reduce((sum, n) => sum + n, 0);
   const tiles = [['CALL TODAY', c.call_today || 0, '#ef4444'], ['HOT', c.hot || 0, '#f97316'], ['WARM', c.warm || 0, '#f59e0b'], ['NEW INBOUND', c.new_inbound || 0, '#34d399'], ['FOLLOW-UPS DUE', followupsDueCount ?? 0, '#38bdf8'], ['RENEWAL WINDOW', c.renewal_window || 0, '#3b82f6'], ["CONSTR / B-RISK", c.construction_buildersrisk || 0, '#22d3ee']];
   const primaryItem = data && data.best_first_action;
   const secondaryEntries = [['Best email draft', m.best_email_draft], ['Best follow-up', m.best_followup], ['Best nurture action', m.best_nurture_action]].filter(([, item]) => item && (!primaryItem || item.lead_id !== primaryItem.lead_id));
@@ -9860,7 +9943,55 @@ function MultifamilyOverviewPanel({
     key: title,
     title: title.toUpperCase(),
     item: item
-  }))), /*#__PURE__*/React.createElement(MultifamilyNeedsAttentionPanel, {
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#64748b',
+      fontFamily: "'Orbitron', sans-serif",
+      letterSpacing: '0.06em',
+      marginBottom: '8px'
+    }
+  }, "MULTIFAMILY FUNNEL"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+      gap: '10px',
+      marginBottom: '1.25rem'
+    }
+  }, /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+    label: "NEW FORMS (TOTAL)",
+    value: totalNewForms,
+    color: "#34d399"
+  }), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+    label: "TOP OFFER PAGE",
+    value: funnel.top_offer_page || '—',
+    color: "#f59e0b"
+  }), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+    label: "SERP NEEDS REVIEW",
+    value: funnel.serp_triggers_needing_review || 0,
+    color: "#facc15"
+  }), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+    label: "CONVERTED FROM OUTBOUND",
+    value: `${funnel.converted_from_outbound || 0} / ${funnel.outbound_links_sent || 0}`,
+    color: "#60a5fa"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+      gap: '8px',
+      marginBottom: '1.25rem'
+    }
+  }, /*#__PURE__*/React.createElement(MultifamilyMissionCard, {
+    title: "BEST INBOUND HAND-RAISER",
+    item: funnel.best_inbound_handraiser
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '8px',
+      padding: '12px 14px'
+    }
+  }, mfBreakdownTable('NEW FORMS BY OFFER', newFormsByOffer))), _MF_OVERVIEW_CAMPAIGN_SECTION(funnel, setActiveTab), /*#__PURE__*/React.createElement(MultifamilyNeedsAttentionPanel, {
     user: user,
     leadNeedingInfo: m.lead_needing_info,
     onOpen: setDrawerId,
@@ -10013,7 +10144,7 @@ function MultifamilyAdminPanel({
     }
   }, /*#__PURE__*/React.createElement("span", null, row.company_name, " (", row.contact_email || 'no email', ")"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle(spamColor[row.spam_status] || '#64748b')
-  }, row.spam_status), " ", row.source, row.utm_source ? ' · ' + row.utm_source : '', row.score_total != null ? ' · score ' + row.score_total + ' (' + row.score_category + ')' : ''))), /*#__PURE__*/React.createElement(MultifamilyDataQualityView, null), /*#__PURE__*/React.createElement(MultifamilySourceRunsView, null), /*#__PURE__*/React.createElement(MultifamilyRecentNotificationsView, null)));
+  }, row.spam_status), " ", row.source, row.utm_source ? ' · ' + row.utm_source : '', row.score_total != null ? ' · score ' + row.score_total + ' (' + row.score_category + ')' : ''))), /*#__PURE__*/React.createElement(MultifamilyDataQualityView, null), /*#__PURE__*/React.createElement(MultifamilySerpRunnerView, null), /*#__PURE__*/React.createElement(MultifamilySourceRunsView, null), /*#__PURE__*/React.createElement(MultifamilyRecentNotificationsView, null)));
 }
 function mfBreakdownTable(title, obj) {
   const entries = Object.entries(obj || {}).sort((a, b) => b[1] - a[1]);
@@ -10045,6 +10176,125 @@ function mfBreakdownTable(title, obj) {
     }
   }, k), /*#__PURE__*/React.createElement("span", null, v))));
 }
+function mfCampaignRateTable(title, buckets, labelHeader) {
+  const entries = Object.entries(buckets || {}).sort((a, b) => b[1].targets - a[1].targets);
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, title), entries.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#475569',
+      marginBottom: '1rem'
+    }
+  }, "No data yet."), entries.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      overflowX: 'auto',
+      marginBottom: '1.25rem'
+    }
+  }, /*#__PURE__*/React.createElement("table", {
+    style: {
+      width: '100%',
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      borderCollapse: 'collapse'
+    }
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
+    style: {
+      color: '#64748b'
+    }
+  }, /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'left',
+      padding: '4px 8px'
+    }
+  }, labelHeader), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, "Targets"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, "Converted"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, "Rate"))), /*#__PURE__*/React.createElement("tbody", null, entries.map(([key, b]) => /*#__PURE__*/React.createElement("tr", {
+    key: key,
+    style: {
+      borderTop: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      padding: '4px 8px',
+      color: '#cbd5e1'
+    }
+  }, b.name || key), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, b.targets), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, b.converted), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, b.conversion_rate_pct, "%")))))));
+}
+function MultifamilySourcePerformanceCampaignSection({
+  campaignPerformance
+}) {
+  const cp = campaignPerformance || {};
+  if (!cp.total_campaigns) return null;
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem',
+      marginTop: '1.25rem'
+    }
+  }, "PILOT CAMPAIGN PERFORMANCE"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+      gap: '10px',
+      marginBottom: '1.25rem'
+    }
+  }, [['Campaigns', cp.total_campaigns], ['Active', cp.total_active_campaigns], ['Targets', cp.total_targets], ['Converted', cp.total_converted], ['Meetings', cp.total_meetings], ['Needing follow-up', cp.targets_needing_followup]].map(([label, value]) => /*#__PURE__*/React.createElement("div", {
+    key: label,
+    style: {
+      background: 'rgba(255,255,255,0.02)',
+      border: '1px solid rgba(255,255,255,0.06)',
+      borderRadius: '6px',
+      padding: '8px 10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.6rem',
+      color: '#64748b'
+    }
+  }, label), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '1.1rem',
+      fontWeight: 700,
+      color: '#f1f5f9'
+    }
+  }, value ?? 0)))), mfCampaignRateTable('CONVERSION RATE BY CAMPAIGN', cp.conversion_rate_by_campaign, 'Campaign'), mfCampaignRateTable('CONVERSION RATE BY OFFER PAGE', cp.conversion_rate_by_page_variant, 'Offer Page'), mfCampaignRateTable('CONVERSION RATE BY SEGMENT', cp.conversion_rate_by_segment, 'Segment'), mfCampaignRateTable('CONVERSION RATE BY STATE', cp.conversion_rate_by_state, 'State'));
+}
 function MultifamilySourcePerformancePanel({
   activeTab,
   setActiveTab,
@@ -10065,6 +10315,41 @@ function MultifamilySourcePerformancePanel({
       }
     })();
   }, []);
+  const serpBlock = data && data.serp && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  style: {
+    fontSize: '0.65rem',
+    color: '#475569',
+    fontFamily: "'Orbitron', sans-serif",
+    marginBottom: '0.5rem',
+    marginTop: '1.25rem'
+  }
+}, "SERP SOURCE PERFORMANCE"), /*#__PURE__*/React.createElement("div", {
+  style: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+    gap: '10px',
+    marginBottom: '1.25rem'
+  }
+}, [['Signals received', data.serp.signals_received], ['Leads created', data.serp.leads_created], ['Leads merged away', data.serp.leads_merged_away], ['Review candidates', data.serp.review_candidates_pending], ['Hot leads', data.serp.hot_leads], ['Call today leads', data.serp.call_today_leads], ['Collection runs', data.serp.collection_runs], ['Total rejected', data.serp.total_rejected_across_runs]].map(([label, value]) => /*#__PURE__*/React.createElement("div", {
+  key: label,
+  style: {
+    background: 'rgba(255,255,255,0.02)',
+    border: '1px solid rgba(255,255,255,0.06)',
+    borderRadius: '6px',
+    padding: '8px 10px'
+  }
+}, /*#__PURE__*/React.createElement("div", {
+  style: {
+    fontSize: '0.6rem',
+    color: '#64748b'
+  }
+}, label), /*#__PURE__*/React.createElement("div", {
+  style: {
+    fontSize: '1.1rem',
+    fontWeight: 700,
+    color: '#f1f5f9'
+  }
+}, value ?? 0)))));
   return /*#__PURE__*/React.createElement("div", {
     style: {
       maxWidth: '1040px',
@@ -10125,7 +10410,98 @@ function MultifamilySourcePerformancePanel({
       gap: '16px',
       marginBottom: '1.25rem'
     }
-  }, mfBreakdownTable('LEADS BY SOURCE', data.leads_by_source), mfBreakdownTable('LEADS BY SOURCE PAGE', data.leads_by_source_page), mfBreakdownTable('LEADS BY OFFER TYPE', data.leads_by_offer_type), mfBreakdownTable('LEADS BY CAMPAIGN', data.leads_by_campaign), mfBreakdownTable('CALL TODAY BY SOURCE', data.call_today_by_source)), /*#__PURE__*/React.createElement("div", {
+  }, mfBreakdownTable('LEADS BY SOURCE', data.leads_by_source), mfBreakdownTable('LEADS BY SOURCE PAGE', data.leads_by_source_page), mfBreakdownTable('LEADS BY OFFER TYPE', data.leads_by_offer_type), mfBreakdownTable('LEADS BY CAMPAIGN', data.leads_by_campaign), mfBreakdownTable('LEADS BY PAGE VARIANT', data.leads_by_page_variant), mfBreakdownTable('LEADS BY OUTREACH CAMPAIGN', data.leads_by_campaign_id), mfBreakdownTable('CALL TODAY BY SOURCE', data.call_today_by_source)), data.outbound_conversion_stats && data.outbound_conversion_stats.total_links_sent > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, "OUTBOUND-TO-FORM CONVERSION"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '20px',
+      flexWrap: 'wrap',
+      fontSize: '0.82rem',
+      color: '#94a3b8',
+      marginBottom: '1rem'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "Links sent: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#f1f5f9'
+    }
+  }, data.outbound_conversion_stats.total_links_sent)), /*#__PURE__*/React.createElement("span", null, "Converted: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#34d399'
+    }
+  }, data.outbound_conversion_stats.total_links_converted)), /*#__PURE__*/React.createElement("span", null, "Conversion rate: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#f59e0b'
+    }
+  }, data.outbound_conversion_stats.conversion_rate_pct, "%"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      overflowX: 'auto',
+      marginBottom: '1.25rem'
+    }
+  }, /*#__PURE__*/React.createElement("table", {
+    style: {
+      width: '100%',
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      borderCollapse: 'collapse'
+    }
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
+    style: {
+      color: '#64748b'
+    }
+  }, /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'left',
+      padding: '4px 8px'
+    }
+  }, "Page variant"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, "Sent"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, "Converted"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, "Rate"))), /*#__PURE__*/React.createElement("tbody", null, Object.entries(data.outbound_conversion_stats.by_page_variant || {}).map(([pv, stats]) => /*#__PURE__*/React.createElement("tr", {
+    key: pv,
+    style: {
+      borderTop: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      padding: '4px 8px',
+      color: '#cbd5e1'
+    }
+  }, pv), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, stats.sent), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, stats.converted), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, stats.conversion_rate_pct, "%"))))))), /*#__PURE__*/React.createElement(MultifamilySourcePerformanceCampaignSection, {
+    campaignPerformance: data.campaign_performance
+  }), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.65rem',
       color: '#475569',
@@ -10192,7 +10568,130 @@ function MultifamilySourcePerformancePanel({
       padding: '4px 0',
       borderBottom: '1px solid rgba(255,255,255,0.04)'
     }
-  }, /*#__PURE__*/React.createElement("span", null, src), /*#__PURE__*/React.createElement("span", null, r.flagged, "/", r.total, " \xB7 ", r.rate_pct, "%")))), /*#__PURE__*/React.createElement(MultifamilySourceRoiView, null));
+  }, /*#__PURE__*/React.createElement("span", null, src), /*#__PURE__*/React.createElement("span", null, r.flagged, "/", r.total, " \xB7 ", r.rate_pct, "%")))), /*#__PURE__*/React.createElement(MultifamilySourceRoiView, null), serpBlock);
+}
+function _mfTitleCase(s) {
+  return (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+function _mfResistanceColor(risk) {
+  if (risk === 'high') return '#ef4444';
+  if (risk === 'medium') return '#f59e0b';
+  return '#34d399';
+}
+function _mfConfidenceColor(score) {
+  if (score == null) return '#64748b';
+  if (score < 0.5) return '#ef4444';
+  if (score < 0.7) return '#f59e0b';
+  return '#34d399';
+}
+const _siCardStyle = {
+  background: 'rgba(255,255,255,0.02)',
+  border: '1px solid rgba(255,255,255,0.06)',
+  borderRadius: '6px',
+  padding: '8px 10px',
+  marginBottom: '8px'
+};
+const _siCardHeaderStyle = {
+  fontSize: '0.68rem',
+  color: '#94a3b8',
+  fontWeight: 700,
+  marginBottom: '5px',
+  textTransform: 'uppercase',
+  letterSpacing: '0.03em'
+};
+const _siLabelStyle = {
+  fontSize: '0.68rem',
+  color: '#94a3b8',
+  fontWeight: 600
+};
+const _siTextBoxStyle = {
+  whiteSpace: 'pre-wrap',
+  fontSize: '0.76rem',
+  color: '#cbd5e1',
+  background: 'rgba(255,255,255,0.03)',
+  borderRadius: '6px',
+  padding: '8px',
+  marginTop: '3px'
+};
+const _siToggleBtnStyle = {
+  background: 'transparent',
+  border: '1px solid rgba(255,255,255,0.1)',
+  color: '#94a3b8',
+  borderRadius: '4px',
+  padding: '1px 8px',
+  cursor: 'pointer',
+  fontSize: '0.65rem'
+};
+const _siActivityBtnStyle = {
+  background: 'transparent',
+  border: '1px solid rgba(255,255,255,0.12)',
+  color: '#94a3b8',
+  borderRadius: '4px',
+  padding: '3px 9px',
+  cursor: 'pointer',
+  fontSize: '0.68rem'
+};
+function MultifamilyOutreachCopyButton({
+  text,
+  label
+}) {
+  const [copied, setCopied] = useState(false);
+  const onClick = async () => {
+    let ok = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text || '');
+        ok = true;
+      }
+    } catch (e) {}
+    if (!ok) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text || '';
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        ok = true;
+      } catch (e) {}
+    }
+    setCopied(ok);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return /*#__PURE__*/React.createElement("button", {
+    onClick: onClick,
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.1)',
+      color: copied ? '#34d399' : '#64748b',
+      borderRadius: '4px',
+      padding: '1px 8px',
+      cursor: 'pointer',
+      fontSize: '0.62rem',
+      fontWeight: copied ? 700 : 400
+    }
+  }, copied ? 'Copied.' : label || 'Copy');
+}
+function MultifamilyOutreachCollapsible({
+  title,
+  defaultOpen,
+  children
+}) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setOpen(!open),
+    style: _siToggleBtnStyle
+  }, (open ? 'Hide ' : 'Show ') + title), open && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '8px'
+    }
+  }, children));
 }
 function MultifamilyOutreachLeadRow({
   lead,
@@ -10202,99 +10701,75 @@ function MultifamilyOutreachLeadRow({
   const [intel, setIntel] = useState(null);
   const [variant, setVariant] = useState(0);
   const [loadingIntel, setLoadingIntel] = useState(false);
-  const [showObjections, setShowObjections] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [intelError, setIntelError] = useState(null);
   const [showWhy, setShowWhy] = useState(false);
-  const loadIntel = useCallback(async v => {
-    setLoadingIntel(true);
+  const [activityMsg, setActivityMsg] = useState(null);
+  const loadIntel = useCallback(async (v, isRegenerate) => {
+    if (isRegenerate) setRegenerating(true);else setLoadingIntel(true);
+    setIntelError(null);
     try {
       const r = await fetch(`/api/multifamily/leads/${lead.id}/sales-intelligence?variant=${v}`);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
       setIntel(j);
-    } catch (e) {} finally {
-      setLoadingIntel(false);
+    } catch (e) {
+      setIntelError('Could not load sales intelligence for this lead.');
+    } finally {
+      if (isRegenerate) setRegenerating(false);else setLoadingIntel(false);
     }
   }, [lead.id]);
-  const toggle = async () => {
+  const toggle = () => {
     const next = !expanded;
     setExpanded(next);
-    if (next && !intel) {
-      loadIntel(variant);
-    }
+    if (next && !intel && !loadingIntel) loadIntel(variant, false);
   };
   const regenerate = () => {
     const nextVariant = variant + 1;
     setVariant(nextVariant);
-    loadIntel(nextVariant);
+    loadIntel(nextVariant, true);
+  };
+  const logActivity = async (activityType, extra) => {
+    try {
+      const r = await fetch(`/api/multifamily/leads/${lead.id}/activity`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          activity_type: activityType,
+          ...(extra || {})
+        })
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      setActivityMsg('✓ Logged');
+    } catch (e) {
+      setActivityMsg('Could not log activity — please log in.');
+    }
+    setTimeout(() => setActivityMsg(null), 2500);
+  };
+  const markCalled = () => logActivity('called');
+  const markEmailed = () => logActivity('emailed');
+  const markLinkedInSent = () => logActivity('linkedin_sent');
+  const addFollowUp = () => {
+    const fuNow = intel && intel.follow_up_strategy;
+    const days = fuNow && fuNow.recommended_wait_days || 7;
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    logActivity('follow_up_due', {
+      next_follow_up_date: d.toISOString().slice(0, 10),
+      note: fuNow ? `Suggested by Sales Intelligence: ${fuNow.follow_up_type.replace(/_/g, ' ')}` : undefined
+    });
   };
   const score = lead.score || {};
-  const messageFields = intel ? [['Call opener', intel.messages.call_opener], ['Email subject', intel.messages.first_email_subject], ['Email body', intel.messages.first_email_body], ['LinkedIn (manual)', intel.messages.linkedin_note_manual], ['Follow-up 1', intel.messages.follow_up_1], ['Follow-up 2', intel.messages.follow_up_2], ['Soft bump', intel.messages.soft_bump]] : [];
+  const strategy = intel && intel.strategy;
+  const context = intel && intel.context;
+  const reasoning = intel && intel.reasoning;
   const qp = intel && intel.question_path;
-  const questionGroups = qp ? [['Situation', qp.situation_questions], ['Problem awareness', qp.problem_awareness_questions], ['Solution awareness', qp.solution_awareness_questions], ['Consequence', qp.consequence_questions], ['Qualifying', qp.qualifying_questions]] : [];
   const fu = intel && intel.follow_up_strategy;
-  const followUpBlock = fu && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: '10px'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.68rem',
-      color: '#94a3b8',
-      fontWeight: 600,
-      marginBottom: '3px'
-    }
-  }, "Follow-up plan"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      gap: '6px',
-      alignItems: 'center',
-      flexWrap: 'wrap',
-      marginBottom: '4px'
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: mfPillStyle('#38bdf8')
-  }, fu.follow_up_type.replace(/_/g, ' ')), fu.recommended_wait_days > 0 && /*#__PURE__*/React.createElement("span", {
-    style: mfPillStyle('#64748b')
-  }, "~", fu.recommended_wait_days, "d"), fu.is_final_attempt && /*#__PURE__*/React.createElement("span", {
-    style: mfPillStyle('#f97316')
-  }, "final attempt")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.74rem',
-      color: '#94a3b8',
-      marginBottom: '6px'
-    }
-  }, fu.reasoning), fu.message_field && intel.messages[fu.message_field] && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      justifyContent: 'space-between'
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: '0.68rem',
-      color: '#94a3b8',
-      fontWeight: 600
-    }
-  }, "Suggested: ", fu.message_field.replace(/_/g, ' ')), /*#__PURE__*/React.createElement("button", {
-    onClick: () => mfCopy(intel.messages[fu.message_field]),
-    style: {
-      background: 'transparent',
-      border: '1px solid rgba(255,255,255,0.1)',
-      color: '#64748b',
-      borderRadius: '4px',
-      padding: '1px 8px',
-      cursor: 'pointer',
-      fontSize: '0.62rem'
-    }
-  }, "Copy")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      whiteSpace: 'pre-wrap',
-      fontSize: '0.76rem',
-      color: '#cbd5e1',
-      background: 'rgba(255,255,255,0.03)',
-      borderRadius: '6px',
-      padding: '8px',
-      marginTop: '3px'
-    }
-  }, intel.messages[fu.message_field])));
+  const tg = intel && intel.tone_guardrail;
+  const questionGroups = qp ? [['Connection', qp.connection_question ? [qp.connection_question] : []], ['Situation', qp.situation_questions], ['Problem awareness', qp.problem_awareness_questions], ['Solution awareness', qp.solution_awareness_questions], ['Consequence', qp.consequence_questions], ['Qualifying', qp.qualifying_questions], ['Transition', qp.transition_question ? [qp.transition_question] : []], ['Commitment', qp.commitment_question ? [qp.commitment_question] : []], ['Fallback', qp.fallback_question ? [qp.fallback_question] : []]] : [];
+  const hasAvoidContent = intel && (strategy.do_not && strategy.do_not.length > 0 || qp.questions_to_avoid && qp.questions_to_avoid.length > 0 || tg && tg.warnings && tg.warnings.length > 0);
   return /*#__PURE__*/React.createElement("div", {
     style: {
       background: 'rgba(15,22,36,0.97)',
@@ -10369,100 +10844,199 @@ function MultifamilyOutreachLeadRow({
     style: {
       marginTop: '10px'
     }
-  }, (loadingIntel || !intel) && /*#__PURE__*/React.createElement("div", {
+  }, loadingIntel && !intel && /*#__PURE__*/React.createElement("div", {
     style: {
       color: '#64748b',
       fontSize: '0.8rem'
     }
-  }, "Loading sales intelligence…"), intel && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, "Loading sales intelligence\u2026"), intelError && !intel && /*#__PURE__*/React.createElement("div", {
     style: {
+      color: '#f97316',
+      fontSize: '0.8rem'
+    }
+  }, intelError, ' ', /*#__PURE__*/React.createElement("button", {
+    onClick: () => loadIntel(variant, false),
+    style: _siToggleBtnStyle
+  }, "Retry")), intel && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      ..._siCardStyle,
       background: 'rgba(129,140,248,0.08)',
-      border: '1px solid rgba(129,140,248,0.25)',
-      borderRadius: '6px',
-      padding: '8px 10px',
-      marginBottom: '10px'
+      border: '1px solid rgba(129,140,248,0.25)'
     }
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      flexWrap: 'wrap',
-      gap: '6px'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.78rem',
-      color: '#e2e8f0',
-      fontWeight: 600
-    }
-  }, "Recommended: ", intel.reasoning.selected_strategy), /*#__PURE__*/React.createElement("div", {
+    style: _siCardHeaderStyle
+  }, "Recommended Approach"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: '6px',
-      alignItems: 'center',
-      flexWrap: 'wrap'
+      flexWrap: 'wrap',
+      marginBottom: '6px'
     }
   }, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#f59e0b')
+  }, "Recommended Action: ", _mfTitleCase(strategy.recommended_action)), /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#818cf8')
-  }, "Stage: ", intel.reasoning.selected_nepq_stage), intel.strategy.conversation_mode && /*#__PURE__*/React.createElement("span", {
+  }, "Stage: ", _mfTitleCase(strategy.starting_nepq_stage)), strategy.conversation_mode && /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#38bdf8')
-  }, "Mode: ", intel.strategy.conversation_mode.replace(/_/g, ' ')), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowWhy(!showWhy),
+  }, "Mode: ", _mfTitleCase(strategy.conversation_mode)), context.buyer_awareness_level && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#a78bfa')
+  }, "Buyer Awareness: ", _mfTitleCase(context.buyer_awareness_level)), /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(_mfResistanceColor(context.resistance_risk))
+  }, "Resistance Risk: ", _mfTitleCase(context.resistance_risk)), /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(_mfConfidenceColor(reasoning.confidence_score))
+  }, "Confidence: ", Math.round((reasoning.confidence_score || 0) * 100), "%", reasoning.confidence_score != null && reasoning.confidence_score < 0.5 ? ' (low)' : '')), strategy.primary_objective && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: 'transparent',
-      border: '1px solid rgba(255,255,255,0.1)',
-      color: '#94a3b8',
-      borderRadius: '4px',
-      padding: '1px 8px',
-      cursor: 'pointer',
-      fontSize: '0.65rem'
+      fontSize: '0.78rem',
+      color: '#cbd5e1',
+      marginBottom: '6px'
     }
+  }, strategy.primary_objective), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '6px',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowWhy(!showWhy),
+    style: _siToggleBtnStyle
   }, showWhy ? 'Hide why' : 'Why this approach?'), /*#__PURE__*/React.createElement("button", {
     onClick: regenerate,
+    disabled: regenerating,
     style: {
-      background: 'transparent',
+      ..._siToggleBtnStyle,
       border: '1px solid rgba(245,158,11,0.4)',
       color: '#f59e0b',
-      borderRadius: '4px',
-      padding: '1px 8px',
-      cursor: 'pointer',
-      fontSize: '0.65rem'
+      opacity: regenerating ? 0.6 : 1
     }
-  }, "↻ Regenerate approach"))), showWhy && /*#__PURE__*/React.createElement("div", {
+  }, regenerating ? 'Regenerating…' : '↻ Regenerate approach')), intelError && /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: '6px',
+      fontSize: '0.68rem',
+      color: '#f97316'
+    }
+  }, intelError), showWhy && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '8px',
       fontSize: '0.74rem',
-      color: '#94a3b8'
+      color: '#94a3b8',
+      borderTop: '1px solid rgba(255,255,255,0.06)',
+      paddingTop: '6px'
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       marginBottom: '4px'
     }
-  }, intel.reasoning.why_this_stage), /*#__PURE__*/React.createElement("div", null, intel.reasoning.why_this_message), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("b", {
     style: {
-      marginTop: '4px',
-      color: '#64748b'
-    }
-  }, "Confidence: ", Math.round(intel.reasoning.confidence_score * 100), "%"))), (intel.context.missing_information || []).length > 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: '10px'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.68rem',
-      color: '#94a3b8',
-      fontWeight: 600,
-      marginBottom: '3px'
-    }
-  }, "Missing information to uncover"), intel.context.missing_information.map((m, i) => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    style: {
-      fontSize: '0.74rem',
       color: '#cbd5e1'
     }
-  }, "• ", m))), messageFields.map(([label, text]) => /*#__PURE__*/React.createElement("div", {
-    key: label,
+  }, "Why this stage: "), reasoning.why_this_stage), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '4px'
+    }
+  }, /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#cbd5e1'
+    }
+  }, "Why this message: "), reasoning.why_this_message), reasoning.key_lead_signals_used && reasoning.key_lead_signals_used.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '4px'
+    }
+  }, /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#cbd5e1'
+    }
+  }, "Signals used: "), reasoning.key_lead_signals_used.join(', ')), reasoning.assumed_pain_points && reasoning.assumed_pain_points.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '4px'
+    }
+  }, /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#cbd5e1'
+    }
+  }, "Assumed pain points: "), reasoning.assumed_pain_points.join(', ')), reasoning.missing_information && reasoning.missing_information.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '4px'
+    }
+  }, /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#cbd5e1'
+    }
+  }, "Missing information: "), reasoning.missing_information.join(', ')), reasoning.recommended_next_step && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#94a3b8'
+    }
+  }, "Next step: "), reasoning.recommended_next_step))), /*#__PURE__*/React.createElement("div", {
+    style: _siCardStyle
+  }, /*#__PURE__*/React.createElement("div", {
+    style: _siCardHeaderStyle
+  }, "Call Opener"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement(MultifamilyOutreachCopyButton, {
+    text: intel.messages.call_opener,
+    label: "Copy Call Opener"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: _siTextBoxStyle
+  }, intel.messages.call_opener)), /*#__PURE__*/React.createElement("div", {
+    style: _siCardStyle
+  }, /*#__PURE__*/React.createElement("div", {
+    style: _siCardHeaderStyle
+  }, "Email Draft"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: _siLabelStyle
+  }, "Subject"), /*#__PURE__*/React.createElement(MultifamilyOutreachCopyButton, {
+    text: intel.messages.first_email_subject,
+    label: "Copy Subject"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: _siTextBoxStyle
+  }, intel.messages.first_email_subject), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginTop: '6px'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: _siLabelStyle
+  }, "Body"), /*#__PURE__*/React.createElement(MultifamilyOutreachCopyButton, {
+    text: intel.messages.first_email_body,
+    label: "Copy Email"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: _siTextBoxStyle
+  }, intel.messages.first_email_body)), /*#__PURE__*/React.createElement("div", {
+    style: _siCardStyle
+  }, /*#__PURE__*/React.createElement("div", {
+    style: _siCardHeaderStyle
+  }, "LinkedIn Note"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#f59e0b',
+      marginBottom: '4px'
+    }
+  }, "Manual LinkedIn note \u2014 copy/paste only"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement(MultifamilyOutreachCopyButton, {
+    text: intel.messages.linkedin_note_manual,
+    label: "Copy LinkedIn Note"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: _siTextBoxStyle
+  }, intel.messages.linkedin_note_manual)), /*#__PURE__*/React.createElement("div", {
+    style: _siCardStyle
+  }, /*#__PURE__*/React.createElement("div", {
+    style: _siCardHeaderStyle
+  }, "Follow-Ups"), [['Follow-up 1', 'follow_up_1'], ['Follow-up 2', 'follow_up_2'], ['Soft bump', 'soft_bump']].map(([label, field]) => /*#__PURE__*/React.createElement("div", {
+    key: field,
     style: {
       marginBottom: '8px'
     }
@@ -10472,90 +11046,73 @@ function MultifamilyOutreachLeadRow({
       justifyContent: 'space-between'
     }
   }, /*#__PURE__*/React.createElement("span", {
+    style: _siLabelStyle
+  }, label), /*#__PURE__*/React.createElement(MultifamilyOutreachCopyButton, {
+    text: intel.messages[field]
+  })), /*#__PURE__*/React.createElement("div", {
+    style: _siTextBoxStyle
+  }, intel.messages[field]))), fu && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: '0.68rem',
-      color: '#94a3b8',
-      fontWeight: 600
+      marginTop: '4px',
+      paddingTop: '8px',
+      borderTop: '1px solid rgba(255,255,255,0.06)'
     }
-  }, label), /*#__PURE__*/React.createElement("button", {
-    onClick: () => mfCopy(text),
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
-      background: 'transparent',
-      border: '1px solid rgba(255,255,255,0.1)',
-      color: '#64748b',
-      borderRadius: '4px',
-      padding: '1px 8px',
-      cursor: 'pointer',
-      fontSize: '0.62rem'
+      display: 'flex',
+      gap: '6px',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      marginBottom: '4px'
     }
-  }, "Copy")), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#38bdf8')
+  }, "Next: ", _mfTitleCase(fu.follow_up_type)), fu.recommended_wait_days > 0 && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#64748b')
+  }, "~", fu.recommended_wait_days, "d"), fu.is_final_attempt && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#f97316')
+  }, "final attempt")), /*#__PURE__*/React.createElement("div", {
     style: {
-      whiteSpace: 'pre-wrap',
-      fontSize: '0.76rem',
-      color: '#cbd5e1',
-      background: 'rgba(255,255,255,0.03)',
-      borderRadius: '6px',
-      padding: '8px',
-      marginTop: '3px'
+      fontSize: '0.74rem',
+      color: '#94a3b8'
     }
-  }, text))), /*#__PURE__*/React.createElement("div", {
+  }, fu.reasoning), fu.message_field && !['call_opener', 'first_email_subject', 'first_email_body', 'linkedin_note_manual', 'follow_up_1', 'follow_up_2', 'soft_bump'].includes(fu.message_field) && intel.messages[fu.message_field] && /*#__PURE__*/React.createElement("div", {
     style: {
-      marginTop: '4px'
+      marginTop: '6px'
     }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: _siLabelStyle
+  }, "Suggested: ", _mfTitleCase(fu.message_field)), /*#__PURE__*/React.createElement(MultifamilyOutreachCopyButton, {
+    text: intel.messages[fu.message_field]
+  })), /*#__PURE__*/React.createElement("div", {
+    style: _siTextBoxStyle
+  }, intel.messages[fu.message_field])))), /*#__PURE__*/React.createElement(MultifamilyOutreachCollapsible, {
+    title: "discovery question path",
+    defaultOpen: false
   }, questionGroups.filter(([, qs]) => qs && qs.length > 0).map(([label, qs]) => /*#__PURE__*/React.createElement("div", {
     key: label,
     style: {
       marginBottom: '8px'
     }
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.68rem',
-      color: '#94a3b8',
-      fontWeight: 600,
-      marginBottom: '3px'
-    }
-  }, label, " questions"), qs.map((q, i) => /*#__PURE__*/React.createElement("div", {
+    style: _siLabelStyle
+  }, label), qs.map((q, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     style: {
       fontSize: '0.76rem',
       color: '#cbd5e1'
     }
-  }, "• ", q)))), qp && qp.questions_to_avoid && qp.questions_to_avoid.length > 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: '10px'
-    }
+  }, "\u2022 ", q))))), /*#__PURE__*/React.createElement(MultifamilyOutreachCollapsible, {
+    title: "objection / resistance guidance",
+    defaultOpen: false
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: '0.68rem',
-      color: '#f97316',
-      fontWeight: 600,
-      marginBottom: '3px'
-    }
-  }, "Questions/angles to avoid"), qp.questions_to_avoid.map((q, i) => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    style: {
-      fontSize: '0.74rem',
-      color: '#fca5a5'
-    }
-  }, "• ", q))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: '6px'
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowObjections(!showObjections),
-    style: {
-      background: 'transparent',
-      border: '1px solid rgba(255,255,255,0.12)',
-      color: '#94a3b8',
-      borderRadius: '4px',
-      padding: '3px 10px',
-      cursor: 'pointer',
-      fontSize: '0.68rem'
-    }
-  }, showObjections ? 'Hide objection guidance' : 'Show objection/resistance guidance'), showObjections && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: '8px',
-      maxHeight: '260px',
+      maxHeight: '300px',
       overflowY: 'auto'
     }
   }, intel.objection_playbook.map(o => /*#__PURE__*/React.createElement("div", {
@@ -10570,11 +11127,17 @@ function MultifamilyOutreachLeadRow({
       color: '#e2e8f0',
       fontWeight: 600
     }
-  }, o.objection_key.replace(/_/g, ' ')), /*#__PURE__*/React.createElement("div", {
+  }, o.objection_key.replace(/_/g, ' ')), o.likely_meaning && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#64748b',
+      marginTop: '2px'
+    }
+  }, "Likely means: ", o.likely_meaning), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.72rem',
       color: '#cbd5e1',
-      marginTop: '2px'
+      marginTop: '3px'
     }
   }, o.response), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -10582,7 +11145,1006 @@ function MultifamilyOutreachLeadRow({
       color: '#64748b',
       marginTop: '2px'
     }
-  }, "Follow-up: ", o.follow_up_strategy)))))), followUpBlock)));
+  }, "Follow-up: ", o.follow_up_strategy), o.what_not_to_say && o.what_not_to_say.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#fca5a5',
+      marginTop: '2px'
+    }
+  }, "Don't say: ", o.what_not_to_say.join('; ')))))), hasAvoidContent && /*#__PURE__*/React.createElement("div", {
+    style: {
+      ..._siCardStyle,
+      background: 'rgba(249,115,22,0.05)',
+      border: '1px solid rgba(249,115,22,0.2)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      ..._siCardHeaderStyle,
+      color: '#f97316'
+    }
+  }, "What to Avoid"), strategy.do_not && strategy.do_not.map((d, i) => /*#__PURE__*/React.createElement("div", {
+    key: 'd' + i,
+    style: {
+      fontSize: '0.74rem',
+      color: '#fca5a5',
+      marginBottom: '2px'
+    }
+  }, "\u2022 ", d)), qp.questions_to_avoid && qp.questions_to_avoid.map((q, i) => /*#__PURE__*/React.createElement("div", {
+    key: 'q' + i,
+    style: {
+      fontSize: '0.74rem',
+      color: '#fca5a5',
+      marginBottom: '2px'
+    }
+  }, "\u2022 ", q)), tg && tg.warnings && tg.warnings.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '6px',
+      fontSize: '0.7rem',
+      color: '#f59e0b'
+    }
+  }, "Tone check: ", tg.warnings.map(w => `${w.field.replace(/_/g, ' ')} — ${w.reasons.join('; ')}`).join(' · '))), !lead.is_demo && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '10px',
+      paddingTop: '8px',
+      borderTop: '1px solid rgba(255,255,255,0.06)',
+      display: 'flex',
+      gap: '6px',
+      flexWrap: 'wrap',
+      alignItems: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: markCalled,
+    style: _siActivityBtnStyle
+  }, "Mark Called"), /*#__PURE__*/React.createElement("button", {
+    onClick: markEmailed,
+    style: _siActivityBtnStyle
+  }, "Mark Emailed"), /*#__PURE__*/React.createElement("button", {
+    onClick: markLinkedInSent,
+    style: _siActivityBtnStyle
+  }, "Mark LinkedIn Sent"), /*#__PURE__*/React.createElement("button", {
+    onClick: addFollowUp,
+    style: _siActivityBtnStyle
+  }, "Add Follow-Up"), activityMsg && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#94a3b8'
+    }
+  }, activityMsg)))));
+}
+function MultifamilyNewCampaignModal({
+  onClose,
+  onCreated
+}) {
+  const [form, setForm] = useState({
+    name: '',
+    pageVariant: 'benchmark',
+    description: '',
+    targetState: '',
+    targetCity: '',
+    targetSegment: '',
+    campaignSource: 'manual_outreach',
+    utmSource: 'manual_outreach',
+    utmMedium: 'email',
+    utmCampaign: ''
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const set = key => e => setForm(s => ({
+    ...s,
+    [key]: e.target.value
+  }));
+  const submit = async e => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch('/api/multifamily/campaigns', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(form)
+      });
+      const j = await r.json();
+      if (r.ok && j.success) {
+        onCreated(j.campaign);
+      } else {
+        setError((j.errors || ['Failed to create campaign.']).join('; '));
+      }
+    } catch (err) {
+      setError('Network error: ' + err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0,0,0,0.55)',
+      zIndex: 2100,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center'
+    },
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: '460px',
+      maxHeight: '85vh',
+      overflowY: 'auto',
+      background: 'rgba(15,22,36,0.98)',
+      border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: '10px',
+      padding: '1.25rem'
+    },
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.95rem',
+      fontWeight: 700,
+      color: '#f1f5f9',
+      marginBottom: '1rem'
+    }
+  }, "New Pilot Campaign"), /*#__PURE__*/React.createElement("form", {
+    onSubmit: submit
+  }, /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Name *", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    required: true,
+    value: form.name,
+    onChange: set('name'),
+    placeholder: "e.g. Texas Renewal Pressure Test"
+  })), /*#__PURE__*/React.createElement("label", {
+    style: {
+      ...mfLabelStyle(),
+      marginTop: '8px',
+      display: 'block'
+    }
+  }, "Offer Page *", /*#__PURE__*/React.createElement("select", {
+    style: mfFieldStyle(),
+    value: form.pageVariant,
+    onChange: set('pageVariant')
+  }, MF_OFFER_PAGE_OPTIONS.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o.slug,
+    value: o.slug
+  }, o.label)))), /*#__PURE__*/React.createElement("label", {
+    style: {
+      ...mfLabelStyle(),
+      marginTop: '8px',
+      display: 'block'
+    }
+  }, "Description", /*#__PURE__*/React.createElement("textarea", {
+    style: {
+      ...mfFieldStyle(),
+      minHeight: '50px'
+    },
+    value: form.description,
+    onChange: set('description')
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '8px',
+      marginTop: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Target State", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.targetState,
+    onChange: set('targetState'),
+    placeholder: "TX"
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Target City", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.targetCity,
+    onChange: set('targetCity')
+  }))), /*#__PURE__*/React.createElement("label", {
+    style: {
+      ...mfLabelStyle(),
+      marginTop: '8px',
+      display: 'block'
+    }
+  }, "Target Segment", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.targetSegment,
+    onChange: set('targetSegment'),
+    placeholder: "e.g. garden-style, 150-300 units"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr 1fr',
+      gap: '8px',
+      marginTop: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "UTM Source", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.utmSource,
+    onChange: set('utmSource')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "UTM Medium", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.utmMedium,
+    onChange: set('utmMedium')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "UTM Campaign", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.utmCampaign,
+    onChange: set('utmCampaign'),
+    placeholder: "tx_renewal_q3"
+  }))), error && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#ef4444',
+      fontSize: '0.75rem',
+      marginTop: '8px'
+    }
+  }, error), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'flex-end',
+      gap: '8px',
+      marginTop: '1rem'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: onClose,
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.12)',
+      color: '#94a3b8',
+      padding: '0.5rem 0.9rem',
+      borderRadius: '0.5rem',
+      cursor: 'pointer',
+      fontSize: '0.78rem'
+    }
+  }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    disabled: busy,
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      padding: '0.5rem 0.9rem',
+      borderRadius: '0.5rem',
+      fontWeight: 700,
+      cursor: busy ? 'not-allowed' : 'pointer',
+      fontSize: '0.78rem'
+    }
+  }, busy ? 'Creating…' : 'Create Campaign')))));
+}
+function MultifamilyCampaignRow({
+  campaign,
+  onOpen
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    onClick: () => onOpen(campaign.id),
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '8px',
+      padding: '12px 14px',
+      marginBottom: '8px',
+      cursor: 'pointer',
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.9rem',
+      fontWeight: 700,
+      color: '#f1f5f9'
+    }
+  }, campaign.name), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.72rem',
+      color: '#94a3b8',
+      marginTop: '3px'
+    }
+  }, (MF_OFFER_PAGE_OPTIONS.find(o => o.slug === campaign.page_variant) || {}).label || campaign.page_variant, campaign.last_activity_at ? ` · last activity ${String(campaign.last_activity_at).slice(0, 10)}` : '')), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '18px',
+      alignItems: 'center',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(campaign.status === 'active' ? '#34d399' : campaign.status === 'paused' ? '#facc15' : campaign.status === 'completed' ? '#64748b' : '#a78bfa')
+  }, campaign.status), [['Targets', campaign.target_count], ['Contacted', campaign.contacted_count], ['Converted', campaign.converted_count], ['Meetings', campaign.meeting_count]].map(([label, value]) => /*#__PURE__*/React.createElement("div", {
+    key: label,
+    style: {
+      textAlign: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.6rem',
+      color: '#64748b'
+    }
+  }, label), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.9rem',
+      fontWeight: 700,
+      color: '#f1f5f9'
+    }
+  }, value || 0)))));
+}
+function MultifamilyCampaignsPanel({
+  activeTab,
+  setActiveTab,
+  user
+}) {
+  const [campaigns, setCampaigns] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [showNew, setShowNew] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch('/api/multifamily/campaigns');
+      const j = r.ok ? await r.json() : {
+        campaigns: []
+      };
+      setCampaigns(j.campaigns || []);
+    } catch (e) {
+      setCampaigns([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
+  if (selectedId) {
+    return /*#__PURE__*/React.createElement(MultifamilyCampaignDetailView, {
+      campaignId: selectedId,
+      onBack: () => {
+        setSelectedId(null);
+        load();
+      },
+      activeTab: activeTab,
+      setActiveTab: setActiveTab,
+      user: user
+    });
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: '1040px',
+      margin: '0 auto'
+    }
+  }, /*#__PURE__*/React.createElement(MultifamilyHeader, {
+    onAddLead: () => {}
+  }), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
+    activeTab: activeTab,
+    setActiveTab: setActiveTab,
+    user: user
+  }), showNew && /*#__PURE__*/React.createElement(MultifamilyNewCampaignModal, {
+    onClose: () => setShowNew(false),
+    onCreated: c => {
+      setShowNew(false);
+      load();
+      setSelectedId(c.id);
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: '1rem'
+    }
+  }, /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: '#64748b',
+      fontSize: '0.78rem',
+      margin: 0
+    }
+  }, "Pilot Campaigns \u2014 controlled outbound/manual prospecting efforts, each tied to one offer page. Generate tracked links, track conversion, learn what works."), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowNew(true),
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      padding: '0.5rem 0.9rem',
+      borderRadius: '0.5rem',
+      fontWeight: 700,
+      cursor: 'pointer',
+      fontSize: '0.78rem',
+      whiteSpace: 'nowrap'
+    }
+  }, "+ New Campaign")), loading && !campaigns && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'center',
+      padding: '3rem',
+      color: '#f59e0b',
+      fontFamily: "'Orbitron', sans-serif"
+    }
+  }, "LOADING CAMPAIGNS..."), !loading && campaigns && campaigns.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'center',
+      padding: '2.5rem 1.5rem',
+      background: 'rgba(15,22,36,0.6)',
+      border: '1px dashed rgba(255,255,255,0.12)',
+      borderRadius: '10px',
+      color: '#64748b'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.85rem',
+      marginBottom: '10px'
+    }
+  }, "No pilot campaigns yet."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.76rem',
+      marginBottom: '14px'
+    }
+  }, "Create one to start testing the funnel with real, targeted prospects."), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowNew(true),
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      padding: '0.5rem 0.9rem',
+      borderRadius: '0.5rem',
+      fontWeight: 700,
+      cursor: 'pointer',
+      fontSize: '0.78rem'
+    }
+  }, "+ New Campaign")), !loading && campaigns && campaigns.length > 0 && campaigns.map(c => /*#__PURE__*/React.createElement(MultifamilyCampaignRow, {
+    key: c.id,
+    campaign: c,
+    onOpen: setSelectedId
+  })));
+}
+function MultifamilyNewTargetModal({
+  campaignId,
+  onClose,
+  onCreated
+}) {
+  const [form, setForm] = useState({
+    company: '',
+    contactName: '',
+    email: '',
+    phone: '',
+    linkedinUrl: '',
+    city: '',
+    state: '',
+    segment: '',
+    notes: ''
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const set = key => e => setForm(s => ({
+    ...s,
+    [key]: e.target.value
+  }));
+  const submit = async e => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/multifamily/campaigns/${campaignId}/targets`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(form)
+      });
+      const j = await r.json();
+      if (r.ok && j.success) {
+        onCreated(j.target);
+      } else {
+        setError((j.errors || ['Failed to add target.']).join('; '));
+      }
+    } catch (err) {
+      setError('Network error: ' + err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0,0,0,0.55)',
+      zIndex: 2100,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center'
+    },
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: '420px',
+      maxHeight: '85vh',
+      overflowY: 'auto',
+      background: 'rgba(15,22,36,0.98)',
+      border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: '10px',
+      padding: '1.25rem'
+    },
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.95rem',
+      fontWeight: 700,
+      color: '#f1f5f9',
+      marginBottom: '1rem'
+    }
+  }, "Add Campaign Target"), /*#__PURE__*/React.createElement("form", {
+    onSubmit: submit
+  }, /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Company", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.company,
+    onChange: set('company')
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '8px',
+      marginTop: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Contact Name", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.contactName,
+    onChange: set('contactName')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Email", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    type: "email",
+    value: form.email,
+    onChange: set('email')
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '8px',
+      marginTop: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Phone", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.phone,
+    onChange: set('phone')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "LinkedIn URL", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.linkedinUrl,
+    onChange: set('linkedinUrl')
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '8px',
+      marginTop: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "City", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.city,
+    onChange: set('city')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "State", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.state,
+    onChange: set('state'),
+    placeholder: "TX"
+  }))), /*#__PURE__*/React.createElement("label", {
+    style: {
+      ...mfLabelStyle(),
+      marginTop: '8px',
+      display: 'block'
+    }
+  }, "Segment", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.segment,
+    onChange: set('segment'),
+    placeholder: "e.g. garden-style, 150-300 units"
+  })), /*#__PURE__*/React.createElement("label", {
+    style: {
+      ...mfLabelStyle(),
+      marginTop: '8px',
+      display: 'block'
+    }
+  }, "Notes", /*#__PURE__*/React.createElement("textarea", {
+    style: {
+      ...mfFieldStyle(),
+      minHeight: '50px'
+    },
+    value: form.notes,
+    onChange: set('notes')
+  })), error && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#ef4444',
+      fontSize: '0.75rem',
+      marginTop: '8px'
+    }
+  }, error), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'flex-end',
+      gap: '8px',
+      marginTop: '1rem'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: onClose,
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.12)',
+      color: '#94a3b8',
+      padding: '0.5rem 0.9rem',
+      borderRadius: '0.5rem',
+      cursor: 'pointer',
+      fontSize: '0.78rem'
+    }
+  }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    disabled: busy,
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      padding: '0.5rem 0.9rem',
+      borderRadius: '0.5rem',
+      fontWeight: 700,
+      cursor: busy ? 'not-allowed' : 'pointer',
+      fontSize: '0.78rem'
+    }
+  }, busy ? 'Adding…' : 'Add Target')))));
+}
+const MF_CAMPAIGN_TARGET_STATUS_OPTIONS = [{
+  value: 'planned',
+  label: 'Planned'
+}, {
+  value: 'contacted',
+  label: 'Contacted'
+}, {
+  value: 'replied',
+  label: 'Replied'
+}, {
+  value: 'meeting_booked',
+  label: 'Meeting Booked'
+}, {
+  value: 'converted',
+  label: 'Converted'
+}, {
+  value: 'not_fit',
+  label: 'Not a Fit'
+}, {
+  value: 'nurture',
+  label: 'Nurture'
+}];
+function mfTargetStatusColor(status) {
+  if (status === 'converted') return '#34d399';
+  if (status === 'meeting_booked') return '#60a5fa';
+  if (status === 'replied') return '#a78bfa';
+  if (status === 'contacted') return '#f59e0b';
+  if (status === 'not_fit') return '#ef4444';
+  if (status === 'nurture') return '#facc15';
+  return '#64748b';
+}
+function MultifamilyCampaignTargetRow({
+  target,
+  onChanged
+}) {
+  const [status, setStatus] = useState(target.status);
+  const [notes, setNotes] = useState(target.notes || '');
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    setSaved(false);
+    try {
+      const r = await fetch(`/api/multifamily/campaign-targets/${target.id}/status`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          status,
+          notes
+        })
+      });
+      if (r.ok) {
+        setSaved(true);
+        onChanged();
+      }
+    } catch (e) {}
+    setBusy(false);
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '8px',
+      padding: '13px 15px',
+      marginBottom: '9px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.85rem',
+      fontWeight: 700,
+      color: '#f1f5f9'
+    }
+  }, target.company || '(no company)'), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.72rem',
+      color: '#94a3b8'
+    }
+  }, target.contact_name || 'no contact', target.email ? ` · ${target.email}` : '', target.city ? ` · ${target.city}, ${target.state || ''}` : '')), /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(mfTargetStatusColor(target.status))
+  }, target.status.replace(/_/g, ' '))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      marginTop: '6px',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#60a5fa',
+      wordBreak: 'break-all',
+      flex: '1 1 260px'
+    }
+  }, target.tracked_url), /*#__PURE__*/React.createElement("button", {
+    onClick: () => mfCopy(window.location.origin + target.tracked_url),
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.1)',
+      color: '#64748b',
+      borderRadius: '4px',
+      padding: '1px 8px',
+      cursor: 'pointer',
+      fontSize: '0.65rem',
+      flexShrink: 0
+    }
+  }, "Copy Link")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px',
+      marginTop: '6px',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("select", {
+    value: status,
+    onChange: e => setStatus(e.target.value),
+    style: {
+      ...mfFieldStyle(),
+      width: 'auto',
+      padding: '4px 6px',
+      fontSize: '0.72rem'
+    }
+  }, MF_CAMPAIGN_TARGET_STATUS_OPTIONS.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o.value,
+    value: o.value
+  }, o.label))), /*#__PURE__*/React.createElement("input", {
+    value: notes,
+    onChange: e => setNotes(e.target.value),
+    placeholder: "Add a note\u2026",
+    style: {
+      ...mfFieldStyle(),
+      width: 'auto',
+      flex: '1 1 160px',
+      padding: '4px 6px',
+      fontSize: '0.72rem'
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: save,
+    disabled: busy,
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      borderRadius: '4px',
+      padding: '4px 10px',
+      cursor: busy ? 'not-allowed' : 'pointer',
+      fontSize: '0.7rem',
+      fontWeight: 700
+    }
+  }, busy ? 'Saving…' : 'Save'), saved && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#34d399'
+    }
+  }, "Saved."), target.lead_id && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#a78bfa')
+  }, "has lead")));
+}
+function MultifamilyCampaignDetailView({
+  campaignId,
+  onBack,
+  activeTab,
+  setActiveTab,
+  user
+}) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [showNewTarget, setShowNewTarget] = useState(false);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`/api/multifamily/campaigns/${campaignId}`);
+      const j = r.ok ? await r.json() : null;
+      setData(j);
+    } catch (e) {
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [campaignId]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  const campaign = data && data.campaign;
+  const targets = data && data.targets || [];
+  const contacted = targets.filter(t => t.status !== 'planned').length;
+  const converted = targets.filter(t => t.status === 'converted').length;
+  const meetings = targets.filter(t => t.status === 'meeting_booked').length;
+  const conversionRate = targets.length ? Math.round(converted / targets.length * 100) : 0;
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: '1040px',
+      margin: '0 auto'
+    }
+  }, /*#__PURE__*/React.createElement(MultifamilyHeader, {
+    onAddLead: () => {}
+  }), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
+    activeTab: activeTab,
+    setActiveTab: setActiveTab,
+    user: user
+  }), showNewTarget && /*#__PURE__*/React.createElement(MultifamilyNewTargetModal, {
+    campaignId: campaignId,
+    onClose: () => setShowNewTarget(false),
+    onCreated: () => {
+      setShowNewTarget(false);
+      load();
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: onBack,
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.12)',
+      color: '#94a3b8',
+      padding: '0.4rem 0.8rem',
+      borderRadius: '0.5rem',
+      cursor: 'pointer',
+      fontSize: '0.74rem',
+      marginBottom: '1rem'
+    }
+  }, "\u2190 Back to Campaigns"), loading && !data && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'center',
+      padding: '3rem',
+      color: '#f59e0b',
+      fontFamily: "'Orbitron', sans-serif"
+    }
+  }, "LOADING CAMPAIGN..."), !loading && campaign && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '10px',
+      padding: '14px 16px',
+      marginBottom: '1rem'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      flexWrap: 'wrap',
+      gap: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '1.05rem',
+      fontWeight: 700,
+      color: '#f1f5f9'
+    }
+  }, campaign.name), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.76rem',
+      color: '#94a3b8',
+      marginTop: '3px'
+    }
+  }, (MF_OFFER_PAGE_OPTIONS.find(o => o.slug === campaign.page_variant) || {}).label || campaign.page_variant, campaign.target_state ? ` · ${campaign.target_state}` : '', campaign.target_city ? `, ${campaign.target_city}` : ''), campaign.description && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.78rem',
+      color: '#cbd5e1',
+      marginTop: '6px'
+    }
+  }, campaign.description)), /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(campaign.status === 'active' ? '#34d399' : campaign.status === 'paused' ? '#facc15' : campaign.status === 'completed' ? '#64748b' : '#a78bfa')
+  }, campaign.status))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+      gap: '10px',
+      marginBottom: '1.25rem'
+    }
+  }, [['Targets', targets.length, '#f1f5f9'], ['Contacted', contacted, '#f59e0b'], ['Converted', converted, '#34d399'], ['Meetings', meetings, '#60a5fa'], ['Conversion Rate', `${conversionRate}%`, '#a78bfa']].map(([label, value, color]) => /*#__PURE__*/React.createElement("div", {
+    key: label,
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '8px',
+      padding: '10px 12px',
+      textAlign: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.58rem',
+      color: '#64748b'
+    }
+  }, label.toUpperCase()), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '1.15rem',
+      fontWeight: 700,
+      color
+    }
+  }, value)))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#64748b',
+      fontFamily: "'Orbitron', sans-serif",
+      letterSpacing: '0.06em'
+    }
+  }, "TARGETS"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowNewTarget(true),
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      padding: '0.4rem 0.8rem',
+      borderRadius: '0.5rem',
+      fontWeight: 700,
+      cursor: 'pointer',
+      fontSize: '0.74rem'
+    }
+  }, "+ Add Target")), targets.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#64748b',
+      fontSize: '0.8rem',
+      padding: '1rem 0'
+    }
+  }, "No targets yet \u2014 add prospects to start tracking outreach."), targets.map(t => /*#__PURE__*/React.createElement(MultifamilyCampaignTargetRow, {
+    key: t.id,
+    target: t,
+    onChanged: load
+  }))));
 }
 function MultifamilyOutreachWorkbenchPanel({
   activeTab,
@@ -10853,6 +12415,242 @@ function MultifamilyAttributionView({
     }
   }, rf))));
 }
+const MF_OFFER_PAGE_OPTIONS = [{
+  slug: 'benchmark',
+  label: 'Benchmark Review'
+}, {
+  slug: 'renewal-pressure',
+  label: 'Renewal Pressure Test'
+}, {
+  slug: 'acquisition',
+  label: 'Acquisition Assumption Review'
+}, {
+  slug: 'lender-requirement',
+  label: 'Lender Requirement Review'
+}, {
+  slug: 'builders-risk',
+  label: "Builder's Risk Review"
+}, {
+  slug: 'completion-leaseup',
+  label: 'Completion / Lease-Up Transition Review'
+}];
+function MultifamilyOutboundLinkView({
+  lead,
+  leadId,
+  onLinkGenerated
+}) {
+  const recommended = lead && lead.recommended_form_variant;
+  const recommendedSlug = recommended && recommended.slug;
+  const [pageVariant, setPageVariant] = useState(recommendedSlug || 'benchmark');
+  const [campaigns, setCampaigns] = useState([]);
+  const [campaignId, setCampaignId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  useEffect(() => {
+    if (recommendedSlug) setPageVariant(recommendedSlug);
+  }, [recommendedSlug]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/multifamily/campaigns?status=active');
+        const j = r.ok ? await r.json() : {
+          campaigns: []
+        };
+        setCampaigns(j.campaigns || []);
+      } catch (e) {
+        setCampaigns([]);
+      }
+    })();
+  }, []);
+  const selectedCampaign = campaigns.find(c => c.id === campaignId);
+  const generate = async () => {
+    setBusy(true);
+    setResult(null);
+    try {
+      let r, j, url;
+      if (campaignId) {
+        const contact = (lead.contacts || [])[0] || {};
+        r = await fetch(`/api/multifamily/campaigns/${campaignId}/targets`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            company: lead.company && lead.company.name,
+            contactName: contact.full_name,
+            email: contact.email,
+            phone: contact.phone,
+            city: lead.city,
+            state: lead.state,
+            leadId
+          })
+        });
+        j = await r.json();
+        url = j.target && j.target.tracked_url;
+      } else {
+        r = await fetch(`/api/multifamily/leads/${leadId}/outbound-link`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            pageVariant
+          })
+        });
+        j = await r.json();
+        url = j.url;
+      }
+      if (r.ok && j.success) {
+        setResult({
+          ok: true,
+          url: window.location.origin + url
+        });
+        if (onLinkGenerated) onLinkGenerated();
+      } else {
+        setResult({
+          ok: false,
+          message: (j.errors || ['Failed to generate link.']).join('; ')
+        });
+      }
+    } catch (err) {
+      setResult({
+        ok: false,
+        message: 'Network error: ' + err.message
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const links = lead && lead.outbound_links || [];
+  return /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+    title: "OUTBOUND-TO-FORM LINK"
+  }, recommended && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      marginBottom: '10px'
+    }
+  }, recommended.reason), campaigns.length > 0 && /*#__PURE__*/React.createElement("label", {
+    style: {
+      ...mfLabelStyle(),
+      display: 'block',
+      marginBottom: '6px'
+    }
+  }, "Send via campaign (optional)", /*#__PURE__*/React.createElement("select", {
+    style: mfFieldStyle(),
+    value: campaignId,
+    onChange: e => setCampaignId(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "No campaign \u2014 ad-hoc link"), campaigns.map(c => /*#__PURE__*/React.createElement("option", {
+    key: c.id,
+    value: c.id
+  }, c.name)))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '8px',
+      alignItems: 'center',
+      marginBottom: '8px'
+    }
+  }, campaignId ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      flex: '1 1 auto'
+    }
+  }, "Offer page: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#cbd5e1'
+    }
+  }, (MF_OFFER_PAGE_OPTIONS.find(o => o.slug === (selectedCampaign || {}).page_variant) || {}).label || (selectedCampaign || {}).page_variant), " (set by the campaign)") : /*#__PURE__*/React.createElement("select", {
+    style: mfFieldStyle(),
+    value: pageVariant,
+    onChange: e => setPageVariant(e.target.value)
+  }, MF_OFFER_PAGE_OPTIONS.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o.slug,
+    value: o.slug
+  }, o.label))), /*#__PURE__*/React.createElement("button", {
+    onClick: generate,
+    disabled: busy || lead && lead.is_demo,
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      borderRadius: '6px',
+      padding: '6px 12px',
+      fontWeight: 700,
+      fontSize: '0.75rem',
+      cursor: busy ? 'not-allowed' : 'pointer'
+    }
+  }, busy ? 'Generating…' : 'Generate Link')), lead && lead.is_demo && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.72rem',
+      color: '#f97316'
+    }
+  }, "This is demo data \u2014 links can't be generated."), result && result.ok && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: '8px',
+      background: 'rgba(255,255,255,0.03)',
+      borderRadius: '6px',
+      padding: '8px',
+      marginTop: '6px'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.72rem',
+      color: '#60a5fa',
+      wordBreak: 'break-all'
+    }
+  }, result.url), /*#__PURE__*/React.createElement("button", {
+    onClick: () => mfCopy(result.url),
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.1)',
+      color: '#64748b',
+      borderRadius: '4px',
+      padding: '1px 8px',
+      cursor: 'pointer',
+      fontSize: '0.65rem',
+      flexShrink: 0
+    }
+  }, "Copy")), result && !result.ok && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.72rem',
+      color: '#ef4444',
+      marginTop: '6px'
+    }
+  }, result.message), links.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '12px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#64748b',
+      marginBottom: '4px'
+    }
+  }, "LINKS SENT"), links.map((l, i) => /*#__PURE__*/React.createElement("div", {
+    key: l.token || i,
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: '8px',
+      fontSize: '0.72rem',
+      padding: '4px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#cbd5e1'
+    }
+  }, l.page_variant || '—', " \xB7 ", l.created_at ? String(l.created_at).slice(0, 10) : '—'), /*#__PURE__*/React.createElement("span", {
+    style: l.converted_at ? mfPillStyle('#34d399') : mfPillStyle('#64748b')
+  }, l.converted_at ? 'converted' : 'sent')))));
+}
 function MultifamilyDataQualityView() {
   const [cands, setCands] = useState(null);
   const [busy, setBusy] = useState(null);
@@ -10957,6 +12755,273 @@ function MultifamilyDataQualityView() {
     }
   }, "Dismiss")))));
 }
+function MultifamilySerpRunnerView() {
+  const [config, setConfig] = useState(null);
+  const [form, setForm] = useState({
+    category: '',
+    state: '',
+    city: '',
+    lookbackDays: 30,
+    limit: 10,
+    dryRun: true
+  });
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/multifamily/admin/serp-config');
+        const j = r.ok ? await r.json() : null;
+        if (j) {
+          setConfig(j);
+          setForm(f => ({
+            ...f,
+            category: (j.categories || [])[0] || '',
+            state: (j.launch_states || [])[0] || ''
+          }));
+        }
+      } catch (e) {}
+    })();
+  }, []);
+  const update = field => e => {
+    const value = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+    setForm(f => ({
+      ...f,
+      [field]: value
+    }));
+  };
+  const run = async () => {
+    setRunning(true);
+    setError(null);
+    setResult(null);
+    try {
+      const r = await fetch('/api/multifamily/admin/serp-run', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          category: form.category,
+          state: form.state,
+          city: form.city || undefined,
+          lookbackDays: Number(form.lookbackDays) || 30,
+          limit: Number(form.limit) || 10,
+          dryRun: form.dryRun
+        })
+      });
+      const j = await r.json();
+      if (!r.ok || j.error) {
+        setError(j.error || `HTTP ${r.status}`);
+      } else {
+        setResult(j);
+      }
+    } catch (e) {
+      setError('Request failed.');
+    } finally {
+      setRunning(false);
+    }
+  };
+  const inputStyle = {
+    background: 'rgba(255,255,255,0.03)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    color: '#e2e8f0',
+    borderRadius: '4px',
+    padding: '4px 8px',
+    fontSize: '0.75rem'
+  };
+  const labelStyle = {
+    fontSize: '0.62rem',
+    color: '#64748b',
+    marginBottom: '2px',
+    display: 'block'
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '1.5rem'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, "RUN SERP SEARCH"), !config && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#475569'
+    }
+  }, "Loading\u2026"), config && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '10px',
+      flexWrap: 'wrap',
+      alignItems: 'flex-end',
+      marginBottom: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: labelStyle
+  }, "Category"), /*#__PURE__*/React.createElement("select", {
+    value: form.category,
+    onChange: update('category'),
+    style: inputStyle
+  }, (config.categories || []).map(c => /*#__PURE__*/React.createElement("option", {
+    key: c,
+    value: c
+  }, _mfTitleCase(c))))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: labelStyle
+  }, "State"), /*#__PURE__*/React.createElement("select", {
+    value: form.state,
+    onChange: update('state'),
+    style: inputStyle
+  }, /*#__PURE__*/React.createElement("optgroup", {
+    label: "Launch states"
+  }, (config.launch_states || []).map(s => /*#__PURE__*/React.createElement("option", {
+    key: s,
+    value: s
+  }, s))), /*#__PURE__*/React.createElement("optgroup", {
+    label: "Future states"
+  }, (config.future_states || []).map(s => /*#__PURE__*/React.createElement("option", {
+    key: s,
+    value: s
+  }, s))))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: labelStyle
+  }, "City (optional)"), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    value: form.city,
+    onChange: update('city'),
+    style: inputStyle,
+    placeholder: "e.g. Austin"
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: labelStyle
+  }, "Lookback days"), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    min: "1",
+    max: "365",
+    value: form.lookbackDays,
+    onChange: update('lookbackDays'),
+    style: {
+      ...inputStyle,
+      width: '70px'
+    }
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: labelStyle
+  }, "Result limit"), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    min: "1",
+    max: "20",
+    value: form.limit,
+    onChange: update('limit'),
+    style: {
+      ...inputStyle,
+      width: '60px'
+    }
+  })), /*#__PURE__*/React.createElement("label", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '4px',
+      fontSize: '0.72rem',
+      color: '#94a3b8'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: form.dryRun,
+    onChange: update('dryRun')
+  }), "Dry run"), /*#__PURE__*/React.createElement("button", {
+    onClick: run,
+    disabled: running,
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(245,158,11,0.4)',
+      color: '#f59e0b',
+      borderRadius: '4px',
+      padding: '5px 14px',
+      cursor: 'pointer',
+      fontSize: '0.75rem',
+      fontWeight: 600,
+      opacity: running ? 0.6 : 1
+    }
+  }, running ? 'Running…' : 'Run SERP Search')), error && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#ef4444',
+      marginBottom: '10px'
+    }
+  }, error), result && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '16px',
+      flexWrap: 'wrap',
+      fontSize: '0.78rem',
+      color: '#94a3b8',
+      marginBottom: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "Found: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#e2e8f0'
+    }
+  }, result.found)), result.dry_run ? /*#__PURE__*/React.createElement("span", null, "Would ingest: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#34d399'
+    }
+  }, result.accepted_would_ingest)) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", null, "Created: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#34d399'
+    }
+  }, result.created)), /*#__PURE__*/React.createElement("span", null, "Merged: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#38bdf8'
+    }
+  }, result.merged)), /*#__PURE__*/React.createElement("span", null, "Review candidates: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#facc15'
+    }
+  }, result.review_candidates))), /*#__PURE__*/React.createElement("span", null, "Rejected: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#ef4444'
+    }
+  }, result.rejected))), result.warnings && result.warnings.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#f59e0b',
+      marginBottom: '8px'
+    }
+  }, result.warnings.join(' · ')), /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxHeight: '260px',
+      overflowY: 'auto'
+    }
+  }, (result.results || []).map((row, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: '6px',
+      fontSize: '0.72rem',
+      color: '#94a3b8',
+      padding: '5px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      maxWidth: '55%'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(row.accepted ? '#34d399' : '#64748b')
+  }, row.accepted ? 'accepted' : 'rejected'), ' ', row.title || row.url), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#64748b'
+    }
+  }, (row.reason_codes || []).join(', ')))), (result.results || []).length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#475569'
+    }
+  }, "No results found for this search."))));
+}
 function MultifamilySourceRunsView() {
   const [runs, setRuns] = useState(null);
   useEffect(() => {
@@ -11013,7 +13078,7 @@ function MultifamilySourceRunsView() {
     }
   }, /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle(statusColor[run.status] || '#64748b')
-  }, run.status || 'unknown'), " ", run.source, run.started_at ? ' · ' + String(run.started_at).slice(0, 19).replace('T', ' ') : ''), /*#__PURE__*/React.createElement("span", null, 'found ' + (run.records_found || 0), ' · created ' + (run.records_created || 0), ' · merged ' + (run.records_merged || 0), ' · rejected ' + (run.records_rejected || 0)))));
+  }, run.status || 'unknown'), " ", run.source, (run.category ? ' · ' + run.category : ''), (run.state ? ' · ' + run.state : ''), run.started_at ? ' · ' + String(run.started_at).slice(0, 19).replace('T', ' ') : ''), /*#__PURE__*/React.createElement("span", null, 'found ' + (run.records_found || 0), ' · created ' + (run.records_created || 0), ' · merged ' + (run.records_merged || 0), ' · rejected ' + (run.records_rejected || 0)))));
 }
 const MF_OUTCOME_TYPES = ['meeting_booked', 'submission_received', 'sov_received', 'loss_runs_received', 'application_received', 'quote_started', 'quote_sent', 'won', 'lost', 'not_a_fit', 'nurture', 'dead'];
 function mfOutcomeLabel(t) {

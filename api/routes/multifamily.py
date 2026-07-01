@@ -12,6 +12,7 @@ responses) only when it has zero matching real leads.
 """
 import dataclasses
 from datetime import date, datetime, timedelta
+from typing import Any, Dict
 
 from flask import Blueprint, request, jsonify
 
@@ -25,7 +26,7 @@ from multifamily.daily_brief.multifamily_daily_brief_builder import build_daily_
 from multifamily.intake import build_lead_from_intake
 from multifamily import repository
 from multifamily import spam_guard
-from multifamily.types import ACTIVITY_TYPES, OUTCOME_TYPES
+from multifamily.types import ACTIVITY_TYPES, OUTCOME_TYPES, CAMPAIGN_STATUSES, CAMPAIGN_TARGET_STATUSES
 from multifamily.stage_timing import compute_stage_timing
 from multifamily.timing import detect_process_stage
 from multifamily.timing.process_stage_types import OUTREACH_WINDOW_RANK
@@ -38,6 +39,15 @@ from multifamily.sales_intelligence.follow_up_suggestions import (
     build_follow_up_suggestion as _follow_up_suggestion,
     attach_follow_up_suggestions as _attach_follow_up_suggestions,
 )
+from multifamily.sales_intelligence.tone_guardrails import check_message_package, worst_status
+from multifamily.serp.query_templates import SerpQueryConfig, SERP_CATEGORIES, SERP_LAUNCH_STATES, SERP_FUTURE_STATES
+from multifamily.forms.form_variants import (
+    FORM_VARIANTS, FORM_VARIANT_SLUGS, DEFAULT_FORM_VARIANT_SLUG,
+    recommend_form_variant_for_situation, recommendation_reason_for_slug,
+)
+from multifamily.funnel.urgency import compute_funnel_urgency
+from multifamily.funnel.overview_widgets import best_inbound_handraiser, build_funnel_widgets
+from multifamily.serp.serp_collector import run_serp_collection
 
 multifamily_bp = Blueprint('multifamily', __name__, url_prefix='/api/multifamily')
 
@@ -130,6 +140,8 @@ def _serialize_lead(lead, is_admin, stage_result=None, with_history=False, curre
     # Signal architecture (Phase C): cheap, always-on.
     d['signal_count'] = len(lead.signals or [])
     d['signal_timeline'] = _signal_timeline(lead)
+    # Funnel Phase 4: derived, read-only — never touches score_total/category.
+    d['funnel_urgency'] = compute_funnel_urgency(lead)
     # Outcome tracking: cheap (bulk-fetched), always-on. Demo leads never
     # carry a persisted outcome.
     d['current_outcome'] = current_outcome
@@ -155,11 +167,29 @@ def _serialize_lead(lead, is_admin, stage_result=None, with_history=False, curre
             d['snapshots'] = repository.get_snapshots_for_lead(lead.id)
             activities = repository.get_activities_for_lead(lead.id)
         d['sales_intelligence'] = _sales_intelligence_summary(lead, sr, activities, outcomes)
+        if not lead.is_demo:
+            d['recommended_form_variant'] = _recommended_form_variant(lead)
+            d['outbound_links'] = repository.get_outbound_links_for_lead(lead.id)
     if not is_admin:
         for f in _ADMIN_ONLY_LEAD_FIELDS:
             d.pop(f, None)
         d.pop('spam_status', None)  # internal triage state — admin only
     return d
+
+
+def _recommended_form_variant(lead) -> Dict[str, Any]:
+    """Which offer page best fits sending THIS lead next, and why —
+    surfaced by the Outreach Workbench alongside a "generate link"
+    action (Funnel Phase 3). Never auto-sent; just a recommendation an
+    operator acts on manually."""
+    situation = repository.lead_situation_of(lead)
+    variant = recommend_form_variant_for_situation(situation)
+    return {
+        'slug': variant.slug,
+        'headline': variant.headline,
+        'cta': variant.cta,
+        'reason': recommendation_reason_for_slug(variant.slug),
+    }
 
 
 def _serialize_leads(leads):
@@ -186,6 +216,23 @@ def _view(filter_fn):
         'leads': _serialize_leads(leads),
         'count': len(leads),
         'is_demo_data': bool(leads) and all(l.is_demo for l in leads),
+    })
+
+
+@multifamily_bp.route('/form-variants', methods=['GET'])
+def get_form_variants():
+    """Public, read-only config for every offer-page/form variant
+    (multifamily/forms/form_variants.py — single source of truth). Used
+    by the public offer pages (Multifamily Funnel Phase 2) to render
+    headline/subheadline/CTA/fields/confirmation without duplicating
+    copy in multiple HTML files, and by the Outreach Workbench's
+    page-recommendation (Phase 3). No auth — this is public marketing
+    copy, not lead data."""
+    variants = {slug: dataclasses.asdict(v) for slug, v in FORM_VARIANTS.items()}
+    return jsonify({
+        'variants': variants,
+        'default_slug': DEFAULT_FORM_VARIANT_SLUG,
+        'slugs': FORM_VARIANT_SLUGS,
     })
 
 
@@ -252,15 +299,102 @@ def create_lead():
     raw_source = (payload.get('source') or '').strip()
     incoming_signal_id = lead.signals[0].id if lead.signals else None
 
+    # ---- Pilot Campaign conversion (Campaign Phase 2) ----
+    # A submission carrying ?t=<token> came from a specific campaign
+    # target's tracked link — highest precedence, since a named campaign
+    # is a more specific, more deliberate identity resolution than an
+    # ad-hoc outbound link. An unknown/already-converted token silently
+    # falls through to the mfRef / normal-matching paths below (never
+    # surfaced to the submitter).
+    campaign_token = (payload.get('campaignToken') or '').strip() or None
+    campaign_target = repository.get_campaign_target_by_token(campaign_token) if campaign_token else None
+    if campaign_target and campaign_target.get('converted_at'):
+        campaign_target = None
+    campaign_row = repository.get_campaign(campaign_target['campaign_id']) if campaign_target else None
+    if campaign_target and not campaign_row:
+        campaign_target = None  # campaign itself was deleted — nothing sane to resolve to
+
+    # ---- Outbound-to-form merge-back (Funnel Phase 3) ----
+    # A submission carrying ?mf_ref=<token> came from a link an operator
+    # generated for a SPECIFIC known lead — identity is already resolved,
+    # so this merges deterministically into that lead rather than running
+    # find_candidates() against the whole pool. An unknown/already-used
+    # token, or one whose target lead no longer resolves, silently falls
+    # through to the normal fuzzy-matching path below (never surfaced to
+    # the submitter).
+    outbound_token = (payload.get('mfRef') or '').strip() or None
+    outbound_link = repository.get_outbound_link(outbound_token) if (outbound_token and not campaign_target) else None
+    outbound_target = None
+    if outbound_link and not outbound_link.get('converted_at'):
+        outbound_target = repository.get_active_lead_by_id(outbound_link['lead_id'])
+
     # ---- Matching / merge (signal-architecture Phase B) ----
     # Rejected/spam submissions are persisted for audit but NEVER matched,
-    # merged, or used to strengthen an existing lead.
+    # merged, or used to strengthen an existing lead — and (Campaign
+    # Phase 2) never convert a campaign target or an outbound link either,
+    # since this branch is checked BEFORE either token is ever resolved
+    # into an action.
     merged_into = None
     review_count = 0
+    outbound_conversion = False
+    campaign_conversion = False
     if spam_status == 'rejected':
         repository.insert_lead(lead)
         repository.persist_lead_signals(lead)
         repository.record_lead_attribution_touch(lead, touch_type='first')
+    elif campaign_target:
+        # The campaign's own page_variant/offer_type/UTM fields are the
+        # authoritative identity for this conversion — stamp the incoming
+        # lead with them rather than trusting whatever the submitted
+        # payload happened to carry (defensive against a stale/edited URL).
+        lead.page_variant = campaign_row['page_variant']
+        lead.offer_type = campaign_row['offer_type']
+        lead.campaign_id = campaign_row['id']
+
+        existing_target_lead = (
+            repository.get_active_lead_by_id(campaign_target['lead_id']) if campaign_target.get('lead_id') else None
+        )
+        if existing_target_lead:
+            # This target was already linked to a known lead (e.g. an
+            # operator attached one manually, or a prior partial
+            # conversion) — merge deterministically, same as an
+            # outbound-link conversion.
+            mf_matching.merge_incoming_on_intake(existing_target_lead, lead, touch_type='conversion')
+            lead = repository.get_lead_by_id(existing_target_lead.id) or existing_target_lead
+            merged_into = lead.id
+            snapshot_lead(lead, 'merged')
+        else:
+            # Cold prospect: route through the SAME matching engine every
+            # other submission uses, so an exact-identity match still
+            # auto-merges instead of creating a duplicate lead.
+            result = mf_matching.classify(lead, repository.get_real_leads())
+            auto = result.get('auto')
+            if auto:
+                mf_matching.merge_incoming_on_intake(auto.lead, lead, touch_type='conversion')
+                lead = repository.get_lead_by_id(auto.lead.id) or auto.lead
+                merged_into = lead.id
+                snapshot_lead(lead, 'merged')
+            else:
+                repository.insert_lead(lead)
+                repository.persist_lead_signals(lead)
+                repository.record_lead_attribution_touch(lead, touch_type='conversion')
+                snapshot_lead(lead, 'created')
+        campaign_conversion = True
+        repository.mark_campaign_target_converted(campaign_target['id'], lead.id)
+        mf_notifications.notify_campaign_conversion(lead.id, lead.company.name, campaign_row['name'], campaign_row['page_variant'])
+        if lead.score and lead.score.category == 'call_today':
+            mf_notifications.notify_new_call_today_lead(lead.id, lead.company.name)
+    elif outbound_target:
+        mf_matching.merge_incoming_on_intake(outbound_target, lead, touch_type='conversion')
+        merged_into = outbound_target.id
+        outbound_conversion = True
+        lead = repository.get_lead_by_id(outbound_target.id) or outbound_target
+        repository.mark_outbound_link_converted(outbound_token, lead.id)
+        snapshot_lead(lead, 'merged')
+        if raw_source == 'benchmark_form':
+            mf_notifications.notify_outbound_conversion(lead.id, lead.company.name, lead.page_variant, outbound_token)
+        if lead.score and lead.score.category == 'call_today':
+            mf_notifications.notify_new_call_today_lead(lead.id, lead.company.name)
     else:
         result = mf_matching.classify(lead, repository.get_real_leads())
         auto = result.get('auto')
@@ -288,13 +422,22 @@ def create_lead():
             snapshot_lead(lead, 'created')
 
         if raw_source == 'benchmark_form':
-            mf_notifications.notify_new_benchmark_submission(lead.id, lead.company.name, incoming_signal_id)
+            variant = FORM_VARIANTS.get(lead.page_variant) if lead.page_variant else None
+            priority = variant.notification_priority if variant else 'same_day'
+            mf_notifications.notify_new_form_submission(
+                lead.id, lead.company.name, lead.page_variant, lead.offer_type,
+                priority=priority, signal_id=incoming_signal_id,
+            )
         if lead.score and lead.score.category == 'call_today':
             mf_notifications.notify_new_call_today_lead(lead.id, lead.company.name)
 
     if spam_status == 'rejected':
         event_type = 'rejected_honeypot' if 'HONEYPOT_FILLED' in spam_reason_codes else 'rejected_garbage'
         mf_notifications.check_spam_spike()
+    elif campaign_conversion:
+        event_type = 'accepted_converted_from_campaign'
+    elif outbound_conversion:
+        event_type = 'accepted_converted_from_outbound'
     elif merged_into:
         event_type = 'accepted_merged'
     elif spam_status == 'suspicious':
@@ -303,6 +446,7 @@ def create_lead():
         event_type = 'accepted_clean'
     repository.record_intake_event(event_type, ip_hash, email, {
         'spam_reason_codes': spam_reason_codes, 'merged_into': merged_into, 'review_candidates': review_count,
+        'outbound_conversion': outbound_conversion, 'campaign_conversion': campaign_conversion,
     })
 
     # Always a normal-looking success — never reveal spam detection to the
@@ -559,6 +703,23 @@ def get_overview():
     }
     best_first_action = mission['best_first_call'] or mission['best_email_draft'] or mission['best_followup']
 
+    # --- Funnel widgets (Funnel Phase 7) ---
+    # `leads` is already priority-sorted (category > score > urgency), so
+    # the first real benchmark-form submission in it is the single best
+    # inbound hand-raiser to work right now.
+    stage_by_id = {l.id: sr for l, sr in staged}
+    handraiser = best_inbound_handraiser(leads)
+    best_handraiser = None
+    if handraiser:
+        activities, outcomes = _mission_activities_outcomes(handraiser)
+        best_handraiser = {
+            **_mission_item(handraiser, stage_by_id.get(handraiser.id), activities, outcomes),
+            'page_variant': handraiser.page_variant,
+            'offer_type': handraiser.offer_type,
+        }
+    campaign_perf = repository.get_campaign_performance()
+    funnel = {**build_funnel_widgets(perf, campaign_perf), 'best_inbound_handraiser': best_handraiser}
+
     payload = {
         'total_leads': len(leads),
         'real_lead_count': len(real_leads),
@@ -575,6 +736,7 @@ def get_overview():
         'top_campaign': top_campaign,
         'best_first_action': best_first_action,
         'mission': mission,
+        'funnel': funnel,
     }
     # Suspicious/spam count — admin only (Part 3).
     if is_admin:
@@ -637,6 +799,14 @@ def get_lead_sales_intelligence(lead_id):
     activities = [] if lead.is_demo else repository.get_activities_for_lead(lead_id)
     outcomes = [] if lead.is_demo else repository.get_outcomes_for_lead(lead_id)
     pkg = build_sales_intelligence(lead, activities=activities, outcomes=outcomes, variant=variant)
+    guardrail_results = check_message_package(pkg.messages)
+    tone_guardrail = {
+        'status': worst_status(guardrail_results),
+        'warnings': [
+            {'field': field, 'status': r.status, 'reasons': r.reasons}
+            for field, r in guardrail_results.items() if r.status != 'pass'
+        ],
+    }
     return jsonify({
         'lead_id': lead_id,
         'company': lead.company.name,
@@ -648,6 +818,7 @@ def get_lead_sales_intelligence(lead_id):
         'objection_playbook': [dataclasses.asdict(o) for o in pkg.objection_playbook],
         'follow_up_strategy': dataclasses.asdict(pkg.follow_up_strategy),
         'reasoning': dataclasses.asdict(pkg.reasoning),
+        'tone_guardrail': tone_guardrail,
     })
 
 
@@ -675,10 +846,57 @@ def get_match_candidates():
 
 @multifamily_bp.route('/admin/source-runs', methods=['GET'])
 def get_source_runs():
-    """Source-run history (populated by future automated collectors —
-    Phase E). Super-admin only."""
+    """Source-run history (populated by automated/manual collectors,
+    including the SERP admin runner below). Super-admin only. Optional
+    `?source=serp` filters to one collector's runs."""
     def _fn():
-        return jsonify({'source_runs': repository.get_source_runs(limit=int(request.args.get('limit', 50)))})
+        return jsonify({'source_runs': repository.get_source_runs(
+            limit=int(request.args.get('limit', 50)), source=request.args.get('source'),
+        )})
+    return _admin_only(_fn)
+
+
+@multifamily_bp.route('/admin/serp-config', methods=['GET'])
+def get_serp_config():
+    """Static config for the SERP admin runner's dropdowns — single
+    source of truth is multifamily/serp/query_templates.py. Super-admin
+    only (matches the runner itself)."""
+    def _fn():
+        return jsonify({
+            'categories': SERP_CATEGORIES,
+            'launch_states': SERP_LAUNCH_STATES,
+            'future_states': SERP_FUTURE_STATES,
+        })
+    return _admin_only(_fn)
+
+
+@multifamily_bp.route('/admin/serp-run', methods=['POST'])
+def run_serp_search():
+    """Manually trigger one Multifamily SERP category/state search
+    (Multifamily SERP Phase C). This is the only control surface for SERP
+    in this phase — there is no automated scheduling yet. Runs every
+    query template for the given category/state[/city], filters results,
+    and (unless dryRun) ingests accepted ones as contactless trigger
+    signals through the same real pipeline as any other collector
+    (spam gate -> matching -> merge/create -> source-run logging ->
+    snapshot). Super-admin only. Never sends anything, never scrapes
+    LinkedIn, never calls any API beyond the existing SerpAPI client."""
+    def _fn():
+        payload = request.get_json(silent=True) or {}
+        try:
+            config = SerpQueryConfig(
+                category=(payload.get('category') or ''),
+                state=(payload.get('state') or ''),
+                city=(payload.get('city') or None),
+                lookback_days=int(payload.get('lookbackDays', 30)),
+                limit=int(payload.get('limit', 10)),
+                confidence_threshold=float(payload.get('confidenceThreshold', 0.35)),
+            )
+        except (ValueError, TypeError) as exc:
+            return jsonify({'success': False, 'error': str(exc)}), 400
+        dry_run = bool(payload.get('dryRun', False))
+        result = run_serp_collection(config, dry_run=dry_run)
+        return jsonify({'success': result.get('error') is None, **result})
     return _admin_only(_fn)
 
 
@@ -730,6 +948,10 @@ def get_source_performance():
     """Part 8: source/UTM/campaign/offer performance over real leads."""
     data = repository.get_source_performance()
     data['is_demo_data'] = (data.get('total_real_leads', 0) == 0)
+    # Campaign Phase 5: Pilot Campaign performance — additive, entirely
+    # separate rollup from the lead-source view above (campaigns/targets,
+    # not leads/signals).
+    data['campaign_performance'] = repository.get_campaign_performance()
     return jsonify(data)
 
 
@@ -927,6 +1149,286 @@ def create_lead_snapshot(lead_id):
             return jsonify({'success': False, 'errors': ['Cannot snapshot demo data.']}), 400
         row = snapshot_lead(lead, 'manual_rerun')
         return jsonify({'success': True, 'snapshot': row}), 201
+
+    return _authorized()
+
+
+@multifamily_bp.route('/leads/<lead_id>/outbound-link', methods=['POST'])
+def create_lead_outbound_link(lead_id):
+    """Mint an outbound-to-form merge-back token for a specific lead
+    (Funnel Phase 3, part of the outbound-to-form lane of the funnel
+    strategy). An operator picks the offer page that best fits this
+    lead's situation, generates a link, and sends it manually through
+    whatever channel they'd already use (email, a call follow-up, a
+    LinkedIn message) — this never sends anything itself. When the
+    prospect submits that page carrying ?mf_ref=<token>, create_lead()
+    merges the submission straight into this lead. Login required."""
+    import app as _app
+    from flask import g
+
+    @_app.require_auth
+    def _authorized():
+        lead, err = _find_lead(lead_id)
+        if err:
+            return err
+        if lead.is_demo:
+            return jsonify({'success': False, 'errors': ['Cannot generate an outbound link for demo data.']}), 400
+
+        payload = request.get_json(silent=True) or {}
+        page_variant = (payload.get('pageVariant') or payload.get('page_variant') or '').strip() or None
+        variant = FORM_VARIANTS.get(page_variant) if page_variant else None
+        if page_variant and not variant:
+            return jsonify({'success': False, 'errors': [f'Unknown page_variant. Must be one of {FORM_VARIANT_SLUGS}']}), 400
+
+        campaign_id = (payload.get('campaignId') or payload.get('campaign_id') or '').strip() or None
+        source = (payload.get('source') or '').strip() or 'outbound_email'
+        user_email = (g.user or {}).get('email') if getattr(g, 'user', None) else None
+
+        row = repository.create_outbound_link(
+            lead_id=lead.id,
+            offer_type=(variant.offer_type if variant else None),
+            page_variant=page_variant,
+            campaign_id=campaign_id,
+            source=source,
+            created_by=user_email,
+        )
+        url = f'/mf-review/{page_variant}?mf_ref={row["token"]}' if page_variant else None
+        return jsonify({'success': True, 'link': row, 'url': url}), 201
+
+    return _authorized()
+
+
+@multifamily_bp.route('/leads/<lead_id>/outbound-links', methods=['GET'])
+def list_lead_outbound_links(lead_id):
+    """Every outbound link ever generated for this lead (newest first) —
+    lets the Outreach Workbench show "link already sent" instead of
+    minting a fresh token on every drawer open. Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        lead, err = _find_lead(lead_id)
+        if err:
+            return err
+        if lead.is_demo:
+            return jsonify({'lead_id': lead_id, 'links': []})
+        return jsonify({'lead_id': lead_id, 'links': repository.get_outbound_links_for_lead(lead_id)})
+
+    return _authorized()
+
+
+# ---- Pilot Campaign Control Center -----------------------------------------
+# A campaign is a controlled outbound/manual prospecting effort tied to
+# ONE offer page. Every endpoint here is internal/operator-facing
+# (require_auth) — the only PUBLIC surface a campaign ever touches is
+# the existing /mf-review/<page_variant> page + POST /leads (a target's
+# tracked link is just that URL with a ?t=<token> param).
+
+def _campaign_tracked_url(campaign_row, token):
+    from multifamily.campaigns.tracked_link import build_tracked_url
+    return build_tracked_url(campaign_row, token)
+
+
+@multifamily_bp.route('/campaigns', methods=['POST'])
+def create_campaign():
+    """Create a campaign bound to one offer page. offer_type is always
+    derived from page_variant (multifamily/forms/form_variants.py is
+    the single source of truth) — never accepted independently, so the
+    two can never drift apart. Login required."""
+    import app as _app
+    from flask import g
+
+    @_app.require_auth
+    def _authorized():
+        payload = request.get_json(silent=True) or {}
+        name = (payload.get('name') or '').strip()
+        page_variant = (payload.get('pageVariant') or payload.get('page_variant') or '').strip()
+        if not name:
+            return jsonify({'success': False, 'errors': ['name is required.']}), 400
+        variant = FORM_VARIANTS.get(page_variant)
+        if not variant:
+            return jsonify({'success': False, 'errors': [f'page_variant must be one of {FORM_VARIANT_SLUGS}']}), 400
+        status = (payload.get('status') or 'draft').strip()
+        if status not in CAMPAIGN_STATUSES:
+            return jsonify({'success': False, 'errors': [f'status must be one of {CAMPAIGN_STATUSES}']}), 400
+
+        user_email = (g.user or {}).get('email') if getattr(g, 'user', None) else None
+        row = repository.create_campaign(
+            name=name, page_variant=page_variant, offer_type=variant.offer_type,
+            description=(payload.get('description') or None),
+            target_state=(payload.get('targetState') or payload.get('target_state') or None),
+            target_city=(payload.get('targetCity') or payload.get('target_city') or None),
+            target_segment=(payload.get('targetSegment') or payload.get('target_segment') or None),
+            campaign_source=(payload.get('campaignSource') or payload.get('campaign_source') or None),
+            utm_source=(payload.get('utmSource') or payload.get('utm_source') or None),
+            utm_medium=(payload.get('utmMedium') or payload.get('utm_medium') or None),
+            utm_campaign=(payload.get('utmCampaign') or payload.get('utm_campaign') or None),
+            status=status, created_by=user_email,
+        )
+        return jsonify({'success': True, 'campaign': row}), 201
+
+    return _authorized()
+
+
+@multifamily_bp.route('/campaigns', methods=['GET'])
+def list_campaigns():
+    """All campaigns (newest first), each annotated with target/
+    contacted/converted/meeting counts for the campaign list view.
+    Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        status = request.args.get('status')
+        campaigns = repository.list_campaigns(status=status)
+        for c in campaigns:
+            targets = repository.list_campaign_targets(c['id'])
+            c['target_count'] = len(targets)
+            c['contacted_count'] = sum(1 for t in targets if t['status'] not in ('planned',))
+            c['converted_count'] = sum(1 for t in targets if t['status'] == 'converted')
+            c['meeting_count'] = sum(1 for t in targets if t['status'] == 'meeting_booked')
+            last_activity = [t['last_activity_at'] for t in targets if t.get('last_activity_at')]
+            c['last_activity_at'] = max(last_activity) if last_activity else None
+        return jsonify({'campaigns': campaigns})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/campaigns/<campaign_id>', methods=['GET'])
+def get_campaign_detail(campaign_id):
+    """Campaign summary + its full targets list, each target's tracked
+    URL computed fresh (never stored). Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        campaign = repository.get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({'error': 'Campaign not found'}), 404
+        targets = repository.list_campaign_targets(campaign_id)
+        for t in targets:
+            t['tracked_url'] = _campaign_tracked_url(campaign, t['tracking_token'])
+        return jsonify({'campaign': campaign, 'targets': targets})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/campaigns/<campaign_id>/status', methods=['POST'])
+def update_campaign_status(campaign_id):
+    """Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        campaign = repository.get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({'error': 'Campaign not found'}), 404
+        payload = request.get_json(silent=True) or {}
+        status = (payload.get('status') or '').strip()
+        if status not in CAMPAIGN_STATUSES:
+            return jsonify({'success': False, 'errors': [f'status must be one of {CAMPAIGN_STATUSES}']}), 400
+        repository.update_campaign_status(campaign_id, status)
+        return jsonify({'success': True, 'campaign': repository.get_campaign(campaign_id)})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/campaigns/<campaign_id>/targets', methods=['POST'])
+def create_campaign_target(campaign_id):
+    """Add one prospect to a campaign and mint their tracked link. A
+    target may have no known lead yet (a cold prospect Max is about to
+    reach out to) — lead_id backfills once they convert. An optional
+    `leadId` pre-links the target to an ALREADY-known lead (Campaign
+    Phase 4: the Outreach Workbench generating a campaign-tracked link
+    for a specific lead already sitting in the pipeline) — that target
+    then merges deterministically into this exact lead on conversion,
+    the same as an outbound-link one-off. Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        campaign = repository.get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({'error': 'Campaign not found'}), 404
+        payload = request.get_json(silent=True) or {}
+        row = repository.create_campaign_target(
+            campaign_id,
+            company=(payload.get('company') or None),
+            contact_name=(payload.get('contactName') or payload.get('contact_name') or None),
+            email=(payload.get('email') or None),
+            phone=(payload.get('phone') or None),
+            linkedin_url=(payload.get('linkedinUrl') or payload.get('linkedin_url') or None),
+            city=(payload.get('city') or None),
+            state=(payload.get('state') or None),
+            segment=(payload.get('segment') or None),
+            notes=(payload.get('notes') or None),
+        )
+        lead_id = (payload.get('leadId') or payload.get('lead_id') or '').strip() or None
+        if lead_id:
+            repository.set_campaign_target_lead(row['id'], lead_id)
+            row['lead_id'] = lead_id
+        row['tracked_url'] = _campaign_tracked_url(campaign, row['tracking_token'])
+        return jsonify({'success': True, 'target': row}), 201
+
+    return _authorized()
+
+
+@multifamily_bp.route('/campaigns/<campaign_id>/targets', methods=['GET'])
+def list_campaign_targets_route(campaign_id):
+    """Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        campaign = repository.get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({'error': 'Campaign not found'}), 404
+        targets = repository.list_campaign_targets(campaign_id)
+        for t in targets:
+            t['tracked_url'] = _campaign_tracked_url(campaign, t['tracking_token'])
+        return jsonify({'targets': targets})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/campaign-targets/<target_id>/status', methods=['POST'])
+def update_campaign_target_status(target_id):
+    """Mark a target contacted/replied/meeting_booked/not_fit/nurture
+    (or back to planned), optionally with a note. If the target already
+    has a lead attached, also logs a matching lead activity so the
+    lead's activity history and reply/meeting notifications fire the
+    same way they would from the drawer's own activity log. Login
+    required."""
+    import app as _app
+    from flask import g
+
+    @_app.require_auth
+    def _authorized():
+        target = repository.get_campaign_target(target_id)
+        if not target:
+            return jsonify({'error': 'Campaign target not found'}), 404
+        payload = request.get_json(silent=True) or {}
+        status = (payload.get('status') or '').strip()
+        if status not in CAMPAIGN_TARGET_STATUSES:
+            return jsonify({'success': False, 'errors': [f'status must be one of {CAMPAIGN_TARGET_STATUSES}']}), 400
+        notes = payload.get('notes')
+        repository.update_campaign_target_status(target_id, status, notes=notes)
+
+        if target.get('lead_id') and status in ('contacted', 'replied', 'meeting_booked', 'not_fit', 'nurture'):
+            activity_type = {
+                'contacted': 'emailed', 'replied': 'replied', 'meeting_booked': 'meeting_booked',
+                'not_fit': 'not_a_fit', 'nurture': 'moved_to_nurture',
+            }[status]
+            user_email = (g.user or {}).get('email') if getattr(g, 'user', None) else None
+            activity = repository.insert_activity(target['lead_id'], activity_type, note=notes, user_email=user_email)
+            lead_row = repository.get_lead_row(target['lead_id'])
+            company_name = (lead_row or {}).get('company_name') or target.get('company') or 'A lead'
+            if status == 'replied':
+                mf_notifications.notify_lead_replied(target['lead_id'], company_name, activity['id'])
+            elif status == 'meeting_booked':
+                mf_notifications.notify_meeting_booked(target['lead_id'], company_name, activity['id'])
+
+        return jsonify({'success': True, 'target': repository.get_campaign_target(target_id)})
 
     return _authorized()
 

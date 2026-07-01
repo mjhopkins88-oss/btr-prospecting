@@ -55,6 +55,11 @@ _ADDED_COLUMNS = [
     # replay the append-only multifamily_lead_outcomes history.
     ('current_outcome', 'TEXT'),
     ('current_outcome_at', 'TEXT'),
+    # Funnel phase: which offer-page variant produced this lead
+    # (multifamily/forms/form_variants.py slug) and which outreach
+    # campaign drove the visit, if any.
+    ('page_variant', 'TEXT'),
+    ('campaign_id', 'TEXT'),
 ]
 
 
@@ -149,6 +154,8 @@ def ensure_schema() -> None:
             referrer TEXT,
             landing_page TEXT,
             offer_type TEXT,
+            page_variant TEXT,
+            campaign_id TEXT,
             occurred_at TEXT,
             created_at TIMESTAMP
         )
@@ -169,7 +176,25 @@ def ensure_schema() -> None:
             records_rejected INTEGER DEFAULT 0,
             errors_json TEXT,
             warnings_json TEXT,
+            category TEXT,
+            state TEXT,
+            query TEXT,
             created_at TIMESTAMP
+        )
+    ''')
+    # SERP url-seen ledger — the authoritative idempotency check for the
+    # SERP collector (multifamily/serp/serp_collector.py): a URL already
+    # in here is skipped before it ever reaches matching, so a re-run of
+    # the same search never re-creates a signal or spams a review
+    # candidate for the same article (the matching engine's same_source_url
+    # reason is only review-tier, not auto-merge, so without this ledger a
+    # repeat run would queue a new review candidate every time).
+    execute('''
+        CREATE TABLE IF NOT EXISTS multifamily_serp_seen (
+            url TEXT PRIMARY KEY,
+            category TEXT,
+            state TEXT,
+            first_seen_at TIMESTAMP
         )
     ''')
     # Possible matches needing human review (auto-tier matches never queue here).
@@ -321,6 +346,7 @@ def ensure_schema() -> None:
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_notifications_read ON multifamily_notifications(read_at, created_at DESC)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_notifications_lead ON multifamily_notifications(lead_id)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_sales_intel_lead ON multifamily_sales_intelligence_events(lead_id, created_at DESC)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_serp_seen_category_state ON multifamily_serp_seen(category, state)')
     except Exception:
         pass
 
@@ -334,6 +360,91 @@ def ensure_schema() -> None:
     _safe_add_column('multifamily_sales_intelligence_events', 'follow_up_type', 'TEXT')
     _safe_add_column('multifamily_sales_intelligence_events', 'guardrail_status', 'TEXT')
 
+    # SERP collection run metadata — added after the table's initial create.
+    _safe_add_column('multifamily_source_runs', 'category', 'TEXT')
+    _safe_add_column('multifamily_source_runs', 'state', 'TEXT')
+    _safe_add_column('multifamily_source_runs', 'query', 'TEXT')
+
+    # Funnel phase: which offer-page variant/campaign drove each attribution
+    # touch — added after the table's initial create.
+    _safe_add_column('multifamily_source_attribution', 'page_variant', 'TEXT')
+    _safe_add_column('multifamily_source_attribution', 'campaign_id', 'TEXT')
+
+    # Outbound-to-form merge-back tokens (Funnel Phase 3). token is the
+    # primary key so the public offer-page URL never has to encode lead_id
+    # directly (?mf_ref=<token>).
+    execute('''
+        CREATE TABLE IF NOT EXISTS multifamily_outbound_links (
+            token TEXT PRIMARY KEY,
+            lead_id TEXT NOT NULL,
+            offer_type TEXT,
+            page_variant TEXT,
+            campaign_id TEXT,
+            source TEXT,
+            created_by TEXT,
+            created_at TIMESTAMP,
+            converted_at TEXT,
+            converted_lead_id TEXT
+        )
+    ''')
+    try:
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_outbound_links_lead ON multifamily_outbound_links(lead_id, created_at DESC)')
+    except Exception:
+        pass
+
+    # Pilot Campaign Control Center. campaign_targets.lead_id is nullable
+    # (a target may be a cold prospect with no lead yet) — this is why
+    # campaigns get their OWN token column rather than reusing
+    # multifamily_outbound_links, whose lead_id is NOT NULL.
+    execute('''
+        CREATE TABLE IF NOT EXISTS multifamily_campaigns (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT,
+            page_variant TEXT NOT NULL,
+            offer_type TEXT NOT NULL,
+            target_state TEXT,
+            target_city TEXT,
+            target_segment TEXT,
+            campaign_source TEXT,
+            utm_source TEXT,
+            utm_medium TEXT,
+            utm_campaign TEXT,
+            status TEXT NOT NULL DEFAULT 'draft',
+            created_by TEXT,
+            created_at TIMESTAMP,
+            updated_at TIMESTAMP
+        )
+    ''')
+    execute('''
+        CREATE TABLE IF NOT EXISTS multifamily_campaign_targets (
+            id TEXT PRIMARY KEY,
+            campaign_id TEXT NOT NULL,
+            tracking_token TEXT NOT NULL,
+            company TEXT,
+            contact_name TEXT,
+            email TEXT,
+            phone TEXT,
+            linkedin_url TEXT,
+            city TEXT,
+            state TEXT,
+            segment TEXT,
+            lead_id TEXT,
+            status TEXT NOT NULL DEFAULT 'planned',
+            notes TEXT,
+            created_at TIMESTAMP,
+            last_activity_at TEXT,
+            converted_at TEXT
+        )
+    ''')
+    try:
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_campaigns_status ON multifamily_campaigns(status, created_at DESC)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_campaign_targets_campaign ON multifamily_campaign_targets(campaign_id, created_at DESC)')
+        execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_multifamily_campaign_targets_token ON multifamily_campaign_targets(tracking_token)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_campaign_targets_lead ON multifamily_campaign_targets(lead_id)')
+    except Exception:
+        pass
+
     _backfill_signals_from_lead_json()
     _SCHEMA_READY = True
 
@@ -343,6 +454,13 @@ def _lead_situation_of(lead: MultifamilyLead) -> str:
         if signal.detail and signal.detail.get('lead_situation'):
             return signal.detail['lead_situation']
     return ''
+
+
+def lead_situation_of(lead: MultifamilyLead) -> str:
+    """Public alias — the self-reported situation (e.g. 'renewal',
+    'acquisition') read from the lead's primary signal, used by the
+    Outreach Workbench's page-recommendation (Funnel Phase 3)."""
+    return _lead_situation_of(lead)
 
 
 def insert_lead(lead: MultifamilyLead) -> None:
@@ -381,6 +499,8 @@ def insert_lead(lead: MultifamilyLead) -> None:
         'referrer': lead.referrer,
         'landing_page': lead.landing_page,
         'offer_type': lead.offer_type,
+        'page_variant': lead.page_variant,
+        'campaign_id': lead.campaign_id,
         'spam_status': lead.spam_status,
         'spam_reason_codes': json.dumps(lead.spam_reason_codes),
         'submitted_ip_hash': lead.submitted_ip_hash,
@@ -557,6 +677,12 @@ def get_source_performance() -> Dict[str, Any]:
     leads_by_source_page = _counts("COALESCE(NULLIF(source_page, ''), 'unknown')")
     leads_by_offer_type = _counts("COALESCE(NULLIF(offer_type, ''), 'unknown')")
     leads_by_campaign = _counts("COALESCE(NULLIF(utm_campaign, ''), 'none')")
+    # Funnel Phase 6: which offer page (multifamily/forms/form_variants.py
+    # slug) and which outreach campaign_id drove each lead — distinct
+    # from offer_type/utm_campaign above (page_variant is the funnel's
+    # own page identity; campaign_id is the funnel's own outreach tag).
+    leads_by_page_variant = _counts("COALESCE(NULLIF(page_variant, ''), 'none')")
+    leads_by_campaign_id = _counts("COALESCE(NULLIF(campaign_id, ''), 'none')")
 
     # Category × source (Call Today / Hot / Warm / Nurture / Watchlist by source).
     cat_rows = fetch_all(
@@ -626,22 +752,99 @@ def get_source_performance() -> Dict[str, Any]:
     }
     total_signal_rows = sum(signals_by_source.values())
 
+    # Funnel Phase 6: outbound-to-form conversion path — how many links
+    # were generated vs. actually converted, overall and per offer page.
+    outbound_rows = fetch_all(
+        "SELECT COALESCE(NULLIF(page_variant, ''), 'none') AS pv, "
+        "COUNT(*) AS sent, SUM(CASE WHEN converted_at IS NOT NULL THEN 1 ELSE 0 END) AS converted "
+        "FROM multifamily_outbound_links GROUP BY pv"
+    )
+    outbound_by_page_variant = {}
+    total_links_sent = 0
+    total_links_converted = 0
+    for row in outbound_rows:
+        sent = int(row['sent'] or 0)
+        converted = int(row['converted'] or 0)
+        total_links_sent += sent
+        total_links_converted += converted
+        outbound_by_page_variant[row['pv'] or 'none'] = {
+            'sent': sent, 'converted': converted,
+            'conversion_rate_pct': round(100.0 * converted / sent, 1) if sent else 0.0,
+        }
+    outbound_conversion_stats = {
+        'total_links_sent': total_links_sent,
+        'total_links_converted': total_links_converted,
+        'conversion_rate_pct': round(100.0 * total_links_converted / total_links_sent, 1) if total_links_sent else 0.0,
+        'by_page_variant': outbound_by_page_variant,
+    }
+
     return {
         'total_real_leads': total_real_leads,
         'leads_by_source': leads_by_source,
         'leads_by_source_page': leads_by_source_page,
         'leads_by_offer_type': leads_by_offer_type,
         'leads_by_campaign': leads_by_campaign,
+        'leads_by_page_variant': leads_by_page_variant,
+        'leads_by_campaign_id': leads_by_campaign_id,
         'by_source_category': by_source_category,
         'call_today_by_source': call_today_by_source,
         'spam_rate_by_source': spam_rate_by_source,
         'best_landing_page': best_landing_page,
         'worst_source': worst_source,
         'leads_missing_attribution': leads_missing_attribution,
+        # Funnel Phase 6: outbound-to-form conversion path.
+        'outbound_conversion_stats': outbound_conversion_stats,
         # Phase C signal-history view.
         'total_signals': total_signal_rows,
         'signals_by_source': signals_by_source,
         'signals_by_type': signals_by_type,
+        # SERP source performance (Multifamily SERP Phase C).
+        'serp': _serp_source_performance(leads_by_source, by_source_category, call_today_by_source, signals_by_source),
+    }
+
+
+def _serp_source_performance(
+    leads_by_source: Dict[str, int], by_source_category: Dict[str, Dict[str, int]],
+    call_today_by_source: Dict[str, int], signals_by_source: Dict[str, int],
+) -> Dict[str, Any]:
+    """SERP-specific rollup, additive to the generic per-source breakdown
+    already computed above: leads merged away (tombstoned into an
+    existing lead — not visible in the active-lead counts above), pending
+    review candidates raised by SERP-sourced signals, and aggregate
+    source-run totals (found/created/merged/rejected) from every logged
+    'serp' collection run."""
+    merged_rows = fetch_all(
+        "SELECT COUNT(*) AS n FROM multifamily_leads WHERE is_demo = 0 AND source = 'serp' AND merge_status = 'merged'"
+    )
+    leads_merged_away = int(merged_rows[0]['n']) if merged_rows else 0
+
+    review_rows = fetch_all(
+        "SELECT COUNT(*) AS n FROM multifamily_lead_match_candidates mc "
+        "JOIN multifamily_leads l ON mc.incoming_lead_id = l.id "
+        "WHERE l.source = 'serp' AND mc.status = 'pending'"
+    )
+    review_candidates_pending = int(review_rows[0]['n']) if review_rows else 0
+
+    run_rows = fetch_all(
+        "SELECT COUNT(*) AS runs, COALESCE(SUM(records_found), 0) AS found, "
+        "COALESCE(SUM(records_created), 0) AS created, COALESCE(SUM(records_merged), 0) AS merged, "
+        "COALESCE(SUM(records_rejected), 0) AS rejected "
+        "FROM multifamily_source_runs WHERE source = 'serp'"
+    )
+    run_totals = run_rows[0] if run_rows else {}
+
+    return {
+        'signals_received': signals_by_source.get('serp', 0),
+        'leads_created': leads_by_source.get('serp', 0),
+        'leads_merged_away': leads_merged_away,
+        'review_candidates_pending': review_candidates_pending,
+        'hot_leads': by_source_category.get('serp', {}).get('hot', 0),
+        'call_today_leads': call_today_by_source.get('serp', 0),
+        'collection_runs': int(run_totals.get('runs') or 0),
+        'total_found_across_runs': int(run_totals.get('found') or 0),
+        'total_created_across_runs': int(run_totals.get('created') or 0),
+        'total_merged_across_runs': int(run_totals.get('merged') or 0),
+        'total_rejected_across_runs': int(run_totals.get('rejected') or 0),
     }
 
 
@@ -826,6 +1029,7 @@ def record_attribution(lead_id: str, touch_type: str, source: Optional[str] = No
                        utm_campaign: Optional[str] = None, utm_term: Optional[str] = None,
                        utm_content: Optional[str] = None, referrer: Optional[str] = None,
                        landing_page: Optional[str] = None, offer_type: Optional[str] = None,
+                       page_variant: Optional[str] = None, campaign_id: Optional[str] = None,
                        occurred_at: Optional[str] = None) -> Dict[str, Any]:
     ensure_schema()
     from multifamily.types import new_id, utc_now_iso
@@ -835,12 +1039,14 @@ def record_attribution(lead_id: str, touch_type: str, source: Optional[str] = No
         'utm_source': utm_source, 'utm_medium': utm_medium, 'utm_campaign': utm_campaign,
         'utm_term': utm_term, 'utm_content': utm_content, 'referrer': referrer,
         'landing_page': landing_page, 'offer_type': offer_type,
+        'page_variant': page_variant, 'campaign_id': campaign_id,
         'occurred_at': occurred_at or now, 'created_at': now,
     }
     execute(
         'INSERT INTO multifamily_source_attribution (id, lead_id, touch_type, source, utm_source, utm_medium, '
-        'utm_campaign, utm_term, utm_content, referrer, landing_page, offer_type, occurred_at, created_at) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'utm_campaign, utm_term, utm_content, referrer, landing_page, offer_type, page_variant, campaign_id, '
+        'occurred_at, created_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         list(row.values()),
     )
     return row
@@ -852,15 +1058,327 @@ def record_lead_attribution_touch(lead, touch_type: str = 'touch') -> None:
         lead.id, touch_type, source=lead.primary_source,
         utm_source=lead.utm_source, utm_medium=lead.utm_medium, utm_campaign=lead.utm_campaign,
         utm_term=lead.utm_term, utm_content=lead.utm_content, referrer=lead.referrer,
-        landing_page=lead.landing_page, offer_type=lead.offer_type, occurred_at=lead.last_verified_at,
+        landing_page=lead.landing_page, offer_type=lead.offer_type,
+        page_variant=getattr(lead, 'page_variant', None), campaign_id=getattr(lead, 'campaign_id', None),
+        occurred_at=lead.last_verified_at,
     )
+
+
+# ---- Outbound-to-form merge-back links (Funnel Phase 3) --------------------
+
+def create_outbound_link(lead_id: str, offer_type: Optional[str] = None,
+                          page_variant: Optional[str] = None, campaign_id: Optional[str] = None,
+                          source: Optional[str] = None, created_by: Optional[str] = None) -> Dict[str, Any]:
+    """Mint a token mapping back to `lead_id` — an operator sends the
+    prospect a link like /mf-review/<page_variant>?mf_ref=<token>; when
+    they submit it, create_lead() looks the token up and merges the
+    submission straight into this lead (see api/routes/multifamily.py)."""
+    ensure_schema()
+    import secrets
+    from multifamily.types import utc_now_iso
+    token = secrets.token_urlsafe(16)
+    now = utc_now_iso()
+    row = {
+        'token': token, 'lead_id': lead_id, 'offer_type': offer_type, 'page_variant': page_variant,
+        'campaign_id': campaign_id, 'source': source, 'created_by': created_by,
+        'created_at': now, 'converted_at': None, 'converted_lead_id': None,
+    }
+    execute(
+        'INSERT INTO multifamily_outbound_links (token, lead_id, offer_type, page_variant, campaign_id, '
+        'source, created_by, created_at, converted_at, converted_lead_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        list(row.values()),
+    )
+    return row
+
+
+def get_outbound_link(token: str) -> Optional[Dict[str, Any]]:
+    ensure_schema()
+    rows = fetch_all(
+        'SELECT token, lead_id, offer_type, page_variant, campaign_id, source, created_by, created_at, '
+        'converted_at, converted_lead_id FROM multifamily_outbound_links WHERE token = ?',
+        [token],
+    )
+    return rows[0] if rows else None
+
+
+def get_outbound_links_for_lead(lead_id: str) -> List[Dict[str, Any]]:
+    ensure_schema()
+    return fetch_all(
+        'SELECT token, lead_id, offer_type, page_variant, campaign_id, source, created_by, created_at, '
+        'converted_at, converted_lead_id FROM multifamily_outbound_links WHERE lead_id = ? ORDER BY created_at DESC',
+        [lead_id],
+    )
+
+
+def mark_outbound_link_converted(token: str, converted_lead_id: str) -> None:
+    ensure_schema()
+    from multifamily.types import utc_now_iso
+    execute(
+        'UPDATE multifamily_outbound_links SET converted_at = ?, converted_lead_id = ? WHERE token = ?',
+        [utc_now_iso(), converted_lead_id, token],
+    )
+
+
+def delete_outbound_links_for_lead(lead_id: str) -> None:
+    """Used by tests to clean up after themselves."""
+    ensure_schema()
+    execute('DELETE FROM multifamily_outbound_links WHERE lead_id = ?', [lead_id])
+
+
+# ---- Pilot Campaign Control Center -----------------------------------------
+
+_CAMPAIGN_COLUMNS = (
+    'id, name, description, page_variant, offer_type, target_state, target_city, '
+    'target_segment, campaign_source, utm_source, utm_medium, utm_campaign, status, '
+    'created_by, created_at, updated_at'
+)
+
+_CAMPAIGN_TARGET_COLUMNS = (
+    'id, campaign_id, tracking_token, company, contact_name, email, phone, linkedin_url, '
+    'city, state, segment, lead_id, status, notes, created_at, last_activity_at, converted_at'
+)
+
+
+def create_campaign(
+    name: str, page_variant: str, offer_type: str, *, description: Optional[str] = None,
+    target_state: Optional[str] = None, target_city: Optional[str] = None,
+    target_segment: Optional[str] = None, campaign_source: Optional[str] = None,
+    utm_source: Optional[str] = None, utm_medium: Optional[str] = None, utm_campaign: Optional[str] = None,
+    status: str = 'draft', created_by: Optional[str] = None,
+) -> Dict[str, Any]:
+    """`offer_type` is derived from `page_variant` by the caller (see
+    api/routes/multifamily.py, same pattern as the outbound-link mint
+    endpoint) — this function just persists what it's given."""
+    ensure_schema()
+    from multifamily.types import new_id, utc_now_iso
+    now = utc_now_iso()
+    row = {
+        'id': new_id(), 'name': name, 'description': description, 'page_variant': page_variant,
+        'offer_type': offer_type, 'target_state': target_state, 'target_city': target_city,
+        'target_segment': target_segment, 'campaign_source': campaign_source,
+        'utm_source': utm_source, 'utm_medium': utm_medium, 'utm_campaign': utm_campaign,
+        'status': status, 'created_by': created_by, 'created_at': now, 'updated_at': now,
+    }
+    execute(
+        f'INSERT INTO multifamily_campaigns ({_CAMPAIGN_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        list(row.values()),
+    )
+    return row
+
+
+def get_campaign(campaign_id: str) -> Optional[Dict[str, Any]]:
+    ensure_schema()
+    rows = fetch_all(f'SELECT {_CAMPAIGN_COLUMNS} FROM multifamily_campaigns WHERE id = ?', [campaign_id])
+    return rows[0] if rows else None
+
+
+def list_campaigns(status: Optional[str] = None) -> List[Dict[str, Any]]:
+    ensure_schema()
+    if status:
+        return fetch_all(
+            f'SELECT {_CAMPAIGN_COLUMNS} FROM multifamily_campaigns WHERE status = ? ORDER BY created_at DESC',
+            [status],
+        )
+    return fetch_all(f'SELECT {_CAMPAIGN_COLUMNS} FROM multifamily_campaigns ORDER BY created_at DESC')
+
+
+def update_campaign_status(campaign_id: str, status: str) -> None:
+    ensure_schema()
+    from multifamily.types import utc_now_iso
+    execute(
+        'UPDATE multifamily_campaigns SET status = ?, updated_at = ? WHERE id = ?',
+        [status, utc_now_iso(), campaign_id],
+    )
+
+
+def delete_campaign(campaign_id: str) -> None:
+    """Used by tests to clean up after themselves."""
+    ensure_schema()
+    execute('DELETE FROM multifamily_campaign_targets WHERE campaign_id = ?', [campaign_id])
+    execute('DELETE FROM multifamily_campaigns WHERE id = ?', [campaign_id])
+
+
+def create_campaign_target(
+    campaign_id: str, *, company: Optional[str] = None, contact_name: Optional[str] = None,
+    email: Optional[str] = None, phone: Optional[str] = None, linkedin_url: Optional[str] = None,
+    city: Optional[str] = None, state: Optional[str] = None, segment: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Mints this target's own tracking_token (distinct from
+    multifamily_outbound_links' token — that table's lead_id is NOT
+    NULL, so it can't represent a cold prospect with no lead yet)."""
+    ensure_schema()
+    import secrets
+    from multifamily.types import new_id, utc_now_iso
+    now = utc_now_iso()
+    row = {
+        'id': new_id(), 'campaign_id': campaign_id, 'tracking_token': secrets.token_urlsafe(16),
+        'company': company, 'contact_name': contact_name, 'email': email, 'phone': phone,
+        'linkedin_url': linkedin_url, 'city': city, 'state': state, 'segment': segment,
+        'lead_id': None, 'status': 'planned', 'notes': notes,
+        'created_at': now, 'last_activity_at': None, 'converted_at': None,
+    }
+    execute(
+        f'INSERT INTO multifamily_campaign_targets ({_CAMPAIGN_TARGET_COLUMNS}) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        list(row.values()),
+    )
+    return row
+
+
+def get_campaign_target(target_id: str) -> Optional[Dict[str, Any]]:
+    ensure_schema()
+    rows = fetch_all(f'SELECT {_CAMPAIGN_TARGET_COLUMNS} FROM multifamily_campaign_targets WHERE id = ?', [target_id])
+    return rows[0] if rows else None
+
+
+def get_campaign_target_by_token(token: str) -> Optional[Dict[str, Any]]:
+    ensure_schema()
+    rows = fetch_all(f'SELECT {_CAMPAIGN_TARGET_COLUMNS} FROM multifamily_campaign_targets WHERE tracking_token = ?', [token])
+    return rows[0] if rows else None
+
+
+def list_campaign_targets(campaign_id: str) -> List[Dict[str, Any]]:
+    ensure_schema()
+    return fetch_all(
+        f'SELECT {_CAMPAIGN_TARGET_COLUMNS} FROM multifamily_campaign_targets '
+        'WHERE campaign_id = ? ORDER BY created_at DESC',
+        [campaign_id],
+    )
+
+
+def update_campaign_target_status(target_id: str, status: str, notes: Optional[str] = None) -> None:
+    """Any status transition bumps last_activity_at — this is the only
+    'freshness' clock a campaign target has (mirrors how lead activities
+    drive multifamily_leads' implicit staleness checks)."""
+    ensure_schema()
+    from multifamily.types import utc_now_iso
+    now = utc_now_iso()
+    if notes is not None:
+        execute(
+            'UPDATE multifamily_campaign_targets SET status = ?, notes = ?, last_activity_at = ? WHERE id = ?',
+            [status, notes, now, target_id],
+        )
+    else:
+        execute(
+            'UPDATE multifamily_campaign_targets SET status = ?, last_activity_at = ? WHERE id = ?',
+            [status, now, target_id],
+        )
+
+
+def set_campaign_target_lead(target_id: str, lead_id: str) -> None:
+    """Backfill a target's lead_id once its identity resolves to a real
+    lead (via the matching engine) — separate from marking it converted,
+    since a target can be linked to a lead before it actually converts
+    (e.g. an operator manually attaches an existing lead to a target)."""
+    ensure_schema()
+    execute('UPDATE multifamily_campaign_targets SET lead_id = ? WHERE id = ?', [lead_id, target_id])
+
+
+def mark_campaign_target_converted(target_id: str, lead_id: str) -> None:
+    ensure_schema()
+    from multifamily.types import utc_now_iso
+    now = utc_now_iso()
+    execute(
+        "UPDATE multifamily_campaign_targets SET status = 'converted', lead_id = ?, "
+        'converted_at = ?, last_activity_at = ? WHERE id = ?',
+        [lead_id, now, now, target_id],
+    )
+
+
+def delete_campaign_targets_for_campaign(campaign_id: str) -> None:
+    """Used by tests to clean up after themselves."""
+    ensure_schema()
+    execute('DELETE FROM multifamily_campaign_targets WHERE campaign_id = ?', [campaign_id])
+
+
+def get_campaign_performance() -> Dict[str, Any]:
+    """Cross-campaign rollup (Campaign Phase 5) for the Overview funnel
+    widgets + Source Performance panel — aggregates over
+    multifamily_campaigns + multifamily_campaign_targets. 'Best' rankings
+    require at least one target in the bucket; an empty pipeline
+    returns None for all ranking fields rather than a misleading 0%."""
+    ensure_schema()
+    campaigns = list_campaigns()
+    total_active_campaigns = sum(1 for c in campaigns if c['status'] == 'active')
+
+    target_rows = fetch_all(
+        'SELECT ct.*, c.name AS campaign_name, c.status AS campaign_status, '
+        'c.page_variant AS campaign_page_variant '
+        'FROM multifamily_campaign_targets ct JOIN multifamily_campaigns c ON ct.campaign_id = c.id'
+    )
+    total_targets = len(target_rows)
+    total_converted = sum(1 for t in target_rows if t['status'] == 'converted')
+    total_meetings = sum(1 for t in target_rows if t['status'] == 'meeting_booked')
+    targets_needing_followup = sum(1 for t in target_rows if t['status'] in ('planned', 'contacted'))
+
+    def _rate_buckets(rows, key_fn):
+        buckets: Dict[str, Dict[str, int]] = {}
+        for t in rows:
+            k = key_fn(t) or 'unknown'
+            b = buckets.setdefault(k, {'targets': 0, 'converted': 0, 'meetings': 0})
+            b['targets'] += 1
+            if t['status'] == 'converted':
+                b['converted'] += 1
+            if t['status'] == 'meeting_booked':
+                b['meetings'] += 1
+        for b in buckets.values():
+            b['conversion_rate_pct'] = round(100.0 * b['converted'] / b['targets'], 1) if b['targets'] else 0.0
+        return buckets
+
+    def _best(buckets, label_key):
+        best = None
+        for key, b in buckets.items():
+            if best is None or b['conversion_rate_pct'] > best['conversion_rate_pct']:
+                best = {label_key: key, **b}
+        return best
+
+    by_campaign = _rate_buckets(target_rows, lambda t: t['campaign_id'])
+    for cid, b in by_campaign.items():
+        b['name'] = next((t['campaign_name'] for t in target_rows if t['campaign_id'] == cid), cid)
+    best_campaign = _best(by_campaign, 'campaign_id')
+
+    by_page_variant = _rate_buckets(target_rows, lambda t: t['campaign_page_variant'])
+    best_offer_page = _best(by_page_variant, 'page_variant')
+
+    conversion_rate_by_segment = _rate_buckets(target_rows, lambda t: t.get('segment'))
+    conversion_rate_by_state = _rate_buckets(target_rows, lambda t: t.get('state'))
+
+    converted_targets = sorted(
+        [t for t in target_rows if t['status'] == 'converted' and t.get('converted_at')],
+        key=lambda t: t['converted_at'], reverse=True,
+    )
+    recently_converted = None
+    if converted_targets:
+        t = converted_targets[0]
+        recently_converted = {
+            'company': t.get('company'), 'campaign_name': t.get('campaign_name'),
+            'lead_id': t.get('lead_id'), 'converted_at': t.get('converted_at'),
+        }
+
+    return {
+        'total_campaigns': len(campaigns),
+        'total_active_campaigns': total_active_campaigns,
+        'total_targets': total_targets,
+        'total_converted': total_converted,
+        'total_meetings': total_meetings,
+        'targets_needing_followup': targets_needing_followup,
+        'best_campaign': best_campaign,
+        'best_offer_page': best_offer_page,
+        'recently_converted': recently_converted,
+        'conversion_rate_by_campaign': by_campaign,
+        'conversion_rate_by_page_variant': by_page_variant,
+        'conversion_rate_by_segment': conversion_rate_by_segment,
+        'conversion_rate_by_state': conversion_rate_by_state,
+    }
 
 
 def get_attribution_for_lead(lead_id: str) -> List[Dict[str, Any]]:
     ensure_schema()
     return fetch_all(
         'SELECT id, lead_id, touch_type, source, utm_source, utm_medium, utm_campaign, utm_term, utm_content, '
-        'referrer, landing_page, offer_type, occurred_at, created_at FROM multifamily_source_attribution '
+        'referrer, landing_page, offer_type, page_variant, campaign_id, occurred_at, created_at '
+        'FROM multifamily_source_attribution '
         'WHERE lead_id = ? ORDER BY occurred_at ASC, created_at ASC',
         [lead_id],
     )
@@ -941,13 +1459,16 @@ def finish_source_run(run_db_id: str, status: str = 'success', records_found: in
     )
 
 
-def get_source_runs(limit: int = 50) -> List[Dict[str, Any]]:
+def get_source_runs(limit: int = 50, source: Optional[str] = None) -> List[Dict[str, Any]]:
     ensure_schema()
+    where = 'WHERE source = ?' if source else ''
+    params = ([source] if source else []) + [limit]
     rows = fetch_all(
         'SELECT id, source, run_id, started_at, finished_at, status, records_found, records_created, '
-        'records_updated, records_merged, records_rejected, errors_json, warnings_json, created_at '
-        'FROM multifamily_source_runs ORDER BY created_at DESC LIMIT ?',
-        [limit],
+        'records_updated, records_merged, records_rejected, errors_json, warnings_json, '
+        'category, state, query, created_at '
+        f'FROM multifamily_source_runs {where} ORDER BY created_at DESC LIMIT ?',
+        params,
     )
     for r in rows:
         for k in ('errors_json', 'warnings_json'):
@@ -958,9 +1479,61 @@ def get_source_runs(limit: int = 50) -> List[Dict[str, Any]]:
     return rows
 
 
+def set_source_run_query_metadata(
+    run_db_id: str, *, category: Optional[str] = None, state: Optional[str] = None,
+    query: Optional[str] = None, records_found: Optional[int] = None,
+) -> None:
+    """Attach SERP-specific run metadata after ingest_batch/ingest_trigger_batch
+    already logged the run (those generic functions don't know about
+    category/state/query). Also lets the SERP collector correct
+    records_found to the TOTAL raw search-result count — ingest_batch only
+    sees the already-filtered accepted-for-ingest count, which would
+    otherwise undercount once low-relevance results are filtered out
+    upstream of ingest."""
+    ensure_schema()
+    sets, params = [], []
+    if category is not None:
+        sets.append('category = ?'); params.append(category)
+    if state is not None:
+        sets.append('state = ?'); params.append(state)
+    if query is not None:
+        sets.append('query = ?'); params.append(query)
+    if records_found is not None:
+        sets.append('records_found = ?'); params.append(records_found)
+    if not sets:
+        return
+    params.append(run_db_id)
+    execute(f'UPDATE multifamily_source_runs SET {", ".join(sets)} WHERE id = ?', params)
+
+
 def delete_source_run(run_db_id: str) -> None:
     ensure_schema()
     execute('DELETE FROM multifamily_source_runs WHERE id = ?', [run_db_id])
+
+
+# ---- SERP url-seen ledger ---------------------------------------------------
+
+def is_serp_url_seen(url: str) -> bool:
+    ensure_schema()
+    rows = fetch_all('SELECT 1 FROM multifamily_serp_seen WHERE url = ?', [url])
+    return bool(rows)
+
+
+def mark_serp_url_seen(url: str, category: Optional[str] = None, state: Optional[str] = None) -> None:
+    """Idempotent — INSERT OR IGNORE so re-marking an already-seen URL
+    (e.g. a race between two concurrent runs) never raises."""
+    ensure_schema()
+    from multifamily.types import utc_now_iso
+    execute(
+        'INSERT OR IGNORE INTO multifamily_serp_seen (url, category, state, first_seen_at) VALUES (?, ?, ?, ?)',
+        [url, category, state, utc_now_iso()],
+    )
+
+
+def delete_serp_seen_url(url: str) -> None:
+    """Used by tests to clean up after themselves."""
+    ensure_schema()
+    execute('DELETE FROM multifamily_serp_seen WHERE url = ?', [url])
 
 
 # ---- Match candidates (review queue) --------------------------------------
@@ -1036,6 +1609,28 @@ def get_lead_by_id(lead_id: str) -> Optional[MultifamilyLead]:
     """Reconstruct a single lead dataclass from its persisted lead_json."""
     row = get_lead_row(lead_id)
     if not row or not row.get('lead_json'):
+        return None
+    try:
+        return _dict_to_lead(json.loads(row['lead_json']))
+    except Exception:
+        return None
+
+
+def get_active_lead_by_id(lead_id: str, _hops: int = 0) -> Optional[MultifamilyLead]:
+    """Like get_lead_by_id, but follows merged_into_id if the given lead
+    was itself merged away since — used by the outbound-link merge-back
+    path (Funnel Phase 3), where the token's original lead_id may have
+    been folded into a survivor by an unrelated fuzzy/auto match in the
+    meantime. Bounded hop count as a defensive guard against a corrupt
+    merge cycle."""
+    if _hops > 5:
+        return None
+    row = get_lead_row(lead_id)
+    if not row:
+        return None
+    if row.get('merge_status') == 'merged' and row.get('merged_into_id'):
+        return get_active_lead_by_id(row['merged_into_id'], _hops + 1)
+    if not row.get('lead_json'):
         return None
     try:
         return _dict_to_lead(json.loads(row['lead_json']))
@@ -1379,6 +1974,10 @@ def delete_notification(notification_id: str) -> None:
 _ROI_DIMENSIONS = [
     'source', 'source_page', 'offer_type', 'utm_source', 'utm_campaign',
     'first_touch_source', 'conversion_source', 'latest_signal_source',
+    # Funnel Phase 6: which offer page + outreach campaign drove the lead
+    # (distinct from utm_campaign, which is UTM-parameter-based and
+    # applies to any source, not just the funnel's own offer pages).
+    'page_variant', 'campaign_id',
 ]
 
 # high=1.0/medium=0.5/low=0.0 — timing_confidence is a label
@@ -1469,9 +2068,10 @@ def _finalize_roi_bucket(b: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def get_source_roi() -> Dict[str, Any]:
-    """Outcome-aware ROI report, grouped by 8 dimensions (source,
+    """Outcome-aware ROI report, grouped by 10 dimensions (source,
     source_page, offer_type, utm_source, utm_campaign, first_touch_source,
-    conversion_source, latest_signal_source). Real leads only
+    conversion_source, latest_signal_source, page_variant, campaign_id).
+    Real leads only
     (non-merged-away); rejected leads count toward spam_rate_pct's
     denominator only — never toward any funnel/revenue/quality metric.
     `duplicate_or_merge_rate_pct` = share of leads in the bucket that
@@ -1482,7 +2082,7 @@ def get_source_roi() -> Dict[str, Any]:
     ensure_schema()
     rows = fetch_all(
         "SELECT id, source, source_page, offer_type, utm_source, utm_campaign, score_category, "
-        "signal_count, spam_status FROM multifamily_leads WHERE is_demo = 0 "
+        "signal_count, spam_status, page_variant, campaign_id FROM multifamily_leads WHERE is_demo = 0 "
         "AND (merge_status IS NULL OR merge_status != 'merged')"
     )
     touch_sources = _attribution_touch_sources_by_lead()

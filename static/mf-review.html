@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multifamily Insurance Review</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+    :root {
+        --bg: #0b1220;
+        --card: rgba(15,22,36,0.95);
+        --border: rgba(255,255,255,0.1);
+        --accent: #f59e0b;
+        --text: #f1f5f9;
+        --muted: #94a3b8;
+    }
+    * { box-sizing: border-box; }
+    body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        padding: 2.5rem 1rem;
+    }
+    .wrap { max-width: 640px; margin: 0 auto; }
+    h1 {
+        font-family: 'Orbitron', sans-serif;
+        font-size: 1.4rem;
+        font-weight: 900;
+        background: linear-gradient(135deg, var(--accent) 0%, #fbbf24 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin: 0 0 0.5rem;
+    }
+    p.lede { color: var(--muted); font-size: 0.9rem; margin: 0 0 1.75rem; line-height: 1.5; }
+    form { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    label { font-size: 0.78rem; color: var(--muted); display: block; }
+    label.full { grid-column: 1 / -1; }
+    input, select, textarea {
+        width: 100%;
+        background: rgba(255,255,255,0.04);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 0.6rem 0.7rem;
+        color: var(--text);
+        font-size: 0.9rem;
+        font-family: 'Inter', sans-serif;
+        margin-top: 5px;
+    }
+    textarea { resize: vertical; }
+    .hint { font-size: 0.7rem; color: #64748b; margin-top: 4px; }
+    .actions { margin-top: 1.5rem; display: flex; justify-content: flex-end; }
+    button {
+        background: var(--accent);
+        border: none;
+        color: #0f172a;
+        padding: 0.7rem 1.4rem;
+        border-radius: 0.5rem;
+        font-weight: 700;
+        font-size: 0.9rem;
+        cursor: pointer;
+    }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .result {
+        margin-top: 1rem;
+        padding: 0.9rem 1.1rem;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        display: none;
+    }
+    .result.ok { display: block; background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.3); color: #34d399; }
+    .result.err { display: block; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #ef4444; }
+    .conditional { display: none; }
+    .variant-hidden { display: none; }
+    /* Honeypot — visually hidden but still in the DOM/tab order's reach
+       for naive bots that fill every input. Real users never see or
+       focus it (off-screen, aria-hidden, no tabstop, no autofill). */
+    .hp-wrap {
+        position: absolute;
+        left: -9999px;
+        top: -9999px;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+    }
+    .consent { font-size: 0.72rem; color: #64748b; line-height: 1.5; margin-top: 0.75rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+    <h1 id="page-headline">MULTIFAMILY INSURANCE REVIEW</h1>
+    <p class="lede" id="page-subheadline">Loading…</p>
+    <form id="offer-form">
+        <div class="hp-wrap" aria-hidden="true">
+            <label for="website_url">Leave this field blank</label>
+            <input type="text" id="website_url" name="website_url" tabindex="-1" autocomplete="off">
+        </div>
+        <input type="hidden" name="utmSource" id="utmSource">
+        <input type="hidden" name="utmMedium" id="utmMedium">
+        <input type="hidden" name="utmCampaign" id="utmCampaign">
+        <input type="hidden" name="utmTerm" id="utmTerm">
+        <input type="hidden" name="utmContent" id="utmContent">
+        <input type="hidden" name="referrer" id="referrer">
+        <input type="hidden" name="landingPage" id="landingPage">
+        <input type="hidden" name="offerType" id="offerType">
+        <input type="hidden" name="pageVariant" id="pageVariant">
+        <input type="hidden" name="campaignId" id="campaignId">
+        <input type="hidden" name="campaignToken" id="campaignToken">
+        <input type="hidden" name="mfRef" id="mfRef">
+        <div class="grid">
+            <label>Name *
+                <input name="name" required>
+            </label>
+            <label>Company *
+                <input name="company" required>
+            </label>
+            <label>Email *
+                <input name="email" type="email" required>
+            </label>
+            <label>Phone
+                <input name="phone">
+            </label>
+            <label>Role / Title
+                <input name="role" placeholder="e.g. VP of Risk Management">
+            </label>
+            <label>State *
+                <select name="state" required>
+                    <option value="">Select...</option>
+                    <option value="TX">Texas</option>
+                    <option value="CA">California</option>
+                </select>
+            </label>
+            <label>City
+                <input name="city">
+            </label>
+            <label>Asset Type
+                <select name="assetType">
+                    <option value="">Select...</option>
+                    <option value="garden">Garden-style</option>
+                    <option value="mid_rise">Mid-rise</option>
+                    <option value="high_rise">High-rise</option>
+                    <option value="mixed_use">Mixed-use</option>
+                </select>
+            </label>
+            <label># of Units
+                <input name="numberOfUnits" type="number" min="0">
+            </label>
+            <label id="situation-label">What best describes your situation? *
+                <select name="leadSituation" id="leadSituation" required></select>
+            </label>
+            <label class="conditional" id="renewalDateField">Renewal Date
+                <input name="renewalDate" type="date">
+            </label>
+            <label class="conditional" id="projectStartDateField">Project Start Date
+                <input name="projectStartDate" type="date">
+            </label>
+            <div id="variant-fields-container" style="display: contents;"></div>
+            <label class="full">Anything else we should know?
+                <textarea name="notes" rows="3"></textarea>
+            </label>
+        </div>
+        <div class="result" id="result"></div>
+        <p class="consent">
+            By submitting this form, you agree to be contacted about your multifamily insurance program by phone,
+            email, or text. We don't sell your information to third parties.
+        </p>
+        <div class="actions">
+            <button type="submit" id="submit-btn">Submit</button>
+        </div>
+    </form>
+</div>
+<script>
+(function () {
+    var BENCHMARK_SITUATION_OPTIONS = [
+        { value: 'benchmark', label: 'Just want a general benchmark/review' },
+        { value: 'renewal', label: 'Renewal coming up' },
+        { value: 'acquisition', label: 'Acquisition' },
+        { value: 'refinance', label: 'Refinance' },
+        { value: 'construction', label: 'Construction project' },
+        { value: 'completion', label: 'Completion / lease-up transition' },
+        { value: 'operating', label: 'Just operating — no specific trigger' },
+    ];
+
+    var form = document.getElementById('offer-form');
+    var resultEl = document.getElementById('result');
+    var submitBtn = document.getElementById('submit-btn');
+    var situationSelect = document.getElementById('leadSituation');
+    var situationLabel = document.getElementById('situation-label');
+    var renewalField = document.getElementById('renewalDateField');
+    var constructionField = document.getElementById('projectStartDateField');
+    var variantFieldsContainer = document.getElementById('variant-fields-container');
+    var headlineEl = document.getElementById('page-headline');
+    var subheadlineEl = document.getElementById('page-subheadline');
+
+    var currentVariant = null;
+
+    function slugFromPath() {
+        var parts = window.location.pathname.split('/').filter(Boolean);
+        return parts.length ? parts[parts.length - 1] : '';
+    }
+
+    // Populate UTM/referrer/landing-page hidden fields from the URL and
+    // browser at load time, so they're captured even if the visitor
+    // edits nothing else on the page.
+    function captureAttribution(defaultOfferType) {
+        var params = new URLSearchParams(window.location.search);
+        var map = {
+            utmSource: 'utm_source', utmMedium: 'utm_medium', utmCampaign: 'utm_campaign',
+            utmTerm: 'utm_term', utmContent: 'utm_content',
+        };
+        Object.keys(map).forEach(function (fieldId) {
+            var value = params.get(map[fieldId]);
+            if (value) document.getElementById(fieldId).value = value;
+        });
+        document.getElementById('referrer').value = document.referrer || '';
+        document.getElementById('landingPage').value = window.location.href;
+        document.getElementById('offerType').value = defaultOfferType;
+        var offerOverride = params.get('offer');
+        if (offerOverride) document.getElementById('offerType').value = offerOverride;
+        var campaign = params.get('campaign') || params.get('cid') || '';
+        if (campaign) document.getElementById('campaignId').value = campaign;
+        // Pilot Campaign Control Center tracked-link token (?t=) and the
+        // ad-hoc Outreach Workbench one-off link token (?mf_ref=) — both
+        // forwarded verbatim so the server can resolve either one and
+        // merge this submission back into the right target/lead.
+        var campaignToken = params.get('t') || '';
+        if (campaignToken) document.getElementById('campaignToken').value = campaignToken;
+        var mfRef = params.get('mf_ref') || '';
+        if (mfRef) document.getElementById('mfRef').value = mfRef;
+    }
+
+    function updateConditionalFields() {
+        renewalField.style.display = situationSelect.value === 'renewal' ? 'block' : 'none';
+        constructionField.style.display = situationSelect.value === 'construction' ? 'block' : 'none';
+    }
+
+    function renderField(spec) {
+        var label = document.createElement('label');
+        label.textContent = spec.label + (spec.required ? ' *' : '');
+        var input;
+        if (spec.field_type === 'select') {
+            input = document.createElement('select');
+            input.name = spec.name;
+            if (spec.required) input.required = true;
+            var blank = document.createElement('option');
+            blank.value = '';
+            blank.textContent = 'Select...';
+            input.appendChild(blank);
+            (spec.options || []).forEach(function (opt) {
+                var o = document.createElement('option');
+                o.value = opt.value;
+                o.textContent = opt.label;
+                input.appendChild(o);
+            });
+        } else if (spec.field_type === 'textarea') {
+            input = document.createElement('textarea');
+            input.name = spec.name;
+            input.rows = 3;
+            if (spec.required) input.required = true;
+        } else {
+            input = document.createElement('input');
+            input.type = spec.field_type || 'text';
+            input.name = spec.name;
+            if (spec.required) input.required = true;
+            if (spec.placeholder) input.placeholder = spec.placeholder;
+        }
+        label.appendChild(input);
+        return label;
+    }
+
+    function applyVariant(variant) {
+        currentVariant = variant;
+        document.title = variant.headline;
+        headlineEl.textContent = variant.headline;
+        subheadlineEl.textContent = variant.subheadline;
+        submitBtn.textContent = variant.cta;
+        document.getElementById('offerType').value = variant.offer_type;
+        document.getElementById('pageVariant').value = variant.slug;
+
+        variantFieldsContainer.innerHTML = '';
+
+        if (variant.slug === 'benchmark') {
+            situationLabel.style.display = 'block';
+            situationSelect.disabled = false;
+            situationSelect.innerHTML = '';
+            BENCHMARK_SITUATION_OPTIONS.forEach(function (opt) {
+                var o = document.createElement('option');
+                o.value = opt.value;
+                o.textContent = opt.label;
+                situationSelect.appendChild(o);
+            });
+            situationSelect.value = 'benchmark';
+            situationSelect.addEventListener('change', updateConditionalFields);
+            updateConditionalFields();
+            (variant.conditional_fields || []).forEach(function (spec) {
+                variantFieldsContainer.appendChild(renderField(spec));
+            });
+        } else {
+            situationLabel.style.display = 'none';
+            renewalField.style.display = 'none';
+            constructionField.style.display = 'none';
+            situationSelect.innerHTML = '';
+            var fixed = document.createElement('option');
+            fixed.value = variant.lead_situation;
+            fixed.textContent = variant.lead_situation;
+            fixed.selected = true;
+            situationSelect.appendChild(fixed);
+            (variant.conditional_fields || []).forEach(function (spec) {
+                variantFieldsContainer.appendChild(renderField(spec));
+            });
+        }
+    }
+
+    function showLoadError() {
+        headlineEl.textContent = 'Multifamily Insurance Review';
+        subheadlineEl.textContent = 'We could not load this page right now. Please refresh, or reach out directly.';
+        submitBtn.disabled = true;
+    }
+
+    fetch('/api/multifamily/form-variants')
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            var slug = slugFromPath();
+            var variant = (data.variants && data.variants[slug]) ||
+                (data.variants && data.variants[data.default_slug]);
+            if (!variant) { showLoadError(); return; }
+            captureAttribution(variant.offer_type);
+            applyVariant(variant);
+        })
+        .catch(showLoadError);
+
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        resultEl.className = 'result';
+        resultEl.textContent = '';
+        submitBtn.disabled = true;
+        var originalLabel = currentVariant ? currentVariant.cta : submitBtn.textContent;
+        submitBtn.textContent = 'Submitting…';
+
+        var data = Object.fromEntries(new FormData(form).entries());
+        data.source = 'benchmark_form';
+        data.sourcePage = currentVariant ? currentVariant.headline : 'Multifamily Insurance Review';
+        data.sourceUrl = window.location.href;
+
+        fetch('/api/multifamily/leads', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        })
+            .then(function (res) { return res.json().then(function (json) { return { ok: res.ok, json: json }; }); })
+            .then(function (r) {
+                if (r.ok && r.json.success) {
+                    resultEl.className = 'result ok';
+                    resultEl.textContent = currentVariant ?
+                        currentVariant.confirmation :
+                        "Thanks — we've got your request and will follow up shortly.";
+                    form.reset();
+                    if (currentVariant) applyVariant(currentVariant);
+                } else {
+                    resultEl.className = 'result err';
+                    resultEl.textContent = (r.json.errors || ['Something went wrong. Please try again.']).join(' ');
+                }
+            })
+            .catch(function (err) {
+                resultEl.className = 'result err';
+                resultEl.textContent = 'Network error: ' + err.message;
+            })
+            .finally(function () {
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalLabel;
+            });
+    });
+})();
+</script>
+</body>
+</html>

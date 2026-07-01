@@ -232,3 +232,25 @@ class SalesIntelligencePackage:
     objection_playbook: List[ObjectionResponse]
     follow_up_strategy: FollowUpStrategy
     reasoning: SalesIntelligenceReasoning
+
+
+# ---------------------------------------------------------------------------
+# Aliases matching the approved planning-doc vocabulary
+# ---------------------------------------------------------------------------
+# Identical structure to the names above — kept as aliases rather than
+# renames so existing references throughout the engine/API/tests don't
+# churn for a purely cosmetic difference (dataclasses.asdict() serializes
+# field names/values only, never the class name, so this has zero effect
+# on any JSON the API or UI ever sees).
+LeadTemperature = LEAD_TEMPERATURES
+LeadOrigin = LEAD_ORIGINS
+InsuranceScenario = INSURANCE_SCENARIOS
+SalesStage = SALES_STAGES
+BuyerAwarenessLevel = BUYER_AWARENESS_LEVELS
+ResistanceRisk = RESISTANCE_RISKS
+ConversationMode = CONVERSATION_MODES
+RecommendedAction = RECOMMENDED_ACTIONS
+OutreachPackage = MessagePackage
+ObjectionGuidance = ObjectionResponse
+ReasoningExplanation = SalesIntelligenceReasoning
+SalesIntelligenceOutput = SalesIntelligencePackage

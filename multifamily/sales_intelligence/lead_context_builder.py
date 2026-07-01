@@ -13,7 +13,7 @@ from multifamily.sales_intelligence.nepq_types import SalesLeadContext
 from multifamily.sales_intelligence.buyer_awareness_classifier import classify_buyer_awareness
 from multifamily.sales_intelligence.resistance_risk_detector import detect_resistance_risk
 
-_TRIGGER_ONLY_SOURCES = {'permit', 'news'}
+_TRIGGER_ONLY_SOURCES = {'permit', 'news', 'serp'}
 _CONSTRUCTION_STAGES = {'construction_loan_closing', 'construction_start', 'entitlement_or_permit'}
 _CONSTRUCTION_SIGNALS = {'permit_filed', 'planning_approval', 'groundbreaking', 'vertical_construction'}
 _ACQUISITION_SIGNALS = {'acquisition', 'refinance', 'financing'}
@@ -95,7 +95,7 @@ def _infer_scenario(lead: MultifamilyLead, process_stage: Optional[str]) -> str:
         return 'refinance_or_financing'
     if situation == 'construction' or process_stage in _CONSTRUCTION_STAGES:
         return 'builders_risk'
-    if process_stage == 'completion_or_lease_up':
+    if situation == 'completion' or process_stage == 'completion_or_lease_up':
         return 'completion_or_lease_up'
     if situation == 'benchmark':
         return 'just_benchmarking'
