@@ -225,6 +225,31 @@ def ensure_schema() -> None:
         )
     ''')
 
+    # Score/timing snapshots (outcome/snapshot/notification phase).
+    # Append-only, read-only projection — never recomputes scoring math,
+    # just records what score_lead()/detect_process_stage() already
+    # produced at a given moment (created/signal_added/merged/
+    # outcome_changed/manual_rerun). Real leads only.
+    execute('''
+        CREATE TABLE IF NOT EXISTS multifamily_lead_snapshots (
+            id TEXT PRIMARY KEY,
+            lead_id TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            score_total INTEGER,
+            score_category TEXT,
+            reason_codes_json TEXT,
+            disqualifier_codes_json TEXT,
+            process_stage TEXT,
+            outreach_window TEXT,
+            timing_reason TEXT,
+            timing_confidence TEXT,
+            urgency_label TEXT,
+            signal_count INTEGER,
+            attribution_summary_json TEXT,
+            created_at TIMESTAMP
+        )
+    ''')
+
     try:
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_leads_created ON multifamily_leads(created_at DESC)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_leads_state ON multifamily_leads(state)')
@@ -243,6 +268,8 @@ def ensure_schema() -> None:
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_outcomes_lead ON multifamily_lead_outcomes(lead_id, created_at DESC)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_outcomes_type ON multifamily_lead_outcomes(outcome_type)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_leads_current_outcome ON multifamily_leads(current_outcome)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_snapshots_lead ON multifamily_lead_snapshots(lead_id, created_at DESC)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_snapshots_reason ON multifamily_lead_snapshots(reason)')
     except Exception:
         pass
 
@@ -1074,3 +1101,92 @@ def delete_outcomes_for_lead(lead_id: str) -> None:
     ensure_schema()
     execute('DELETE FROM multifamily_lead_outcomes WHERE lead_id = ?', [lead_id])
     execute('UPDATE multifamily_leads SET current_outcome = NULL, current_outcome_at = NULL WHERE id = ?', [lead_id])
+
+
+# ===========================================================================
+# Score/timing snapshots (outcome/snapshot/notification phase)
+# Append-only, read-only projections of already-computed score/timing/
+# attribution state — never recomputes scoring math. See
+# multifamily/snapshots.py for the capture logic; this module is pure CRUD.
+# ===========================================================================
+
+def insert_snapshot(
+    lead_id: str, reason: str, *, score_total: Optional[int] = None, score_category: Optional[str] = None,
+    reason_codes: Optional[List[str]] = None, disqualifier_codes: Optional[List[str]] = None,
+    process_stage: Optional[str] = None, outreach_window: Optional[str] = None,
+    timing_reason: Optional[str] = None, timing_confidence: Optional[str] = None,
+    urgency_label: Optional[str] = None, signal_count: int = 0,
+    attribution_summary: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    ensure_schema()
+    from multifamily.types import new_id, utc_now_iso
+    row = {
+        'id': new_id(), 'lead_id': lead_id, 'reason': reason,
+        'score_total': score_total, 'score_category': score_category,
+        'reason_codes': reason_codes or [], 'disqualifier_codes': disqualifier_codes or [],
+        'process_stage': process_stage, 'outreach_window': outreach_window,
+        'timing_reason': timing_reason, 'timing_confidence': timing_confidence,
+        'urgency_label': urgency_label, 'signal_count': signal_count,
+        'attribution_summary': attribution_summary or {}, 'created_at': utc_now_iso(),
+    }
+    execute(
+        'INSERT INTO multifamily_lead_snapshots (id, lead_id, reason, score_total, score_category, '
+        'reason_codes_json, disqualifier_codes_json, process_stage, outreach_window, timing_reason, '
+        'timing_confidence, urgency_label, signal_count, attribution_summary_json, created_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+            row['id'], lead_id, reason, score_total, score_category,
+            json.dumps(row['reason_codes']), json.dumps(row['disqualifier_codes']),
+            process_stage, outreach_window, timing_reason, timing_confidence, urgency_label,
+            signal_count, json.dumps(row['attribution_summary']), row['created_at'],
+        ],
+    )
+    return row
+
+
+def _snapshot_row_with_json(r: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        r['reason_codes'] = json.loads(r['reason_codes_json']) if r.get('reason_codes_json') else []
+    except Exception:
+        r['reason_codes'] = []
+    try:
+        r['disqualifier_codes'] = json.loads(r['disqualifier_codes_json']) if r.get('disqualifier_codes_json') else []
+    except Exception:
+        r['disqualifier_codes'] = []
+    try:
+        r['attribution_summary'] = json.loads(r['attribution_summary_json']) if r.get('attribution_summary_json') else {}
+    except Exception:
+        r['attribution_summary'] = {}
+    return r
+
+
+def get_snapshots_for_lead(lead_id: str) -> List[Dict[str, Any]]:
+    """Full snapshot history for a lead, newest first."""
+    ensure_schema()
+    rows = fetch_all(
+        'SELECT id, lead_id, reason, score_total, score_category, reason_codes_json, disqualifier_codes_json, '
+        'process_stage, outreach_window, timing_reason, timing_confidence, urgency_label, signal_count, '
+        'attribution_summary_json, created_at FROM multifamily_lead_snapshots '
+        'WHERE lead_id = ? ORDER BY created_at DESC',
+        [lead_id],
+    )
+    return [_snapshot_row_with_json(r) for r in rows]
+
+
+def get_creation_snapshot(lead_id: str) -> Optional[Dict[str, Any]]:
+    """The lead's very first ('created') snapshot — the baseline used for
+    calibration reporting (e.g. avg score/timing-confidence at intake)."""
+    ensure_schema()
+    rows = fetch_all(
+        "SELECT id, lead_id, reason, score_total, score_category, reason_codes_json, disqualifier_codes_json, "
+        "process_stage, outreach_window, timing_reason, timing_confidence, urgency_label, signal_count, "
+        "attribution_summary_json, created_at FROM multifamily_lead_snapshots "
+        "WHERE lead_id = ? AND reason = 'created' ORDER BY created_at ASC LIMIT 1",
+        [lead_id],
+    )
+    return _snapshot_row_with_json(rows[0]) if rows else None
+
+
+def delete_snapshots_for_lead(lead_id: str) -> None:
+    ensure_schema()
+    execute('DELETE FROM multifamily_lead_snapshots WHERE lead_id = ?', [lead_id])

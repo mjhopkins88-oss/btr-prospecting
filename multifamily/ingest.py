@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from multifamily import repository, matching as mf_matching, spam_guard
 from multifamily.intake import build_lead_from_intake
+from multifamily.snapshots import snapshot_lead
 
 
 def _ingest_one(payload: Dict[str, Any], *, default_source: str) -> Dict[str, Any]:
@@ -74,6 +75,11 @@ def _ingest_one(payload: Dict[str, Any], *, default_source: str) -> Dict[str, An
     auto = classified.get('auto')
     if auto:
         mf_matching.merge_incoming_on_intake(auto.lead, lead)
+        # An automated collector folding a new signal onto an already-known
+        # lead is a distinct snapshot moment from a human-facing dedupe
+        # merge (create_lead's auto-merge / admin-confirmed merge) — both
+        # re-score the survivor the same way, just via different callers.
+        snapshot_lead(auto.lead, 'signal_added')
         result.update(action='merged', lead_id=auto.lead.id, merged_into=auto.lead.id)
         return result
 
@@ -88,6 +94,7 @@ def _ingest_one(payload: Dict[str, Any], *, default_source: str) -> Dict[str, An
             incoming_lead_id=lead.id,
         )
         result['review_candidates'] += 1
+    snapshot_lead(lead, 'created')
     result.update(action='created', lead_id=lead.id)
     return result
 

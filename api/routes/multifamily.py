@@ -31,6 +31,7 @@ from multifamily.timing import detect_process_stage
 from multifamily.timing.process_stage_types import OUTREACH_WINDOW_RANK
 from multifamily.outreach.outreach_bundle_builder import build_outreach_bundle
 from multifamily import matching as mf_matching
+from multifamily.snapshots import snapshot_lead, SNAPSHOT_REASONS
 
 multifamily_bp = Blueprint('multifamily', __name__, url_prefix='/api/multifamily')
 
@@ -109,9 +110,11 @@ def _serialize_lead(lead, is_admin, stage_result=None, with_history=False, curre
                 'utm_history': [], 'landing_page_history': [], 'referrer_history': [],
             }
             d['outcomes'] = []
+            d['snapshots'] = []
         else:
             d['attribution'] = repository.get_attribution_summary(lead.id)
             d['outcomes'] = repository.get_outcomes_for_lead(lead.id)
+            d['snapshots'] = repository.get_snapshots_for_lead(lead.id)
     if not is_admin:
         for f in _ADMIN_ONLY_LEAD_FIELDS:
             d.pop(f, None)
@@ -221,6 +224,7 @@ def create_lead():
             mf_matching.merge_incoming_on_intake(auto.lead, lead)
             merged_into = auto.lead.id
             lead = repository.get_lead_by_id(auto.lead.id) or auto.lead
+            snapshot_lead(lead, 'merged')
         else:
             repository.insert_lead(lead)
             repository.persist_lead_signals(lead)
@@ -233,6 +237,7 @@ def create_lead():
                     incoming_lead_id=lead.id,
                 )
                 review_count += 1
+            snapshot_lead(lead, 'created')
 
     if spam_status == 'rejected':
         event_type = 'rejected_honeypot' if 'HONEYPOT_FILLED' in spam_reason_codes else 'rejected_garbage'
@@ -581,6 +586,7 @@ def merge_match_candidate(candidate_id):
         survivor = mf_matching.merge_existing(survivor_id, loser_id)
         if not survivor:
             return jsonify({'success': False, 'error': 'Merge failed (lead missing)'}), 422
+        snapshot_lead(survivor, 'merged')
         resolver = (g.user or {}).get('email') if getattr(g, 'user', None) else None
         repository.resolve_match_candidate(candidate_id, 'merged', resolved_by=resolver)
         return jsonify({'success': True, 'survivor_id': survivor_id, 'merged_lead_id': loser_id})
@@ -703,6 +709,7 @@ def record_lead_outcome(lead_id):
             notes=(payload.get('notes') or None),
             created_by=user_email,
         )
+        snapshot_lead(lead, 'outcome_changed')
         return jsonify({
             'success': True, 'outcome': outcome,
             'current_outcome': repository.get_current_outcome(lead_id),
@@ -728,6 +735,45 @@ def list_lead_outcomes(lead_id):
             'outcomes': repository.get_outcomes_for_lead(lead_id),
             'current_outcome': repository.get_current_outcome(lead_id),
         })
+
+    return _authorized()
+
+
+@multifamily_bp.route('/leads/<lead_id>/snapshots', methods=['GET'])
+def list_lead_snapshots(lead_id):
+    """Score/timing snapshot history for one lead, newest first (drawer's
+    Score History tab). Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        lead, err = _find_lead(lead_id)
+        if err:
+            return err
+        if lead.is_demo:
+            return jsonify({'lead_id': lead_id, 'snapshots': []})
+        return jsonify({'lead_id': lead_id, 'snapshots': repository.get_snapshots_for_lead(lead_id)})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/leads/<lead_id>/snapshot', methods=['POST'])
+def create_lead_snapshot(lead_id):
+    """Force a fresh score/timing snapshot ('manual_rerun') — e.g. after an
+    operator manually reviews/corrects a lead's data. Login required. Real
+    leads only; never recomputes/changes scoring, just records the current
+    (already-computed) state."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        lead, err = _find_lead(lead_id)
+        if err:
+            return err
+        if lead.is_demo:
+            return jsonify({'success': False, 'errors': ['Cannot snapshot demo data.']}), 400
+        row = snapshot_lead(lead, 'manual_rerun')
+        return jsonify({'success': True, 'snapshot': row}), 201
 
     return _authorized()
 
