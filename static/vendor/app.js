@@ -11831,6 +11831,27 @@ const MF_CAMPAIGN_TARGET_STATUS_OPTIONS = [{
   value: 'nurture',
   label: 'Nurture'
 }];
+const MF_CAMPAIGN_TOUCH_STEP_OPTIONS = [{
+  step: 'touch_1_sent',
+  label: 'Touch 1 sent',
+  field: 'touch_1_sent_at'
+}, {
+  step: 'connected',
+  label: 'LinkedIn connect sent',
+  field: 'connected_at'
+}, {
+  step: 'touch_2_sent',
+  label: 'Touch 2 sent',
+  field: 'touch_2_sent_at'
+}, {
+  step: 'called',
+  label: 'Called',
+  field: 'called_at'
+}, {
+  step: 'breakup_sent',
+  label: 'Breakup sent',
+  field: 'breakup_sent_at'
+}];
 function mfTargetStatusColor(status) {
   if (status === 'converted') return '#34d399';
   if (status === 'meeting_booked') return '#60a5fa';
@@ -11848,6 +11869,8 @@ function MultifamilyCampaignTargetRow({
   const [notes, setNotes] = useState(target.notes || '');
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [touchBusy, setTouchBusy] = useState(null);
+  const [renewalMonth, setRenewalMonth] = useState(target.renewal_month || '');
   const save = async () => {
     setBusy(true);
     setSaved(false);
@@ -11868,6 +11891,37 @@ function MultifamilyCampaignTargetRow({
       }
     } catch (e) {}
     setBusy(false);
+  };
+  const markTouch = async step => {
+    setTouchBusy(step);
+    try {
+      const r = await fetch(`/api/multifamily/campaign-targets/${target.id}/touch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          step
+        })
+      });
+      if (r.ok) onChanged();
+    } catch (e) {}
+    setTouchBusy(null);
+  };
+  const saveRenewalMonth = async () => {
+    if (!/^\d{4}-\d{2}$/.test(renewalMonth)) return;
+    try {
+      const r = await fetch(`/api/multifamily/campaign-targets/${target.id}/renewal-month`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          renewalMonth: renewalMonth
+        })
+      });
+      if (r.ok) onChanged();
+    } catch (e) {}
   };
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -11975,7 +12029,71 @@ function MultifamilyCampaignTargetRow({
     }
   }, "Saved."), target.lead_id && /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#a78bfa')
-  }, "has lead")));
+  }, "has lead")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '10px',
+      marginTop: '8px',
+      flexWrap: 'wrap',
+      paddingTop: '8px',
+      borderTop: '1px solid rgba(255,255,255,0.05)'
+    }
+  }, MF_CAMPAIGN_TOUCH_STEP_OPTIONS.map(opt => /*#__PURE__*/React.createElement("label", {
+    key: opt.step,
+    title: target[opt.field] ? `Sent ${String(target[opt.field]).slice(0, 10)}` : 'Not yet sent',
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '4px',
+      fontSize: '0.68rem',
+      color: target[opt.field] ? '#34d399' : '#64748b',
+      cursor: touchBusy ? 'not-allowed' : 'pointer'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: !!target[opt.field],
+    disabled: !!touchBusy,
+    onChange: () => markTouch(opt.step)
+  }), opt.label)), /*#__PURE__*/React.createElement("label", {
+    title: target.bounced_at ? `Bounced ${String(target.bounced_at).slice(0, 10)}` : 'Mark this send as bounced',
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '4px',
+      fontSize: '0.68rem',
+      color: target.bounced_at ? '#ef4444' : '#64748b',
+      cursor: touchBusy ? 'not-allowed' : 'pointer'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: !!target.bounced_at,
+    disabled: !!touchBusy,
+    onChange: () => markTouch('bounced')
+  }), "Bounced")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px',
+      marginTop: '6px'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#64748b'
+    }
+  }, "Renewal month (if known):"), /*#__PURE__*/React.createElement("input", {
+    type: "month",
+    value: renewalMonth,
+    onChange: e => setRenewalMonth(e.target.value),
+    onBlur: saveRenewalMonth,
+    style: {
+      ...mfFieldStyle(),
+      width: 'auto',
+      padding: '3px 6px',
+      fontSize: '0.68rem'
+    }
+  })));
 }
 function MultifamilyCampaignDetailView({
   campaignId,
@@ -11987,6 +12105,9 @@ function MultifamilyCampaignDetailView({
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showNewTarget, setShowNewTarget] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const fileInputRef = useRef(null);
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -12002,6 +12123,42 @@ function MultifamilyCampaignDetailView({
   useEffect(() => {
     load();
   }, [load]);
+  const handleCsvFile = async e => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const r = await fetch(`/api/multifamily/campaigns/${campaignId}/targets/import`, {
+        method: 'POST',
+        body: formData
+      });
+      const j = await r.json();
+      if (r.ok && j.success) {
+        setImportResult({
+          ok: true,
+          message: `Imported ${j.created} target(s), linked ${j.leads_linked} to a lead.`,
+          errors: j.errors || []
+        });
+        load();
+      } else {
+        setImportResult({
+          ok: false,
+          message: (j.errors || ['Import failed.']).join('; ')
+        });
+      }
+    } catch (err) {
+      setImportResult({
+        ok: false,
+        message: 'Network error: ' + err.message
+      });
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
   const campaign = data && data.campaign;
   const targets = data && data.targets || [];
   const contacted = targets.filter(t => t.status !== 'planned').length;
@@ -12122,7 +12279,33 @@ function MultifamilyCampaignDetailView({
       fontFamily: "'Orbitron', sans-serif",
       letterSpacing: '0.06em'
     }
-  }, "TARGETS"), /*#__PURE__*/React.createElement("button", {
+  }, "TARGETS"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    ref: fileInputRef,
+    type: "file",
+    accept: ".csv,text/csv",
+    style: {
+      display: 'none'
+    },
+    onChange: handleCsvFile
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: () => fileInputRef.current && fileInputRef.current.click(),
+    disabled: importing,
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.15)',
+      color: '#cbd5e1',
+      padding: '0.4rem 0.8rem',
+      borderRadius: '0.5rem',
+      fontWeight: 600,
+      cursor: importing ? 'not-allowed' : 'pointer',
+      fontSize: '0.74rem'
+    }
+  }, importing ? 'Importing\u2026' : 'Import CSV'), /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowNewTarget(true),
     style: {
       background: '#f59e0b',
@@ -12134,13 +12317,27 @@ function MultifamilyCampaignDetailView({
       cursor: 'pointer',
       fontSize: '0.74rem'
     }
-  }, "+ Add Target")), targets.length === 0 && /*#__PURE__*/React.createElement("div", {
+  }, "+ Add Target"))), importResult && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.76rem',
+      color: importResult.ok ? '#34d399' : '#ef4444',
+      background: 'rgba(255,255,255,0.03)',
+      borderRadius: '6px',
+      padding: '8px 10px',
+      marginBottom: '10px'
+    }
+  }, importResult.message, importResult.errors && importResult.errors.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#facc15',
+      marginTop: '4px'
+    }
+  }, importResult.errors.join(' \u00b7 '))), targets.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       color: '#64748b',
       fontSize: '0.8rem',
       padding: '1rem 0'
     }
-  }, "No targets yet \u2014 add prospects to start tracking outreach."), targets.map(t => /*#__PURE__*/React.createElement(MultifamilyCampaignTargetRow, {
+  }, "No targets yet \u2014 add prospects to start tracking outreach, or Import CSV above."), targets.map(t => /*#__PURE__*/React.createElement(MultifamilyCampaignTargetRow, {
     key: t.id,
     target: t,
     onChanged: load

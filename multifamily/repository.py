@@ -445,6 +445,16 @@ def ensure_schema() -> None:
     except Exception:
         pass
 
+    # Pilot Campaign sequence-cadence tracking + bounce flag + coarse
+    # renewal fallback — added after the table's initial create.
+    _safe_add_column('multifamily_campaign_targets', 'touch_1_sent_at', 'TEXT')
+    _safe_add_column('multifamily_campaign_targets', 'connected_at', 'TEXT')
+    _safe_add_column('multifamily_campaign_targets', 'touch_2_sent_at', 'TEXT')
+    _safe_add_column('multifamily_campaign_targets', 'called_at', 'TEXT')
+    _safe_add_column('multifamily_campaign_targets', 'breakup_sent_at', 'TEXT')
+    _safe_add_column('multifamily_campaign_targets', 'bounced_at', 'TEXT')
+    _safe_add_column('multifamily_campaign_targets', 'renewal_month', 'TEXT')
+
     _backfill_signals_from_lead_json()
     _SCHEMA_READY = True
 
@@ -1135,6 +1145,16 @@ _CAMPAIGN_COLUMNS = (
 
 _CAMPAIGN_TARGET_COLUMNS = (
     'id, campaign_id, tracking_token, company, contact_name, email, phone, linkedin_url, '
+    'city, state, segment, lead_id, status, notes, created_at, last_activity_at, converted_at, '
+    'touch_1_sent_at, connected_at, touch_2_sent_at, called_at, breakup_sent_at, bounced_at, renewal_month'
+)
+
+# Only the columns create_campaign_target() actually sets at creation —
+# the sequence/bounce timestamps and renewal_month are added later via
+# mark_campaign_target_touch()/set_campaign_target_renewal_month(), so
+# they're deliberately excluded from the INSERT (defaulting to NULL).
+_CAMPAIGN_TARGET_INSERT_COLUMNS = (
+    'id, campaign_id, tracking_token, company, contact_name, email, phone, linkedin_url, '
     'city, state, segment, lead_id, status, notes, created_at, last_activity_at, converted_at'
 )
 
@@ -1219,7 +1239,7 @@ def create_campaign_target(
         'created_at': now, 'last_activity_at': None, 'converted_at': None,
     }
     execute(
-        f'INSERT INTO multifamily_campaign_targets ({_CAMPAIGN_TARGET_COLUMNS}) '
+        f'INSERT INTO multifamily_campaign_targets ({_CAMPAIGN_TARGET_INSERT_COLUMNS}) '
         'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         list(row.values()),
     )
@@ -1273,6 +1293,49 @@ def set_campaign_target_lead(target_id: str, lead_id: str) -> None:
     (e.g. an operator manually attaches an existing lead to a target)."""
     ensure_schema()
     execute('UPDATE multifamily_campaign_targets SET lead_id = ? WHERE id = ?', [lead_id, target_id])
+
+
+# Maps a touch step name to its timestamp column — the single source of
+# truth so the API layer never string-formats a column name from
+# user input (CAMPAIGN_TARGET_TOUCH_STEPS values are the only valid keys).
+_TOUCH_STEP_COLUMNS = {
+    'touch_1_sent': 'touch_1_sent_at',
+    'connected': 'connected_at',
+    'touch_2_sent': 'touch_2_sent_at',
+    'called': 'called_at',
+    'breakup_sent': 'breakup_sent_at',
+    'bounced': 'bounced_at',
+}
+
+
+def mark_campaign_target_touch(target_id: str, step: str, occurred_at: Optional[str] = None) -> None:
+    """Mark one Section 7 sequence step (or the 'bounced' data-quality
+    flag) with a timestamp. Idempotent — re-marking the same step just
+    updates the timestamp, it doesn't error or duplicate anything (there's
+    only one column per step). Also bumps last_activity_at, same as any
+    other touch on a target. `step` must be a CAMPAIGN_TARGET_TOUCH_STEPS
+    value; the caller (API route) validates this before calling."""
+    ensure_schema()
+    from multifamily.types import utc_now_iso
+    column = _TOUCH_STEP_COLUMNS[step]
+    now = utc_now_iso()
+    when = occurred_at or now
+    execute(
+        f'UPDATE multifamily_campaign_targets SET {column} = ?, last_activity_at = ? WHERE id = ?',
+        [when, now, target_id],
+    )
+
+
+def set_campaign_target_renewal_month(target_id: str, renewal_month: str) -> None:
+    """Capture a coarse ('YYYY-MM') renewal estimate an operator picked
+    up in conversation — a fallback the timing engine uses only when no
+    precise renewal_date_known signal exists on the linked lead."""
+    ensure_schema()
+    from multifamily.types import utc_now_iso
+    execute(
+        'UPDATE multifamily_campaign_targets SET renewal_month = ?, last_activity_at = ? WHERE id = ?',
+        [renewal_month, utc_now_iso(), target_id],
+    )
 
 
 def mark_campaign_target_converted(target_id: str, lead_id: str) -> None:

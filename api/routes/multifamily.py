@@ -11,6 +11,7 @@ flagged via `is_demo` on each lead, and `is_demo_data` on aggregate
 responses) only when it has zero matching real leads.
 """
 import dataclasses
+import re
 from datetime import date, datetime, timedelta
 from typing import Any, Dict
 
@@ -26,7 +27,9 @@ from multifamily.daily_brief.multifamily_daily_brief_builder import build_daily_
 from multifamily.intake import build_lead_from_intake
 from multifamily import repository
 from multifamily import spam_guard
-from multifamily.types import ACTIVITY_TYPES, OUTCOME_TYPES, CAMPAIGN_STATUSES, CAMPAIGN_TARGET_STATUSES
+from multifamily.types import (
+    ACTIVITY_TYPES, OUTCOME_TYPES, CAMPAIGN_STATUSES, CAMPAIGN_TARGET_STATUSES, CAMPAIGN_TARGET_TOUCH_STEPS,
+)
 from multifamily.stage_timing import compute_stage_timing
 from multifamily.timing import detect_process_stage
 from multifamily.timing.process_stage_types import OUTREACH_WINDOW_RANK
@@ -1373,6 +1376,45 @@ def create_campaign_target(campaign_id):
     return _authorized()
 
 
+@multifamily_bp.route('/campaigns/<campaign_id>/targets/import', methods=['POST'])
+def import_campaign_targets(campaign_id):
+    """Bulk-add prospects from a CSV (file upload or a raw `csv` string
+    in the JSON body — either works, so this is scriptable without a
+    browser too). Columns: company (required), contact_name, email,
+    phone, linkedin_url, city, state, segment, notes, property_name,
+    units, year_built, close_date. A row with a real email is run
+    through the SAME create-or-match path every other real submission
+    uses (multifamily.campaigns.csv_import), so it strengthens an
+    existing lead instead of duplicating one; a row with close_date is
+    ingested with acquisition context regardless of this campaign's own
+    offer, so first_renewal_estimator can see it later. Login
+    required."""
+    import app as _app
+    from multifamily.campaigns.csv_import import import_targets_from_csv
+
+    @_app.require_auth
+    def _authorized():
+        campaign = repository.get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({'error': 'Campaign not found'}), 404
+
+        file_content = None
+        uploaded = request.files.get('file')
+        if uploaded:
+            file_content = uploaded.read().decode('utf-8', errors='replace')
+        else:
+            payload = request.get_json(silent=True) or {}
+            file_content = payload.get('csv')
+
+        if not file_content:
+            return jsonify({'success': False, 'errors': ['No CSV file or csv text provided.']}), 400
+
+        summary = import_targets_from_csv(campaign, file_content)
+        return jsonify({'success': True, **summary}), 201
+
+    return _authorized()
+
+
 @multifamily_bp.route('/campaigns/<campaign_id>/targets', methods=['GET'])
 def list_campaign_targets_route(campaign_id):
     """Login required."""
@@ -1428,6 +1470,53 @@ def update_campaign_target_status(target_id):
             elif status == 'meeting_booked':
                 mf_notifications.notify_meeting_booked(target['lead_id'], company_name, activity['id'])
 
+        return jsonify({'success': True, 'target': repository.get_campaign_target(target_id)})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/campaign-targets/<target_id>/touch', methods=['POST'])
+def mark_campaign_target_touch_route(target_id):
+    """Mark one Section 7 sequence step (touch_1_sent/connected/
+    touch_2_sent/called/breakup_sent) or the 'bounced' data-quality flag
+    with a timestamp — a SEPARATE axis from `status` (see
+    CAMPAIGN_TARGET_TOUCH_STEPS). Idempotent: re-marking the same step
+    just updates its timestamp. Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        target = repository.get_campaign_target(target_id)
+        if not target:
+            return jsonify({'error': 'Campaign target not found'}), 404
+        payload = request.get_json(silent=True) or {}
+        step = (payload.get('step') or '').strip()
+        if step not in CAMPAIGN_TARGET_TOUCH_STEPS:
+            return jsonify({'success': False, 'errors': [f'step must be one of {CAMPAIGN_TARGET_TOUCH_STEPS}']}), 400
+        repository.mark_campaign_target_touch(target_id, step)
+        return jsonify({'success': True, 'target': repository.get_campaign_target(target_id)})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/campaign-targets/<target_id>/renewal-month', methods=['POST'])
+def set_campaign_target_renewal_month_route(target_id):
+    """Capture a coarse ('YYYY-MM') renewal estimate an operator picked
+    up in conversation — used by the timing engine only when no precise
+    renewal_date_known signal exists on the linked lead. Login
+    required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        target = repository.get_campaign_target(target_id)
+        if not target:
+            return jsonify({'error': 'Campaign target not found'}), 404
+        payload = request.get_json(silent=True) or {}
+        renewal_month = (payload.get('renewalMonth') or payload.get('renewal_month') or '').strip()
+        if not re.match(r'^\d{4}-\d{2}$', renewal_month):
+            return jsonify({'success': False, 'errors': ["renewal_month must be in 'YYYY-MM' format"]}), 400
+        repository.set_campaign_target_renewal_month(target_id, renewal_month)
         return jsonify({'success': True, 'target': repository.get_campaign_target(target_id)})
 
     return _authorized()

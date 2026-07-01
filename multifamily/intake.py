@@ -156,6 +156,11 @@ def _situation_signals(payload: Dict[str, Any], property_id: str, company_id: st
             detail['acquisition_property_name'] = _clean(payload.get('propertyName'))
         if payload.get('relyingOnSellerNumbers'):
             detail['relying_on_seller_numbers'] = _clean(payload.get('relyingOnSellerNumbers'))
+        if payload.get('yearBuilt'):
+            # Vintage — a key targeting/deliverable input (Section 8 item 5's
+            # Acquisition Review inputs) — rides in signal detail only, same
+            # as every other conditional field here; scoring never reads it.
+            detail['year_built'] = _clean(payload.get('yearBuilt'))
         signals.append(MultifamilySignal(
             id=new_id(), signal_type='acquisition', source=source, confidence=0.8,
             detail=detail, property_id=property_id, company_id=company_id,
