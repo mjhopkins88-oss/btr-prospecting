@@ -411,6 +411,8 @@ class MultifamilyCampaignTarget:
     breakup_sent_at: Optional[str] = None
     bounced_at: Optional[str] = None  # data-quality event, distinct from disqualification
     renewal_month: Optional[str] = None  # 'YYYY-MM', coarse fallback
+    disqualification_reason: Optional[str] = None  # one of DISQUALIFICATION_REASONS, set with status='not_fit'
+    reply_sentiment: Optional[str] = None  # one of REPLY_SENTIMENTS, set with status='replied'
 
 
 @dataclass
@@ -425,6 +427,8 @@ class MultifamilyActivity:
     next_follow_up_date: Optional[str] = None  # ISO date (YYYY-MM-DD)
     user_email: Optional[str] = None
     created_at: str = field(default_factory=utc_now_iso)
+    disqualification_reason: Optional[str] = None  # one of DISQUALIFICATION_REASONS, set with activity_type='not_a_fit'
+    reply_sentiment: Optional[str] = None  # one of REPLY_SENTIMENTS, set with activity_type='replied'
 
 
 @dataclass

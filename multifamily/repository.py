@@ -454,6 +454,13 @@ def ensure_schema() -> None:
     _safe_add_column('multifamily_campaign_targets', 'breakup_sent_at', 'TEXT')
     _safe_add_column('multifamily_campaign_targets', 'bounced_at', 'TEXT')
     _safe_add_column('multifamily_campaign_targets', 'renewal_month', 'TEXT')
+    _safe_add_column('multifamily_campaign_targets', 'disqualification_reason', 'TEXT')
+    _safe_add_column('multifamily_campaign_targets', 'reply_sentiment', 'TEXT')
+    # Same two CRM-metadata fields on the lead-level activity log, so a
+    # target's underlying lead (when attached) carries the same reason/
+    # sentiment on its activity history, not just on the target row.
+    _safe_add_column('multifamily_activities', 'disqualification_reason', 'TEXT')
+    _safe_add_column('multifamily_activities', 'reply_sentiment', 'TEXT')
 
     _backfill_signals_from_lead_json()
     _SCHEMA_READY = True
@@ -865,7 +872,8 @@ def _serp_source_performance(
 # ---------------------------------------------------------------------------
 
 def insert_activity(lead_id: str, activity_type: str, note: Optional[str] = None,
-                    next_follow_up_date: Optional[str] = None, user_email: Optional[str] = None) -> Dict[str, Any]:
+                    next_follow_up_date: Optional[str] = None, user_email: Optional[str] = None,
+                    disqualification_reason: Optional[str] = None, reply_sentiment: Optional[str] = None) -> Dict[str, Any]:
     ensure_schema()
     from multifamily.types import new_id, utc_now_iso
     row = {
@@ -876,10 +884,12 @@ def insert_activity(lead_id: str, activity_type: str, note: Optional[str] = None
         'next_follow_up_date': next_follow_up_date or None,
         'user_email': (user_email or '').lower() or None,
         'created_at': utc_now_iso(),
+        'disqualification_reason': disqualification_reason,
+        'reply_sentiment': reply_sentiment,
     }
     execute(
-        'INSERT INTO multifamily_activities (id, lead_id, activity_type, note, next_follow_up_date, user_email, created_at) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO multifamily_activities (id, lead_id, activity_type, note, next_follow_up_date, user_email, '
+        'created_at, disqualification_reason, reply_sentiment) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         list(row.values()),
     )
     return row
@@ -888,7 +898,8 @@ def insert_activity(lead_id: str, activity_type: str, note: Optional[str] = None
 def get_activities_for_lead(lead_id: str) -> List[Dict[str, Any]]:
     ensure_schema()
     return fetch_all(
-        'SELECT id, lead_id, activity_type, note, next_follow_up_date, user_email, created_at '
+        'SELECT id, lead_id, activity_type, note, next_follow_up_date, user_email, created_at, '
+        'disqualification_reason, reply_sentiment '
         'FROM multifamily_activities WHERE lead_id = ? ORDER BY created_at DESC',
         [lead_id],
     )
@@ -899,6 +910,7 @@ def _activities_with_lead(where: str, params: List[Any]) -> List[Dict[str, Any]]
     state/category). Lead fields are NULL for activities on demo leads."""
     return fetch_all(
         'SELECT a.id, a.lead_id, a.activity_type, a.note, a.next_follow_up_date, a.user_email, a.created_at, '
+        'a.disqualification_reason, a.reply_sentiment, '
         'l.company_name, l.state, l.city, l.score_category '
         'FROM multifamily_activities a LEFT JOIN multifamily_leads l ON a.lead_id = l.id '
         f'WHERE {where}',
@@ -1146,7 +1158,8 @@ _CAMPAIGN_COLUMNS = (
 _CAMPAIGN_TARGET_COLUMNS = (
     'id, campaign_id, tracking_token, company, contact_name, email, phone, linkedin_url, '
     'city, state, segment, lead_id, status, notes, created_at, last_activity_at, converted_at, '
-    'touch_1_sent_at, connected_at, touch_2_sent_at, called_at, breakup_sent_at, bounced_at, renewal_month'
+    'touch_1_sent_at, connected_at, touch_2_sent_at, called_at, breakup_sent_at, bounced_at, renewal_month, '
+    'disqualification_reason, reply_sentiment'
 )
 
 # Only the columns create_campaign_target() actually sets at creation —
@@ -1267,23 +1280,36 @@ def list_campaign_targets(campaign_id: str) -> List[Dict[str, Any]]:
     )
 
 
-def update_campaign_target_status(target_id: str, status: str, notes: Optional[str] = None) -> None:
+def update_campaign_target_status(
+    target_id: str, status: str, notes: Optional[str] = None,
+    disqualification_reason: Optional[str] = None, reply_sentiment: Optional[str] = None,
+) -> None:
     """Any status transition bumps last_activity_at — this is the only
     'freshness' clock a campaign target has (mirrors how lead activities
-    drive multifamily_leads' implicit staleness checks)."""
+    drive multifamily_leads' implicit staleness checks). disqualification_reason
+    and reply_sentiment are independent, optional CRM fields — set only
+    when the caller provides them, never cleared by a status change
+    alone (so, e.g., reviewing notes on an already-not_fit target
+    without re-specifying the reason doesn't blank it out)."""
     ensure_schema()
     from multifamily.types import utc_now_iso
     now = utc_now_iso()
+    set_clauses = ['status = ?', 'last_activity_at = ?']
+    params = [status, now]
     if notes is not None:
-        execute(
-            'UPDATE multifamily_campaign_targets SET status = ?, notes = ?, last_activity_at = ? WHERE id = ?',
-            [status, notes, now, target_id],
-        )
-    else:
-        execute(
-            'UPDATE multifamily_campaign_targets SET status = ?, last_activity_at = ? WHERE id = ?',
-            [status, now, target_id],
-        )
+        set_clauses.append('notes = ?')
+        params.append(notes)
+    if disqualification_reason is not None:
+        set_clauses.append('disqualification_reason = ?')
+        params.append(disqualification_reason)
+    if reply_sentiment is not None:
+        set_clauses.append('reply_sentiment = ?')
+        params.append(reply_sentiment)
+    params.append(target_id)
+    execute(
+        f'UPDATE multifamily_campaign_targets SET {", ".join(set_clauses)} WHERE id = ?',
+        params,
+    )
 
 
 def set_campaign_target_lead(target_id: str, lead_id: str) -> None:
@@ -1396,9 +1422,48 @@ def get_campaign_performance() -> Dict[str, Any]:
                 best = {label_key: key, **b}
         return best
 
+    def _campaign_scorecards(rows):
+        """Per-campaign pilot scorecard — delivery/reply/positive/meetings
+        with zero manual math required by callers (Strategy Research §5.3
+        gates: delivery >97%, reply >=6-8%, positive >=40% of replies,
+        meetings 1-3 per 50). 'delivered' = touch_1_sent - bounced;
+        'replies' counts targets CURRENTLY in status='replied' — a target
+        that progressed on to meeting_booked/converted is counted under
+        meetings/conversions instead, not double-counted as a reply, since
+        only the current status is stored (no per-target status history)."""
+        scorecards: Dict[str, Dict[str, Any]] = {}
+        for t in rows:
+            cid = t['campaign_id']
+            sc = scorecards.setdefault(cid, {
+                'touch_1_sent': 0, 'bounced': 0, 'replies': 0, 'positive_replies': 0,
+                'meetings': 0, 'disqualification_reasons': {},
+            })
+            if t.get('touch_1_sent_at'):
+                sc['touch_1_sent'] += 1
+            if t.get('bounced_at'):
+                sc['bounced'] += 1
+            if t['status'] == 'replied':
+                sc['replies'] += 1
+                if t.get('reply_sentiment') in ('positive', 'referral'):
+                    sc['positive_replies'] += 1
+            if t['status'] == 'meeting_booked':
+                sc['meetings'] += 1
+            if t['status'] == 'not_fit' and t.get('disqualification_reason'):
+                reason = t['disqualification_reason']
+                sc['disqualification_reasons'][reason] = sc['disqualification_reasons'].get(reason, 0) + 1
+        for sc in scorecards.values():
+            delivered = sc['touch_1_sent'] - sc['bounced']
+            sc['delivered'] = delivered
+            sc['delivery_rate'] = round(delivered / sc['touch_1_sent'], 4) if sc['touch_1_sent'] else None
+            sc['reply_rate'] = round(sc['replies'] / delivered, 4) if delivered else None
+            sc['positive_share'] = round(sc['positive_replies'] / sc['replies'], 4) if sc['replies'] else None
+        return scorecards
+
     by_campaign = _rate_buckets(target_rows, lambda t: t['campaign_id'])
+    campaign_scorecards = _campaign_scorecards(target_rows)
     for cid, b in by_campaign.items():
         b['name'] = next((t['campaign_name'] for t in target_rows if t['campaign_id'] == cid), cid)
+        b.update(campaign_scorecards.get(cid, {}))
     best_campaign = _best(by_campaign, 'campaign_id')
 
     by_page_variant = _rate_buckets(target_rows, lambda t: t['campaign_page_variant'])
@@ -1419,6 +1484,14 @@ def get_campaign_performance() -> Dict[str, Any]:
             'lead_id': t.get('lead_id'), 'converted_at': t.get('converted_at'),
         }
 
+    # Global disqualification_reason breakdown (counts only) — additive
+    # to the per-campaign breakdown nested in conversion_rate_by_campaign.
+    disqualification_reasons: Dict[str, int] = {}
+    for t in target_rows:
+        if t['status'] == 'not_fit' and t.get('disqualification_reason'):
+            reason = t['disqualification_reason']
+            disqualification_reasons[reason] = disqualification_reasons.get(reason, 0) + 1
+
     return {
         'total_campaigns': len(campaigns),
         'total_active_campaigns': total_active_campaigns,
@@ -1433,6 +1506,7 @@ def get_campaign_performance() -> Dict[str, Any]:
         'conversion_rate_by_page_variant': by_page_variant,
         'conversion_rate_by_segment': conversion_rate_by_segment,
         'conversion_rate_by_state': conversion_rate_by_state,
+        'disqualification_reasons': disqualification_reasons,
     }
 
 

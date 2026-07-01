@@ -29,6 +29,7 @@ from multifamily import repository
 from multifamily import spam_guard
 from multifamily.types import (
     ACTIVITY_TYPES, OUTCOME_TYPES, CAMPAIGN_STATUSES, CAMPAIGN_TARGET_STATUSES, CAMPAIGN_TARGET_TOUCH_STEPS,
+    DISQUALIFICATION_REASONS, REPLY_SENTIMENTS,
 )
 from multifamily.stage_timing import compute_stage_timing
 from multifamily.timing import detect_process_stage, estimate_first_renewal
@@ -1004,12 +1005,20 @@ def log_activity(lead_id):
         activity_type = (payload.get('activity_type') or '').strip()
         if activity_type not in ACTIVITY_TYPES:
             return jsonify({'success': False, 'errors': [f'activity_type must be one of {ACTIVITY_TYPES}']}), 400
+        disqualification_reason = (payload.get('disqualification_reason') or payload.get('disqualificationReason') or '').strip() or None
+        if disqualification_reason and disqualification_reason not in DISQUALIFICATION_REASONS:
+            return jsonify({'success': False, 'errors': [f'disqualification_reason must be one of {DISQUALIFICATION_REASONS}']}), 400
+        reply_sentiment = (payload.get('reply_sentiment') or payload.get('replySentiment') or '').strip() or None
+        if reply_sentiment and reply_sentiment not in REPLY_SENTIMENTS:
+            return jsonify({'success': False, 'errors': [f'reply_sentiment must be one of {REPLY_SENTIMENTS}']}), 400
         user_email = (g.user or {}).get('email') if getattr(g, 'user', None) else None
         activity = repository.insert_activity(
             lead_id, activity_type,
             note=(payload.get('note') or None),
             next_follow_up_date=(payload.get('next_follow_up_date') or None),
             user_email=user_email,
+            disqualification_reason=disqualification_reason,
+            reply_sentiment=reply_sentiment,
         )
         if activity_type in ('replied', 'meeting_booked'):
             lead_row = repository.get_lead_row(lead_id)
@@ -1459,7 +1468,16 @@ def update_campaign_target_status(target_id):
         if status not in CAMPAIGN_TARGET_STATUSES:
             return jsonify({'success': False, 'errors': [f'status must be one of {CAMPAIGN_TARGET_STATUSES}']}), 400
         notes = payload.get('notes')
-        repository.update_campaign_target_status(target_id, status, notes=notes)
+        disqualification_reason = (payload.get('disqualification_reason') or payload.get('disqualificationReason') or '').strip() or None
+        if disqualification_reason and disqualification_reason not in DISQUALIFICATION_REASONS:
+            return jsonify({'success': False, 'errors': [f'disqualification_reason must be one of {DISQUALIFICATION_REASONS}']}), 400
+        reply_sentiment = (payload.get('reply_sentiment') or payload.get('replySentiment') or '').strip() or None
+        if reply_sentiment and reply_sentiment not in REPLY_SENTIMENTS:
+            return jsonify({'success': False, 'errors': [f'reply_sentiment must be one of {REPLY_SENTIMENTS}']}), 400
+        repository.update_campaign_target_status(
+            target_id, status, notes=notes,
+            disqualification_reason=disqualification_reason, reply_sentiment=reply_sentiment,
+        )
 
         if target.get('lead_id') and status in ('contacted', 'replied', 'meeting_booked', 'not_fit', 'nurture'):
             activity_type = {
@@ -1467,7 +1485,10 @@ def update_campaign_target_status(target_id):
                 'not_fit': 'not_a_fit', 'nurture': 'moved_to_nurture',
             }[status]
             user_email = (g.user or {}).get('email') if getattr(g, 'user', None) else None
-            activity = repository.insert_activity(target['lead_id'], activity_type, note=notes, user_email=user_email)
+            activity = repository.insert_activity(
+                target['lead_id'], activity_type, note=notes, user_email=user_email,
+                disqualification_reason=disqualification_reason, reply_sentiment=reply_sentiment,
+            )
             lead_row = repository.get_lead_row(target['lead_id'])
             company_name = (lead_row or {}).get('company_name') or target.get('company') or 'A lead'
             if status == 'replied':
