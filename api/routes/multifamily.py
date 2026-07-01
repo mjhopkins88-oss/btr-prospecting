@@ -299,6 +299,21 @@ def create_lead():
     raw_source = (payload.get('source') or '').strip()
     incoming_signal_id = lead.signals[0].id if lead.signals else None
 
+    # ---- Pilot Campaign conversion (Campaign Phase 2) ----
+    # A submission carrying ?t=<token> came from a specific campaign
+    # target's tracked link — highest precedence, since a named campaign
+    # is a more specific, more deliberate identity resolution than an
+    # ad-hoc outbound link. An unknown/already-converted token silently
+    # falls through to the mfRef / normal-matching paths below (never
+    # surfaced to the submitter).
+    campaign_token = (payload.get('campaignToken') or '').strip() or None
+    campaign_target = repository.get_campaign_target_by_token(campaign_token) if campaign_token else None
+    if campaign_target and campaign_target.get('converted_at'):
+        campaign_target = None
+    campaign_row = repository.get_campaign(campaign_target['campaign_id']) if campaign_target else None
+    if campaign_target and not campaign_row:
+        campaign_target = None  # campaign itself was deleted — nothing sane to resolve to
+
     # ---- Outbound-to-form merge-back (Funnel Phase 3) ----
     # A submission carrying ?mf_ref=<token> came from a link an operator
     # generated for a SPECIFIC known lead — identity is already resolved,
@@ -308,21 +323,67 @@ def create_lead():
     # through to the normal fuzzy-matching path below (never surfaced to
     # the submitter).
     outbound_token = (payload.get('mfRef') or '').strip() or None
-    outbound_link = repository.get_outbound_link(outbound_token) if outbound_token else None
+    outbound_link = repository.get_outbound_link(outbound_token) if (outbound_token and not campaign_target) else None
     outbound_target = None
     if outbound_link and not outbound_link.get('converted_at'):
         outbound_target = repository.get_active_lead_by_id(outbound_link['lead_id'])
 
     # ---- Matching / merge (signal-architecture Phase B) ----
     # Rejected/spam submissions are persisted for audit but NEVER matched,
-    # merged, or used to strengthen an existing lead.
+    # merged, or used to strengthen an existing lead — and (Campaign
+    # Phase 2) never convert a campaign target or an outbound link either,
+    # since this branch is checked BEFORE either token is ever resolved
+    # into an action.
     merged_into = None
     review_count = 0
     outbound_conversion = False
+    campaign_conversion = False
     if spam_status == 'rejected':
         repository.insert_lead(lead)
         repository.persist_lead_signals(lead)
         repository.record_lead_attribution_touch(lead, touch_type='first')
+    elif campaign_target:
+        # The campaign's own page_variant/offer_type/UTM fields are the
+        # authoritative identity for this conversion — stamp the incoming
+        # lead with them rather than trusting whatever the submitted
+        # payload happened to carry (defensive against a stale/edited URL).
+        lead.page_variant = campaign_row['page_variant']
+        lead.offer_type = campaign_row['offer_type']
+        lead.campaign_id = campaign_row['id']
+
+        existing_target_lead = (
+            repository.get_active_lead_by_id(campaign_target['lead_id']) if campaign_target.get('lead_id') else None
+        )
+        if existing_target_lead:
+            # This target was already linked to a known lead (e.g. an
+            # operator attached one manually, or a prior partial
+            # conversion) — merge deterministically, same as an
+            # outbound-link conversion.
+            mf_matching.merge_incoming_on_intake(existing_target_lead, lead, touch_type='conversion')
+            lead = repository.get_lead_by_id(existing_target_lead.id) or existing_target_lead
+            merged_into = lead.id
+            snapshot_lead(lead, 'merged')
+        else:
+            # Cold prospect: route through the SAME matching engine every
+            # other submission uses, so an exact-identity match still
+            # auto-merges instead of creating a duplicate lead.
+            result = mf_matching.classify(lead, repository.get_real_leads())
+            auto = result.get('auto')
+            if auto:
+                mf_matching.merge_incoming_on_intake(auto.lead, lead, touch_type='conversion')
+                lead = repository.get_lead_by_id(auto.lead.id) or auto.lead
+                merged_into = lead.id
+                snapshot_lead(lead, 'merged')
+            else:
+                repository.insert_lead(lead)
+                repository.persist_lead_signals(lead)
+                repository.record_lead_attribution_touch(lead, touch_type='conversion')
+                snapshot_lead(lead, 'created')
+        campaign_conversion = True
+        repository.mark_campaign_target_converted(campaign_target['id'], lead.id)
+        mf_notifications.notify_campaign_conversion(lead.id, lead.company.name, campaign_row['name'], campaign_row['page_variant'])
+        if lead.score and lead.score.category == 'call_today':
+            mf_notifications.notify_new_call_today_lead(lead.id, lead.company.name)
     elif outbound_target:
         mf_matching.merge_incoming_on_intake(outbound_target, lead, touch_type='conversion')
         merged_into = outbound_target.id
@@ -373,6 +434,8 @@ def create_lead():
     if spam_status == 'rejected':
         event_type = 'rejected_honeypot' if 'HONEYPOT_FILLED' in spam_reason_codes else 'rejected_garbage'
         mf_notifications.check_spam_spike()
+    elif campaign_conversion:
+        event_type = 'accepted_converted_from_campaign'
     elif outbound_conversion:
         event_type = 'accepted_converted_from_outbound'
     elif merged_into:
@@ -383,7 +446,7 @@ def create_lead():
         event_type = 'accepted_clean'
     repository.record_intake_event(event_type, ip_hash, email, {
         'spam_reason_codes': spam_reason_codes, 'merged_into': merged_into, 'review_candidates': review_count,
-        'outbound_conversion': outbound_conversion,
+        'outbound_conversion': outbound_conversion, 'campaign_conversion': campaign_conversion,
     })
 
     # Always a normal-looking success — never reveal spam detection to the

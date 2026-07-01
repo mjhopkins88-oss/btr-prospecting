@@ -27,7 +27,7 @@ SEVERITIES = ['info', 'warning', 'critical']
 
 NOTIFICATION_TYPES = [
     'new_call_today_lead', 'new_benchmark_submission', 'new_form_submission',
-    'converted_from_outbound', 'hot_lead_stale',
+    'converted_from_outbound', 'campaign_conversion', 'hot_lead_stale',
     'followup_due_today', 'followup_overdue', 'lead_replied', 'meeting_booked',
     'high_confidence_merge', 'fuzzy_match_review', 'spam_spike',
 ]
@@ -127,6 +127,23 @@ def notify_outbound_conversion(lead_id: str, company_name: str, page_variant: Op
         action_url=f'/multifamily?lead={lead_id}',
         metadata={'company': company_name, 'page_variant': page_variant},
         dedupe_key=f'converted_from_outbound:{token}',
+    )
+
+
+def notify_campaign_conversion(lead_id: str, company_name: str, campaign_name: str, page_variant: Optional[str]) -> Optional[Dict[str, Any]]:
+    """A prospect converted through a NAMED Pilot Campaign target's
+    tracked link (Campaign Phase 2) — distinct from
+    notify_outbound_conversion (an ad-hoc one-off link) because the
+    operator wants to know WHICH campaign is working, not just that
+    "an" outbound link converted."""
+    page_label = (page_variant or 'benchmark').replace('-', ' ')
+    return emit(
+        'campaign_conversion', lead_id=lead_id, severity='info',
+        title='Campaign target converted',
+        message=f'{company_name} converted via "{campaign_name}" (the "{page_label}" page).',
+        action_url=f'/multifamily?lead={lead_id}',
+        metadata={'company': company_name, 'campaign_name': campaign_name, 'page_variant': page_variant},
+        dedupe_key=f'campaign_conversion:{lead_id}:{campaign_name}',
     )
 
 
