@@ -46,6 +46,10 @@ _ADDED_COLUMNS = [
     ('spam_reason_codes', 'TEXT'),
     ('submitted_ip_hash', 'TEXT'),
     ('user_agent_summary', 'TEXT'),
+    # Signal-architecture phase: dedupe/merge bookkeeping.
+    ('merge_status', "TEXT NOT NULL DEFAULT 'active'"),  # active | merged
+    ('merged_into_id', 'TEXT'),                          # survivor id when merged away
+    ('signal_count', 'INTEGER'),                         # number of signals combined into this lead
 ]
 
 
@@ -107,6 +111,78 @@ def ensure_schema() -> None:
         )
     ''')
 
+    # --- Signal architecture (signal-architecture phase) ---------------
+    # Queryable projection of every REAL signal. lead_json remains the
+    # dataclass source of truth; these rows are kept consistent with it.
+    execute('''
+        CREATE TABLE IF NOT EXISTS multifamily_signals (
+            id TEXT PRIMARY KEY,
+            lead_id TEXT NOT NULL,
+            signal_type TEXT NOT NULL,
+            source TEXT,
+            source_url TEXT,
+            confidence REAL,
+            occurred_at TEXT,
+            detail_json TEXT,
+            is_demo INTEGER NOT NULL DEFAULT 0,
+            spam_status TEXT NOT NULL DEFAULT 'clean',
+            created_at TIMESTAMP
+        )
+    ''')
+    # Append-only attribution touches -> first/latest/conversion + UTM path.
+    execute('''
+        CREATE TABLE IF NOT EXISTS multifamily_source_attribution (
+            id TEXT PRIMARY KEY,
+            lead_id TEXT NOT NULL,
+            touch_type TEXT NOT NULL,
+            source TEXT,
+            utm_source TEXT,
+            utm_medium TEXT,
+            utm_campaign TEXT,
+            utm_term TEXT,
+            utm_content TEXT,
+            referrer TEXT,
+            landing_page TEXT,
+            offer_type TEXT,
+            occurred_at TEXT,
+            created_at TIMESTAMP
+        )
+    ''')
+    # Persisted source-run accounting for future automated collectors.
+    execute('''
+        CREATE TABLE IF NOT EXISTS multifamily_source_runs (
+            id TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            run_id TEXT,
+            started_at TEXT,
+            finished_at TEXT,
+            status TEXT,
+            records_found INTEGER DEFAULT 0,
+            records_created INTEGER DEFAULT 0,
+            records_updated INTEGER DEFAULT 0,
+            records_merged INTEGER DEFAULT 0,
+            records_rejected INTEGER DEFAULT 0,
+            errors_json TEXT,
+            warnings_json TEXT,
+            created_at TIMESTAMP
+        )
+    ''')
+    # Possible matches needing human review (auto-tier matches never queue here).
+    execute('''
+        CREATE TABLE IF NOT EXISTS multifamily_lead_match_candidates (
+            id TEXT PRIMARY KEY,
+            incoming_signal_id TEXT,
+            candidate_lead_id TEXT NOT NULL,
+            match_tier TEXT NOT NULL,
+            match_reasons_json TEXT,
+            score REAL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            resolved_by TEXT,
+            created_at TIMESTAMP,
+            resolved_at TEXT
+        )
+    ''')
+
     # Manual follow-up/activity tracking (Part 7). Entirely separate from
     # the BTR crm_* tables — Multifamily and BTR data never mix.
     execute('''
@@ -130,8 +206,20 @@ def ensure_schema() -> None:
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_events_type_created ON multifamily_intake_events(event_type, created_at DESC)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_activities_lead ON multifamily_activities(lead_id, created_at DESC)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_activities_followup ON multifamily_activities(next_follow_up_date)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_signals_lead ON multifamily_signals(lead_id, occurred_at)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_signals_type ON multifamily_signals(signal_type)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_attribution_lead ON multifamily_source_attribution(lead_id, occurred_at)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_source_runs_created ON multifamily_source_runs(created_at DESC)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_match_candidates_status ON multifamily_lead_match_candidates(status, created_at DESC)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_leads_merge_status ON multifamily_leads(merge_status)')
     except Exception:
         pass
+
+    # A match candidate references both the incoming lead and the existing
+    # candidate lead (added after the table's initial create).
+    _safe_add_column('multifamily_lead_match_candidates', 'incoming_lead_id', 'TEXT')
+
+    _backfill_signals_from_lead_json()
     _SCHEMA_READY = True
 
 
@@ -182,6 +270,8 @@ def insert_lead(lead: MultifamilyLead) -> None:
         'spam_reason_codes': json.dumps(lead.spam_reason_codes),
         'submitted_ip_hash': lead.submitted_ip_hash,
         'user_agent_summary': lead.user_agent_summary,
+        'merge_status': 'active',
+        'signal_count': len(lead.signals or []),
         'lead_json': json.dumps(dataclasses.asdict(lead)),
     }
     cols = list(row.keys())
@@ -218,9 +308,11 @@ def get_real_leads(include_rejected: bool = False) -> List[MultifamilyLead]:
     for the admin/debug view only. 'suspicious' leads are always
     included (they're real leads that just need a closer look)."""
     ensure_schema()
-    sql = 'SELECT lead_json FROM multifamily_leads'
+    # Exclude merged-away tombstones from every normal view; they're kept
+    # only for reversibility/audit (merged_into_id points at the survivor).
+    sql = "SELECT lead_json FROM multifamily_leads WHERE (merge_status IS NULL OR merge_status != 'merged')"
     if not include_rejected:
-        sql += " WHERE spam_status != 'rejected'"
+        sql += " AND spam_status != 'rejected'"
     sql += ' ORDER BY created_at DESC'
     rows = fetch_all(sql)
     leads = []
@@ -336,8 +428,9 @@ def get_intake_stats(recent_limit: int = 20) -> Dict[str, Any]:
 
 def get_source_performance() -> Dict[str, Any]:
     ensure_schema()
-    # Operational breakdowns exclude rejected spam (not real opportunities).
-    real = "is_demo = 0 AND spam_status != 'rejected'"
+    # Operational breakdowns exclude rejected spam (not real opportunities)
+    # and merged-away tombstones (counted once, on the survivor).
+    real = "is_demo = 0 AND spam_status != 'rejected' AND (merge_status IS NULL OR merge_status != 'merged')"
 
     def _counts(expr: str, where: str = real, label_default: str = 'unknown') -> Dict[str, int]:
         rows = fetch_all(
@@ -405,6 +498,19 @@ def get_source_performance() -> Dict[str, Any]:
     total_rows = fetch_all(f"SELECT COUNT(*) AS n FROM multifamily_leads WHERE {real}")
     total_real_leads = int(total_rows[0]['n']) if total_rows else 0
 
+    # Signal-based view (Phase C): per-source / per-type signal counts over
+    # real, non-rejected signals — additive to the lead-source aggregates.
+    sig_where = "is_demo = 0 AND spam_status != 'rejected'"
+    signals_by_source = {
+        (r['k'] or 'unknown'): r['n'] for r in fetch_all(
+            f"SELECT COALESCE(NULLIF(source, ''), 'unknown') AS k, COUNT(*) AS n FROM multifamily_signals WHERE {sig_where} GROUP BY source")
+    }
+    signals_by_type = {
+        (r['k'] or 'unknown'): r['n'] for r in fetch_all(
+            f"SELECT COALESCE(NULLIF(signal_type, ''), 'unknown') AS k, COUNT(*) AS n FROM multifamily_signals WHERE {sig_where} GROUP BY signal_type")
+    }
+    total_signal_rows = sum(signals_by_source.values())
+
     return {
         'total_real_leads': total_real_leads,
         'leads_by_source': leads_by_source,
@@ -417,6 +523,10 @@ def get_source_performance() -> Dict[str, Any]:
         'best_landing_page': best_landing_page,
         'worst_source': worst_source,
         'leads_missing_attribution': leads_missing_attribution,
+        # Phase C signal-history view.
+        'total_signals': total_signal_rows,
+        'signals_by_source': signals_by_source,
+        'signals_by_type': signals_by_type,
     }
 
 
@@ -500,3 +610,352 @@ def delete_activities_for_lead(lead_id: str) -> None:
     """Used by tests to clean up after themselves."""
     ensure_schema()
     execute('DELETE FROM multifamily_activities WHERE lead_id = ?', [lead_id])
+
+
+# ===========================================================================
+# Signal architecture (signal-architecture phase)
+# Persisted, queryable signals + source-attribution touches + source-run
+# accounting + match candidates. `lead_json` on multifamily_leads remains
+# the dataclass source of truth; multifamily_signals is a consistent
+# queryable projection of it.
+# ===========================================================================
+
+def _insert_signal_row(lead_id: str, signal: Dict[str, Any], is_demo: int = 0, spam_status: str = 'clean') -> None:
+    """Insert one signal row from a plain dict (no ensure_schema — safe to
+    call from the backfill, which runs *inside* ensure_schema)."""
+    from multifamily.types import utc_now_iso
+    detail = signal.get('detail')
+    execute(
+        'INSERT INTO multifamily_signals (id, lead_id, signal_type, source, source_url, confidence, '
+        'occurred_at, detail_json, is_demo, spam_status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+            signal.get('id'), lead_id, signal.get('signal_type'), signal.get('source'), signal.get('source_url'),
+            signal.get('confidence'), signal.get('occurred_at'),
+            json.dumps(detail) if detail is not None else None,
+            1 if is_demo else 0, spam_status or 'clean', utc_now_iso(),
+        ],
+    )
+
+
+def _backfill_signals_from_lead_json() -> None:
+    """One-time, idempotent backfill: project signals embedded in each
+    lead's lead_json into the multifamily_signals table. Inserts only
+    signals whose id isn't already present, so it's safe to run on every
+    process start (it's called from ensure_schema, once per process)."""
+    try:
+        existing = {r['id'] for r in fetch_all('SELECT id FROM multifamily_signals')}
+        lead_rows = fetch_all('SELECT id, is_demo, spam_status, lead_json FROM multifamily_leads')
+    except Exception:
+        return
+    for row in lead_rows:
+        try:
+            d = json.loads(row['lead_json'])
+        except Exception:
+            continue
+        for s in (d.get('signals') or []):
+            sid = s.get('id')
+            if not sid or sid in existing:
+                continue
+            try:
+                _insert_signal_row(row['id'], s, is_demo=row.get('is_demo') or 0, spam_status=row.get('spam_status') or 'clean')
+                existing.add(sid)
+            except Exception:
+                continue
+
+
+def insert_signal(lead_id: str, signal, is_demo: bool = False, spam_status: str = 'clean') -> None:
+    """Persist one signal (a MultifamilySignal dataclass or a dict) as a
+    queryable row, keyed to its lead."""
+    ensure_schema()
+    s = dataclasses.asdict(signal) if dataclasses.is_dataclass(signal) else dict(signal)
+    _insert_signal_row(lead_id, s, is_demo=1 if is_demo else 0, spam_status=spam_status)
+
+
+def persist_lead_signals(lead) -> None:
+    """Persist every signal of a freshly-built lead (used by intake/merge)."""
+    ensure_schema()
+    for s in (lead.signals or []):
+        insert_signal(lead.id, s, is_demo=lead.is_demo, spam_status=getattr(lead, 'spam_status', 'clean'))
+
+
+def get_signals_for_lead(lead_id: str) -> List[Dict[str, Any]]:
+    ensure_schema()
+    rows = fetch_all(
+        'SELECT id, lead_id, signal_type, source, source_url, confidence, occurred_at, detail_json, '
+        'is_demo, spam_status, created_at FROM multifamily_signals WHERE lead_id = ? ORDER BY occurred_at ASC, created_at ASC',
+        [lead_id],
+    )
+    for r in rows:
+        try:
+            r['detail'] = json.loads(r['detail_json']) if r.get('detail_json') else {}
+        except Exception:
+            r['detail'] = {}
+    return rows
+
+
+def delete_signals_for_lead(lead_id: str) -> None:
+    ensure_schema()
+    execute('DELETE FROM multifamily_signals WHERE lead_id = ?', [lead_id])
+
+
+def reassign_signals(from_lead_id: str, to_lead_id: str) -> None:
+    """Move a merged-away lead's signal rows onto the survivor (Phase B)."""
+    ensure_schema()
+    execute('UPDATE multifamily_signals SET lead_id = ? WHERE lead_id = ?', [to_lead_id, from_lead_id])
+
+
+# ---- Source attribution touches -------------------------------------------
+
+def record_attribution(lead_id: str, touch_type: str, source: Optional[str] = None,
+                       utm_source: Optional[str] = None, utm_medium: Optional[str] = None,
+                       utm_campaign: Optional[str] = None, utm_term: Optional[str] = None,
+                       utm_content: Optional[str] = None, referrer: Optional[str] = None,
+                       landing_page: Optional[str] = None, offer_type: Optional[str] = None,
+                       occurred_at: Optional[str] = None) -> Dict[str, Any]:
+    ensure_schema()
+    from multifamily.types import new_id, utc_now_iso
+    now = utc_now_iso()
+    row = {
+        'id': new_id(), 'lead_id': lead_id, 'touch_type': touch_type, 'source': source,
+        'utm_source': utm_source, 'utm_medium': utm_medium, 'utm_campaign': utm_campaign,
+        'utm_term': utm_term, 'utm_content': utm_content, 'referrer': referrer,
+        'landing_page': landing_page, 'offer_type': offer_type,
+        'occurred_at': occurred_at or now, 'created_at': now,
+    }
+    execute(
+        'INSERT INTO multifamily_source_attribution (id, lead_id, touch_type, source, utm_source, utm_medium, '
+        'utm_campaign, utm_term, utm_content, referrer, landing_page, offer_type, occurred_at, created_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        list(row.values()),
+    )
+    return row
+
+
+def record_lead_attribution_touch(lead, touch_type: str = 'touch') -> None:
+    """Record one attribution touch from a lead's current source/UTM fields."""
+    record_attribution(
+        lead.id, touch_type, source=lead.primary_source,
+        utm_source=lead.utm_source, utm_medium=lead.utm_medium, utm_campaign=lead.utm_campaign,
+        utm_term=lead.utm_term, utm_content=lead.utm_content, referrer=lead.referrer,
+        landing_page=lead.landing_page, offer_type=lead.offer_type, occurred_at=lead.last_verified_at,
+    )
+
+
+def get_attribution_for_lead(lead_id: str) -> List[Dict[str, Any]]:
+    ensure_schema()
+    return fetch_all(
+        'SELECT id, lead_id, touch_type, source, utm_source, utm_medium, utm_campaign, utm_term, utm_content, '
+        'referrer, landing_page, offer_type, occurred_at, created_at FROM multifamily_source_attribution '
+        'WHERE lead_id = ? ORDER BY occurred_at ASC, created_at ASC',
+        [lead_id],
+    )
+
+
+# Sources that represent a real "conversion" (a form/manual submission),
+# used to pick the conversion touch from the attribution history.
+_CONVERSION_SOURCES = {'benchmark_form', 'form', 'manual', 'linkedin_lead_form'}
+
+
+def get_attribution_summary(lead_id: str) -> Dict[str, Any]:
+    """Derive first-touch / latest-touch / conversion source plus the
+    UTM / landing-page / referrer path from a lead's append-only
+    attribution touches (Phase C)."""
+    touches = get_attribution_for_lead(lead_id)
+    if not touches:
+        return {
+            'first_touch': None, 'latest_touch': None, 'conversion_source': None,
+            'touches': [], 'utm_history': [], 'landing_page_history': [], 'referrer_history': [],
+        }
+    first, latest = touches[0], touches[-1]
+    conversion = next((t for t in touches if t.get('source') in _CONVERSION_SOURCES), first)
+    utm_history = [
+        {'utm_source': t.get('utm_source'), 'utm_medium': t.get('utm_medium'),
+         'utm_campaign': t.get('utm_campaign'), 'occurred_at': t.get('occurred_at')}
+        for t in touches if any(t.get(k) for k in ('utm_source', 'utm_medium', 'utm_campaign'))
+    ]
+    landing_history = [t.get('landing_page') for t in touches if t.get('landing_page')]
+    referrer_history = [t.get('referrer') for t in touches if t.get('referrer')]
+    return {
+        'first_touch': {'source': first.get('source'), 'utm_source': first.get('utm_source'),
+                        'utm_campaign': first.get('utm_campaign'), 'occurred_at': first.get('occurred_at')},
+        'latest_touch': {'source': latest.get('source'), 'utm_source': latest.get('utm_source'),
+                         'utm_campaign': latest.get('utm_campaign'), 'occurred_at': latest.get('occurred_at')},
+        'conversion_source': conversion.get('source'),
+        'touches': touches,
+        'utm_history': utm_history,
+        'landing_page_history': landing_history,
+        'referrer_history': referrer_history,
+    }
+
+
+def delete_attribution_for_lead(lead_id: str) -> None:
+    ensure_schema()
+    execute('DELETE FROM multifamily_source_attribution WHERE lead_id = ?', [lead_id])
+
+
+def reassign_attribution(from_lead_id: str, to_lead_id: str) -> None:
+    ensure_schema()
+    execute('UPDATE multifamily_source_attribution SET lead_id = ? WHERE lead_id = ?', [to_lead_id, from_lead_id])
+
+
+# ---- Source-run accounting -------------------------------------------------
+
+def start_source_run(source: str, run_id: Optional[str] = None) -> Dict[str, Any]:
+    ensure_schema()
+    from multifamily.types import new_id, utc_now_iso
+    now = utc_now_iso()
+    rid = run_id or new_id()
+    row = {'id': new_id(), 'source': source, 'run_id': rid, 'started_at': now, 'status': 'running', 'created_at': now}
+    execute(
+        'INSERT INTO multifamily_source_runs (id, source, run_id, started_at, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [row['id'], source, rid, now, 'running', now],
+    )
+    return row
+
+
+def finish_source_run(run_db_id: str, status: str = 'success', records_found: int = 0, records_created: int = 0,
+                      records_updated: int = 0, records_merged: int = 0, records_rejected: int = 0,
+                      errors: Optional[List[str]] = None, warnings: Optional[List[str]] = None) -> None:
+    ensure_schema()
+    from multifamily.types import utc_now_iso
+    execute(
+        'UPDATE multifamily_source_runs SET finished_at = ?, status = ?, records_found = ?, records_created = ?, '
+        'records_updated = ?, records_merged = ?, records_rejected = ?, errors_json = ?, warnings_json = ? WHERE id = ?',
+        [utc_now_iso(), status, records_found, records_created, records_updated, records_merged, records_rejected,
+         json.dumps(errors or []), json.dumps(warnings or []), run_db_id],
+    )
+
+
+def get_source_runs(limit: int = 50) -> List[Dict[str, Any]]:
+    ensure_schema()
+    rows = fetch_all(
+        'SELECT id, source, run_id, started_at, finished_at, status, records_found, records_created, '
+        'records_updated, records_merged, records_rejected, errors_json, warnings_json, created_at '
+        'FROM multifamily_source_runs ORDER BY created_at DESC LIMIT ?',
+        [limit],
+    )
+    for r in rows:
+        for k in ('errors_json', 'warnings_json'):
+            try:
+                r[k.replace('_json', '')] = json.loads(r[k]) if r.get(k) else []
+            except Exception:
+                r[k.replace('_json', '')] = []
+    return rows
+
+
+def delete_source_run(run_db_id: str) -> None:
+    ensure_schema()
+    execute('DELETE FROM multifamily_source_runs WHERE id = ?', [run_db_id])
+
+
+# ---- Match candidates (review queue) --------------------------------------
+
+def insert_match_candidate(incoming_signal_id: Optional[str], candidate_lead_id: str, match_tier: str,
+                           match_reasons: Optional[List[str]] = None, score: float = 0.0,
+                           incoming_lead_id: Optional[str] = None) -> Dict[str, Any]:
+    ensure_schema()
+    from multifamily.types import new_id, utc_now_iso
+    row = {
+        'id': new_id(), 'incoming_signal_id': incoming_signal_id, 'candidate_lead_id': candidate_lead_id,
+        'incoming_lead_id': incoming_lead_id, 'match_tier': match_tier, 'match_reasons': match_reasons or [],
+        'score': score, 'status': 'pending', 'created_at': utc_now_iso(),
+    }
+    execute(
+        'INSERT INTO multifamily_lead_match_candidates (id, incoming_signal_id, candidate_lead_id, incoming_lead_id, '
+        'match_tier, match_reasons_json, score, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [row['id'], incoming_signal_id, candidate_lead_id, incoming_lead_id, match_tier,
+         json.dumps(row['match_reasons']), score, 'pending', row['created_at']],
+    )
+    return row
+
+
+def get_match_candidates(status: str = 'pending') -> List[Dict[str, Any]]:
+    ensure_schema()
+    rows = fetch_all(
+        'SELECT c.id, c.incoming_signal_id, c.incoming_lead_id, c.candidate_lead_id, c.match_tier, c.match_reasons_json, '
+        'c.score, c.status, c.resolved_by, c.created_at, c.resolved_at, l.company_name, l.state, l.city, '
+        'il.company_name AS incoming_company_name, il.state AS incoming_state, il.city AS incoming_city '
+        'FROM multifamily_lead_match_candidates c '
+        'LEFT JOIN multifamily_leads l ON c.candidate_lead_id = l.id '
+        'LEFT JOIN multifamily_leads il ON c.incoming_lead_id = il.id '
+        'WHERE c.status = ? ORDER BY c.created_at DESC',
+        [status],
+    )
+    for r in rows:
+        try:
+            r['match_reasons'] = json.loads(r['match_reasons_json']) if r.get('match_reasons_json') else []
+        except Exception:
+            r['match_reasons'] = []
+    return rows
+
+
+def get_match_candidate(candidate_id: str) -> Optional[Dict[str, Any]]:
+    ensure_schema()
+    rows = fetch_all('SELECT * FROM multifamily_lead_match_candidates WHERE id = ?', [candidate_id])
+    return rows[0] if rows else None
+
+
+def resolve_match_candidate(candidate_id: str, status: str, resolved_by: Optional[str] = None) -> None:
+    ensure_schema()
+    from multifamily.types import utc_now_iso
+    execute(
+        'UPDATE multifamily_lead_match_candidates SET status = ?, resolved_by = ?, resolved_at = ? WHERE id = ?',
+        [status, resolved_by, utc_now_iso(), candidate_id],
+    )
+
+
+def delete_match_candidates_for_lead(lead_id: str) -> None:
+    ensure_schema()
+    execute('DELETE FROM multifamily_lead_match_candidates WHERE candidate_lead_id = ?', [lead_id])
+
+
+# ---- Lead update / tombstone (used by the merge engine, Phase B) ----------
+
+def get_lead_row(lead_id: str) -> Optional[Dict[str, Any]]:
+    ensure_schema()
+    rows = fetch_all('SELECT * FROM multifamily_leads WHERE id = ?', [lead_id])
+    return rows[0] if rows else None
+
+
+def get_lead_by_id(lead_id: str) -> Optional[MultifamilyLead]:
+    """Reconstruct a single lead dataclass from its persisted lead_json."""
+    row = get_lead_row(lead_id)
+    if not row or not row.get('lead_json'):
+        return None
+    try:
+        return _dict_to_lead(json.loads(row['lead_json']))
+    except Exception:
+        return None
+
+
+def update_lead(lead) -> None:
+    """Rewrite an existing lead's projection columns + lead_json in place
+    (used after a merge re-scores/re-times the survivor)."""
+    ensure_schema()
+    contact = lead.contacts[0] if lead.contacts else None
+    execute(
+        'UPDATE multifamily_leads SET company_name=?, property_name=?, contact_name=?, contact_email=?, '
+        'contact_phone=?, contact_role=?, state=?, city=?, asset_type=?, unit_count=?, lead_situation=?, '
+        'primary_concern=?, notes=?, source=?, source_page=?, source_url=?, confidence=?, score_total=?, '
+        'score_category=?, signal_count=?, lead_json=? WHERE id=?',
+        [
+            lead.company.name, lead.property.name,
+            contact.full_name if contact else None, contact.email if contact else None,
+            contact.phone if contact else None, contact.title if contact else None,
+            lead.state, lead.city, lead.property.asset_type, lead.property.unit_count,
+            _lead_situation_of(lead), lead.pain_flags[0] if lead.pain_flags else None, lead.notes,
+            lead.primary_source, lead.source_page, lead.source_url, lead.confidence,
+            lead.score.total if lead.score else None, lead.score.category if lead.score else None,
+            len(lead.signals or []), json.dumps(dataclasses.asdict(lead)), lead.id,
+        ],
+    )
+
+
+def mark_lead_merged(loser_id: str, survivor_id: str) -> None:
+    """Tombstone a merged-away lead (reversible: merged_into_id points at
+    the survivor). It stops appearing in every normal view."""
+    ensure_schema()
+    execute(
+        "UPDATE multifamily_leads SET merge_status = 'merged', merged_into_id = ? WHERE id = ?",
+        [survivor_id, loser_id],
+    )

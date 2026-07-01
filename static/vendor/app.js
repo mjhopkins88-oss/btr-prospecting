@@ -8356,7 +8356,10 @@ function MultifamilyLeadCard({
     style: mfPillStyle('#fb7185')
   }, primaryConcern), /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#34d399')
-  }, "confidence ", (lead.confidence ?? 0).toFixed(2)), (score.disqualifier_codes || []).map(code => /*#__PURE__*/React.createElement("span", {
+  }, "confidence ", (lead.confidence ?? 0).toFixed(2)), lead.signal_count > 1 && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#818cf8'),
+    title: "signals combined on this lead"
+  }, lead.signal_count, " signals"), (score.disqualifier_codes || []).map(code => /*#__PURE__*/React.createElement("span", {
     key: code,
     style: mfPillStyle('#f97316'),
     title: code
@@ -9022,6 +9025,9 @@ function MultifamilyLeadDrawer({
     id: 'timing',
     label: 'Timing / Stage'
   }, {
+    id: 'signals',
+    label: 'Signal Timeline'
+  }, {
     id: 'source',
     label: 'Source'
   }, {
@@ -9200,9 +9206,13 @@ function MultifamilyLeadDrawer({
       fontSize: '0.7rem',
       color: '#64748b'
     }
-  }, "CONSTRUCTION STAGE TIMING"), mfKV('Stage', lead.stage_timing.stage_label), mfKV('Status', lead.stage_timing.timing_status), mfKV('Days in stage', lead.stage_timing.days_in_stage), mfKV('Detail', lead.stage_timing.explanation))), lead && section === 'source' && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+  }, "CONSTRUCTION STAGE TIMING"), mfKV('Stage', lead.stage_timing.stage_label), mfKV('Status', lead.stage_timing.timing_status), mfKV('Days in stage', lead.stage_timing.days_in_stage), mfKV('Detail', lead.stage_timing.explanation))), lead && section === 'signals' && /*#__PURE__*/React.createElement(MultifamilySignalTimelineView, {
+    lead: lead
+  }), lead && section === 'source' && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
     title: "SOURCE ATTRIBUTION"
-  }, mfKV('Source', lead.primary_source), mfKV('Source page', lead.source_page), mfKV('Source URL', lead.source_url), mfKV('Offer type', lead.offer_type), mfKV('UTM source', lead.utm_source), mfKV('UTM medium', lead.utm_medium), mfKV('UTM campaign', lead.utm_campaign), mfKV('UTM term', lead.utm_term), mfKV('UTM content', lead.utm_content), mfKV('Referrer', lead.referrer), mfKV('Landing page', lead.landing_page), mfKV('Last verified', lead.last_verified_at ? String(lead.last_verified_at).slice(0, 19) : null)), lead && section === 'outreach' && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+  }, mfKV('Source', lead.primary_source), mfKV('Source page', lead.source_page), mfKV('Source URL', lead.source_url), mfKV('Offer type', lead.offer_type), mfKV('UTM source', lead.utm_source), mfKV('UTM medium', lead.utm_medium), mfKV('UTM campaign', lead.utm_campaign), mfKV('UTM term', lead.utm_term), mfKV('UTM content', lead.utm_content), mfKV('Referrer', lead.referrer), mfKV('Landing page', lead.landing_page), mfKV('Last verified', lead.last_verified_at ? String(lead.last_verified_at).slice(0, 19) : null)), lead && section === 'source' && /*#__PURE__*/React.createElement(MultifamilyAttributionView, {
+    attribution: lead.attribution
+  }), lead && section === 'outreach' && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
     title: "OUTREACH"
   }, !outreach && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -9771,7 +9781,7 @@ function MultifamilyAdminPanel({
     }
   }, /*#__PURE__*/React.createElement("span", null, row.company_name, " (", row.contact_email || 'no email', ")"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle(spamColor[row.spam_status] || '#64748b')
-  }, row.spam_status), " ", row.source, row.utm_source ? ' · ' + row.utm_source : '', row.score_total != null ? ' · score ' + row.score_total + ' (' + row.score_category + ')' : '')))));
+  }, row.spam_status), " ", row.source, row.utm_source ? ' · ' + row.utm_source : '', row.score_total != null ? ' · score ' + row.score_total + ' (' + row.score_category + ')' : ''))), /*#__PURE__*/React.createElement(MultifamilyDataQualityView, null), /*#__PURE__*/React.createElement(MultifamilySourceRunsView, null)));
 }
 function mfBreakdownTable(title, obj) {
   const entries = Object.entries(obj || {}).sort((a, b) => b[1] - a[1]);
@@ -10245,6 +10255,308 @@ function MultifamilyLeadListView({
     lead: lead,
     onOpen: setDrawerId
   }))));
+}
+function MultifamilySignalTimelineView({
+  lead
+}) {
+  const items = lead && lead.signal_timeline || [];
+  return /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+    title: "SIGNAL TIMELINE"
+  }, lead && lead.signal_count > 1 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.72rem',
+      color: '#818cf8',
+      marginBottom: '8px'
+    }
+  }, lead.signal_count, " signals combined on this lead."), items.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#64748b',
+      fontSize: '0.78rem'
+    }
+  }, "No signals recorded yet."), items.map((s, i) => /*#__PURE__*/React.createElement("div", {
+    key: s.id || i,
+    style: {
+      padding: '8px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      gap: '8px',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.8rem',
+      color: '#e2e8f0',
+      fontWeight: 600
+    }
+  }, (s.signal_type || 'signal').replace(/_/g, ' ')), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#64748b'
+    }
+  }, s.occurred_at ? String(s.occurred_at).slice(0, 19).replace('T', ' ') : '—')), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '6px',
+      flexWrap: 'wrap',
+      marginTop: '4px'
+    }
+  }, s.source && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#a78bfa')
+  }, s.source), s.confidence != null && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#34d399')
+  }, "conf ", Number(s.confidence).toFixed(2))), s.source_url && /*#__PURE__*/React.createElement("a", {
+    href: s.source_url,
+    target: "_blank",
+    rel: "noopener noreferrer",
+    style: {
+      fontSize: '0.7rem',
+      color: '#60a5fa',
+      wordBreak: 'break-all',
+      display: 'block',
+      marginTop: '3px'
+    }
+  }, s.source_url), s.detail && Object.keys(s.detail).length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#94a3b8',
+      marginTop: '3px'
+    }
+  }, Object.entries(s.detail).map(([k, v]) => `${k}: ${v}`).join(' · ')))));
+}
+function mfTouchLine(t) {
+  if (!t) return '—';
+  const parts = [t.source || 'unknown'];
+  if (t.utm_source) parts.push('utm:' + t.utm_source);
+  if (t.utm_campaign) parts.push('campaign:' + t.utm_campaign);
+  if (t.occurred_at) parts.push(String(t.occurred_at).slice(0, 19).replace('T', ' '));
+  return parts.join(' · ');
+}
+function MultifamilyAttributionView({
+  attribution
+}) {
+  const a = attribution || {};
+  return /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+    title: "ATTRIBUTION HISTORY"
+  }, mfKV('First touch', mfTouchLine(a.first_touch)), mfKV('Latest touch', mfTouchLine(a.latest_touch)), mfKV('Conversion source', a.conversion_source), (a.utm_history || []).length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#64748b',
+      marginBottom: '4px'
+    }
+  }, "UTM PATH"), a.utm_history.map((u, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      fontSize: '0.74rem',
+      color: '#94a3b8',
+      padding: '2px 0'
+    }
+  }, [u.utm_source, u.utm_medium, u.utm_campaign].filter(Boolean).join(' / ') || '—', u.occurred_at ? ' · ' + String(u.occurred_at).slice(0, 10) : ''))), (a.landing_page_history || []).length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#64748b',
+      marginBottom: '4px'
+    }
+  }, "LANDING PAGES"), a.landing_page_history.map((lp, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      fontSize: '0.72rem',
+      color: '#60a5fa',
+      wordBreak: 'break-all',
+      padding: '2px 0'
+    }
+  }, lp))), (a.referrer_history || []).length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#64748b',
+      marginBottom: '4px'
+    }
+  }, "REFERRERS"), a.referrer_history.map((rf, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      fontSize: '0.72rem',
+      color: '#94a3b8',
+      wordBreak: 'break-all',
+      padding: '2px 0'
+    }
+  }, rf))));
+}
+function MultifamilyDataQualityView() {
+  const [cands, setCands] = useState(null);
+  const [busy, setBusy] = useState(null);
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch('/api/multifamily/match-candidates');
+      const j = r.ok ? await r.json() : {
+        candidates: []
+      };
+      setCands(j.candidates || []);
+    } catch (e) {
+      setCands([]);
+    }
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
+  const act = async (id, action) => {
+    setBusy(id);
+    try {
+      await fetch(`/api/multifamily/match-candidates/${id}/${action}`, {
+        method: 'POST'
+      });
+      await load();
+    } catch (e) {} finally {
+      setBusy(null);
+    }
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '1.5rem'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, "DATA QUALITY — POSSIBLE DUPLICATES"), cands == null && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#475569'
+    }
+  }, "Loading…"), cands != null && cands.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#475569'
+    }
+  }, "No pending duplicates to review."), (cands || []).map(c => /*#__PURE__*/React.createElement("div", {
+    key: c.id,
+    style: {
+      padding: '10px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.8rem',
+      color: '#e2e8f0'
+    }
+  }, /*#__PURE__*/React.createElement("b", null, c.incoming_company_name || 'New lead'), " ≈ possible dup of ", /*#__PURE__*/React.createElement("b", null, c.company_name || 'existing lead')), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '4px',
+      flexWrap: 'wrap',
+      margin: '4px 0'
+    }
+  }, (c.match_reasons || []).map(rn => /*#__PURE__*/React.createElement("span", {
+    key: rn,
+    style: mfPillStyle('#facc15')
+  }, rn.replace(/_/g, ' '))), c.score != null && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#64748b')
+  }, "score ", Number(c.score).toFixed(2))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '8px',
+      marginTop: '4px'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    disabled: busy === c.id,
+    onClick: () => act(c.id, 'merge'),
+    style: {
+      background: 'rgba(52,211,153,0.15)',
+      border: '1px solid #34d399',
+      color: '#34d399',
+      borderRadius: '4px',
+      padding: '3px 12px',
+      cursor: 'pointer',
+      fontSize: '0.7rem'
+    }
+  }, "Merge"), /*#__PURE__*/React.createElement("button", {
+    disabled: busy === c.id,
+    onClick: () => act(c.id, 'dismiss'),
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.15)',
+      color: '#94a3b8',
+      borderRadius: '4px',
+      padding: '3px 12px',
+      cursor: 'pointer',
+      fontSize: '0.7rem'
+    }
+  }, "Dismiss")))));
+}
+function MultifamilySourceRunsView() {
+  const [runs, setRuns] = useState(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/multifamily/admin/source-runs');
+        const j = r.ok ? await r.json() : {
+          source_runs: []
+        };
+        setRuns(j.source_runs || []);
+      } catch (e) {
+        setRuns([]);
+      }
+    })();
+  }, []);
+  const statusColor = {
+    running: '#facc15',
+    success: '#34d399',
+    error: '#ef4444',
+    partial: '#f97316'
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '1.5rem'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, "SOURCE RUN HISTORY"), runs == null && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#475569'
+    }
+  }, "Loading…"), runs != null && runs.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#475569'
+    }
+  }, "No automated source runs yet."), (runs || []).map(run => /*#__PURE__*/React.createElement("div", {
+    key: run.id,
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: '6px',
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      padding: '8px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(statusColor[run.status] || '#64748b')
+  }, run.status || 'unknown'), " ", run.source, run.started_at ? ' · ' + String(run.started_at).slice(0, 19).replace('T', ' ') : ''), /*#__PURE__*/React.createElement("span", null, 'found ' + (run.records_found || 0), ' · created ' + (run.records_created || 0), ' · merged ' + (run.records_merged || 0), ' · rejected ' + (run.records_rejected || 0)))));
 }
 function CapitalFlowPanel() {
   const [predictions, setPredictions] = useState([]);

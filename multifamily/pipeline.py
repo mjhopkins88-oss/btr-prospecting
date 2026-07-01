@@ -6,10 +6,23 @@ explains, and attaches a suggested opener + next-best-action to every
 lead. Entirely in-memory — no DB writes — so it can be exercised from
 the demo/test scripts and the Flask API layer alike.
 """
+import hashlib
 from typing import Any, Callable, List, Optional, Tuple
 
 from multifamily.types import MultifamilyLead, MultifamilySourceRun, INBOUND_INTENT_SOURCES, new_id, utc_now_iso
 from multifamily.dedupe import dedupe_leads
+
+
+def _stable_demo_id(lead: MultifamilyLead) -> str:
+    """Deterministic id for a demo lead so it stays the same across pipeline
+    runs (otherwise the single-lead drawer fetch would 404 because demo ids
+    are regenerated every request). Keyed on company + property + source."""
+    key = '|'.join([
+        (lead.company.name or '').strip().lower(),
+        (lead.property.name or '').strip().lower(),
+        lead.primary_source or '',
+    ])
+    return 'demo-' + hashlib.md5(key.encode('utf-8')).hexdigest()[:16]
 from multifamily.scoring.multifamily_score_engine import score_lead
 from multifamily.scoring.multifamily_score_explanations import explain_why_warm, explain_likely_pain
 from multifamily.daily_brief.multifamily_next_best_action import next_best_action_for_lead
@@ -86,6 +99,7 @@ def run_pipeline() -> Tuple[List[MultifamilyLead], List[MultifamilySourceRun]]:
     leads = dedupe_leads(leads)
 
     for lead in leads:
+        lead.id = _stable_demo_id(lead)  # stable across requests for drawer fetches
         lead.score = score_lead(lead)
         lead.why_warm = explain_why_warm(lead)
         lead.likely_pain = explain_likely_pain(lead)
