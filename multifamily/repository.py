@@ -1210,6 +1210,28 @@ def get_creation_snapshot(lead_id: str) -> Optional[Dict[str, Any]]:
     return _snapshot_row_with_json(rows[0]) if rows else None
 
 
+def get_creation_snapshots_for_leads(lead_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Bulk creation-snapshot ('created' reason) lookup for a batch of lead
+    ids — one query instead of one per lead, for the source-ROI report's
+    avg-score/avg-timing-confidence-at-creation metrics."""
+    ensure_schema()
+    if not lead_ids:
+        return {}
+    placeholders = ', '.join(['?'] * len(lead_ids))
+    rows = fetch_all(
+        f"SELECT id, lead_id, reason, score_total, score_category, reason_codes_json, disqualifier_codes_json, "
+        f"process_stage, outreach_window, timing_reason, timing_confidence, urgency_label, signal_count, "
+        f"attribution_summary_json, created_at FROM multifamily_lead_snapshots "
+        f"WHERE lead_id IN ({placeholders}) AND reason = 'created' ORDER BY created_at ASC",
+        lead_ids,
+    )
+    result: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        if r['lead_id'] not in result:  # ascending order -> first write wins
+            result[r['lead_id']] = _snapshot_row_with_json(r)
+    return result
+
+
 def delete_snapshots_for_lead(lead_id: str) -> None:
     ensure_schema()
     execute('DELETE FROM multifamily_lead_snapshots WHERE lead_id = ?', [lead_id])
@@ -1311,3 +1333,276 @@ def delete_notification(notification_id: str) -> None:
     """Used by tests to clean up after themselves."""
     ensure_schema()
     execute('DELETE FROM multifamily_notifications WHERE id = ?', [notification_id])
+
+
+# ===========================================================================
+# Source ROI + calibration readiness (outcome/snapshot/notification phase)
+# Additive to get_source_performance() (lead-count/signal-count view) —
+# this reports outcomes/revenue/quality by source, and a descriptive
+# (no-ML) dataset for future calibration once real lead history exists.
+# ===========================================================================
+
+_ROI_DIMENSIONS = [
+    'source', 'source_page', 'offer_type', 'utm_source', 'utm_campaign',
+    'first_touch_source', 'conversion_source', 'latest_signal_source',
+]
+
+# high=1.0/medium=0.5/low=0.0 — timing_confidence is a label
+# (multifamily/timing/process_stage_detector.py's _confidence()), so
+# "average timing confidence" needs a numeric mapping to average.
+_TIMING_CONFIDENCE_SCORE = {'high': 1.0, 'medium': 0.5, 'low': 0.0}
+
+_SCORE_BANDS = [('90-100', 90, 100), ('75-89', 75, 89), ('60-74', 60, 74), ('40-59', 40, 59), ('0-39', 0, 39)]
+
+
+def _attribution_touch_sources_by_lead() -> Dict[str, Dict[str, Optional[str]]]:
+    """For every lead_id, derive first_touch_source/conversion_source from
+    the append-only attribution history — the same rule
+    get_attribution_summary() applies per-lead, batched here so the ROI
+    report isn't N queries for N leads."""
+    ensure_schema()
+    rows = fetch_all(
+        'SELECT lead_id, source, occurred_at FROM multifamily_source_attribution ORDER BY lead_id, occurred_at ASC'
+    )
+    by_lead: Dict[str, List[Dict[str, Any]]] = {}
+    for r in rows:
+        by_lead.setdefault(r['lead_id'], []).append(r)
+    result: Dict[str, Dict[str, Optional[str]]] = {}
+    for lead_id, touches in by_lead.items():
+        first = touches[0]
+        conversion = next((t for t in touches if t.get('source') in _CONVERSION_SOURCES), first)
+        result[lead_id] = {'first_touch_source': first.get('source'), 'conversion_source': conversion.get('source')}
+    return result
+
+
+def _latest_signal_source_by_lead() -> Dict[str, str]:
+    """Most recent real, non-rejected signal's source, per lead."""
+    ensure_schema()
+    rows = fetch_all(
+        "SELECT lead_id, source, occurred_at FROM multifamily_signals "
+        "WHERE is_demo = 0 AND spam_status != 'rejected' ORDER BY lead_id, occurred_at ASC"
+    )
+    result: Dict[str, str] = {}
+    for r in rows:
+        if r.get('source'):
+            result[r['lead_id']] = r['source']  # ascending order -> last write wins
+    return result
+
+
+def _outcome_rollup_by_lead() -> Dict[str, Dict[str, Any]]:
+    """Per lead: the set of outcome types EVER reached (for funnel
+    milestone counts — "did this lead ever hit quote_sent", not "how many
+    times") plus the max estimated_revenue/bound_premium ever recorded on
+    it (the most defensible single number without double-counting a
+    history that may set the same field more than once)."""
+    ensure_schema()
+    rows = fetch_all('SELECT lead_id, outcome_type, estimated_revenue, bound_premium FROM multifamily_lead_outcomes')
+    result: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        entry = result.setdefault(r['lead_id'], {'types': set(), 'estimated_revenue': None, 'bound_premium': None})
+        entry['types'].add(r['outcome_type'])
+        if r.get('estimated_revenue') is not None:
+            entry['estimated_revenue'] = max(entry['estimated_revenue'] or 0, r['estimated_revenue'])
+        if r.get('bound_premium') is not None:
+            entry['bound_premium'] = max(entry['bound_premium'] or 0, r['bound_premium'])
+    return result
+
+
+def _new_roi_bucket() -> Dict[str, Any]:
+    return {
+        'leads_created': 0, 'signals_received': 0, 'hot_or_call_today_leads': 0,
+        'meetings_booked': 0, 'submissions_received': 0, 'quotes_started': 0, 'quotes_sent': 0,
+        'wins': 0, 'losses': 0, 'estimated_revenue': 0.0, 'bound_premium': 0.0,
+        'duplicate_or_merged_leads': 0,
+        '_total_incl_rejected': 0, '_rejected': 0, '_score_sum': 0.0, '_score_n': 0,
+        '_timing_sum': 0.0, '_timing_n': 0,
+    }
+
+
+def _finalize_roi_bucket(b: Dict[str, Any]) -> Dict[str, Any]:
+    total_incl_rejected = b.pop('_total_incl_rejected')
+    rejected = b.pop('_rejected')
+    score_sum, score_n = b.pop('_score_sum'), b.pop('_score_n')
+    timing_sum, timing_n = b.pop('_timing_sum'), b.pop('_timing_n')
+    leads = b['leads_created']
+    b['spam_rate_pct'] = round(100.0 * rejected / total_incl_rejected, 1) if total_incl_rejected else 0.0
+    b['duplicate_or_merge_rate_pct'] = round(100.0 * b['duplicate_or_merged_leads'] / leads, 1) if leads else 0.0
+    b['avg_score_at_creation'] = round(score_sum / score_n, 1) if score_n else None
+    b['avg_timing_confidence'] = round(timing_sum / timing_n, 2) if timing_n else None
+    b['estimated_revenue'] = round(b['estimated_revenue'], 2)
+    b['bound_premium'] = round(b['bound_premium'], 2)
+    return b
+
+
+def get_source_roi() -> Dict[str, Any]:
+    """Outcome-aware ROI report, grouped by 8 dimensions (source,
+    source_page, offer_type, utm_source, utm_campaign, first_touch_source,
+    conversion_source, latest_signal_source). Real leads only
+    (non-merged-away); rejected leads count toward spam_rate_pct's
+    denominator only — never toward any funnel/revenue/quality metric.
+    `duplicate_or_merge_rate_pct` = share of leads in the bucket that
+    absorbed >1 signal (signal_count > 1), i.e. survived at least one
+    merge — covers both the on-intake auto-merge path and the
+    admin-confirmed match-candidate merge uniformly, since both raise a
+    survivor's signal_count."""
+    ensure_schema()
+    rows = fetch_all(
+        "SELECT id, source, source_page, offer_type, utm_source, utm_campaign, score_category, "
+        "signal_count, spam_status FROM multifamily_leads WHERE is_demo = 0 "
+        "AND (merge_status IS NULL OR merge_status != 'merged')"
+    )
+    touch_sources = _attribution_touch_sources_by_lead()
+    latest_signal_source = _latest_signal_source_by_lead()
+    outcomes = _outcome_rollup_by_lead()
+    creation = get_creation_snapshots_for_leads([r['id'] for r in rows])
+
+    def _dim_value(row: Dict[str, Any], dim: str) -> str:
+        if dim == 'first_touch_source':
+            v = touch_sources.get(row['id'], {}).get('first_touch_source')
+        elif dim == 'conversion_source':
+            v = touch_sources.get(row['id'], {}).get('conversion_source')
+        elif dim == 'latest_signal_source':
+            v = latest_signal_source.get(row['id'])
+        else:
+            v = row.get(dim)
+        return v or 'unknown'
+
+    _OUTCOME_FIELD_MAP = (
+        ('meeting_booked', 'meetings_booked'), ('submission_received', 'submissions_received'),
+        ('quote_started', 'quotes_started'), ('quote_sent', 'quotes_sent'), ('won', 'wins'), ('lost', 'losses'),
+    )
+
+    report: Dict[str, Any] = {}
+    for dim in _ROI_DIMENSIONS:
+        buckets: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            b = buckets.setdefault(_dim_value(row, dim), _new_roi_bucket())
+            b['_total_incl_rejected'] += 1
+            if row.get('spam_status') == 'rejected':
+                b['_rejected'] += 1
+                continue  # rejected leads never count as a valid lead beyond the spam-rate denominator
+            b['leads_created'] += 1
+            b['signals_received'] += row.get('signal_count') or 0
+            if row.get('score_category') in ('hot', 'call_today'):
+                b['hot_or_call_today_leads'] += 1
+            if (row.get('signal_count') or 0) > 1:
+                b['duplicate_or_merged_leads'] += 1
+            o = outcomes.get(row['id'])
+            if o:
+                for outcome_type, field in _OUTCOME_FIELD_MAP:
+                    if outcome_type in o['types']:
+                        b[field] += 1
+                if o.get('estimated_revenue'):
+                    b['estimated_revenue'] += o['estimated_revenue']
+                if o.get('bound_premium'):
+                    b['bound_premium'] += o['bound_premium']
+            snap = creation.get(row['id'])
+            if snap:
+                if snap.get('score_total') is not None:
+                    b['_score_sum'] += snap['score_total']
+                    b['_score_n'] += 1
+                tc = _TIMING_CONFIDENCE_SCORE.get(snap.get('timing_confidence'))
+                if tc is not None:
+                    b['_timing_sum'] += tc
+                    b['_timing_n'] += 1
+        report[dim] = {key: _finalize_roi_bucket(b) for key, b in buckets.items()}
+    return report
+
+
+def _score_band(total: Optional[int]) -> str:
+    if total is None:
+        return 'unknown'
+    for label, lo, hi in _SCORE_BANDS:
+        if lo <= total <= hi:
+            return label
+    return 'unknown'
+
+
+def get_calibration_dataset() -> Dict[str, Any]:
+    """Descriptive-only foundation for future calibration (NO machine
+    learning — counts and rates only). Joins each real lead's creation
+    snapshot (score/timing baseline, frozen at intake) with its outcome
+    history and activity log to surface:
+      - score_band_meeting_or_win_rate: which score bands actually
+        produce a meeting or a win
+      - timing_stage_reply_rate: which process stages produce replies
+      - process_stage_win_rate: which process stages actually close
+      - revenue_by_source: which source creates the most estimated
+        revenue / bound premium
+      - disqualifier_code_outcome_mix: how leads carrying each
+        disqualifier code eventually resolve — a disqualifier code with a
+        high won-rate is a candidate for being "too strict"
+    """
+    ensure_schema()
+    rows = fetch_all(
+        "SELECT id, source FROM multifamily_leads WHERE is_demo = 0 AND spam_status != 'rejected' "
+        "AND (merge_status IS NULL OR merge_status != 'merged')"
+    )
+    lead_ids = [r['id'] for r in rows]
+    source_by_lead = {r['id']: (r['source'] or 'unknown') for r in rows}
+    creation = get_creation_snapshots_for_leads(lead_ids)
+    outcomes = _outcome_rollup_by_lead()
+    replied_leads = {
+        r['lead_id'] for r in fetch_all("SELECT DISTINCT lead_id FROM multifamily_activities WHERE activity_type = 'replied'")
+    }
+
+    score_band_stats: Dict[str, Dict[str, int]] = {}
+    timing_stage_stats: Dict[str, Dict[str, int]] = {}
+    process_stage_stats: Dict[str, Dict[str, int]] = {}
+    source_revenue: Dict[str, float] = {}
+    disqualifier_outcome_mix: Dict[str, Dict[str, int]] = {}
+
+    for lead_id in lead_ids:
+        snap = creation.get(lead_id)
+        o = outcomes.get(lead_id, {'types': set(), 'estimated_revenue': None, 'bound_premium': None})
+        types = o['types']
+        won_or_meeting = bool(types & {'meeting_booked', 'won'})
+        replied = lead_id in replied_leads
+        stage = (snap or {}).get('process_stage') or 'unknown'
+
+        bs = score_band_stats.setdefault(_score_band((snap or {}).get('score_total')), {'leads': 0, 'meetings_or_wins': 0})
+        bs['leads'] += 1
+        bs['meetings_or_wins'] += int(won_or_meeting)
+
+        ts = timing_stage_stats.setdefault(stage, {'leads': 0, 'replies': 0})
+        ts['leads'] += 1
+        ts['replies'] += int(replied)
+
+        pc = process_stage_stats.setdefault(stage, {'leads': 0, 'wins': 0})
+        pc['leads'] += 1
+        pc['wins'] += int('won' in types)
+
+        src = source_by_lead.get(lead_id, 'unknown')
+        revenue = (o.get('estimated_revenue') or 0) + (o.get('bound_premium') or 0)
+        if revenue:
+            source_revenue[src] = source_revenue.get(src, 0.0) + revenue
+
+        for code in ((snap or {}).get('disqualifier_codes') or []):
+            outcome_label = 'no_outcome_yet'
+            if 'won' in types:
+                outcome_label = 'won'
+            elif 'lost' in types:
+                outcome_label = 'lost'
+            elif 'not_a_fit' in types:
+                outcome_label = 'not_a_fit'
+            elif 'dead' in types:
+                outcome_label = 'dead'
+            elif types:
+                outcome_label = 'in_progress'
+            dm = disqualifier_outcome_mix.setdefault(code, {})
+            dm[outcome_label] = dm.get(outcome_label, 0) + 1
+
+    def _with_rate(stats: Dict[str, Dict[str, int]], numerator_key: str, denom_key: str) -> Dict[str, Dict[str, Any]]:
+        return {
+            key: {**v, 'rate_pct': round(100.0 * v[numerator_key] / v[denom_key], 1) if v[denom_key] else 0.0}
+            for key, v in stats.items()
+        }
+
+    return {
+        'score_band_meeting_or_win_rate': _with_rate(score_band_stats, 'meetings_or_wins', 'leads'),
+        'timing_stage_reply_rate': _with_rate(timing_stage_stats, 'replies', 'leads'),
+        'process_stage_win_rate': _with_rate(process_stage_stats, 'wins', 'leads'),
+        'revenue_by_source': {k: round(v, 2) for k, v in source_revenue.items()},
+        'disqualifier_code_outcome_mix': disqualifier_outcome_mix,
+        'sample_size': len(lead_ids),
+    }

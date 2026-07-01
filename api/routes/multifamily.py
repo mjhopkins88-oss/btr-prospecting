@@ -633,6 +633,34 @@ def get_source_performance():
     return jsonify(data)
 
 
+@multifamily_bp.route('/source-roi', methods=['GET'])
+def get_source_roi():
+    """Outcome-aware ROI report (outcome/snapshot/notification phase):
+    leads/signals/funnel milestones/revenue/quality metrics grouped by
+    source, source_page, offer_type, utm_source, utm_campaign,
+    first_touch_source, conversion_source, and latest_signal_source.
+    Login required — includes revenue/premium figures, more sensitive
+    than the public lead-count view at /source-performance."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        return jsonify({'roi': repository.get_source_roi()})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/admin/calibration', methods=['GET'])
+def get_admin_calibration():
+    """Descriptive-only (no ML) calibration dataset: score-band ->
+    meeting/win rate, timing-stage -> reply rate, process-stage -> win
+    rate, revenue by source, and disqualifier-code -> outcome mix. Super-
+    admin only (raw per-lead financials feed into this)."""
+    def _fn():
+        return jsonify(repository.get_calibration_dataset())
+    return _admin_only(_fn)
+
+
 @multifamily_bp.route('/leads/<lead_id>/activity', methods=['POST'])
 def log_activity(lead_id):
     """Log a manual activity / follow-up on a lead (Part 7). Login
