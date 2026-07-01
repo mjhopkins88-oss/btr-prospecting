@@ -9049,6 +9049,9 @@ function MultifamilyLeadDrawer({
   }, {
     id: 'score_history',
     label: 'Score History'
+  }, {
+    id: 'sales_intel',
+    label: 'Sales Intelligence'
   }];
   if (isAdmin) sections.push({
     id: 'raw',
@@ -9401,6 +9404,8 @@ function MultifamilyLeadDrawer({
     leadId: leadId,
     lead: lead,
     onRefresh: refreshLead
+  }), lead && section === 'sales_intel' && /*#__PURE__*/React.createElement(MultifamilySalesIntelView, {
+    lead: lead
   }), lead && section === 'raw' && isAdmin && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
     title: "RAW / DEBUG (ADMIN ONLY)"
   }, mfKV('Spam status', lead.spam_status), mfKV('Spam reason codes', (lead.spam_reason_codes || []).join(', ')), mfKV('Submitted IP hash', lead.submitted_ip_hash), mfKV('User agent', lead.user_agent_summary), /*#__PURE__*/React.createElement("pre", {
@@ -11445,6 +11450,68 @@ function MultifamilyRecentNotificationsView() {
   }, /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle(n.severity === 'critical' ? '#ef4444' : n.severity === 'warning' ? '#f59e0b' : '#64748b')
   }, n.type.replace(/_/g, ' ')), " ", n.title), /*#__PURE__*/React.createElement("span", null, n.is_read ? 'read' : 'unread', " \xB7 ", String(n.created_at || '').slice(0, 19).replace('T', ' ')))));
+}
+function MultifamilySalesIntelView({
+  lead
+}) {
+  const si = lead.sales_intelligence;
+  return /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+    title: "SALES INTELLIGENCE"
+  }, !si && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#64748b',
+      fontSize: '0.78rem'
+    }
+  }, "Not available for this lead."), si && /*#__PURE__*/React.createElement(React.Fragment, null, mfKV('Recommended action', (si.recommended_action || '').replace(/_/g, ' ')), mfKV('NEPQ stage', (si.nepq_stage || '').replace(/_/g, ' ')), mfKV('Buyer awareness', (si.buyer_awareness_level || '').replace(/_/g, ' ')), mfKV('Resistance risk', si.resistance_risk), mfKV('Likely emotional driver', si.likely_emotional_driver), mfKV('Confidence', si.confidence_score != null ? Math.round(si.confidence_score * 100) + '%' : null), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '10px',
+      fontSize: '0.7rem',
+      color: '#64748b'
+    }
+  }, "PRIMARY QUESTION"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.78rem',
+      color: '#cbd5e1',
+      marginTop: '3px'
+    }
+  }, si.primary_question), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '10px',
+      fontSize: '0.7rem',
+      color: '#64748b'
+    }
+  }, "MESSAGE ANGLE"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.78rem',
+      color: '#cbd5e1',
+      marginTop: '3px'
+    }
+  }, si.message_angle), (si.what_to_avoid || []).length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '10px',
+      fontSize: '0.7rem',
+      color: '#f97316'
+    }
+  }, "WHAT TO AVOID"), si.what_to_avoid.map((w, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      fontSize: '0.76rem',
+      color: '#fca5a5',
+      marginTop: '2px'
+    }
+  }, "• ", w))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '10px',
+      fontSize: '0.7rem',
+      color: '#64748b'
+    }
+  }, "REASONING"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.76rem',
+      color: '#94a3b8',
+      marginTop: '3px'
+    }
+  }, si.reasoning_summary)));
 }
 function CapitalFlowPanel() {
   const [predictions, setPredictions] = useState([]);
