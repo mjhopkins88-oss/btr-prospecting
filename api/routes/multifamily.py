@@ -40,6 +40,7 @@ from multifamily.sales_intelligence.follow_up_suggestions import (
 )
 from multifamily.sales_intelligence.tone_guardrails import check_message_package, worst_status
 from multifamily.serp.query_templates import SerpQueryConfig, SERP_CATEGORIES, SERP_LAUNCH_STATES, SERP_FUTURE_STATES
+from multifamily.forms.form_variants import FORM_VARIANTS, FORM_VARIANT_SLUGS, DEFAULT_FORM_VARIANT_SLUG
 from multifamily.serp.serp_collector import run_serp_collection
 
 multifamily_bp = Blueprint('multifamily', __name__, url_prefix='/api/multifamily')
@@ -189,6 +190,23 @@ def _view(filter_fn):
         'leads': _serialize_leads(leads),
         'count': len(leads),
         'is_demo_data': bool(leads) and all(l.is_demo for l in leads),
+    })
+
+
+@multifamily_bp.route('/form-variants', methods=['GET'])
+def get_form_variants():
+    """Public, read-only config for every offer-page/form variant
+    (multifamily/forms/form_variants.py — single source of truth). Used
+    by the public offer pages (Multifamily Funnel Phase 2) to render
+    headline/subheadline/CTA/fields/confirmation without duplicating
+    copy in multiple HTML files, and by the Outreach Workbench's
+    page-recommendation (Phase 3). No auth — this is public marketing
+    copy, not lead data."""
+    variants = {slug: dataclasses.asdict(v) for slug, v in FORM_VARIANTS.items()}
+    return jsonify({
+        'variants': variants,
+        'default_slug': DEFAULT_FORM_VARIANT_SLUG,
+        'slugs': FORM_VARIANT_SLUGS,
     })
 
 

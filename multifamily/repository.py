@@ -55,6 +55,11 @@ _ADDED_COLUMNS = [
     # replay the append-only multifamily_lead_outcomes history.
     ('current_outcome', 'TEXT'),
     ('current_outcome_at', 'TEXT'),
+    # Funnel phase: which offer-page variant produced this lead
+    # (multifamily/forms/form_variants.py slug) and which outreach
+    # campaign drove the visit, if any.
+    ('page_variant', 'TEXT'),
+    ('campaign_id', 'TEXT'),
 ]
 
 
@@ -149,6 +154,8 @@ def ensure_schema() -> None:
             referrer TEXT,
             landing_page TEXT,
             offer_type TEXT,
+            page_variant TEXT,
+            campaign_id TEXT,
             occurred_at TEXT,
             created_at TIMESTAMP
         )
@@ -358,6 +365,11 @@ def ensure_schema() -> None:
     _safe_add_column('multifamily_source_runs', 'state', 'TEXT')
     _safe_add_column('multifamily_source_runs', 'query', 'TEXT')
 
+    # Funnel phase: which offer-page variant/campaign drove each attribution
+    # touch — added after the table's initial create.
+    _safe_add_column('multifamily_source_attribution', 'page_variant', 'TEXT')
+    _safe_add_column('multifamily_source_attribution', 'campaign_id', 'TEXT')
+
     _backfill_signals_from_lead_json()
     _SCHEMA_READY = True
 
@@ -405,6 +417,8 @@ def insert_lead(lead: MultifamilyLead) -> None:
         'referrer': lead.referrer,
         'landing_page': lead.landing_page,
         'offer_type': lead.offer_type,
+        'page_variant': lead.page_variant,
+        'campaign_id': lead.campaign_id,
         'spam_status': lead.spam_status,
         'spam_reason_codes': json.dumps(lead.spam_reason_codes),
         'submitted_ip_hash': lead.submitted_ip_hash,
@@ -897,6 +911,7 @@ def record_attribution(lead_id: str, touch_type: str, source: Optional[str] = No
                        utm_campaign: Optional[str] = None, utm_term: Optional[str] = None,
                        utm_content: Optional[str] = None, referrer: Optional[str] = None,
                        landing_page: Optional[str] = None, offer_type: Optional[str] = None,
+                       page_variant: Optional[str] = None, campaign_id: Optional[str] = None,
                        occurred_at: Optional[str] = None) -> Dict[str, Any]:
     ensure_schema()
     from multifamily.types import new_id, utc_now_iso
@@ -906,12 +921,14 @@ def record_attribution(lead_id: str, touch_type: str, source: Optional[str] = No
         'utm_source': utm_source, 'utm_medium': utm_medium, 'utm_campaign': utm_campaign,
         'utm_term': utm_term, 'utm_content': utm_content, 'referrer': referrer,
         'landing_page': landing_page, 'offer_type': offer_type,
+        'page_variant': page_variant, 'campaign_id': campaign_id,
         'occurred_at': occurred_at or now, 'created_at': now,
     }
     execute(
         'INSERT INTO multifamily_source_attribution (id, lead_id, touch_type, source, utm_source, utm_medium, '
-        'utm_campaign, utm_term, utm_content, referrer, landing_page, offer_type, occurred_at, created_at) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'utm_campaign, utm_term, utm_content, referrer, landing_page, offer_type, page_variant, campaign_id, '
+        'occurred_at, created_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         list(row.values()),
     )
     return row
@@ -923,7 +940,9 @@ def record_lead_attribution_touch(lead, touch_type: str = 'touch') -> None:
         lead.id, touch_type, source=lead.primary_source,
         utm_source=lead.utm_source, utm_medium=lead.utm_medium, utm_campaign=lead.utm_campaign,
         utm_term=lead.utm_term, utm_content=lead.utm_content, referrer=lead.referrer,
-        landing_page=lead.landing_page, offer_type=lead.offer_type, occurred_at=lead.last_verified_at,
+        landing_page=lead.landing_page, offer_type=lead.offer_type,
+        page_variant=getattr(lead, 'page_variant', None), campaign_id=getattr(lead, 'campaign_id', None),
+        occurred_at=lead.last_verified_at,
     )
 
 
@@ -931,7 +950,8 @@ def get_attribution_for_lead(lead_id: str) -> List[Dict[str, Any]]:
     ensure_schema()
     return fetch_all(
         'SELECT id, lead_id, touch_type, source, utm_source, utm_medium, utm_campaign, utm_term, utm_content, '
-        'referrer, landing_page, offer_type, occurred_at, created_at FROM multifamily_source_attribution '
+        'referrer, landing_page, offer_type, page_variant, campaign_id, occurred_at, created_at '
+        'FROM multifamily_source_attribution '
         'WHERE lead_id = ? ORDER BY occurred_at ASC, created_at ASC',
         [lead_id],
     )

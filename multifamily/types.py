@@ -255,6 +255,8 @@ class MultifamilySourceAttribution:
     referrer: Optional[str] = None
     landing_page: Optional[str] = None
     offer_type: Optional[str] = None
+    page_variant: Optional[str] = None
+    campaign_id: Optional[str] = None
     occurred_at: str = field(default_factory=utc_now_iso)
     created_at: str = field(default_factory=utc_now_iso)
 
@@ -348,6 +350,12 @@ class MultifamilyLead:
     referrer: Optional[str] = None
     landing_page: Optional[str] = None
     offer_type: Optional[str] = None
+    # Which form-variant page produced this lead (multifamily/forms/form_variants.py
+    # slug, e.g. 'renewal-pressure') and which outreach campaign drove the
+    # visit, if any. Both optional/additive — a lead with neither is exactly
+    # today's benchmark-form behavior.
+    page_variant: Optional[str] = None
+    campaign_id: Optional[str] = None
 
     # ---- Spam/abuse signal (real intake only — see multifamily/spam_guard.py) ----
     # 'clean' | 'suspicious' | 'rejected'. Only 'rejected' leads are excluded

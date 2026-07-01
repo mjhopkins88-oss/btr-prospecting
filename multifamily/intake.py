@@ -21,6 +21,7 @@ from multifamily.scoring.multifamily_score_engine import score_lead
 from multifamily.scoring.multifamily_score_explanations import explain_why_warm, explain_likely_pain
 from multifamily.daily_brief.multifamily_next_best_action import next_best_action_for_lead
 from multifamily.pipeline import build_opener
+from multifamily.forms.form_variants import form_variant_for_offer_type
 
 LEAD_SITUATIONS = ['renewal', 'acquisition', 'refinance', 'construction', 'operating', 'benchmark']
 
@@ -47,6 +48,7 @@ MAX_FIELD_LENGTHS = {
     'notes': 4000, 'sourcePage': 300, 'sourceUrl': 500,
     'utmSource': 200, 'utmMedium': 200, 'utmCampaign': 200,
     'utmTerm': 200, 'utmContent': 200, 'referrer': 500, 'landingPage': 500,
+    'pageVariant': 100, 'campaignId': 200,
 }
 
 
@@ -216,6 +218,17 @@ def build_lead_from_intake(
     primary_concern = _clean(payload.get('primaryConcern'))
     pain_flags = [primary_concern] if primary_concern in PRIMARY_CONCERN_OPTIONS else []
 
+    offer_type = _clean(payload.get('offerType'))
+    page_variant = _clean(payload.get('pageVariant'))
+    if not page_variant and offer_type:
+        # A submission that carries offer_type but no explicit page_variant
+        # (e.g. today's benchmark form, or an outbound link that only sets
+        # offerType) still gets an accurate page_variant recorded, purely
+        # server-side — the form's own fields/behavior are unchanged.
+        matched_variant = form_variant_for_offer_type(offer_type)
+        if matched_variant:
+            page_variant = matched_variant.slug
+
     lead = MultifamilyLead(
         id=new_id(), company=company, property=prop, signals=signals, contacts=[contact],
         state=prop.state, city=prop.city, primary_signal_type='benchmark_form_submit',
@@ -230,7 +243,9 @@ def build_lead_from_intake(
         utm_content=_clean(payload.get('utmContent')),
         referrer=_clean(payload.get('referrer')),
         landing_page=_clean(payload.get('landingPage')),
-        offer_type=_clean(payload.get('offerType')),
+        offer_type=offer_type,
+        page_variant=page_variant,
+        campaign_id=_clean(payload.get('campaignId')),
         spam_status=spam_status,
         spam_reason_codes=spam_reason_codes or [],
         submitted_ip_hash=ip_hash,
