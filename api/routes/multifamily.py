@@ -717,7 +717,8 @@ def get_overview():
             'page_variant': handraiser.page_variant,
             'offer_type': handraiser.offer_type,
         }
-    funnel = {**build_funnel_widgets(perf), 'best_inbound_handraiser': best_handraiser}
+    campaign_perf = repository.get_campaign_performance()
+    funnel = {**build_funnel_widgets(perf, campaign_perf), 'best_inbound_handraiser': best_handraiser}
 
     payload = {
         'total_leads': len(leads),
@@ -947,6 +948,10 @@ def get_source_performance():
     """Part 8: source/UTM/campaign/offer performance over real leads."""
     data = repository.get_source_performance()
     data['is_demo_data'] = (data.get('total_real_leads', 0) == 0)
+    # Campaign Phase 5: Pilot Campaign performance — additive, entirely
+    # separate rollup from the lead-source view above (campaigns/targets,
+    # not leads/signals).
+    data['campaign_performance'] = repository.get_campaign_performance()
     return jsonify(data)
 
 

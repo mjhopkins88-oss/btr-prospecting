@@ -1292,6 +1292,87 @@ def delete_campaign_targets_for_campaign(campaign_id: str) -> None:
     execute('DELETE FROM multifamily_campaign_targets WHERE campaign_id = ?', [campaign_id])
 
 
+def get_campaign_performance() -> Dict[str, Any]:
+    """Cross-campaign rollup (Campaign Phase 5) for the Overview funnel
+    widgets + Source Performance panel — aggregates over
+    multifamily_campaigns + multifamily_campaign_targets. 'Best' rankings
+    require at least one target in the bucket; an empty pipeline
+    returns None for all ranking fields rather than a misleading 0%."""
+    ensure_schema()
+    campaigns = list_campaigns()
+    total_active_campaigns = sum(1 for c in campaigns if c['status'] == 'active')
+
+    target_rows = fetch_all(
+        'SELECT ct.*, c.name AS campaign_name, c.status AS campaign_status, '
+        'c.page_variant AS campaign_page_variant '
+        'FROM multifamily_campaign_targets ct JOIN multifamily_campaigns c ON ct.campaign_id = c.id'
+    )
+    total_targets = len(target_rows)
+    total_converted = sum(1 for t in target_rows if t['status'] == 'converted')
+    total_meetings = sum(1 for t in target_rows if t['status'] == 'meeting_booked')
+    targets_needing_followup = sum(1 for t in target_rows if t['status'] in ('planned', 'contacted'))
+
+    def _rate_buckets(rows, key_fn):
+        buckets: Dict[str, Dict[str, int]] = {}
+        for t in rows:
+            k = key_fn(t) or 'unknown'
+            b = buckets.setdefault(k, {'targets': 0, 'converted': 0, 'meetings': 0})
+            b['targets'] += 1
+            if t['status'] == 'converted':
+                b['converted'] += 1
+            if t['status'] == 'meeting_booked':
+                b['meetings'] += 1
+        for b in buckets.values():
+            b['conversion_rate_pct'] = round(100.0 * b['converted'] / b['targets'], 1) if b['targets'] else 0.0
+        return buckets
+
+    def _best(buckets, label_key):
+        best = None
+        for key, b in buckets.items():
+            if best is None or b['conversion_rate_pct'] > best['conversion_rate_pct']:
+                best = {label_key: key, **b}
+        return best
+
+    by_campaign = _rate_buckets(target_rows, lambda t: t['campaign_id'])
+    for cid, b in by_campaign.items():
+        b['name'] = next((t['campaign_name'] for t in target_rows if t['campaign_id'] == cid), cid)
+    best_campaign = _best(by_campaign, 'campaign_id')
+
+    by_page_variant = _rate_buckets(target_rows, lambda t: t['campaign_page_variant'])
+    best_offer_page = _best(by_page_variant, 'page_variant')
+
+    conversion_rate_by_segment = _rate_buckets(target_rows, lambda t: t.get('segment'))
+    conversion_rate_by_state = _rate_buckets(target_rows, lambda t: t.get('state'))
+
+    converted_targets = sorted(
+        [t for t in target_rows if t['status'] == 'converted' and t.get('converted_at')],
+        key=lambda t: t['converted_at'], reverse=True,
+    )
+    recently_converted = None
+    if converted_targets:
+        t = converted_targets[0]
+        recently_converted = {
+            'company': t.get('company'), 'campaign_name': t.get('campaign_name'),
+            'lead_id': t.get('lead_id'), 'converted_at': t.get('converted_at'),
+        }
+
+    return {
+        'total_campaigns': len(campaigns),
+        'total_active_campaigns': total_active_campaigns,
+        'total_targets': total_targets,
+        'total_converted': total_converted,
+        'total_meetings': total_meetings,
+        'targets_needing_followup': targets_needing_followup,
+        'best_campaign': best_campaign,
+        'best_offer_page': best_offer_page,
+        'recently_converted': recently_converted,
+        'conversion_rate_by_campaign': by_campaign,
+        'conversion_rate_by_page_variant': by_page_variant,
+        'conversion_rate_by_segment': conversion_rate_by_segment,
+        'conversion_rate_by_state': conversion_rate_by_state,
+    }
+
+
 def get_attribution_for_lead(lead_id: str) -> List[Dict[str, Any]]:
     ensure_schema()
     return fetch_all(

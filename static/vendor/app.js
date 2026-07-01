@@ -9766,6 +9766,67 @@ function MultifamilySourceSnapshot({
     }
   }, data.top_campaign || '—'))));
 }
+const _MF_OVERVIEW_CAMPAIGN_SECTION = (funnel, setActiveTab) => /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  style: {
+    fontSize: '0.68rem',
+    color: '#64748b',
+    fontFamily: "'Orbitron', sans-serif",
+    letterSpacing: '0.06em',
+    marginBottom: '8px'
+  }
+}, "PILOT CAMPAIGNS"), /*#__PURE__*/React.createElement("div", {
+  style: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+    gap: '10px',
+    marginBottom: '1.25rem'
+  }
+}, /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+  label: "ACTIVE CAMPAIGNS",
+  value: funnel.active_campaigns || 0,
+  color: "#34d399"
+}), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+  label: "CAMPAIGN CONVERSIONS",
+  value: funnel.campaign_conversions || 0,
+  color: "#60a5fa"
+}), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+  label: "TARGETS NEEDING FOLLOW-UP",
+  value: funnel.campaign_targets_needing_followup || 0,
+  color: "#f59e0b"
+}), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+  label: "BEST CAMPAIGN",
+  value: funnel.best_campaign ? `${funnel.best_campaign.name || funnel.best_campaign.campaign_id} (${funnel.best_campaign.conversion_rate_pct}%)` : '—',
+  color: "#a78bfa"
+})), (funnel.best_performing_offer_page || funnel.recently_converted_campaign_target) && /*#__PURE__*/React.createElement("div", {
+  style: {
+    display: 'flex',
+    gap: '20px',
+    flexWrap: 'wrap',
+    fontSize: '0.78rem',
+    color: '#94a3b8',
+    marginBottom: '1.25rem'
+  }
+}, funnel.best_performing_offer_page && /*#__PURE__*/React.createElement("span", null, "Best-performing offer page: ", /*#__PURE__*/React.createElement("b", {
+  style: {
+    color: '#f1f5f9'
+  }
+}, (MF_OFFER_PAGE_OPTIONS.find(o => o.slug === funnel.best_performing_offer_page.page_variant) || {}).label || funnel.best_performing_offer_page.page_variant, ' ', "(", funnel.best_performing_offer_page.conversion_rate_pct, "%)")), funnel.recently_converted_campaign_target && /*#__PURE__*/React.createElement("span", null, "Recently converted: ", /*#__PURE__*/React.createElement("b", {
+  style: {
+    color: '#34d399'
+  }
+}, funnel.recently_converted_campaign_target.company, " via \"", funnel.recently_converted_campaign_target.campaign_name, "\""))), /*#__PURE__*/React.createElement("button", {
+  onClick: () => setActiveTab('multifamily_campaigns'),
+  style: {
+    background: 'transparent',
+    border: '1px solid rgba(255,255,255,0.12)',
+    color: '#94a3b8',
+    padding: '0.4rem 0.8rem',
+    borderRadius: '0.5rem',
+    cursor: 'pointer',
+    fontSize: '0.74rem',
+    marginBottom: '1.25rem'
+  }
+}, "View Pilot Campaigns \u2192"));
 function MultifamilyOverviewPanel({
   activeTab,
   setActiveTab,
@@ -9930,7 +9991,7 @@ function MultifamilyOverviewPanel({
       borderRadius: '8px',
       padding: '12px 14px'
     }
-  }, mfBreakdownTable('NEW FORMS BY OFFER', newFormsByOffer))), /*#__PURE__*/React.createElement(MultifamilyNeedsAttentionPanel, {
+  }, mfBreakdownTable('NEW FORMS BY OFFER', newFormsByOffer))), _MF_OVERVIEW_CAMPAIGN_SECTION(funnel, setActiveTab), /*#__PURE__*/React.createElement(MultifamilyNeedsAttentionPanel, {
     user: user,
     leadNeedingInfo: m.lead_needing_info,
     onOpen: setDrawerId,
@@ -10114,6 +10175,125 @@ function mfBreakdownTable(title, obj) {
       wordBreak: 'break-word'
     }
   }, k), /*#__PURE__*/React.createElement("span", null, v))));
+}
+function mfCampaignRateTable(title, buckets, labelHeader) {
+  const entries = Object.entries(buckets || {}).sort((a, b) => b[1].targets - a[1].targets);
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, title), entries.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#475569',
+      marginBottom: '1rem'
+    }
+  }, "No data yet."), entries.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      overflowX: 'auto',
+      marginBottom: '1.25rem'
+    }
+  }, /*#__PURE__*/React.createElement("table", {
+    style: {
+      width: '100%',
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      borderCollapse: 'collapse'
+    }
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
+    style: {
+      color: '#64748b'
+    }
+  }, /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'left',
+      padding: '4px 8px'
+    }
+  }, labelHeader), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, "Targets"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, "Converted"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, "Rate"))), /*#__PURE__*/React.createElement("tbody", null, entries.map(([key, b]) => /*#__PURE__*/React.createElement("tr", {
+    key: key,
+    style: {
+      borderTop: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      padding: '4px 8px',
+      color: '#cbd5e1'
+    }
+  }, b.name || key), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, b.targets), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, b.converted), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, b.conversion_rate_pct, "%")))))));
+}
+function MultifamilySourcePerformanceCampaignSection({
+  campaignPerformance
+}) {
+  const cp = campaignPerformance || {};
+  if (!cp.total_campaigns) return null;
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem',
+      marginTop: '1.25rem'
+    }
+  }, "PILOT CAMPAIGN PERFORMANCE"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+      gap: '10px',
+      marginBottom: '1.25rem'
+    }
+  }, [['Campaigns', cp.total_campaigns], ['Active', cp.total_active_campaigns], ['Targets', cp.total_targets], ['Converted', cp.total_converted], ['Meetings', cp.total_meetings], ['Needing follow-up', cp.targets_needing_followup]].map(([label, value]) => /*#__PURE__*/React.createElement("div", {
+    key: label,
+    style: {
+      background: 'rgba(255,255,255,0.02)',
+      border: '1px solid rgba(255,255,255,0.06)',
+      borderRadius: '6px',
+      padding: '8px 10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.6rem',
+      color: '#64748b'
+    }
+  }, label), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '1.1rem',
+      fontWeight: 700,
+      color: '#f1f5f9'
+    }
+  }, value ?? 0)))), mfCampaignRateTable('CONVERSION RATE BY CAMPAIGN', cp.conversion_rate_by_campaign, 'Campaign'), mfCampaignRateTable('CONVERSION RATE BY OFFER PAGE', cp.conversion_rate_by_page_variant, 'Offer Page'), mfCampaignRateTable('CONVERSION RATE BY SEGMENT', cp.conversion_rate_by_segment, 'Segment'), mfCampaignRateTable('CONVERSION RATE BY STATE', cp.conversion_rate_by_state, 'State'));
 }
 function MultifamilySourcePerformancePanel({
   activeTab,
@@ -10319,7 +10499,9 @@ function MultifamilySourcePerformancePanel({
       textAlign: 'right',
       padding: '4px 8px'
     }
-  }, stats.conversion_rate_pct, "%"))))))), /*#__PURE__*/React.createElement("div", {
+  }, stats.conversion_rate_pct, "%"))))))), /*#__PURE__*/React.createElement(MultifamilySourcePerformanceCampaignSection, {
+    campaignPerformance: data.campaign_performance
+  }), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.65rem',
       color: '#475569',
