@@ -7,9 +7,10 @@ Confirms get_source_roi() counts meetings/submissions/quotes/wins/losses
 correctly, sums estimated revenue + bound premium without double-
 counting, excludes rejected/spam leads from every metric except the
 spam-rate denominator, flags duplicate/merged leads via signal_count>1,
-reports the same numbers across every one of the 8 dimensions (source,
+reports the same numbers across every one of the 10 dimensions (source,
 source_page, offer_type, utm_source, utm_campaign, first_touch_source,
-conversion_source, latest_signal_source), and that
+conversion_source, latest_signal_source, page_variant, campaign_id),
+and that
 get_calibration_dataset() produces well-formed, purely descriptive
 (no-ML) groupings. Also confirms demo leads never appear. Each test uses
 a unique utm_campaign to isolate its own ROI bucket regardless of other
@@ -75,17 +76,19 @@ def mk_incoming(company, email, campaign):
     return lead
 
 
-def test_all_eight_dimensions_present():
+def test_all_ten_dimensions_present():
     campaign = 'roitest-dims-' + os.urandom(3).hex()
-    _make('Dimsflow Partners', campaign)
+    _make('Dimsflow Partners', campaign, offerType='multifamily_benchmark_review', pageVariant='benchmark')
     roi = repository.get_source_roi()
     expected = {
         'source', 'source_page', 'offer_type', 'utm_source', 'utm_campaign',
         'first_touch_source', 'conversion_source', 'latest_signal_source',
+        'page_variant', 'campaign_id',
     }
-    check('report has all 8 dimensions', set(roi.keys()) == expected)
+    check('report has all 10 dimensions', set(roi.keys()) == expected)
     check('utm_campaign bucket exists for this test lead', campaign in roi['utm_campaign'])
     check('source bucket includes benchmark_form', 'benchmark_form' in roi['source'])
+    check('page_variant bucket includes benchmark', 'benchmark' in roi['page_variant'])
 
 
 def test_meetings_submissions_quotes_wins_losses_counted():
@@ -205,7 +208,7 @@ def test_calibration_dataset_shape():
 
 def main():
     try:
-        test_all_eight_dimensions_present()
+        test_all_ten_dimensions_present()
         test_meetings_submissions_quotes_wins_losses_counted()
         test_revenue_and_bound_premium_no_double_counting()
         test_rejected_leads_excluded_from_roi_but_counted_for_spam_rate()

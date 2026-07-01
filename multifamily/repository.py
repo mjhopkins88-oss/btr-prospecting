@@ -624,6 +624,12 @@ def get_source_performance() -> Dict[str, Any]:
     leads_by_source_page = _counts("COALESCE(NULLIF(source_page, ''), 'unknown')")
     leads_by_offer_type = _counts("COALESCE(NULLIF(offer_type, ''), 'unknown')")
     leads_by_campaign = _counts("COALESCE(NULLIF(utm_campaign, ''), 'none')")
+    # Funnel Phase 6: which offer page (multifamily/forms/form_variants.py
+    # slug) and which outreach campaign_id drove each lead — distinct
+    # from offer_type/utm_campaign above (page_variant is the funnel's
+    # own page identity; campaign_id is the funnel's own outreach tag).
+    leads_by_page_variant = _counts("COALESCE(NULLIF(page_variant, ''), 'none')")
+    leads_by_campaign_id = _counts("COALESCE(NULLIF(campaign_id, ''), 'none')")
 
     # Category × source (Call Today / Hot / Warm / Nurture / Watchlist by source).
     cat_rows = fetch_all(
@@ -693,18 +699,48 @@ def get_source_performance() -> Dict[str, Any]:
     }
     total_signal_rows = sum(signals_by_source.values())
 
+    # Funnel Phase 6: outbound-to-form conversion path — how many links
+    # were generated vs. actually converted, overall and per offer page.
+    outbound_rows = fetch_all(
+        "SELECT COALESCE(NULLIF(page_variant, ''), 'none') AS pv, "
+        "COUNT(*) AS sent, SUM(CASE WHEN converted_at IS NOT NULL THEN 1 ELSE 0 END) AS converted "
+        "FROM multifamily_outbound_links GROUP BY pv"
+    )
+    outbound_by_page_variant = {}
+    total_links_sent = 0
+    total_links_converted = 0
+    for row in outbound_rows:
+        sent = int(row['sent'] or 0)
+        converted = int(row['converted'] or 0)
+        total_links_sent += sent
+        total_links_converted += converted
+        outbound_by_page_variant[row['pv'] or 'none'] = {
+            'sent': sent, 'converted': converted,
+            'conversion_rate_pct': round(100.0 * converted / sent, 1) if sent else 0.0,
+        }
+    outbound_conversion_stats = {
+        'total_links_sent': total_links_sent,
+        'total_links_converted': total_links_converted,
+        'conversion_rate_pct': round(100.0 * total_links_converted / total_links_sent, 1) if total_links_sent else 0.0,
+        'by_page_variant': outbound_by_page_variant,
+    }
+
     return {
         'total_real_leads': total_real_leads,
         'leads_by_source': leads_by_source,
         'leads_by_source_page': leads_by_source_page,
         'leads_by_offer_type': leads_by_offer_type,
         'leads_by_campaign': leads_by_campaign,
+        'leads_by_page_variant': leads_by_page_variant,
+        'leads_by_campaign_id': leads_by_campaign_id,
         'by_source_category': by_source_category,
         'call_today_by_source': call_today_by_source,
         'spam_rate_by_source': spam_rate_by_source,
         'best_landing_page': best_landing_page,
         'worst_source': worst_source,
         'leads_missing_attribution': leads_missing_attribution,
+        # Funnel Phase 6: outbound-to-form conversion path.
+        'outbound_conversion_stats': outbound_conversion_stats,
         # Phase C signal-history view.
         'total_signals': total_signal_rows,
         'signals_by_source': signals_by_source,
@@ -1637,6 +1673,10 @@ def delete_notification(notification_id: str) -> None:
 _ROI_DIMENSIONS = [
     'source', 'source_page', 'offer_type', 'utm_source', 'utm_campaign',
     'first_touch_source', 'conversion_source', 'latest_signal_source',
+    # Funnel Phase 6: which offer page + outreach campaign drove the lead
+    # (distinct from utm_campaign, which is UTM-parameter-based and
+    # applies to any source, not just the funnel's own offer pages).
+    'page_variant', 'campaign_id',
 ]
 
 # high=1.0/medium=0.5/low=0.0 — timing_confidence is a label
@@ -1727,9 +1767,10 @@ def _finalize_roi_bucket(b: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def get_source_roi() -> Dict[str, Any]:
-    """Outcome-aware ROI report, grouped by 8 dimensions (source,
+    """Outcome-aware ROI report, grouped by 10 dimensions (source,
     source_page, offer_type, utm_source, utm_campaign, first_touch_source,
-    conversion_source, latest_signal_source). Real leads only
+    conversion_source, latest_signal_source, page_variant, campaign_id).
+    Real leads only
     (non-merged-away); rejected leads count toward spam_rate_pct's
     denominator only — never toward any funnel/revenue/quality metric.
     `duplicate_or_merge_rate_pct` = share of leads in the bucket that
@@ -1740,7 +1781,7 @@ def get_source_roi() -> Dict[str, Any]:
     ensure_schema()
     rows = fetch_all(
         "SELECT id, source, source_page, offer_type, utm_source, utm_campaign, score_category, "
-        "signal_count, spam_status FROM multifamily_leads WHERE is_demo = 0 "
+        "signal_count, spam_status, page_variant, campaign_id FROM multifamily_leads WHERE is_demo = 0 "
         "AND (merge_status IS NULL OR merge_status != 'merged')"
     )
     touch_sources = _attribution_touch_sources_by_lead()

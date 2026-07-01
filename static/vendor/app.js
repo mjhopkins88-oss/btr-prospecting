@@ -10170,7 +10170,96 @@ function MultifamilySourcePerformancePanel({
       gap: '16px',
       marginBottom: '1.25rem'
     }
-  }, mfBreakdownTable('LEADS BY SOURCE', data.leads_by_source), mfBreakdownTable('LEADS BY SOURCE PAGE', data.leads_by_source_page), mfBreakdownTable('LEADS BY OFFER TYPE', data.leads_by_offer_type), mfBreakdownTable('LEADS BY CAMPAIGN', data.leads_by_campaign), mfBreakdownTable('CALL TODAY BY SOURCE', data.call_today_by_source)), /*#__PURE__*/React.createElement("div", {
+  }, mfBreakdownTable('LEADS BY SOURCE', data.leads_by_source), mfBreakdownTable('LEADS BY SOURCE PAGE', data.leads_by_source_page), mfBreakdownTable('LEADS BY OFFER TYPE', data.leads_by_offer_type), mfBreakdownTable('LEADS BY CAMPAIGN', data.leads_by_campaign), mfBreakdownTable('LEADS BY PAGE VARIANT', data.leads_by_page_variant), mfBreakdownTable('LEADS BY OUTREACH CAMPAIGN', data.leads_by_campaign_id), mfBreakdownTable('CALL TODAY BY SOURCE', data.call_today_by_source)), data.outbound_conversion_stats && data.outbound_conversion_stats.total_links_sent > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, "OUTBOUND-TO-FORM CONVERSION"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '20px',
+      flexWrap: 'wrap',
+      fontSize: '0.82rem',
+      color: '#94a3b8',
+      marginBottom: '1rem'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "Links sent: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#f1f5f9'
+    }
+  }, data.outbound_conversion_stats.total_links_sent)), /*#__PURE__*/React.createElement("span", null, "Converted: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#34d399'
+    }
+  }, data.outbound_conversion_stats.total_links_converted)), /*#__PURE__*/React.createElement("span", null, "Conversion rate: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#f59e0b'
+    }
+  }, data.outbound_conversion_stats.conversion_rate_pct, "%"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      overflowX: 'auto',
+      marginBottom: '1.25rem'
+    }
+  }, /*#__PURE__*/React.createElement("table", {
+    style: {
+      width: '100%',
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      borderCollapse: 'collapse'
+    }
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
+    style: {
+      color: '#64748b'
+    }
+  }, /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'left',
+      padding: '4px 8px'
+    }
+  }, "Page variant"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, "Sent"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, "Converted"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, "Rate"))), /*#__PURE__*/React.createElement("tbody", null, Object.entries(data.outbound_conversion_stats.by_page_variant || {}).map(([pv, stats]) => /*#__PURE__*/React.createElement("tr", {
+    key: pv,
+    style: {
+      borderTop: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      padding: '4px 8px',
+      color: '#cbd5e1'
+    }
+  }, pv), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, stats.sent), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, stats.converted), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, stats.conversion_rate_pct, "%"))))))), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.65rem',
       color: '#475569',
