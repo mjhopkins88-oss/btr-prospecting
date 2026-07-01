@@ -12137,9 +12137,12 @@ function MultifamilyCampaignDetailView({
       });
       const j = await r.json();
       if (r.ok && j.success) {
+        const parts = [`Imported ${j.created} target(s): ${j.leads_linked} linked to a lead`];
+        if (j.no_email_count) parts.push(`${j.no_email_count} cold prospect (no email)`);
+        if (j.lead_build_failed_count) parts.push(`${j.lead_build_failed_count} could not be validated`);
         setImportResult({
           ok: true,
-          message: `Imported ${j.created} target(s), linked ${j.leads_linked} to a lead.`,
+          message: parts.join(', ') + '.',
           errors: j.errors || []
         });
         load();

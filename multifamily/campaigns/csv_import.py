@@ -93,12 +93,16 @@ def import_row_as_target_and_lead(campaign: Dict[str, Any], row: Dict[str, Any])
         city=row.get('city') or None, state=row.get('state') or None, segment=row.get('segment') or None,
         notes=row.get('notes') or None,
     )
+    # `outcome` is the machine-readable classification the aggregate
+    # summary counts by; `reason` is the human-readable explanation for
+    # the same event — kept in sync so neither drifts from the other.
     result: Dict[str, Any] = {
         'row': row.get('_row_number'), 'target_id': target['id'], 'company': row.get('company'),
-        'lead_linked': False, 'reason': None,
+        'lead_linked': False, 'outcome': None, 'reason': None,
     }
 
     if not row.get('email'):
+        result['outcome'] = 'no_email'
         result['reason'] = 'no email — created as a cold prospect target, no lead yet'
         return result
 
@@ -121,6 +125,7 @@ def import_row_as_target_and_lead(campaign: Dict[str, Any], row: Dict[str, Any])
 
     lead, errors = build_lead_from_intake(payload)
     if errors:
+        result['outcome'] = 'lead_build_failed'
         result['reason'] = f'could not build a lead ({"; ".join(errors)}) — created as a cold prospect target'
         return result
 
@@ -139,6 +144,7 @@ def import_row_as_target_and_lead(campaign: Dict[str, Any], row: Dict[str, Any])
 
     repository.set_campaign_target_lead(target['id'], final_lead_id)
     result['lead_linked'] = True
+    result['outcome'] = 'lead_linked'
     result['lead_id'] = final_lead_id
     return result
 
@@ -146,12 +152,18 @@ def import_row_as_target_and_lead(campaign: Dict[str, Any], row: Dict[str, Any])
 def import_targets_from_csv(campaign: Dict[str, Any], file_content: str) -> Dict[str, Any]:
     """End-to-end: parse + import every row. Returns a summary the API
     route hands back verbatim — never partial-fails the whole file for
-    one bad row."""
+    one bad row. The three outcome counts below make enrichment gaps
+    visible to the operator: `no_email_count` is expected/fine (the
+    pilot cadence is email-first — no email just means no sequence yet),
+    while `lead_build_failed_count` flags rows that need a data fix
+    (bad state, etc.) before they can ever reach the timing engine."""
     rows, parse_errors = parse_csv_rows(file_content)
     results = [import_row_as_target_and_lead(campaign, row) for row in rows]
     return {
         'created': len(results),
-        'leads_linked': sum(1 for r in results if r['lead_linked']),
+        'leads_linked': sum(1 for r in results if r['outcome'] == 'lead_linked'),
+        'no_email_count': sum(1 for r in results if r['outcome'] == 'no_email'),
+        'lead_build_failed_count': sum(1 for r in results if r['outcome'] == 'lead_build_failed'),
         'results': results,
         'errors': parse_errors,
     }

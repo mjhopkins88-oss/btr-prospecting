@@ -81,6 +81,7 @@ def test_row_with_email_builds_and_links_a_new_lead():
     result = import_row_as_target_and_lead(campaign, row)
     check('target is created', bool(result.get('target_id')))
     check('lead_linked is True for a row with a real email', result['lead_linked'] is True)
+    check("outcome is 'lead_linked'", result['outcome'] == 'lead_linked')
     check('lead_id is present', bool(result.get('lead_id')))
     _cleanup_lead(result.get('lead_id'))
 
@@ -99,6 +100,7 @@ def test_row_with_no_email_stays_a_cold_prospect():
     result = import_row_as_target_and_lead(campaign, row)
     check('target is still created with no email', bool(result.get('target_id')))
     check('lead_linked is False when there is no email', result['lead_linked'] is False)
+    check("outcome is 'no_email' (distinct from 'lead_build_failed')", result['outcome'] == 'no_email')
     check("reason explains why (no email)", 'no email' in (result.get('reason') or '').lower())
     target = repository.get_campaign_target(result['target_id'])
     check('target has no lead_id', target['lead_id'] is None)
@@ -154,6 +156,7 @@ def test_invalid_row_degrades_to_target_only_not_a_crash():
     result = import_row_as_target_and_lead(campaign, row)
     check('target is still created even though the lead build failed', bool(result.get('target_id')))
     check('lead_linked is False for an invalid row', result['lead_linked'] is False)
+    check("outcome is 'lead_build_failed' (distinct from 'no_email')", result['outcome'] == 'lead_build_failed')
     check('reason explains the lead could not be built', 'could not build a lead' in (result.get('reason') or ''))
 
 
@@ -185,6 +188,10 @@ def test_import_targets_from_csv_end_to_end_summary():
     summary = import_targets_from_csv(campaign, csv_text)
     check('2 rows created (the company-less row was skipped at parse time)', summary['created'] == 2)
     check('exactly 1 lead linked (the row with an email)', summary['leads_linked'] == 1)
+    check('exactly 1 row is a cold prospect (no email) — visible to the operator', summary['no_email_count'] == 1)
+    check('zero rows failed lead-build validation', summary['lead_build_failed_count'] == 0)
+    check('leads_linked + no_email_count + lead_build_failed_count accounts for every created row',
+          summary['leads_linked'] + summary['no_email_count'] + summary['lead_build_failed_count'] == summary['created'])
     check('parse errors report the skipped row', any('company is required' in e for e in summary['errors']))
     for r in summary['results']:
         if r.get('lead_id'):
