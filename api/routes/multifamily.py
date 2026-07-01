@@ -539,6 +539,15 @@ def get_match_candidates():
     return _admin_only(_fn)
 
 
+@multifamily_bp.route('/admin/source-runs', methods=['GET'])
+def get_source_runs():
+    """Source-run history (populated by future automated collectors —
+    Phase E). Super-admin only."""
+    def _fn():
+        return jsonify({'source_runs': repository.get_source_runs(limit=int(request.args.get('limit', 50)))})
+    return _admin_only(_fn)
+
+
 @multifamily_bp.route('/match-candidates/<candidate_id>/merge', methods=['POST'])
 def merge_match_candidate(candidate_id):
     """Confirm a review candidate: merge the incoming lead into the
