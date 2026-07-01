@@ -26,7 +26,7 @@ from multifamily.daily_brief.multifamily_daily_brief_builder import build_daily_
 from multifamily.intake import build_lead_from_intake
 from multifamily import repository
 from multifamily import spam_guard
-from multifamily.types import ACTIVITY_TYPES, OUTCOME_TYPES
+from multifamily.types import ACTIVITY_TYPES, OUTCOME_TYPES, CAMPAIGN_STATUSES, CAMPAIGN_TARGET_STATUSES
 from multifamily.stage_timing import compute_stage_timing
 from multifamily.timing import detect_process_stage
 from multifamily.timing.process_stage_types import OUTREACH_WINDOW_RANK
@@ -1145,6 +1145,214 @@ def list_lead_outbound_links(lead_id):
         if lead.is_demo:
             return jsonify({'lead_id': lead_id, 'links': []})
         return jsonify({'lead_id': lead_id, 'links': repository.get_outbound_links_for_lead(lead_id)})
+
+    return _authorized()
+
+
+# ---- Pilot Campaign Control Center -----------------------------------------
+# A campaign is a controlled outbound/manual prospecting effort tied to
+# ONE offer page. Every endpoint here is internal/operator-facing
+# (require_auth) — the only PUBLIC surface a campaign ever touches is
+# the existing /mf-review/<page_variant> page + POST /leads (a target's
+# tracked link is just that URL with a ?t=<token> param).
+
+def _campaign_tracked_url(campaign_row, token):
+    from multifamily.campaigns.tracked_link import build_tracked_url
+    return build_tracked_url(campaign_row, token)
+
+
+@multifamily_bp.route('/campaigns', methods=['POST'])
+def create_campaign():
+    """Create a campaign bound to one offer page. offer_type is always
+    derived from page_variant (multifamily/forms/form_variants.py is
+    the single source of truth) — never accepted independently, so the
+    two can never drift apart. Login required."""
+    import app as _app
+    from flask import g
+
+    @_app.require_auth
+    def _authorized():
+        payload = request.get_json(silent=True) or {}
+        name = (payload.get('name') or '').strip()
+        page_variant = (payload.get('pageVariant') or payload.get('page_variant') or '').strip()
+        if not name:
+            return jsonify({'success': False, 'errors': ['name is required.']}), 400
+        variant = FORM_VARIANTS.get(page_variant)
+        if not variant:
+            return jsonify({'success': False, 'errors': [f'page_variant must be one of {FORM_VARIANT_SLUGS}']}), 400
+        status = (payload.get('status') or 'draft').strip()
+        if status not in CAMPAIGN_STATUSES:
+            return jsonify({'success': False, 'errors': [f'status must be one of {CAMPAIGN_STATUSES}']}), 400
+
+        user_email = (g.user or {}).get('email') if getattr(g, 'user', None) else None
+        row = repository.create_campaign(
+            name=name, page_variant=page_variant, offer_type=variant.offer_type,
+            description=(payload.get('description') or None),
+            target_state=(payload.get('targetState') or payload.get('target_state') or None),
+            target_city=(payload.get('targetCity') or payload.get('target_city') or None),
+            target_segment=(payload.get('targetSegment') or payload.get('target_segment') or None),
+            campaign_source=(payload.get('campaignSource') or payload.get('campaign_source') or None),
+            utm_source=(payload.get('utmSource') or payload.get('utm_source') or None),
+            utm_medium=(payload.get('utmMedium') or payload.get('utm_medium') or None),
+            utm_campaign=(payload.get('utmCampaign') or payload.get('utm_campaign') or None),
+            status=status, created_by=user_email,
+        )
+        return jsonify({'success': True, 'campaign': row}), 201
+
+    return _authorized()
+
+
+@multifamily_bp.route('/campaigns', methods=['GET'])
+def list_campaigns():
+    """All campaigns (newest first), each annotated with target/
+    contacted/converted/meeting counts for the campaign list view.
+    Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        status = request.args.get('status')
+        campaigns = repository.list_campaigns(status=status)
+        for c in campaigns:
+            targets = repository.list_campaign_targets(c['id'])
+            c['target_count'] = len(targets)
+            c['contacted_count'] = sum(1 for t in targets if t['status'] not in ('planned',))
+            c['converted_count'] = sum(1 for t in targets if t['status'] == 'converted')
+            c['meeting_count'] = sum(1 for t in targets if t['status'] == 'meeting_booked')
+            last_activity = [t['last_activity_at'] for t in targets if t.get('last_activity_at')]
+            c['last_activity_at'] = max(last_activity) if last_activity else None
+        return jsonify({'campaigns': campaigns})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/campaigns/<campaign_id>', methods=['GET'])
+def get_campaign_detail(campaign_id):
+    """Campaign summary + its full targets list, each target's tracked
+    URL computed fresh (never stored). Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        campaign = repository.get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({'error': 'Campaign not found'}), 404
+        targets = repository.list_campaign_targets(campaign_id)
+        for t in targets:
+            t['tracked_url'] = _campaign_tracked_url(campaign, t['tracking_token'])
+        return jsonify({'campaign': campaign, 'targets': targets})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/campaigns/<campaign_id>/status', methods=['POST'])
+def update_campaign_status(campaign_id):
+    """Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        campaign = repository.get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({'error': 'Campaign not found'}), 404
+        payload = request.get_json(silent=True) or {}
+        status = (payload.get('status') or '').strip()
+        if status not in CAMPAIGN_STATUSES:
+            return jsonify({'success': False, 'errors': [f'status must be one of {CAMPAIGN_STATUSES}']}), 400
+        repository.update_campaign_status(campaign_id, status)
+        return jsonify({'success': True, 'campaign': repository.get_campaign(campaign_id)})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/campaigns/<campaign_id>/targets', methods=['POST'])
+def create_campaign_target(campaign_id):
+    """Add one prospect to a campaign and mint their tracked link. A
+    target may have no known lead yet (a cold prospect Max is about to
+    reach out to) — lead_id backfills once they convert. Login
+    required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        campaign = repository.get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({'error': 'Campaign not found'}), 404
+        payload = request.get_json(silent=True) or {}
+        row = repository.create_campaign_target(
+            campaign_id,
+            company=(payload.get('company') or None),
+            contact_name=(payload.get('contactName') or payload.get('contact_name') or None),
+            email=(payload.get('email') or None),
+            phone=(payload.get('phone') or None),
+            linkedin_url=(payload.get('linkedinUrl') or payload.get('linkedin_url') or None),
+            city=(payload.get('city') or None),
+            state=(payload.get('state') or None),
+            segment=(payload.get('segment') or None),
+            notes=(payload.get('notes') or None),
+        )
+        row['tracked_url'] = _campaign_tracked_url(campaign, row['tracking_token'])
+        return jsonify({'success': True, 'target': row}), 201
+
+    return _authorized()
+
+
+@multifamily_bp.route('/campaigns/<campaign_id>/targets', methods=['GET'])
+def list_campaign_targets_route(campaign_id):
+    """Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        campaign = repository.get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({'error': 'Campaign not found'}), 404
+        targets = repository.list_campaign_targets(campaign_id)
+        for t in targets:
+            t['tracked_url'] = _campaign_tracked_url(campaign, t['tracking_token'])
+        return jsonify({'targets': targets})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/campaign-targets/<target_id>/status', methods=['POST'])
+def update_campaign_target_status(target_id):
+    """Mark a target contacted/replied/meeting_booked/not_fit/nurture
+    (or back to planned), optionally with a note. If the target already
+    has a lead attached, also logs a matching lead activity so the
+    lead's activity history and reply/meeting notifications fire the
+    same way they would from the drawer's own activity log. Login
+    required."""
+    import app as _app
+    from flask import g
+
+    @_app.require_auth
+    def _authorized():
+        target = repository.get_campaign_target(target_id)
+        if not target:
+            return jsonify({'error': 'Campaign target not found'}), 404
+        payload = request.get_json(silent=True) or {}
+        status = (payload.get('status') or '').strip()
+        if status not in CAMPAIGN_TARGET_STATUSES:
+            return jsonify({'success': False, 'errors': [f'status must be one of {CAMPAIGN_TARGET_STATUSES}']}), 400
+        notes = payload.get('notes')
+        repository.update_campaign_target_status(target_id, status, notes=notes)
+
+        if target.get('lead_id') and status in ('contacted', 'replied', 'meeting_booked', 'not_fit', 'nurture'):
+            activity_type = {
+                'contacted': 'emailed', 'replied': 'replied', 'meeting_booked': 'meeting_booked',
+                'not_fit': 'not_a_fit', 'nurture': 'moved_to_nurture',
+            }[status]
+            user_email = (g.user or {}).get('email') if getattr(g, 'user', None) else None
+            activity = repository.insert_activity(target['lead_id'], activity_type, note=notes, user_email=user_email)
+            lead_row = repository.get_lead_row(target['lead_id'])
+            company_name = (lead_row or {}).get('company_name') or target.get('company') or 'A lead'
+            if status == 'replied':
+                mf_notifications.notify_lead_replied(target['lead_id'], company_name, activity['id'])
+            elif status == 'meeting_booked':
+                mf_notifications.notify_meeting_booked(target['lead_id'], company_name, activity['id'])
+
+        return jsonify({'success': True, 'target': repository.get_campaign_target(target_id)})
 
     return _authorized()
 

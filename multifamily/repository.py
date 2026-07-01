@@ -392,6 +392,59 @@ def ensure_schema() -> None:
     except Exception:
         pass
 
+    # Pilot Campaign Control Center. campaign_targets.lead_id is nullable
+    # (a target may be a cold prospect with no lead yet) — this is why
+    # campaigns get their OWN token column rather than reusing
+    # multifamily_outbound_links, whose lead_id is NOT NULL.
+    execute('''
+        CREATE TABLE IF NOT EXISTS multifamily_campaigns (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT,
+            page_variant TEXT NOT NULL,
+            offer_type TEXT NOT NULL,
+            target_state TEXT,
+            target_city TEXT,
+            target_segment TEXT,
+            campaign_source TEXT,
+            utm_source TEXT,
+            utm_medium TEXT,
+            utm_campaign TEXT,
+            status TEXT NOT NULL DEFAULT 'draft',
+            created_by TEXT,
+            created_at TIMESTAMP,
+            updated_at TIMESTAMP
+        )
+    ''')
+    execute('''
+        CREATE TABLE IF NOT EXISTS multifamily_campaign_targets (
+            id TEXT PRIMARY KEY,
+            campaign_id TEXT NOT NULL,
+            tracking_token TEXT NOT NULL,
+            company TEXT,
+            contact_name TEXT,
+            email TEXT,
+            phone TEXT,
+            linkedin_url TEXT,
+            city TEXT,
+            state TEXT,
+            segment TEXT,
+            lead_id TEXT,
+            status TEXT NOT NULL DEFAULT 'planned',
+            notes TEXT,
+            created_at TIMESTAMP,
+            last_activity_at TEXT,
+            converted_at TEXT
+        )
+    ''')
+    try:
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_campaigns_status ON multifamily_campaigns(status, created_at DESC)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_campaign_targets_campaign ON multifamily_campaign_targets(campaign_id, created_at DESC)')
+        execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_multifamily_campaign_targets_token ON multifamily_campaign_targets(tracking_token)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_campaign_targets_lead ON multifamily_campaign_targets(lead_id)')
+    except Exception:
+        pass
+
     _backfill_signals_from_lead_json()
     _SCHEMA_READY = True
 
@@ -1070,6 +1123,173 @@ def delete_outbound_links_for_lead(lead_id: str) -> None:
     """Used by tests to clean up after themselves."""
     ensure_schema()
     execute('DELETE FROM multifamily_outbound_links WHERE lead_id = ?', [lead_id])
+
+
+# ---- Pilot Campaign Control Center -----------------------------------------
+
+_CAMPAIGN_COLUMNS = (
+    'id, name, description, page_variant, offer_type, target_state, target_city, '
+    'target_segment, campaign_source, utm_source, utm_medium, utm_campaign, status, '
+    'created_by, created_at, updated_at'
+)
+
+_CAMPAIGN_TARGET_COLUMNS = (
+    'id, campaign_id, tracking_token, company, contact_name, email, phone, linkedin_url, '
+    'city, state, segment, lead_id, status, notes, created_at, last_activity_at, converted_at'
+)
+
+
+def create_campaign(
+    name: str, page_variant: str, offer_type: str, *, description: Optional[str] = None,
+    target_state: Optional[str] = None, target_city: Optional[str] = None,
+    target_segment: Optional[str] = None, campaign_source: Optional[str] = None,
+    utm_source: Optional[str] = None, utm_medium: Optional[str] = None, utm_campaign: Optional[str] = None,
+    status: str = 'draft', created_by: Optional[str] = None,
+) -> Dict[str, Any]:
+    """`offer_type` is derived from `page_variant` by the caller (see
+    api/routes/multifamily.py, same pattern as the outbound-link mint
+    endpoint) — this function just persists what it's given."""
+    ensure_schema()
+    from multifamily.types import new_id, utc_now_iso
+    now = utc_now_iso()
+    row = {
+        'id': new_id(), 'name': name, 'description': description, 'page_variant': page_variant,
+        'offer_type': offer_type, 'target_state': target_state, 'target_city': target_city,
+        'target_segment': target_segment, 'campaign_source': campaign_source,
+        'utm_source': utm_source, 'utm_medium': utm_medium, 'utm_campaign': utm_campaign,
+        'status': status, 'created_by': created_by, 'created_at': now, 'updated_at': now,
+    }
+    execute(
+        f'INSERT INTO multifamily_campaigns ({_CAMPAIGN_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        list(row.values()),
+    )
+    return row
+
+
+def get_campaign(campaign_id: str) -> Optional[Dict[str, Any]]:
+    ensure_schema()
+    rows = fetch_all(f'SELECT {_CAMPAIGN_COLUMNS} FROM multifamily_campaigns WHERE id = ?', [campaign_id])
+    return rows[0] if rows else None
+
+
+def list_campaigns(status: Optional[str] = None) -> List[Dict[str, Any]]:
+    ensure_schema()
+    if status:
+        return fetch_all(
+            f'SELECT {_CAMPAIGN_COLUMNS} FROM multifamily_campaigns WHERE status = ? ORDER BY created_at DESC',
+            [status],
+        )
+    return fetch_all(f'SELECT {_CAMPAIGN_COLUMNS} FROM multifamily_campaigns ORDER BY created_at DESC')
+
+
+def update_campaign_status(campaign_id: str, status: str) -> None:
+    ensure_schema()
+    from multifamily.types import utc_now_iso
+    execute(
+        'UPDATE multifamily_campaigns SET status = ?, updated_at = ? WHERE id = ?',
+        [status, utc_now_iso(), campaign_id],
+    )
+
+
+def delete_campaign(campaign_id: str) -> None:
+    """Used by tests to clean up after themselves."""
+    ensure_schema()
+    execute('DELETE FROM multifamily_campaign_targets WHERE campaign_id = ?', [campaign_id])
+    execute('DELETE FROM multifamily_campaigns WHERE id = ?', [campaign_id])
+
+
+def create_campaign_target(
+    campaign_id: str, *, company: Optional[str] = None, contact_name: Optional[str] = None,
+    email: Optional[str] = None, phone: Optional[str] = None, linkedin_url: Optional[str] = None,
+    city: Optional[str] = None, state: Optional[str] = None, segment: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Mints this target's own tracking_token (distinct from
+    multifamily_outbound_links' token — that table's lead_id is NOT
+    NULL, so it can't represent a cold prospect with no lead yet)."""
+    ensure_schema()
+    import secrets
+    from multifamily.types import new_id, utc_now_iso
+    now = utc_now_iso()
+    row = {
+        'id': new_id(), 'campaign_id': campaign_id, 'tracking_token': secrets.token_urlsafe(16),
+        'company': company, 'contact_name': contact_name, 'email': email, 'phone': phone,
+        'linkedin_url': linkedin_url, 'city': city, 'state': state, 'segment': segment,
+        'lead_id': None, 'status': 'planned', 'notes': notes,
+        'created_at': now, 'last_activity_at': None, 'converted_at': None,
+    }
+    execute(
+        f'INSERT INTO multifamily_campaign_targets ({_CAMPAIGN_TARGET_COLUMNS}) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        list(row.values()),
+    )
+    return row
+
+
+def get_campaign_target(target_id: str) -> Optional[Dict[str, Any]]:
+    ensure_schema()
+    rows = fetch_all(f'SELECT {_CAMPAIGN_TARGET_COLUMNS} FROM multifamily_campaign_targets WHERE id = ?', [target_id])
+    return rows[0] if rows else None
+
+
+def get_campaign_target_by_token(token: str) -> Optional[Dict[str, Any]]:
+    ensure_schema()
+    rows = fetch_all(f'SELECT {_CAMPAIGN_TARGET_COLUMNS} FROM multifamily_campaign_targets WHERE tracking_token = ?', [token])
+    return rows[0] if rows else None
+
+
+def list_campaign_targets(campaign_id: str) -> List[Dict[str, Any]]:
+    ensure_schema()
+    return fetch_all(
+        f'SELECT {_CAMPAIGN_TARGET_COLUMNS} FROM multifamily_campaign_targets '
+        'WHERE campaign_id = ? ORDER BY created_at DESC',
+        [campaign_id],
+    )
+
+
+def update_campaign_target_status(target_id: str, status: str, notes: Optional[str] = None) -> None:
+    """Any status transition bumps last_activity_at — this is the only
+    'freshness' clock a campaign target has (mirrors how lead activities
+    drive multifamily_leads' implicit staleness checks)."""
+    ensure_schema()
+    from multifamily.types import utc_now_iso
+    now = utc_now_iso()
+    if notes is not None:
+        execute(
+            'UPDATE multifamily_campaign_targets SET status = ?, notes = ?, last_activity_at = ? WHERE id = ?',
+            [status, notes, now, target_id],
+        )
+    else:
+        execute(
+            'UPDATE multifamily_campaign_targets SET status = ?, last_activity_at = ? WHERE id = ?',
+            [status, now, target_id],
+        )
+
+
+def set_campaign_target_lead(target_id: str, lead_id: str) -> None:
+    """Backfill a target's lead_id once its identity resolves to a real
+    lead (via the matching engine) — separate from marking it converted,
+    since a target can be linked to a lead before it actually converts
+    (e.g. an operator manually attaches an existing lead to a target)."""
+    ensure_schema()
+    execute('UPDATE multifamily_campaign_targets SET lead_id = ? WHERE id = ?', [lead_id, target_id])
+
+
+def mark_campaign_target_converted(target_id: str, lead_id: str) -> None:
+    ensure_schema()
+    from multifamily.types import utc_now_iso
+    now = utc_now_iso()
+    execute(
+        "UPDATE multifamily_campaign_targets SET status = 'converted', lead_id = ?, "
+        'converted_at = ?, last_activity_at = ? WHERE id = ?',
+        [lead_id, now, now, target_id],
+    )
+
+
+def delete_campaign_targets_for_campaign(campaign_id: str) -> None:
+    """Used by tests to clean up after themselves."""
+    ensure_schema()
+    execute('DELETE FROM multifamily_campaign_targets WHERE campaign_id = ?', [campaign_id])
 
 
 def get_attribution_for_lead(lead_id: str) -> List[Dict[str, Any]]:

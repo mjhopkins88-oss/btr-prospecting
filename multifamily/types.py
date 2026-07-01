@@ -96,6 +96,18 @@ MATCH_TIERS = ['auto', 'review', 'none']
 # Lifecycle of a queued match candidate (multifamily_lead_match_candidates).
 MATCH_CANDIDATE_STATUSES = ['pending', 'merged', 'dismissed']
 
+# Pilot Campaign Control Center — a controlled outbound/manual
+# prospecting effort tied to one specific offer page (multifamily_campaigns).
+CAMPAIGN_STATUSES = ['draft', 'active', 'paused', 'completed']
+
+# Lifecycle of one prospect inside a campaign (multifamily_campaign_targets).
+# Mirrors ACTIVITY_TYPES' vocabulary where they overlap (contacted/replied/
+# meeting_booked/not_fit/nurture) so a target with a lead can log a matching
+# lead activity on every status transition.
+CAMPAIGN_TARGET_STATUSES = [
+    'planned', 'contacted', 'replied', 'converted', 'meeting_booked', 'not_fit', 'nurture',
+]
+
 # Whether a lead row is the live survivor or has been merged away.
 MERGE_STATUSES = ['active', 'merged']
 
@@ -298,6 +310,63 @@ class MultifamilyOutboundLink:
     created_at: str = field(default_factory=utc_now_iso)
     converted_at: Optional[str] = None
     converted_lead_id: Optional[str] = None
+
+
+@dataclass
+class MultifamilyCampaign:
+    """A controlled outbound/manual prospecting effort tied to ONE
+    specific offer page (Pilot Campaign Control Center) — e.g. "Texas
+    Renewal Pressure Test" or "Builder's Risk Review — Active
+    Development Prospects". `offer_type` is always derived from
+    `page_variant` at write time (multifamily/forms/form_variants.py is
+    the single source of truth — never store it independently, to avoid
+    it drifting out of sync with the variant)."""
+    id: str
+    name: str
+    page_variant: str  # one of multifamily.forms.form_variants.FORM_VARIANT_SLUGS
+    offer_type: str  # derived from page_variant, not independently set
+    description: Optional[str] = None
+    target_state: Optional[str] = None
+    target_city: Optional[str] = None
+    target_segment: Optional[str] = None
+    campaign_source: Optional[str] = None  # e.g. 'manual_outreach' | 'email' | 'linkedin'
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    status: str = 'draft'  # one of CAMPAIGN_STATUSES
+    created_by: Optional[str] = None
+    created_at: str = field(default_factory=utc_now_iso)
+    updated_at: str = field(default_factory=utc_now_iso)
+
+
+@dataclass
+class MultifamilyCampaignTarget:
+    """One prospect inside a campaign (multifamily_campaign_targets).
+    May start with NO lead at all (a cold prospect Max is about to
+    reach out to) — `lead_id` is backfilled once the target converts
+    (either by resolving to an existing lead via the normal matching
+    engine, or by becoming a brand-new one). `tracking_token` is this
+    target's own unique token (distinct from multifamily_outbound_links'
+    token, which is for one-off ad-hoc drawer-generated links) — the
+    campaign's tracked URL is derived from campaign.page_variant +
+    this token + the campaign's utm_* fields, never stored redundantly."""
+    id: str
+    campaign_id: str
+    tracking_token: str
+    company: Optional[str] = None
+    contact_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    segment: Optional[str] = None
+    lead_id: Optional[str] = None
+    status: str = 'planned'  # one of CAMPAIGN_TARGET_STATUSES
+    notes: Optional[str] = None
+    created_at: str = field(default_factory=utc_now_iso)
+    last_activity_at: Optional[str] = None
+    converted_at: Optional[str] = None
 
 
 @dataclass

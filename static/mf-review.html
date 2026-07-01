@@ -107,6 +107,8 @@
         <input type="hidden" name="offerType" id="offerType">
         <input type="hidden" name="pageVariant" id="pageVariant">
         <input type="hidden" name="campaignId" id="campaignId">
+        <input type="hidden" name="campaignToken" id="campaignToken">
+        <input type="hidden" name="mfRef" id="mfRef">
         <div class="grid">
             <label>Name *
                 <input name="name" required>
@@ -219,6 +221,14 @@
         if (offerOverride) document.getElementById('offerType').value = offerOverride;
         var campaign = params.get('campaign') || params.get('cid') || '';
         if (campaign) document.getElementById('campaignId').value = campaign;
+        // Pilot Campaign Control Center tracked-link token (?t=) and the
+        // ad-hoc Outreach Workbench one-off link token (?mf_ref=) — both
+        // forwarded verbatim so the server can resolve either one and
+        // merge this submission back into the right target/lead.
+        var campaignToken = params.get('t') || '';
+        if (campaignToken) document.getElementById('campaignToken').value = campaignToken;
+        var mfRef = params.get('mf_ref') || '';
+        if (mfRef) document.getElementById('mfRef').value = mfRef;
     }
 
     function updateConditionalFields() {
