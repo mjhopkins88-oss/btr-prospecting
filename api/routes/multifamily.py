@@ -34,6 +34,10 @@ from multifamily import matching as mf_matching
 from multifamily.snapshots import snapshot_lead, SNAPSHOT_REASONS
 from multifamily import notifications as mf_notifications
 from multifamily.sales_intelligence.engine import build_sales_intelligence
+from multifamily.sales_intelligence.follow_up_suggestions import (
+    build_follow_up_suggestion as _follow_up_suggestion,
+    attach_follow_up_suggestions as _attach_follow_up_suggestions,
+)
 
 multifamily_bp = Blueprint('multifamily', __name__, url_prefix='/api/multifamily')
 
@@ -783,7 +787,8 @@ def log_activity(lead_id):
                 mf_notifications.notify_lead_replied(lead_id, company_name, activity['id'])
             else:
                 mf_notifications.notify_meeting_booked(lead_id, company_name, activity['id'])
-        return jsonify({'success': True, 'activity': activity}), 201
+        next_suggested_follow_up = _follow_up_suggestion(repository.get_lead_by_id(lead_id))
+        return jsonify({'success': True, 'activity': activity, 'next_suggested_follow_up': next_suggested_follow_up}), 201
 
     return _authorized()
 
@@ -1007,8 +1012,8 @@ def activity_dashboard():
                 })
 
         return jsonify({
-            'follow_ups_due': follow_ups_due,
-            'stale_hot_leads': stale_hot,
+            'follow_ups_due': _attach_follow_up_suggestions(follow_ups_due),
+            'stale_hot_leads': _attach_follow_up_suggestions(stale_hot),
             'replied_needs_response': replied,
             'meetings_booked': meetings_booked,
             'needs_info': needs_info,
