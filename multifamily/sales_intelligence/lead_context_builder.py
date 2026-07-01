@@ -10,10 +10,9 @@ from typing import Any, Dict, List, Optional
 from multifamily.types import MultifamilyLead
 from multifamily.timing.process_stage_types import ProcessStageResult
 from multifamily.sales_intelligence.nepq_types import SalesLeadContext
+from multifamily.sales_intelligence.buyer_awareness_classifier import classify_buyer_awareness
+from multifamily.sales_intelligence.resistance_risk_detector import detect_resistance_risk
 
-_DIRECT_ASK_SIGNALS = {'quote_request', 'meeting_request'}
-_RESEARCH_SIGNALS = {'benchmark_form_submit', 'linkedin_lead_form_submit', 'calculator_submit'}
-_LOW_INTENT_WEB_SIGNALS = {'website_visit', 'repeat_website_visit', 'keyword_intent', 'paid_search_click', 'guide_download'}
 _TRIGGER_ONLY_SOURCES = {'permit', 'news'}
 _CONSTRUCTION_STAGES = {'construction_loan_closing', 'construction_start', 'entitlement_or_permit'}
 _CONSTRUCTION_SIGNALS = {'permit_filed', 'planning_approval', 'groundbreaking', 'vertical_construction'}
@@ -101,36 +100,6 @@ def _infer_scenario(lead: MultifamilyLead, process_stage: Optional[str]) -> str:
     if situation == 'benchmark':
         return 'just_benchmarking'
     return 'unknown'
-
-
-def _infer_buyer_awareness(lead: MultifamilyLead) -> str:
-    signal_types = {s.signal_type for s in (lead.signals or [])}
-    if signal_types & _DIRECT_ASK_SIGNALS:
-        return 'decision_ready'
-    if signal_types & _RESEARCH_SIGNALS:
-        return 'solution_aware'
-    if (lead.pain_flags or []) or (signal_types & (_ACQUISITION_SIGNALS | _CONSTRUCTION_SIGNALS)):
-        return 'problem_aware'
-    if signal_types & _LOW_INTENT_WEB_SIGNALS:
-        return 'unaware'
-    if lead.primary_source in _TRIGGER_ONLY_SOURCES:
-        return 'unaware'
-    return 'unknown'
-
-
-def _infer_resistance_risk(lead: MultifamilyLead) -> str:
-    category = lead.score.category if lead.score else None
-    if lead.primary_source in _TRIGGER_ONLY_SOURCES:
-        return 'high'
-    if category in ('nurture', 'watchlist'):
-        return 'high'
-    if lead.score and lead.score.disqualifier_codes:
-        return 'medium'
-    if getattr(lead, 'spam_status', 'clean') == 'suspicious':
-        return 'medium'
-    if category == 'warm':
-        return 'medium'
-    return 'low'
 
 
 def _infer_decision_maker(lead: MultifamilyLead) -> Optional[str]:
@@ -231,8 +200,8 @@ def build_lead_context(
         lead_temperature=(score.category if score else 'watchlist'),
         lead_origin=_infer_origin(lead),
         insurance_scenario=scenario,
-        buyer_awareness_level=_infer_buyer_awareness(lead),
-        resistance_risk=_infer_resistance_risk(lead),
+        buyer_awareness_level=classify_buyer_awareness(lead),
+        resistance_risk=detect_resistance_risk(lead),
         likely_decision_maker_type=_infer_decision_maker(lead),
         likely_emotional_driver=_EMOTIONAL_DRIVER_BY_SCENARIO.get(scenario, _EMOTIONAL_DRIVER_BY_SCENARIO['unknown']),
         missing_information=_missing_information(lead, activities, scenario),

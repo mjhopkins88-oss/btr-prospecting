@@ -32,6 +32,8 @@ from multifamily.sales_intelligence.question_path_engine import build_question_p
 from multifamily.sales_intelligence.message_strategy_engine import build_message_package
 from multifamily.sales_intelligence.objection_strategy_engine import objection_playbook
 from multifamily.sales_intelligence.reasoning_explainer import build_reasoning
+from multifamily.sales_intelligence.tone_guardrails import check_message_package, worst_status
+from multifamily.sales_intelligence.follow_up_strategy_engine import select_follow_up_strategy
 
 
 def build_sales_intelligence(
@@ -48,39 +50,45 @@ def build_sales_intelligence(
     question_path = build_question_path(context, strategy)
     messages = build_message_package(context, strategy, question_path, variant=variant)
     playbook = objection_playbook(context)
+    follow_up_strategy = select_follow_up_strategy(context, strategy)
     reasoning = build_reasoning(context, strategy, question_path)
+    guardrail_status = worst_status(check_message_package(messages))
 
     if log and not lead.is_demo:
-        _maybe_log_event(lead.id, context, strategy, reasoning, variant)
+        _maybe_log_event(lead.id, context, strategy, follow_up_strategy, reasoning, variant, guardrail_status)
 
     return SalesIntelligencePackage(
         lead_id=lead.id, variant=variant, context=context, strategy=strategy,
-        question_path=question_path, messages=messages, objection_playbook=playbook, reasoning=reasoning,
+        question_path=question_path, messages=messages, objection_playbook=playbook,
+        follow_up_strategy=follow_up_strategy, reasoning=reasoning,
     )
 
 
-def _decision_tuple(context, strategy):
+def _decision_tuple(context, strategy, follow_up_strategy):
     return (
         context.lead_temperature, context.lead_origin, context.insurance_scenario,
         context.buyer_awareness_level, context.resistance_risk, strategy.starting_nepq_stage,
-        strategy.recommended_action,
+        strategy.recommended_action, strategy.conversation_mode, follow_up_strategy.follow_up_type,
     )
 
 
-def _maybe_log_event(lead_id: str, context, strategy, reasoning, variant: int) -> None:
+def _maybe_log_event(
+    lead_id: str, context, strategy, follow_up_strategy, reasoning, variant: int, guardrail_status: str,
+) -> None:
     latest = repository.get_latest_sales_intelligence_event(lead_id)
     if latest and variant == 0:
         prev_tuple = (
             latest.get('lead_temperature'), latest.get('lead_origin'), latest.get('insurance_scenario'),
             latest.get('buyer_awareness_level'), latest.get('resistance_risk'), latest.get('nepq_stage'),
-            latest.get('recommended_action'),
+            latest.get('recommended_action'), latest.get('conversation_mode'), latest.get('follow_up_type'),
         )
-        if prev_tuple == _decision_tuple(context, strategy):
+        if prev_tuple == _decision_tuple(context, strategy, follow_up_strategy):
             return  # nothing changed -> don't spam the decision log
     repository.log_sales_intelligence_event(
         lead_id, variant=variant, lead_temperature=context.lead_temperature, lead_origin=context.lead_origin,
         insurance_scenario=context.insurance_scenario, buyer_awareness_level=context.buyer_awareness_level,
         resistance_risk=context.resistance_risk, nepq_stage=strategy.starting_nepq_stage,
         recommended_action=strategy.recommended_action, confidence_score=reasoning.confidence_score,
-        reasoning=asdict(reasoning),
+        reasoning=asdict(reasoning), conversation_mode=strategy.conversation_mode,
+        follow_up_type=follow_up_strategy.follow_up_type, guardrail_status=guardrail_status,
     )

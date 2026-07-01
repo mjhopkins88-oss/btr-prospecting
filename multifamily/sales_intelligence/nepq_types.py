@@ -42,14 +42,36 @@ NEPQ_STAGES = [
     'qualifying', 'transition', 'presentation', 'commitment', 'nurture',
 ]
 
+# Alias — same list, named to match the sales-stage-classifier module's vocabulary.
+SALES_STAGES = NEPQ_STAGES
+
 BUYER_AWARENESS_LEVELS = ['unaware', 'problem_aware', 'solution_aware', 'vendor_comparing', 'decision_ready', 'unknown']
 
 RESISTANCE_RISKS = ['low', 'medium', 'high']
 
 RECOMMENDED_ACTIONS = [
     'call_now', 'send_soft_email', 'send_linkedin_note_manual', 'ask_for_context',
-    'ask_for_renewal_timing', 'ask_for_current_program_details', 'ask_for_sov', 'ask_for_loss_runs',
-    'schedule_benchmark_call', 'nurture', 'do_not_contact_yet',
+    'ask_for_renewal_timing', 'ask_for_current_program_details', 'ask_for_lender_requirements',
+    'ask_for_sov', 'ask_for_loss_runs', 'schedule_benchmark_call', 'nurture', 'do_not_contact_yet',
+]
+
+# High-level "what kind of conversation is this" label, derived 1:1 from
+# which strategy rule matched (see conversation_strategy_engine.py's
+# _CONVERSATION_MODE_BY_RULE). objection_resolution and follow_up are not
+# reachable from select_strategy() alone — they're set by the objection
+# engine and follow_up_strategy_engine respectively.
+CONVERSATION_MODES = [
+    'inbound_response', 'warm_contextual_outreach', 'trigger_based_outbound',
+    'renewal_discovery', 'acquisition_discovery', 'lender_compliance_discovery',
+    'construction_discovery', 'completion_transition_discovery', 'nurture_check_in',
+    'objection_resolution', 'follow_up',
+]
+
+# Which kind of next-touch follow_up_strategy_engine picked, and which
+# MessagePackage field carries that touch's copy.
+FOLLOW_UP_TYPES = [
+    'info_request_reminder', 'first_follow_up', 'second_follow_up', 'soft_bump',
+    'meeting_confirmation_follow_up', 'nurture_reconnect', 'no_further_action',
 ]
 
 
@@ -129,6 +151,7 @@ class ConversationStrategy:
     challenge_assumptions_carefully: bool = False
     move_toward_next_step: bool = False
     rule_applied: Optional[str] = None
+    conversation_mode: Optional[str] = None
 
 
 @dataclass
@@ -169,6 +192,19 @@ class ObjectionResponse:
 
 
 @dataclass
+class FollowUpStrategy:
+    """Which next touch to make on a lead that hasn't converted yet, and
+    when — derived from prior activity + the current conversation
+    strategy, never from scoring math."""
+    follow_up_type: str
+    message_field: Optional[str]  # which MessagePackage field carries this touch's copy (None = no further outreach)
+    recommended_wait_days: int
+    reasoning: str
+    is_final_attempt: bool = False
+    conversation_mode: str = 'follow_up'
+
+
+@dataclass
 class SalesIntelligenceReasoning:
     selected_strategy: str
     selected_nepq_stage: str
@@ -194,4 +230,5 @@ class SalesIntelligencePackage:
     question_path: QuestionPath
     messages: MessagePackage
     objection_playbook: List[ObjectionResponse]
+    follow_up_strategy: FollowUpStrategy
     reasoning: SalesIntelligenceReasoning

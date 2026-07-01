@@ -10230,6 +10230,71 @@ function MultifamilyOutreachLeadRow({
   const messageFields = intel ? [['Call opener', intel.messages.call_opener], ['Email subject', intel.messages.first_email_subject], ['Email body', intel.messages.first_email_body], ['LinkedIn (manual)', intel.messages.linkedin_note_manual], ['Follow-up 1', intel.messages.follow_up_1], ['Follow-up 2', intel.messages.follow_up_2], ['Soft bump', intel.messages.soft_bump]] : [];
   const qp = intel && intel.question_path;
   const questionGroups = qp ? [['Situation', qp.situation_questions], ['Problem awareness', qp.problem_awareness_questions], ['Solution awareness', qp.solution_awareness_questions], ['Consequence', qp.consequence_questions], ['Qualifying', qp.qualifying_questions]] : [];
+  const fu = intel && intel.follow_up_strategy;
+  const followUpBlock = fu && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#94a3b8',
+      fontWeight: 600,
+      marginBottom: '3px'
+    }
+  }, "Follow-up plan"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '6px',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      marginBottom: '4px'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#38bdf8')
+  }, fu.follow_up_type.replace(/_/g, ' ')), fu.recommended_wait_days > 0 && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#64748b')
+  }, "~", fu.recommended_wait_days, "d"), fu.is_final_attempt && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#f97316')
+  }, "final attempt")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.74rem',
+      color: '#94a3b8',
+      marginBottom: '6px'
+    }
+  }, fu.reasoning), fu.message_field && intel.messages[fu.message_field] && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#94a3b8',
+      fontWeight: 600
+    }
+  }, "Suggested: ", fu.message_field.replace(/_/g, ' ')), /*#__PURE__*/React.createElement("button", {
+    onClick: () => mfCopy(intel.messages[fu.message_field]),
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.1)',
+      color: '#64748b',
+      borderRadius: '4px',
+      padding: '1px 8px',
+      cursor: 'pointer',
+      fontSize: '0.62rem'
+    }
+  }, "Copy")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      whiteSpace: 'pre-wrap',
+      fontSize: '0.76rem',
+      color: '#cbd5e1',
+      background: 'rgba(255,255,255,0.03)',
+      borderRadius: '6px',
+      padding: '8px',
+      marginTop: '3px'
+    }
+  }, intel.messages[fu.message_field])));
   return /*#__PURE__*/React.createElement("div", {
     style: {
       background: 'rgba(15,22,36,0.97)',
@@ -10335,11 +10400,14 @@ function MultifamilyOutreachLeadRow({
     style: {
       display: 'flex',
       gap: '6px',
-      alignItems: 'center'
+      alignItems: 'center',
+      flexWrap: 'wrap'
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#818cf8')
-  }, "Stage: ", intel.reasoning.selected_nepq_stage), /*#__PURE__*/React.createElement("button", {
+  }, "Stage: ", intel.reasoning.selected_nepq_stage), intel.strategy.conversation_mode && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#38bdf8')
+  }, "Mode: ", intel.strategy.conversation_mode.replace(/_/g, ' ')), /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowWhy(!showWhy),
     style: {
       background: 'transparent',
@@ -10514,7 +10582,7 @@ function MultifamilyOutreachLeadRow({
       color: '#64748b',
       marginTop: '2px'
     }
-  }, "Follow-up: ", o.follow_up_strategy)))))))));
+  }, "Follow-up: ", o.follow_up_strategy)))))), followUpBlock)));
 }
 function MultifamilyOutreachWorkbenchPanel({
   activeTab,
@@ -11608,7 +11676,7 @@ function MultifamilySalesIntelView({
       color: '#64748b',
       fontSize: '0.78rem'
     }
-  }, "Not available for this lead."), si && /*#__PURE__*/React.createElement(React.Fragment, null, mfKV('Recommended action', (si.recommended_action || '').replace(/_/g, ' ')), mfKV('NEPQ stage', (si.nepq_stage || '').replace(/_/g, ' ')), mfKV('Buyer awareness', (si.buyer_awareness_level || '').replace(/_/g, ' ')), mfKV('Resistance risk', si.resistance_risk), mfKV('Likely emotional driver', si.likely_emotional_driver), mfKV('Confidence', si.confidence_score != null ? Math.round(si.confidence_score * 100) + '%' : null), /*#__PURE__*/React.createElement("div", {
+  }, "Not available for this lead."), si && /*#__PURE__*/React.createElement(React.Fragment, null, mfKV('Recommended action', (si.recommended_action || '').replace(/_/g, ' ')), mfKV('Conversation mode', (si.conversation_mode || '').replace(/_/g, ' ')), mfKV('NEPQ stage', (si.nepq_stage || '').replace(/_/g, ' ')), mfKV('Buyer awareness', (si.buyer_awareness_level || '').replace(/_/g, ' ')), mfKV('Resistance risk', si.resistance_risk), mfKV('Likely emotional driver', si.likely_emotional_driver), mfKV('Confidence', si.confidence_score != null ? Math.round(si.confidence_score * 100) + '%' : null), mfKV('Next follow-up', si.follow_up_type ? (si.follow_up_type.replace(/_/g, ' ') + (si.follow_up_wait_days ? ` (~${si.follow_up_wait_days}d)` : '')) : null), /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: '10px',
       fontSize: '0.7rem',

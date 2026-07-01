@@ -34,6 +34,10 @@ from multifamily import matching as mf_matching
 from multifamily.snapshots import snapshot_lead, SNAPSHOT_REASONS
 from multifamily import notifications as mf_notifications
 from multifamily.sales_intelligence.engine import build_sales_intelligence
+from multifamily.sales_intelligence.follow_up_suggestions import (
+    build_follow_up_suggestion as _follow_up_suggestion,
+    attach_follow_up_suggestions as _attach_follow_up_suggestions,
+)
 
 multifamily_bp = Blueprint('multifamily', __name__, url_prefix='/api/multifamily')
 
@@ -80,18 +84,23 @@ def _signal_timeline(lead):
     return items
 
 
-def _sales_intelligence_summary(lead, stage_result, activities, outcomes):
+def _sales_intelligence_summary(lead, stage_result, activities, outcomes, pkg=None):
     """Compact Sales Intelligence snapshot for the drawer's "Sales
-    Intelligence" tab (Part 10) — not the full package (that's the
-    dedicated /sales-intelligence endpoint used by the Outreach
-    Workbench, which also includes messages + the objection playbook)."""
-    try:
-        pkg = build_sales_intelligence(lead, stage_result=stage_result, activities=activities, outcomes=outcomes)
-    except Exception:
-        return None
+    Intelligence" tab and the Overview's Mission cards (Part 10) — not the
+    full package (that's the dedicated /sales-intelligence endpoint used by
+    the Outreach Workbench, which also includes messages + the objection
+    playbook). Pass a precomputed `pkg` to avoid recomputing the engine
+    twice when the caller already needed the full package (e.g. the
+    Mission's best-email-draft card)."""
+    if pkg is None:
+        try:
+            pkg = build_sales_intelligence(lead, stage_result=stage_result, activities=activities, outcomes=outcomes)
+        except Exception:
+            return None
     return {
         'recommended_action': pkg.strategy.recommended_action,
         'nepq_stage': pkg.strategy.starting_nepq_stage,
+        'conversation_mode': pkg.strategy.conversation_mode,
         'buyer_awareness_level': pkg.context.buyer_awareness_level,
         'resistance_risk': pkg.context.resistance_risk,
         'likely_emotional_driver': pkg.context.likely_emotional_driver,
@@ -100,6 +109,8 @@ def _sales_intelligence_summary(lead, stage_result, activities, outcomes):
         'what_to_avoid': pkg.strategy.do_not,
         'reasoning_summary': pkg.reasoning.why_this_stage,
         'confidence_score': pkg.reasoning.confidence_score,
+        'follow_up_type': pkg.follow_up_strategy.follow_up_type,
+        'follow_up_wait_days': pkg.follow_up_strategy.recommended_wait_days,
     }
 
 
@@ -419,9 +430,19 @@ def get_daily_brief():
     return jsonify(brief)
 
 
-def _mission_item(lead, stage_result=None):
+def _mission_activities_outcomes(lead):
+    """Real leads carry persisted activity/outcome history; demo leads
+    don't (they're regenerated on every pipeline run), so the Mission's
+    sales-intelligence read just treats them as having none yet."""
+    if lead.is_demo:
+        return [], []
+    return repository.get_activities_for_lead(lead.id), repository.get_outcomes_for_lead(lead.id)
+
+
+def _mission_item(lead, stage_result=None, activities=None, outcomes=None, pkg=None):
     """Compact, action-oriented summary of a lead for the Overview's
-    'Today's Mission' cards."""
+    'Today's Mission' cards. Additive `sales_intelligence` key reflects the
+    same NEPQ engine reasoning surfaced in the Outreach Workbench/drawer."""
     sr = stage_result or detect_process_stage(lead)
     contact = lead.contacts[0] if lead.contacts else None
     return {
@@ -439,6 +460,7 @@ def _mission_item(lead, stage_result=None):
         'reason': sr.timing_reason,
         'next_best_action': lead.next_best_action,
         'is_demo': lead.is_demo,
+        'sales_intelligence': _sales_intelligence_summary(lead, sr, activities or [], outcomes or [], pkg=pkg),
     }
 
 
@@ -509,15 +531,31 @@ def get_overview():
     best_email_item = None
     if best_email:
         lead, sr = best_email
-        bundle = build_outreach_bundle(lead, sr)
-        best_email_item = {**_mission_item(lead, sr), 'email_draft': bundle['email_draft']}
+        activities, outcomes = _mission_activities_outcomes(lead)
+        try:
+            pkg = build_sales_intelligence(lead, stage_result=sr, activities=activities, outcomes=outcomes)
+            email_draft = {'subject': pkg.messages.first_email_subject, 'body': pkg.messages.first_email_body}
+        except Exception:
+            # Defensive fallback only — the sales-intelligence engine is the
+            # primary path; the legacy bundle builder covers the exceptional
+            # case where it errors, so the Mission card never comes up empty.
+            pkg = None
+            email_draft = build_outreach_bundle(lead, sr)['email_draft']
+        best_email_item = {**_mission_item(lead, sr, activities, outcomes, pkg=pkg), 'email_draft': email_draft}
+
+    def _mission_item_for(pair):
+        if not pair:
+            return None
+        lead, sr = pair
+        activities, outcomes = _mission_activities_outcomes(lead)
+        return _mission_item(lead, sr, activities, outcomes)
 
     mission = {
-        'best_first_call': _mission_item(*best_first_call) if best_first_call else None,
+        'best_first_call': _mission_item_for(best_first_call),
         'best_email_draft': best_email_item,
-        'best_followup': _mission_item(*best_followup) if best_followup else None,
-        'best_nurture_action': _mission_item(*best_nurture) if best_nurture else None,
-        'lead_needing_info': _mission_item(*needs_info) if needs_info else None,
+        'best_followup': _mission_item_for(best_followup),
+        'best_nurture_action': _mission_item_for(best_nurture),
+        'lead_needing_info': _mission_item_for(needs_info),
     }
     best_first_action = mission['best_first_call'] or mission['best_email_draft'] or mission['best_followup']
 
@@ -608,6 +646,7 @@ def get_lead_sales_intelligence(lead_id):
         'question_path': dataclasses.asdict(pkg.question_path),
         'messages': dataclasses.asdict(pkg.messages),
         'objection_playbook': [dataclasses.asdict(o) for o in pkg.objection_playbook],
+        'follow_up_strategy': dataclasses.asdict(pkg.follow_up_strategy),
         'reasoning': dataclasses.asdict(pkg.reasoning),
     })
 
@@ -749,7 +788,8 @@ def log_activity(lead_id):
                 mf_notifications.notify_lead_replied(lead_id, company_name, activity['id'])
             else:
                 mf_notifications.notify_meeting_booked(lead_id, company_name, activity['id'])
-        return jsonify({'success': True, 'activity': activity}), 201
+        next_suggested_follow_up = _follow_up_suggestion(repository.get_lead_by_id(lead_id))
+        return jsonify({'success': True, 'activity': activity, 'next_suggested_follow_up': next_suggested_follow_up}), 201
 
     return _authorized()
 
@@ -973,8 +1013,8 @@ def activity_dashboard():
                 })
 
         return jsonify({
-            'follow_ups_due': follow_ups_due,
-            'stale_hot_leads': stale_hot,
+            'follow_ups_due': _attach_follow_up_suggestions(follow_ups_due),
+            'stale_hot_leads': _attach_follow_up_suggestions(stale_hot),
             'replied_needs_response': replied,
             'meetings_booked': meetings_booked,
             'needs_info': needs_info,
