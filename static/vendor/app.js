@@ -8955,6 +8955,13 @@ function MultifamilyLeadDrawer({
       }
     } catch (e) {}
   }, [leadId]);
+  const refreshLead = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/multifamily/leads/${leadId}`);
+      const j = await r.json();
+      setData(j);
+    } catch (e) {}
+  }, [leadId]);
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -9036,6 +9043,12 @@ function MultifamilyLeadDrawer({
   }, {
     id: 'activity',
     label: 'Notes / Activity'
+  }, {
+    id: 'outcomes',
+    label: 'Outcomes'
+  }, {
+    id: 'score_history',
+    label: 'Score History'
   }];
   if (isAdmin) sections.push({
     id: 'raw',
@@ -9380,7 +9393,15 @@ function MultifamilyLeadDrawer({
       fontSize: '0.68rem',
       color: '#475569'
     }
-  }, a.user_email || 'system', " \xB7 ", String(a.created_at).slice(0, 19))))), lead && section === 'raw' && isAdmin && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+  }, a.user_email || 'system', " \xB7 ", String(a.created_at).slice(0, 19))))), lead && section === 'outcomes' && /*#__PURE__*/React.createElement(MultifamilyOutcomesView, {
+    leadId: leadId,
+    lead: lead,
+    onRefresh: refreshLead
+  }), lead && section === 'score_history' && /*#__PURE__*/React.createElement(MultifamilyScoreHistoryView, {
+    leadId: leadId,
+    lead: lead,
+    onRefresh: refreshLead
+  }), lead && section === 'raw' && isAdmin && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
     title: "RAW / DEBUG (ADMIN ONLY)"
   }, mfKV('Spam status', lead.spam_status), mfKV('Spam reason codes', (lead.spam_reason_codes || []).join(', ')), mfKV('Submitted IP hash', lead.submitted_ip_hash), mfKV('User agent', lead.user_agent_summary), /*#__PURE__*/React.createElement("pre", {
     style: {
@@ -9552,7 +9573,9 @@ function MultifamilyOverviewPanel({
       color: '#f59e0b',
       fontFamily: "'Orbitron', sans-serif"
     }
-  }, "LOADING MULTIFAMILY DATA..."), !loading && data && /*#__PURE__*/React.createElement(React.Fragment, null, data.is_demo_data && /*#__PURE__*/React.createElement("div", {
+  }, "LOADING MULTIFAMILY DATA..."), !loading && data && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(MultifamilyNotificationStrip, {
+    user: user
+  }), data.is_demo_data && /*#__PURE__*/React.createElement("div", {
     style: {
       background: 'rgba(249,115,22,0.1)',
       border: '1px solid rgba(249,115,22,0.3)',
@@ -9562,7 +9585,7 @@ function MultifamilyOverviewPanel({
       fontSize: '0.8rem',
       color: '#f97316'
     }
-  }, "\u26A0 Showing demo data \u2014 no real leads captured yet. Add one via \u201C+ Add Multifamily Lead\u201D or the public benchmark form."), /*#__PURE__*/React.createElement("div", {
+  }, "\u26A0 Showing demo data \u2014 no real leads captured yet. Add one via \u201C+ Add Multifamily Lead\u201D or the public benchmark form."), /*#__PURE__*/React.createElement(MultifamilyOutcomeSummaryTiles, null), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'grid',
       gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
@@ -9781,7 +9804,7 @@ function MultifamilyAdminPanel({
     }
   }, /*#__PURE__*/React.createElement("span", null, row.company_name, " (", row.contact_email || 'no email', ")"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle(spamColor[row.spam_status] || '#64748b')
-  }, row.spam_status), " ", row.source, row.utm_source ? ' · ' + row.utm_source : '', row.score_total != null ? ' · score ' + row.score_total + ' (' + row.score_category + ')' : ''))), /*#__PURE__*/React.createElement(MultifamilyDataQualityView, null), /*#__PURE__*/React.createElement(MultifamilySourceRunsView, null)));
+  }, row.spam_status), " ", row.source, row.utm_source ? ' · ' + row.utm_source : '', row.score_total != null ? ' · score ' + row.score_total + ' (' + row.score_category + ')' : ''))), /*#__PURE__*/React.createElement(MultifamilyDataQualityView, null), /*#__PURE__*/React.createElement(MultifamilySourceRunsView, null), /*#__PURE__*/React.createElement(MultifamilyRecentNotificationsView, null)));
 }
 function mfBreakdownTable(title, obj) {
   const entries = Object.entries(obj || {}).sort((a, b) => b[1] - a[1]);
@@ -9960,7 +9983,7 @@ function MultifamilySourcePerformancePanel({
       padding: '4px 0',
       borderBottom: '1px solid rgba(255,255,255,0.04)'
     }
-  }, /*#__PURE__*/React.createElement("span", null, src), /*#__PURE__*/React.createElement("span", null, r.flagged, "/", r.total, " \xB7 ", r.rate_pct, "%")))));
+  }, /*#__PURE__*/React.createElement("span", null, src), /*#__PURE__*/React.createElement("span", null, r.flagged, "/", r.total, " \xB7 ", r.rate_pct, "%")))), /*#__PURE__*/React.createElement(MultifamilySourceRoiView, null));
 }
 function MultifamilyOutreachLeadRow({
   lead,
@@ -10557,6 +10580,698 @@ function MultifamilySourceRunsView() {
   }, /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle(statusColor[run.status] || '#64748b')
   }, run.status || 'unknown'), " ", run.source, run.started_at ? ' · ' + String(run.started_at).slice(0, 19).replace('T', ' ') : ''), /*#__PURE__*/React.createElement("span", null, 'found ' + (run.records_found || 0), ' · created ' + (run.records_created || 0), ' · merged ' + (run.records_merged || 0), ' · rejected ' + (run.records_rejected || 0)))));
+}
+const MF_OUTCOME_TYPES = ['meeting_booked', 'submission_received', 'sov_received', 'loss_runs_received', 'application_received', 'quote_started', 'quote_sent', 'won', 'lost', 'not_a_fit', 'nurture', 'dead'];
+function mfOutcomeLabel(t) {
+  return (t || '').replace(/_/g, ' ');
+}
+const MF_OUTCOME_FORM_DEFAULTS = {
+  outcome_type: 'meeting_booked',
+  estimated_premium: '',
+  estimated_revenue: '',
+  quoted_premium: '',
+  bound_premium: '',
+  outcome_date: '',
+  effective_date: '',
+  renewal_date: '',
+  lost_reason: '',
+  won_reason: '',
+  notes: ''
+};
+function MultifamilyOutcomesView({
+  leadId,
+  lead,
+  onRefresh
+}) {
+  const [form, setForm] = useState(MF_OUTCOME_FORM_DEFAULTS);
+  const [result, setResult] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const update = f => e => setForm(s => ({
+    ...s,
+    [f]: e.target.value
+  }));
+  const submit = async e => {
+    e.preventDefault();
+    setSubmitting(true);
+    setResult(null);
+    try {
+      const r = await fetch(`/api/multifamily/leads/${leadId}/outcome`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(form)
+      });
+      const j = await r.json();
+      if (r.ok && j.success) {
+        setResult({
+          ok: true,
+          message: 'Outcome recorded.'
+        });
+        setForm(MF_OUTCOME_FORM_DEFAULTS);
+        onRefresh && onRefresh();
+      } else {
+        setResult({
+          ok: false,
+          message: (j.errors || ['Failed.']).join('; ')
+        });
+      }
+    } catch (err) {
+      setResult({
+        ok: false,
+        message: 'Network error: ' + err.message
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const current = lead.current_outcome;
+  const outcomes = lead.outcomes || [];
+  return /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+    title: "OUTCOMES"
+  }, mfKV('Current outcome', current ? mfOutcomeLabel(current.outcome_type) : null), lead.is_demo ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#f97316',
+      margin: '10px 0'
+    }
+  }, "This is demo data — outcomes can't be recorded.") : /*#__PURE__*/React.createElement("form", {
+    onSubmit: submit,
+    style: {
+      background: 'rgba(255,255,255,0.03)',
+      borderRadius: '8px',
+      padding: '10px',
+      margin: '10px 0'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Outcome type *", /*#__PURE__*/React.createElement("select", {
+    required: true,
+    style: mfFieldStyle(),
+    value: form.outcome_type,
+    onChange: update('outcome_type')
+  }, MF_OUTCOME_TYPES.map(t => /*#__PURE__*/React.createElement("option", {
+    key: t,
+    value: t
+  }, mfOutcomeLabel(t))))), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Outcome date", /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    style: mfFieldStyle(),
+    value: form.outcome_date,
+    onChange: update('outcome_date')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Estimated premium", /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    min: "0",
+    style: mfFieldStyle(),
+    value: form.estimated_premium,
+    onChange: update('estimated_premium')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Estimated revenue", /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    min: "0",
+    style: mfFieldStyle(),
+    value: form.estimated_revenue,
+    onChange: update('estimated_revenue')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Quoted premium", /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    min: "0",
+    style: mfFieldStyle(),
+    value: form.quoted_premium,
+    onChange: update('quoted_premium')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Bound premium", /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    min: "0",
+    style: mfFieldStyle(),
+    value: form.bound_premium,
+    onChange: update('bound_premium')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Effective date", /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    style: mfFieldStyle(),
+    value: form.effective_date,
+    onChange: update('effective_date')
+  })), /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Renewal date", /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    style: mfFieldStyle(),
+    value: form.renewal_date,
+    onChange: update('renewal_date')
+  })), form.outcome_type === 'lost' && /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Lost reason", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.lost_reason,
+    onChange: update('lost_reason')
+  })), form.outcome_type === 'won' && /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Won reason", /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: form.won_reason,
+    onChange: update('won_reason')
+  }))), /*#__PURE__*/React.createElement("label", {
+    style: {
+      ...mfLabelStyle(),
+      display: 'block',
+      marginTop: '8px'
+    }
+  }, "Notes", /*#__PURE__*/React.createElement("textarea", {
+    rows: 2,
+    style: {
+      ...mfFieldStyle(),
+      width: '100%',
+      resize: 'vertical'
+    },
+    value: form.notes,
+    onChange: update('notes')
+  })), /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    disabled: submitting,
+    style: {
+      marginTop: '10px',
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      padding: '6px 14px',
+      borderRadius: '6px',
+      fontSize: '0.75rem',
+      fontWeight: 700,
+      cursor: 'pointer'
+    }
+  }, submitting ? 'Recording…' : 'Record outcome'), result && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '8px',
+      fontSize: '0.75rem',
+      color: result.ok ? '#34d399' : '#ef4444'
+    }
+  }, result.message)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#64748b',
+      marginTop: '10px',
+      marginBottom: '4px'
+    }
+  }, "HISTORY"), outcomes.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#64748b',
+      fontSize: '0.78rem'
+    }
+  }, "No outcomes recorded yet."), outcomes.map(o => /*#__PURE__*/React.createElement("div", {
+    key: o.id,
+    style: {
+      padding: '6px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      gap: '8px',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.8rem',
+      color: '#e2e8f0',
+      fontWeight: 600
+    }
+  }, mfOutcomeLabel(o.outcome_type)), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#64748b'
+    }
+  }, o.outcome_date ? String(o.outcome_date).slice(0, 19).replace('T', ' ') : '—')), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.72rem',
+      color: '#94a3b8',
+      marginTop: '2px'
+    }
+  }, [o.estimated_premium != null && `est. premium $${o.estimated_premium}`, o.estimated_revenue != null && `est. revenue $${o.estimated_revenue}`, o.quoted_premium != null && `quoted $${o.quoted_premium}`, o.bound_premium != null && `bound $${o.bound_premium}`].filter(Boolean).join(' · ')), (o.lost_reason || o.won_reason || o.notes) && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.72rem',
+      color: '#94a3b8',
+      marginTop: '2px'
+    }
+  }, o.won_reason || o.lost_reason || o.notes), o.created_by && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#475569',
+      marginTop: '2px'
+    }
+  }, "logged by ", o.created_by))));
+}
+function MultifamilyScoreHistoryView({
+  leadId,
+  lead,
+  onRefresh
+}) {
+  const [busy, setBusy] = useState(false);
+  const forceSnapshot = async () => {
+    setBusy(true);
+    try {
+      await fetch(`/api/multifamily/leads/${leadId}/snapshot`, {
+        method: 'POST'
+      });
+      onRefresh && onRefresh();
+    } catch (e) {} finally {
+      setBusy(false);
+    }
+  };
+  const snapshots = lead.snapshots || [];
+  return /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+    title: "SCORE HISTORY"
+  }, !lead.is_demo && /*#__PURE__*/React.createElement("button", {
+    onClick: forceSnapshot,
+    disabled: busy,
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.15)',
+      color: '#94a3b8',
+      borderRadius: '4px',
+      padding: '3px 12px',
+      cursor: 'pointer',
+      fontSize: '0.7rem',
+      marginBottom: '10px'
+    }
+  }, busy ? 'Snapshotting…' : 'Force snapshot now'), snapshots.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#64748b',
+      fontSize: '0.78rem'
+    }
+  }, "No snapshots recorded yet."), snapshots.map(s => /*#__PURE__*/React.createElement("div", {
+    key: s.id,
+    style: {
+      padding: '6px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      gap: '8px',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#818cf8')
+  }, (s.reason || '').replace(/_/g, ' ')), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#64748b'
+    }
+  }, s.created_at ? String(s.created_at).slice(0, 19).replace('T', ' ') : '—')), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.78rem',
+      color: '#cbd5e1',
+      marginTop: '3px'
+    }
+  }, s.score_total, " (", mfCategoryLabel(s.score_category), ")", s.process_stage ? ` · ${s.process_stage.replace(/_/g, ' ')}` : '', " \xB7 ", s.signal_count, " signal", s.signal_count === 1 ? '' : 's'))));
+}
+function MultifamilyNotificationStrip({
+  user
+}) {
+  const [data, setData] = useState(null);
+  const [open, setOpen] = useState(false);
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch('/api/multifamily/notifications?limit=20');
+      setData(r.ok ? await r.json() : null);
+    } catch (e) {
+      setData(null);
+    }
+  }, []);
+  useEffect(() => {
+    if (user) load();
+  }, [user, load]);
+  if (!user || !data) return null;
+  const notifications = data.notifications || [];
+  const followups = notifications.filter(n => n.type === 'followup_due_today' || n.type === 'followup_overdue');
+  const markRead = async id => {
+    try {
+      await fetch(`/api/multifamily/notifications/${id}/read`, {
+        method: 'POST'
+      });
+      load();
+    } catch (e) {}
+  };
+  const markAllRead = async () => {
+    try {
+      await fetch('/api/multifamily/notifications/read-all', {
+        method: 'POST'
+      });
+      load();
+    } catch (e) {}
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '1rem'
+    }
+  }, followups.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(245,158,11,0.08)',
+      border: '1px solid rgba(245,158,11,0.25)',
+      borderRadius: '8px',
+      padding: '8px 12px',
+      marginBottom: '8px',
+      fontSize: '0.78rem',
+      color: '#f59e0b'
+    }
+  }, "⏰ ", followups.length, " follow-up", followups.length === 1 ? '' : 's', " need", followups.length === 1 ? 's' : '', " attention today."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setOpen(!open),
+    style: {
+      background: 'rgba(255,255,255,0.03)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      color: '#cbd5e1',
+      borderRadius: '6px',
+      padding: '4px 10px',
+      cursor: 'pointer',
+      fontSize: '0.75rem'
+    }
+  }, "🔔 Notifications", data.unread_count > 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      ...mfPillStyle('#ef4444'),
+      marginLeft: '6px'
+    }
+  }, data.unread_count))), open && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '8px',
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '8px',
+      padding: '10px',
+      maxHeight: '320px',
+      overflowY: 'auto'
+    }
+  }, notifications.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#64748b',
+      fontSize: '0.78rem'
+    }
+  }, "No notifications."), notifications.length > 0 && /*#__PURE__*/React.createElement("button", {
+    onClick: markAllRead,
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.1)',
+      color: '#64748b',
+      borderRadius: '4px',
+      padding: '2px 8px',
+      cursor: 'pointer',
+      fontSize: '0.68rem',
+      marginBottom: '8px'
+    }
+  }, "Mark all read"), notifications.map(n => /*#__PURE__*/React.createElement("div", {
+    key: n.id,
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      gap: '8px',
+      padding: '6px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)',
+      opacity: n.is_read ? 0.55 : 1
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.78rem',
+      color: '#e2e8f0',
+      fontWeight: n.is_read ? 400 : 600
+    }
+  }, n.title), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.72rem',
+      color: '#94a3b8'
+    }
+  }, n.message)), !n.is_read && /*#__PURE__*/React.createElement("button", {
+    onClick: () => markRead(n.id),
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.1)',
+      color: '#64748b',
+      borderRadius: '4px',
+      padding: '1px 8px',
+      cursor: 'pointer',
+      fontSize: '0.65rem',
+      height: 'fit-content',
+      whiteSpace: 'nowrap'
+    }
+  }, "Mark read")))));
+}
+function MultifamilyOutcomeSummaryTiles() {
+  const [roi, setRoi] = useState(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/multifamily/source-roi');
+        const j = r.ok ? await r.json() : null;
+        setRoi(j ? j.roi : null);
+      } catch (e) {
+        setRoi(null);
+      }
+    })();
+  }, []);
+  if (!roi) return null;
+  const buckets = Object.values(roi.source || {});
+  if (buckets.length === 0) return null;
+  const sum = key => buckets.reduce((acc, b) => acc + (b[key] || 0), 0);
+  const tiles = [['MEETINGS BOOKED', sum('meetings_booked'), '#34d399'], ['QUOTES SENT', sum('quotes_sent'), '#60a5fa'], ['WINS', sum('wins'), '#22d3ee'], ['LOSSES', sum('losses'), '#ef4444'], ['EST. REVENUE', `$${sum('estimated_revenue').toLocaleString()}`, '#facc15'], ['BOUND PREMIUM', `$${sum('bound_premium').toLocaleString()}`, '#a78bfa']];
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '1.25rem'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, "OUTCOME SUMMARY"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+      gap: '10px'
+    }
+  }, tiles.map(t => /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+    key: t[0],
+    label: t[0],
+    value: t[1],
+    color: t[2]
+  }))));
+}
+const MF_ROI_DIMENSIONS = [{
+  value: 'source',
+  label: 'Source'
+}, {
+  value: 'source_page',
+  label: 'Source Page'
+}, {
+  value: 'offer_type',
+  label: 'Offer Type'
+}, {
+  value: 'utm_source',
+  label: 'UTM Source'
+}, {
+  value: 'utm_campaign',
+  label: 'UTM Campaign'
+}, {
+  value: 'first_touch_source',
+  label: 'First Touch Source'
+}, {
+  value: 'conversion_source',
+  label: 'Conversion Source'
+}, {
+  value: 'latest_signal_source',
+  label: 'Latest Signal Source'
+}];
+const MF_ROI_METRIC_COLS = [{
+  key: 'leads_created',
+  label: 'Leads'
+}, {
+  key: 'meetings_booked',
+  label: 'Meetings'
+}, {
+  key: 'quotes_sent',
+  label: 'Quotes Sent'
+}, {
+  key: 'wins',
+  label: 'Wins'
+}, {
+  key: 'losses',
+  label: 'Losses'
+}, {
+  key: 'estimated_revenue',
+  label: 'Est. Revenue'
+}, {
+  key: 'bound_premium',
+  label: 'Bound Premium'
+}, {
+  key: 'duplicate_or_merge_rate_pct',
+  label: 'Dup/Merge %'
+}, {
+  key: 'avg_score_at_creation',
+  label: 'Avg Score'
+}];
+function MultifamilySourceRoiView() {
+  const [roi, setRoi] = useState(null);
+  const [dim, setDim] = useState('source');
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/multifamily/source-roi');
+        const j = r.ok ? await r.json() : null;
+        setRoi(j ? j.roi : null);
+      } catch (e) {
+        setRoi(null);
+      }
+    })();
+  }, []);
+  if (!roi) return null;
+  const buckets = roi[dim] || {};
+  const entries = Object.entries(buckets).sort((a, b) => b[1].leads_created - a[1].leads_created);
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '1.5rem'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: '0.5rem'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif"
+    }
+  }, "SOURCE ROI"), /*#__PURE__*/React.createElement("select", {
+    value: dim,
+    onChange: e => setDim(e.target.value),
+    style: {
+      ...mfFieldStyle(),
+      width: 'auto',
+      fontSize: '0.72rem'
+    }
+  }, MF_ROI_DIMENSIONS.map(d => /*#__PURE__*/React.createElement("option", {
+    key: d.value,
+    value: d.value
+  }, d.label)))), entries.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#475569'
+    }
+  }, "No ROI data yet."), entries.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      overflowX: 'auto'
+    }
+  }, /*#__PURE__*/React.createElement("table", {
+    style: {
+      width: '100%',
+      fontSize: '0.72rem',
+      color: '#94a3b8',
+      borderCollapse: 'collapse'
+    }
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
+    style: {
+      color: '#64748b'
+    }
+  }, /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'left',
+      padding: '4px 8px'
+    }
+  }, "Bucket"), MF_ROI_METRIC_COLS.map(m => /*#__PURE__*/React.createElement("th", {
+    key: m.key,
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, m.label)))), /*#__PURE__*/React.createElement("tbody", null, entries.map(([key, b]) => /*#__PURE__*/React.createElement("tr", {
+    key: key,
+    style: {
+      borderTop: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      padding: '4px 8px',
+      color: '#cbd5e1'
+    }
+  }, key), MF_ROI_METRIC_COLS.map(m => /*#__PURE__*/React.createElement("td", {
+    key: m.key,
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, m.key === 'estimated_revenue' || m.key === 'bound_premium' ? `$${(b[m.key] || 0).toLocaleString()}` : m.key === 'duplicate_or_merge_rate_pct' ? `${b[m.key]}%` : b[m.key] ?? '—'))))))));
+}
+function MultifamilyRecentNotificationsView() {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/multifamily/notifications?limit=20');
+        setData(r.ok ? await r.json() : null);
+      } catch (e) {
+        setData(null);
+      }
+    })();
+  }, []);
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '1.5rem'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, "RECENT NOTIFICATIONS"), data == null && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#475569'
+    }
+  }, "Loading…"), data != null && (data.notifications || []).length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#475569'
+    }
+  }, "No notifications yet."), data != null && (data.notifications || []).map(n => /*#__PURE__*/React.createElement("div", {
+    key: n.id,
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: '6px',
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      padding: '6px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(n.severity === 'critical' ? '#ef4444' : n.severity === 'warning' ? '#f59e0b' : '#64748b')
+  }, n.type.replace(/_/g, ' ')), " ", n.title), /*#__PURE__*/React.createElement("span", null, n.is_read ? 'read' : 'unread', " \xB7 ", String(n.created_at || '').slice(0, 19).replace('T', ' ')))));
 }
 function CapitalFlowPanel() {
   const [predictions, setPredictions] = useState([]);
