@@ -10194,6 +10194,129 @@ function MultifamilySourcePerformancePanel({
     }
   }, /*#__PURE__*/React.createElement("span", null, src), /*#__PURE__*/React.createElement("span", null, r.flagged, "/", r.total, " \xB7 ", r.rate_pct, "%")))), /*#__PURE__*/React.createElement(MultifamilySourceRoiView, null));
 }
+function _mfTitleCase(s) {
+  return (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+function _mfResistanceColor(risk) {
+  if (risk === 'high') return '#ef4444';
+  if (risk === 'medium') return '#f59e0b';
+  return '#34d399';
+}
+function _mfConfidenceColor(score) {
+  if (score == null) return '#64748b';
+  if (score < 0.5) return '#ef4444';
+  if (score < 0.7) return '#f59e0b';
+  return '#34d399';
+}
+const _siCardStyle = {
+  background: 'rgba(255,255,255,0.02)',
+  border: '1px solid rgba(255,255,255,0.06)',
+  borderRadius: '6px',
+  padding: '8px 10px',
+  marginBottom: '8px'
+};
+const _siCardHeaderStyle = {
+  fontSize: '0.68rem',
+  color: '#94a3b8',
+  fontWeight: 700,
+  marginBottom: '5px',
+  textTransform: 'uppercase',
+  letterSpacing: '0.03em'
+};
+const _siLabelStyle = {
+  fontSize: '0.68rem',
+  color: '#94a3b8',
+  fontWeight: 600
+};
+const _siTextBoxStyle = {
+  whiteSpace: 'pre-wrap',
+  fontSize: '0.76rem',
+  color: '#cbd5e1',
+  background: 'rgba(255,255,255,0.03)',
+  borderRadius: '6px',
+  padding: '8px',
+  marginTop: '3px'
+};
+const _siToggleBtnStyle = {
+  background: 'transparent',
+  border: '1px solid rgba(255,255,255,0.1)',
+  color: '#94a3b8',
+  borderRadius: '4px',
+  padding: '1px 8px',
+  cursor: 'pointer',
+  fontSize: '0.65rem'
+};
+const _siActivityBtnStyle = {
+  background: 'transparent',
+  border: '1px solid rgba(255,255,255,0.12)',
+  color: '#94a3b8',
+  borderRadius: '4px',
+  padding: '3px 9px',
+  cursor: 'pointer',
+  fontSize: '0.68rem'
+};
+function MultifamilyOutreachCopyButton({
+  text,
+  label
+}) {
+  const [copied, setCopied] = useState(false);
+  const onClick = async () => {
+    let ok = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text || '');
+        ok = true;
+      }
+    } catch (e) {}
+    if (!ok) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text || '';
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        ok = true;
+      } catch (e) {}
+    }
+    setCopied(ok);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return /*#__PURE__*/React.createElement("button", {
+    onClick: onClick,
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.1)',
+      color: copied ? '#34d399' : '#64748b',
+      borderRadius: '4px',
+      padding: '1px 8px',
+      cursor: 'pointer',
+      fontSize: '0.62rem',
+      fontWeight: copied ? 700 : 400
+    }
+  }, copied ? 'Copied.' : label || 'Copy');
+}
+function MultifamilyOutreachCollapsible({
+  title,
+  defaultOpen,
+  children
+}) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setOpen(!open),
+    style: _siToggleBtnStyle
+  }, (open ? 'Hide ' : 'Show ') + title), open && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '8px'
+    }
+  }, children));
+}
 function MultifamilyOutreachLeadRow({
   lead,
   onOpen
@@ -10202,99 +10325,75 @@ function MultifamilyOutreachLeadRow({
   const [intel, setIntel] = useState(null);
   const [variant, setVariant] = useState(0);
   const [loadingIntel, setLoadingIntel] = useState(false);
-  const [showObjections, setShowObjections] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [intelError, setIntelError] = useState(null);
   const [showWhy, setShowWhy] = useState(false);
-  const loadIntel = useCallback(async v => {
-    setLoadingIntel(true);
+  const [activityMsg, setActivityMsg] = useState(null);
+  const loadIntel = useCallback(async (v, isRegenerate) => {
+    if (isRegenerate) setRegenerating(true);else setLoadingIntel(true);
+    setIntelError(null);
     try {
       const r = await fetch(`/api/multifamily/leads/${lead.id}/sales-intelligence?variant=${v}`);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
       setIntel(j);
-    } catch (e) {} finally {
-      setLoadingIntel(false);
+    } catch (e) {
+      setIntelError('Could not load sales intelligence for this lead.');
+    } finally {
+      if (isRegenerate) setRegenerating(false);else setLoadingIntel(false);
     }
   }, [lead.id]);
-  const toggle = async () => {
+  const toggle = () => {
     const next = !expanded;
     setExpanded(next);
-    if (next && !intel) {
-      loadIntel(variant);
-    }
+    if (next && !intel && !loadingIntel) loadIntel(variant, false);
   };
   const regenerate = () => {
     const nextVariant = variant + 1;
     setVariant(nextVariant);
-    loadIntel(nextVariant);
+    loadIntel(nextVariant, true);
+  };
+  const logActivity = async (activityType, extra) => {
+    try {
+      const r = await fetch(`/api/multifamily/leads/${lead.id}/activity`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          activity_type: activityType,
+          ...(extra || {})
+        })
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      setActivityMsg('✓ Logged');
+    } catch (e) {
+      setActivityMsg('Could not log activity — please log in.');
+    }
+    setTimeout(() => setActivityMsg(null), 2500);
+  };
+  const markCalled = () => logActivity('called');
+  const markEmailed = () => logActivity('emailed');
+  const markLinkedInSent = () => logActivity('linkedin_sent');
+  const addFollowUp = () => {
+    const fuNow = intel && intel.follow_up_strategy;
+    const days = fuNow && fuNow.recommended_wait_days || 7;
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    logActivity('follow_up_due', {
+      next_follow_up_date: d.toISOString().slice(0, 10),
+      note: fuNow ? `Suggested by Sales Intelligence: ${fuNow.follow_up_type.replace(/_/g, ' ')}` : undefined
+    });
   };
   const score = lead.score || {};
-  const messageFields = intel ? [['Call opener', intel.messages.call_opener], ['Email subject', intel.messages.first_email_subject], ['Email body', intel.messages.first_email_body], ['LinkedIn (manual)', intel.messages.linkedin_note_manual], ['Follow-up 1', intel.messages.follow_up_1], ['Follow-up 2', intel.messages.follow_up_2], ['Soft bump', intel.messages.soft_bump]] : [];
+  const strategy = intel && intel.strategy;
+  const context = intel && intel.context;
+  const reasoning = intel && intel.reasoning;
   const qp = intel && intel.question_path;
-  const questionGroups = qp ? [['Situation', qp.situation_questions], ['Problem awareness', qp.problem_awareness_questions], ['Solution awareness', qp.solution_awareness_questions], ['Consequence', qp.consequence_questions], ['Qualifying', qp.qualifying_questions]] : [];
   const fu = intel && intel.follow_up_strategy;
-  const followUpBlock = fu && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: '10px'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.68rem',
-      color: '#94a3b8',
-      fontWeight: 600,
-      marginBottom: '3px'
-    }
-  }, "Follow-up plan"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      gap: '6px',
-      alignItems: 'center',
-      flexWrap: 'wrap',
-      marginBottom: '4px'
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: mfPillStyle('#38bdf8')
-  }, fu.follow_up_type.replace(/_/g, ' ')), fu.recommended_wait_days > 0 && /*#__PURE__*/React.createElement("span", {
-    style: mfPillStyle('#64748b')
-  }, "~", fu.recommended_wait_days, "d"), fu.is_final_attempt && /*#__PURE__*/React.createElement("span", {
-    style: mfPillStyle('#f97316')
-  }, "final attempt")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.74rem',
-      color: '#94a3b8',
-      marginBottom: '6px'
-    }
-  }, fu.reasoning), fu.message_field && intel.messages[fu.message_field] && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      justifyContent: 'space-between'
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: '0.68rem',
-      color: '#94a3b8',
-      fontWeight: 600
-    }
-  }, "Suggested: ", fu.message_field.replace(/_/g, ' ')), /*#__PURE__*/React.createElement("button", {
-    onClick: () => mfCopy(intel.messages[fu.message_field]),
-    style: {
-      background: 'transparent',
-      border: '1px solid rgba(255,255,255,0.1)',
-      color: '#64748b',
-      borderRadius: '4px',
-      padding: '1px 8px',
-      cursor: 'pointer',
-      fontSize: '0.62rem'
-    }
-  }, "Copy")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      whiteSpace: 'pre-wrap',
-      fontSize: '0.76rem',
-      color: '#cbd5e1',
-      background: 'rgba(255,255,255,0.03)',
-      borderRadius: '6px',
-      padding: '8px',
-      marginTop: '3px'
-    }
-  }, intel.messages[fu.message_field])));
+  const tg = intel && intel.tone_guardrail;
+  const questionGroups = qp ? [['Connection', qp.connection_question ? [qp.connection_question] : []], ['Situation', qp.situation_questions], ['Problem awareness', qp.problem_awareness_questions], ['Solution awareness', qp.solution_awareness_questions], ['Consequence', qp.consequence_questions], ['Qualifying', qp.qualifying_questions], ['Transition', qp.transition_question ? [qp.transition_question] : []], ['Commitment', qp.commitment_question ? [qp.commitment_question] : []], ['Fallback', qp.fallback_question ? [qp.fallback_question] : []]] : [];
+  const hasAvoidContent = intel && (strategy.do_not && strategy.do_not.length > 0 || qp.questions_to_avoid && qp.questions_to_avoid.length > 0 || tg && tg.warnings && tg.warnings.length > 0);
   return /*#__PURE__*/React.createElement("div", {
     style: {
       background: 'rgba(15,22,36,0.97)',
@@ -10369,100 +10468,199 @@ function MultifamilyOutreachLeadRow({
     style: {
       marginTop: '10px'
     }
-  }, (loadingIntel || !intel) && /*#__PURE__*/React.createElement("div", {
+  }, loadingIntel && !intel && /*#__PURE__*/React.createElement("div", {
     style: {
       color: '#64748b',
       fontSize: '0.8rem'
     }
-  }, "Loading sales intelligence…"), intel && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, "Loading sales intelligence\u2026"), intelError && !intel && /*#__PURE__*/React.createElement("div", {
     style: {
+      color: '#f97316',
+      fontSize: '0.8rem'
+    }
+  }, intelError, ' ', /*#__PURE__*/React.createElement("button", {
+    onClick: () => loadIntel(variant, false),
+    style: _siToggleBtnStyle
+  }, "Retry")), intel && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      ..._siCardStyle,
       background: 'rgba(129,140,248,0.08)',
-      border: '1px solid rgba(129,140,248,0.25)',
-      borderRadius: '6px',
-      padding: '8px 10px',
-      marginBottom: '10px'
+      border: '1px solid rgba(129,140,248,0.25)'
     }
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      flexWrap: 'wrap',
-      gap: '6px'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.78rem',
-      color: '#e2e8f0',
-      fontWeight: 600
-    }
-  }, "Recommended: ", intel.reasoning.selected_strategy), /*#__PURE__*/React.createElement("div", {
+    style: _siCardHeaderStyle
+  }, "Recommended Approach"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: '6px',
-      alignItems: 'center',
-      flexWrap: 'wrap'
+      flexWrap: 'wrap',
+      marginBottom: '6px'
     }
   }, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#f59e0b')
+  }, "Recommended Action: ", _mfTitleCase(strategy.recommended_action)), /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#818cf8')
-  }, "Stage: ", intel.reasoning.selected_nepq_stage), intel.strategy.conversation_mode && /*#__PURE__*/React.createElement("span", {
+  }, "Stage: ", _mfTitleCase(strategy.starting_nepq_stage)), strategy.conversation_mode && /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#38bdf8')
-  }, "Mode: ", intel.strategy.conversation_mode.replace(/_/g, ' ')), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowWhy(!showWhy),
+  }, "Mode: ", _mfTitleCase(strategy.conversation_mode)), context.buyer_awareness_level && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#a78bfa')
+  }, "Buyer Awareness: ", _mfTitleCase(context.buyer_awareness_level)), /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(_mfResistanceColor(context.resistance_risk))
+  }, "Resistance Risk: ", _mfTitleCase(context.resistance_risk)), /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(_mfConfidenceColor(reasoning.confidence_score))
+  }, "Confidence: ", Math.round((reasoning.confidence_score || 0) * 100), "%", reasoning.confidence_score != null && reasoning.confidence_score < 0.5 ? ' (low)' : '')), strategy.primary_objective && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: 'transparent',
-      border: '1px solid rgba(255,255,255,0.1)',
-      color: '#94a3b8',
-      borderRadius: '4px',
-      padding: '1px 8px',
-      cursor: 'pointer',
-      fontSize: '0.65rem'
+      fontSize: '0.78rem',
+      color: '#cbd5e1',
+      marginBottom: '6px'
     }
+  }, strategy.primary_objective), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '6px',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowWhy(!showWhy),
+    style: _siToggleBtnStyle
   }, showWhy ? 'Hide why' : 'Why this approach?'), /*#__PURE__*/React.createElement("button", {
     onClick: regenerate,
+    disabled: regenerating,
     style: {
-      background: 'transparent',
+      ..._siToggleBtnStyle,
       border: '1px solid rgba(245,158,11,0.4)',
       color: '#f59e0b',
-      borderRadius: '4px',
-      padding: '1px 8px',
-      cursor: 'pointer',
-      fontSize: '0.65rem'
+      opacity: regenerating ? 0.6 : 1
     }
-  }, "↻ Regenerate approach"))), showWhy && /*#__PURE__*/React.createElement("div", {
+  }, regenerating ? 'Regenerating…' : '↻ Regenerate approach')), intelError && /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: '6px',
+      fontSize: '0.68rem',
+      color: '#f97316'
+    }
+  }, intelError), showWhy && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '8px',
       fontSize: '0.74rem',
-      color: '#94a3b8'
+      color: '#94a3b8',
+      borderTop: '1px solid rgba(255,255,255,0.06)',
+      paddingTop: '6px'
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       marginBottom: '4px'
     }
-  }, intel.reasoning.why_this_stage), /*#__PURE__*/React.createElement("div", null, intel.reasoning.why_this_message), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("b", {
     style: {
-      marginTop: '4px',
-      color: '#64748b'
-    }
-  }, "Confidence: ", Math.round(intel.reasoning.confidence_score * 100), "%"))), (intel.context.missing_information || []).length > 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: '10px'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.68rem',
-      color: '#94a3b8',
-      fontWeight: 600,
-      marginBottom: '3px'
-    }
-  }, "Missing information to uncover"), intel.context.missing_information.map((m, i) => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    style: {
-      fontSize: '0.74rem',
       color: '#cbd5e1'
     }
-  }, "• ", m))), messageFields.map(([label, text]) => /*#__PURE__*/React.createElement("div", {
-    key: label,
+  }, "Why this stage: "), reasoning.why_this_stage), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '4px'
+    }
+  }, /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#cbd5e1'
+    }
+  }, "Why this message: "), reasoning.why_this_message), reasoning.key_lead_signals_used && reasoning.key_lead_signals_used.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '4px'
+    }
+  }, /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#cbd5e1'
+    }
+  }, "Signals used: "), reasoning.key_lead_signals_used.join(', ')), reasoning.assumed_pain_points && reasoning.assumed_pain_points.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '4px'
+    }
+  }, /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#cbd5e1'
+    }
+  }, "Assumed pain points: "), reasoning.assumed_pain_points.join(', ')), reasoning.missing_information && reasoning.missing_information.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '4px'
+    }
+  }, /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#cbd5e1'
+    }
+  }, "Missing information: "), reasoning.missing_information.join(', ')), reasoning.recommended_next_step && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#94a3b8'
+    }
+  }, "Next step: "), reasoning.recommended_next_step))), /*#__PURE__*/React.createElement("div", {
+    style: _siCardStyle
+  }, /*#__PURE__*/React.createElement("div", {
+    style: _siCardHeaderStyle
+  }, "Call Opener"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement(MultifamilyOutreachCopyButton, {
+    text: intel.messages.call_opener,
+    label: "Copy Call Opener"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: _siTextBoxStyle
+  }, intel.messages.call_opener)), /*#__PURE__*/React.createElement("div", {
+    style: _siCardStyle
+  }, /*#__PURE__*/React.createElement("div", {
+    style: _siCardHeaderStyle
+  }, "Email Draft"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: _siLabelStyle
+  }, "Subject"), /*#__PURE__*/React.createElement(MultifamilyOutreachCopyButton, {
+    text: intel.messages.first_email_subject,
+    label: "Copy Subject"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: _siTextBoxStyle
+  }, intel.messages.first_email_subject), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginTop: '6px'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: _siLabelStyle
+  }, "Body"), /*#__PURE__*/React.createElement(MultifamilyOutreachCopyButton, {
+    text: intel.messages.first_email_body,
+    label: "Copy Email"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: _siTextBoxStyle
+  }, intel.messages.first_email_body)), /*#__PURE__*/React.createElement("div", {
+    style: _siCardStyle
+  }, /*#__PURE__*/React.createElement("div", {
+    style: _siCardHeaderStyle
+  }, "LinkedIn Note"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#f59e0b',
+      marginBottom: '4px'
+    }
+  }, "Manual LinkedIn note \u2014 copy/paste only"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement(MultifamilyOutreachCopyButton, {
+    text: intel.messages.linkedin_note_manual,
+    label: "Copy LinkedIn Note"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: _siTextBoxStyle
+  }, intel.messages.linkedin_note_manual)), /*#__PURE__*/React.createElement("div", {
+    style: _siCardStyle
+  }, /*#__PURE__*/React.createElement("div", {
+    style: _siCardHeaderStyle
+  }, "Follow-Ups"), [['Follow-up 1', 'follow_up_1'], ['Follow-up 2', 'follow_up_2'], ['Soft bump', 'soft_bump']].map(([label, field]) => /*#__PURE__*/React.createElement("div", {
+    key: field,
     style: {
       marginBottom: '8px'
     }
@@ -10472,90 +10670,73 @@ function MultifamilyOutreachLeadRow({
       justifyContent: 'space-between'
     }
   }, /*#__PURE__*/React.createElement("span", {
+    style: _siLabelStyle
+  }, label), /*#__PURE__*/React.createElement(MultifamilyOutreachCopyButton, {
+    text: intel.messages[field]
+  })), /*#__PURE__*/React.createElement("div", {
+    style: _siTextBoxStyle
+  }, intel.messages[field]))), fu && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: '0.68rem',
-      color: '#94a3b8',
-      fontWeight: 600
+      marginTop: '4px',
+      paddingTop: '8px',
+      borderTop: '1px solid rgba(255,255,255,0.06)'
     }
-  }, label), /*#__PURE__*/React.createElement("button", {
-    onClick: () => mfCopy(text),
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
-      background: 'transparent',
-      border: '1px solid rgba(255,255,255,0.1)',
-      color: '#64748b',
-      borderRadius: '4px',
-      padding: '1px 8px',
-      cursor: 'pointer',
-      fontSize: '0.62rem'
+      display: 'flex',
+      gap: '6px',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      marginBottom: '4px'
     }
-  }, "Copy")), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#38bdf8')
+  }, "Next: ", _mfTitleCase(fu.follow_up_type)), fu.recommended_wait_days > 0 && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#64748b')
+  }, "~", fu.recommended_wait_days, "d"), fu.is_final_attempt && /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#f97316')
+  }, "final attempt")), /*#__PURE__*/React.createElement("div", {
     style: {
-      whiteSpace: 'pre-wrap',
-      fontSize: '0.76rem',
-      color: '#cbd5e1',
-      background: 'rgba(255,255,255,0.03)',
-      borderRadius: '6px',
-      padding: '8px',
-      marginTop: '3px'
+      fontSize: '0.74rem',
+      color: '#94a3b8'
     }
-  }, text))), /*#__PURE__*/React.createElement("div", {
+  }, fu.reasoning), fu.message_field && !['call_opener', 'first_email_subject', 'first_email_body', 'linkedin_note_manual', 'follow_up_1', 'follow_up_2', 'soft_bump'].includes(fu.message_field) && intel.messages[fu.message_field] && /*#__PURE__*/React.createElement("div", {
     style: {
-      marginTop: '4px'
+      marginTop: '6px'
     }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: _siLabelStyle
+  }, "Suggested: ", _mfTitleCase(fu.message_field)), /*#__PURE__*/React.createElement(MultifamilyOutreachCopyButton, {
+    text: intel.messages[fu.message_field]
+  })), /*#__PURE__*/React.createElement("div", {
+    style: _siTextBoxStyle
+  }, intel.messages[fu.message_field])))), /*#__PURE__*/React.createElement(MultifamilyOutreachCollapsible, {
+    title: "discovery question path",
+    defaultOpen: false
   }, questionGroups.filter(([, qs]) => qs && qs.length > 0).map(([label, qs]) => /*#__PURE__*/React.createElement("div", {
     key: label,
     style: {
       marginBottom: '8px'
     }
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '0.68rem',
-      color: '#94a3b8',
-      fontWeight: 600,
-      marginBottom: '3px'
-    }
-  }, label, " questions"), qs.map((q, i) => /*#__PURE__*/React.createElement("div", {
+    style: _siLabelStyle
+  }, label), qs.map((q, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     style: {
       fontSize: '0.76rem',
       color: '#cbd5e1'
     }
-  }, "• ", q)))), qp && qp.questions_to_avoid && qp.questions_to_avoid.length > 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: '10px'
-    }
+  }, "\u2022 ", q))))), /*#__PURE__*/React.createElement(MultifamilyOutreachCollapsible, {
+    title: "objection / resistance guidance",
+    defaultOpen: false
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: '0.68rem',
-      color: '#f97316',
-      fontWeight: 600,
-      marginBottom: '3px'
-    }
-  }, "Questions/angles to avoid"), qp.questions_to_avoid.map((q, i) => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    style: {
-      fontSize: '0.74rem',
-      color: '#fca5a5'
-    }
-  }, "• ", q))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: '6px'
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowObjections(!showObjections),
-    style: {
-      background: 'transparent',
-      border: '1px solid rgba(255,255,255,0.12)',
-      color: '#94a3b8',
-      borderRadius: '4px',
-      padding: '3px 10px',
-      cursor: 'pointer',
-      fontSize: '0.68rem'
-    }
-  }, showObjections ? 'Hide objection guidance' : 'Show objection/resistance guidance'), showObjections && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: '8px',
-      maxHeight: '260px',
+      maxHeight: '300px',
       overflowY: 'auto'
     }
   }, intel.objection_playbook.map(o => /*#__PURE__*/React.createElement("div", {
@@ -10570,11 +10751,17 @@ function MultifamilyOutreachLeadRow({
       color: '#e2e8f0',
       fontWeight: 600
     }
-  }, o.objection_key.replace(/_/g, ' ')), /*#__PURE__*/React.createElement("div", {
+  }, o.objection_key.replace(/_/g, ' ')), o.likely_meaning && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#64748b',
+      marginTop: '2px'
+    }
+  }, "Likely means: ", o.likely_meaning), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.72rem',
       color: '#cbd5e1',
-      marginTop: '2px'
+      marginTop: '3px'
     }
   }, o.response), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -10582,7 +10769,71 @@ function MultifamilyOutreachLeadRow({
       color: '#64748b',
       marginTop: '2px'
     }
-  }, "Follow-up: ", o.follow_up_strategy)))))), followUpBlock)));
+  }, "Follow-up: ", o.follow_up_strategy), o.what_not_to_say && o.what_not_to_say.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#fca5a5',
+      marginTop: '2px'
+    }
+  }, "Don't say: ", o.what_not_to_say.join('; ')))))), hasAvoidContent && /*#__PURE__*/React.createElement("div", {
+    style: {
+      ..._siCardStyle,
+      background: 'rgba(249,115,22,0.05)',
+      border: '1px solid rgba(249,115,22,0.2)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      ..._siCardHeaderStyle,
+      color: '#f97316'
+    }
+  }, "What to Avoid"), strategy.do_not && strategy.do_not.map((d, i) => /*#__PURE__*/React.createElement("div", {
+    key: 'd' + i,
+    style: {
+      fontSize: '0.74rem',
+      color: '#fca5a5',
+      marginBottom: '2px'
+    }
+  }, "\u2022 ", d)), qp.questions_to_avoid && qp.questions_to_avoid.map((q, i) => /*#__PURE__*/React.createElement("div", {
+    key: 'q' + i,
+    style: {
+      fontSize: '0.74rem',
+      color: '#fca5a5',
+      marginBottom: '2px'
+    }
+  }, "\u2022 ", q)), tg && tg.warnings && tg.warnings.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '6px',
+      fontSize: '0.7rem',
+      color: '#f59e0b'
+    }
+  }, "Tone check: ", tg.warnings.map(w => `${w.field.replace(/_/g, ' ')} — ${w.reasons.join('; ')}`).join(' · '))), !lead.is_demo && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '10px',
+      paddingTop: '8px',
+      borderTop: '1px solid rgba(255,255,255,0.06)',
+      display: 'flex',
+      gap: '6px',
+      flexWrap: 'wrap',
+      alignItems: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: markCalled,
+    style: _siActivityBtnStyle
+  }, "Mark Called"), /*#__PURE__*/React.createElement("button", {
+    onClick: markEmailed,
+    style: _siActivityBtnStyle
+  }, "Mark Emailed"), /*#__PURE__*/React.createElement("button", {
+    onClick: markLinkedInSent,
+    style: _siActivityBtnStyle
+  }, "Mark LinkedIn Sent"), /*#__PURE__*/React.createElement("button", {
+    onClick: addFollowUp,
+    style: _siActivityBtnStyle
+  }, "Add Follow-Up"), activityMsg && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#94a3b8'
+    }
+  }, activityMsg)))));
 }
 function MultifamilyOutreachWorkbenchPanel({
   activeTab,

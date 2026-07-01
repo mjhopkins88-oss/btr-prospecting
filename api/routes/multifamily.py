@@ -38,6 +38,7 @@ from multifamily.sales_intelligence.follow_up_suggestions import (
     build_follow_up_suggestion as _follow_up_suggestion,
     attach_follow_up_suggestions as _attach_follow_up_suggestions,
 )
+from multifamily.sales_intelligence.tone_guardrails import check_message_package, worst_status
 
 multifamily_bp = Blueprint('multifamily', __name__, url_prefix='/api/multifamily')
 
@@ -637,6 +638,14 @@ def get_lead_sales_intelligence(lead_id):
     activities = [] if lead.is_demo else repository.get_activities_for_lead(lead_id)
     outcomes = [] if lead.is_demo else repository.get_outcomes_for_lead(lead_id)
     pkg = build_sales_intelligence(lead, activities=activities, outcomes=outcomes, variant=variant)
+    guardrail_results = check_message_package(pkg.messages)
+    tone_guardrail = {
+        'status': worst_status(guardrail_results),
+        'warnings': [
+            {'field': field, 'status': r.status, 'reasons': r.reasons}
+            for field, r in guardrail_results.items() if r.status != 'pass'
+        ],
+    }
     return jsonify({
         'lead_id': lead_id,
         'company': lead.company.name,
@@ -648,6 +657,7 @@ def get_lead_sales_intelligence(lead_id):
         'objection_playbook': [dataclasses.asdict(o) for o in pkg.objection_playbook],
         'follow_up_strategy': dataclasses.asdict(pkg.follow_up_strategy),
         'reasoning': dataclasses.asdict(pkg.reasoning),
+        'tone_guardrail': tone_guardrail,
     })
 
 
