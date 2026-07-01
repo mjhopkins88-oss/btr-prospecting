@@ -50,6 +50,11 @@ _ADDED_COLUMNS = [
     ('merge_status', "TEXT NOT NULL DEFAULT 'active'"),  # active | merged
     ('merged_into_id', 'TEXT'),                          # survivor id when merged away
     ('signal_count', 'INTEGER'),                         # number of signals combined into this lead
+    # Outcome-tracking phase: cache of the latest recorded outcome event —
+    # kept in sync by record_outcome() so filtering/reporting never has to
+    # replay the append-only multifamily_lead_outcomes history.
+    ('current_outcome', 'TEXT'),
+    ('current_outcome_at', 'TEXT'),
 ]
 
 
@@ -197,6 +202,29 @@ def ensure_schema() -> None:
         )
     ''')
 
+    # Outcome tracking (outcome/snapshot/notification phase). Append-only —
+    # multifamily_leads.current_outcome/current_outcome_at cache the latest
+    # event for fast filtering. Real leads only.
+    execute('''
+        CREATE TABLE IF NOT EXISTS multifamily_lead_outcomes (
+            id TEXT PRIMARY KEY,
+            lead_id TEXT NOT NULL,
+            outcome_type TEXT NOT NULL,
+            outcome_date TEXT,
+            estimated_premium REAL,
+            estimated_revenue REAL,
+            quoted_premium REAL,
+            bound_premium REAL,
+            effective_date TEXT,
+            renewal_date TEXT,
+            lost_reason TEXT,
+            won_reason TEXT,
+            notes TEXT,
+            created_by TEXT,
+            created_at TIMESTAMP
+        )
+    ''')
+
     try:
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_leads_created ON multifamily_leads(created_at DESC)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_leads_state ON multifamily_leads(state)')
@@ -212,6 +240,9 @@ def ensure_schema() -> None:
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_source_runs_created ON multifamily_source_runs(created_at DESC)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_match_candidates_status ON multifamily_lead_match_candidates(status, created_at DESC)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_leads_merge_status ON multifamily_leads(merge_status)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_outcomes_lead ON multifamily_lead_outcomes(lead_id, created_at DESC)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_outcomes_type ON multifamily_lead_outcomes(outcome_type)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_leads_current_outcome ON multifamily_leads(current_outcome)')
     except Exception:
         pass
 
@@ -959,3 +990,87 @@ def mark_lead_merged(loser_id: str, survivor_id: str) -> None:
         "UPDATE multifamily_leads SET merge_status = 'merged', merged_into_id = ? WHERE id = ?",
         [survivor_id, loser_id],
     )
+
+
+# ===========================================================================
+# Outcome tracking (outcome/snapshot/notification phase)
+# Append-only business-outcome events on real leads. current_outcome/
+# current_outcome_at on multifamily_leads always mirror the LATEST event
+# (by outcome_date, tie-broken by created_at) for cheap filtering/reporting.
+# ===========================================================================
+
+def record_outcome(
+    lead_id: str, outcome_type: str, *, outcome_date: Optional[str] = None,
+    estimated_premium: Optional[float] = None, estimated_revenue: Optional[float] = None,
+    quoted_premium: Optional[float] = None, bound_premium: Optional[float] = None,
+    effective_date: Optional[str] = None, renewal_date: Optional[str] = None,
+    lost_reason: Optional[str] = None, won_reason: Optional[str] = None,
+    notes: Optional[str] = None, created_by: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Persist one outcome event and refresh the lead's current_outcome
+    cache to the most recent event (by outcome_date). Real leads only —
+    callers must resolve a real lead id before calling this."""
+    ensure_schema()
+    from multifamily.types import new_id, utc_now_iso
+    now = utc_now_iso()
+    row = {
+        'id': new_id(), 'lead_id': lead_id, 'outcome_type': outcome_type,
+        'outcome_date': outcome_date or now, 'estimated_premium': estimated_premium,
+        'estimated_revenue': estimated_revenue, 'quoted_premium': quoted_premium,
+        'bound_premium': bound_premium, 'effective_date': effective_date,
+        'renewal_date': renewal_date, 'lost_reason': lost_reason, 'won_reason': won_reason,
+        'notes': notes, 'created_by': (created_by or '').lower() or None, 'created_at': now,
+    }
+    execute(
+        'INSERT INTO multifamily_lead_outcomes (id, lead_id, outcome_type, outcome_date, estimated_premium, '
+        'estimated_revenue, quoted_premium, bound_premium, effective_date, renewal_date, lost_reason, won_reason, '
+        'notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        list(row.values()),
+    )
+    latest = get_current_outcome(lead_id)
+    if latest:
+        execute(
+            'UPDATE multifamily_leads SET current_outcome = ?, current_outcome_at = ? WHERE id = ?',
+            [latest['outcome_type'], latest['outcome_date'], lead_id],
+        )
+    return row
+
+
+def get_outcomes_for_lead(lead_id: str) -> List[Dict[str, Any]]:
+    """All outcome events for a lead, most recent first (by outcome_date,
+    then created_at, so backdated entries still sort correctly)."""
+    ensure_schema()
+    return fetch_all(
+        'SELECT id, lead_id, outcome_type, outcome_date, estimated_premium, estimated_revenue, quoted_premium, '
+        'bound_premium, effective_date, renewal_date, lost_reason, won_reason, notes, created_by, created_at '
+        'FROM multifamily_lead_outcomes WHERE lead_id = ? ORDER BY outcome_date DESC, created_at DESC',
+        [lead_id],
+    )
+
+
+def get_current_outcome(lead_id: str) -> Optional[Dict[str, Any]]:
+    """The single most-recent outcome event for a lead, or None."""
+    rows = get_outcomes_for_lead(lead_id)
+    return rows[0] if rows else None
+
+
+def get_current_outcomes_for_leads(lead_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Bulk current-outcome lookup for a batch of REAL lead ids — lets list
+    views show a lead-card outcome pill without one query per lead. Returns
+    only ids that actually have a current_outcome set."""
+    ensure_schema()
+    if not lead_ids:
+        return {}
+    placeholders = ', '.join(['?'] * len(lead_ids))
+    rows = fetch_all(
+        f'SELECT id, current_outcome, current_outcome_at FROM multifamily_leads '
+        f'WHERE id IN ({placeholders}) AND current_outcome IS NOT NULL',
+        lead_ids,
+    )
+    return {r['id']: {'outcome_type': r['current_outcome'], 'outcome_date': r['current_outcome_at']} for r in rows}
+
+
+def delete_outcomes_for_lead(lead_id: str) -> None:
+    ensure_schema()
+    execute('DELETE FROM multifamily_lead_outcomes WHERE lead_id = ?', [lead_id])
+    execute('UPDATE multifamily_leads SET current_outcome = NULL, current_outcome_at = NULL WHERE id = ?', [lead_id])

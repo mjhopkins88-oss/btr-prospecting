@@ -52,6 +52,28 @@ ACTIVITY_TYPES = [
     'not_a_fit', 'moved_to_nurture', 'needs_info', 'follow_up_due',
 ]
 
+# ---- Outcome tracking (outcome/snapshot/notification phase) --------------
+# Real business outcomes recorded against a lead (multifamily_lead_outcomes).
+# Append-only event log — `current_outcome` on multifamily_leads always
+# reflects the LATEST recorded event (by outcome_date, tie-broken by
+# created_at), so filtering/reporting never has to replay history.
+OUTCOME_TYPES = [
+    'meeting_booked', 'submission_received', 'sov_received', 'loss_runs_received',
+    'application_received', 'quote_started', 'quote_sent',
+    'won', 'lost', 'not_a_fit', 'nurture', 'dead',
+]
+
+# Rough funnel ordering for reporting (not used to gate transitions — an
+# operator can record outcomes in any order/re-record the same type).
+OUTCOME_FUNNEL_RANK = {
+    'meeting_booked': 1, 'submission_received': 2, 'sov_received': 3,
+    'loss_runs_received': 3, 'application_received': 3, 'quote_started': 4,
+    'quote_sent': 5, 'won': 6, 'lost': 6, 'not_a_fit': 6, 'nurture': 6, 'dead': 6,
+}
+
+# Terminal outcomes — the deal is closed one way or another.
+OUTCOME_TERMINAL_TYPES = {'won', 'lost', 'not_a_fit', 'dead'}
+
 # ---- Signal architecture / dedupe-merge (signal-architecture phase) ----
 # Source-attribution touch types (multifamily_source_attribution).
 ATTRIBUTION_TOUCH_TYPES = ['first', 'latest', 'conversion', 'touch']
@@ -256,6 +278,31 @@ class MultifamilyActivity:
     note: Optional[str] = None
     next_follow_up_date: Optional[str] = None  # ISO date (YYYY-MM-DD)
     user_email: Optional[str] = None
+    created_at: str = field(default_factory=utc_now_iso)
+
+
+@dataclass
+class MultifamilyOutcome:
+    """One recorded business-outcome event on a lead
+    (multifamily_lead_outcomes). Append-only — `current_outcome`/
+    `current_outcome_at` on multifamily_leads is a cache of the latest
+    event, kept in sync by repository.record_outcome. Real leads only —
+    demo lead ids regenerate every pipeline run, so outcomes never
+    meaningfully attach to them."""
+    id: str
+    lead_id: str
+    outcome_type: str  # one of OUTCOME_TYPES
+    outcome_date: str = field(default_factory=utc_now_iso)
+    estimated_premium: Optional[float] = None
+    estimated_revenue: Optional[float] = None
+    quoted_premium: Optional[float] = None
+    bound_premium: Optional[float] = None
+    effective_date: Optional[str] = None
+    renewal_date: Optional[str] = None
+    lost_reason: Optional[str] = None
+    won_reason: Optional[str] = None
+    notes: Optional[str] = None
+    created_by: Optional[str] = None
     created_at: str = field(default_factory=utc_now_iso)
 
 
