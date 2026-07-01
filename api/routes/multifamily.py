@@ -11,6 +11,7 @@ flagged via `is_demo` on each lead, and `is_demo_data` on aggregate
 responses) only when it has zero matching real leads.
 """
 import dataclasses
+import re
 from datetime import date, datetime, timedelta
 from typing import Any, Dict
 
@@ -26,9 +27,12 @@ from multifamily.daily_brief.multifamily_daily_brief_builder import build_daily_
 from multifamily.intake import build_lead_from_intake
 from multifamily import repository
 from multifamily import spam_guard
-from multifamily.types import ACTIVITY_TYPES, OUTCOME_TYPES, CAMPAIGN_STATUSES, CAMPAIGN_TARGET_STATUSES
+from multifamily.types import (
+    ACTIVITY_TYPES, OUTCOME_TYPES, CAMPAIGN_STATUSES, CAMPAIGN_TARGET_STATUSES, CAMPAIGN_TARGET_TOUCH_STEPS,
+    DISQUALIFICATION_REASONS, REPLY_SENTIMENTS,
+)
 from multifamily.stage_timing import compute_stage_timing
-from multifamily.timing import detect_process_stage
+from multifamily.timing import detect_process_stage, estimate_first_renewal
 from multifamily.timing.process_stage_types import OUTREACH_WINDOW_RANK
 from multifamily.outreach.outreach_bundle_builder import build_outreach_bundle
 from multifamily import matching as mf_matching
@@ -142,6 +146,11 @@ def _serialize_lead(lead, is_admin, stage_result=None, with_history=False, curre
     d['signal_timeline'] = _signal_timeline(lead)
     # Funnel Phase 4: derived, read-only — never touches score_total/category.
     d['funnel_urgency'] = compute_funnel_urgency(lead)
+    # Section 8 item 2: first-renewal watchlist — derived, read-only, only
+    # set for acquisition-origin leads with a known close date.
+    first_renewal = estimate_first_renewal(lead)
+    d['first_renewal_estimate'] = first_renewal['first_renewal_estimate'] if first_renewal else None
+    d['renewal_window_opens_at'] = first_renewal['renewal_window_opens_at'] if first_renewal else None
     # Outcome tracking: cheap (bulk-fetched), always-on. Demo leads never
     # carry a persisted outcome.
     d['current_outcome'] = current_outcome
@@ -996,12 +1005,20 @@ def log_activity(lead_id):
         activity_type = (payload.get('activity_type') or '').strip()
         if activity_type not in ACTIVITY_TYPES:
             return jsonify({'success': False, 'errors': [f'activity_type must be one of {ACTIVITY_TYPES}']}), 400
+        disqualification_reason = (payload.get('disqualification_reason') or payload.get('disqualificationReason') or '').strip() or None
+        if disqualification_reason and disqualification_reason not in DISQUALIFICATION_REASONS:
+            return jsonify({'success': False, 'errors': [f'disqualification_reason must be one of {DISQUALIFICATION_REASONS}']}), 400
+        reply_sentiment = (payload.get('reply_sentiment') or payload.get('replySentiment') or '').strip() or None
+        if reply_sentiment and reply_sentiment not in REPLY_SENTIMENTS:
+            return jsonify({'success': False, 'errors': [f'reply_sentiment must be one of {REPLY_SENTIMENTS}']}), 400
         user_email = (g.user or {}).get('email') if getattr(g, 'user', None) else None
         activity = repository.insert_activity(
             lead_id, activity_type,
             note=(payload.get('note') or None),
             next_follow_up_date=(payload.get('next_follow_up_date') or None),
             user_email=user_email,
+            disqualification_reason=disqualification_reason,
+            reply_sentiment=reply_sentiment,
         )
         if activity_type in ('replied', 'meeting_booked'):
             lead_row = repository.get_lead_row(lead_id)
@@ -1373,6 +1390,45 @@ def create_campaign_target(campaign_id):
     return _authorized()
 
 
+@multifamily_bp.route('/campaigns/<campaign_id>/targets/import', methods=['POST'])
+def import_campaign_targets(campaign_id):
+    """Bulk-add prospects from a CSV (file upload or a raw `csv` string
+    in the JSON body — either works, so this is scriptable without a
+    browser too). Columns: company (required), contact_name, email,
+    phone, linkedin_url, city, state, segment, notes, property_name,
+    units, year_built, close_date. A row with a real email is run
+    through the SAME create-or-match path every other real submission
+    uses (multifamily.campaigns.csv_import), so it strengthens an
+    existing lead instead of duplicating one; a row with close_date is
+    ingested with acquisition context regardless of this campaign's own
+    offer, so first_renewal_estimator can see it later. Login
+    required."""
+    import app as _app
+    from multifamily.campaigns.csv_import import import_targets_from_csv
+
+    @_app.require_auth
+    def _authorized():
+        campaign = repository.get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({'error': 'Campaign not found'}), 404
+
+        file_content = None
+        uploaded = request.files.get('file')
+        if uploaded:
+            file_content = uploaded.read().decode('utf-8', errors='replace')
+        else:
+            payload = request.get_json(silent=True) or {}
+            file_content = payload.get('csv')
+
+        if not file_content:
+            return jsonify({'success': False, 'errors': ['No CSV file or csv text provided.']}), 400
+
+        summary = import_targets_from_csv(campaign, file_content)
+        return jsonify({'success': True, **summary}), 201
+
+    return _authorized()
+
+
 @multifamily_bp.route('/campaigns/<campaign_id>/targets', methods=['GET'])
 def list_campaign_targets_route(campaign_id):
     """Login required."""
@@ -1412,7 +1468,16 @@ def update_campaign_target_status(target_id):
         if status not in CAMPAIGN_TARGET_STATUSES:
             return jsonify({'success': False, 'errors': [f'status must be one of {CAMPAIGN_TARGET_STATUSES}']}), 400
         notes = payload.get('notes')
-        repository.update_campaign_target_status(target_id, status, notes=notes)
+        disqualification_reason = (payload.get('disqualification_reason') or payload.get('disqualificationReason') or '').strip() or None
+        if disqualification_reason and disqualification_reason not in DISQUALIFICATION_REASONS:
+            return jsonify({'success': False, 'errors': [f'disqualification_reason must be one of {DISQUALIFICATION_REASONS}']}), 400
+        reply_sentiment = (payload.get('reply_sentiment') or payload.get('replySentiment') or '').strip() or None
+        if reply_sentiment and reply_sentiment not in REPLY_SENTIMENTS:
+            return jsonify({'success': False, 'errors': [f'reply_sentiment must be one of {REPLY_SENTIMENTS}']}), 400
+        repository.update_campaign_target_status(
+            target_id, status, notes=notes,
+            disqualification_reason=disqualification_reason, reply_sentiment=reply_sentiment,
+        )
 
         if target.get('lead_id') and status in ('contacted', 'replied', 'meeting_booked', 'not_fit', 'nurture'):
             activity_type = {
@@ -1420,7 +1485,10 @@ def update_campaign_target_status(target_id):
                 'not_fit': 'not_a_fit', 'nurture': 'moved_to_nurture',
             }[status]
             user_email = (g.user or {}).get('email') if getattr(g, 'user', None) else None
-            activity = repository.insert_activity(target['lead_id'], activity_type, note=notes, user_email=user_email)
+            activity = repository.insert_activity(
+                target['lead_id'], activity_type, note=notes, user_email=user_email,
+                disqualification_reason=disqualification_reason, reply_sentiment=reply_sentiment,
+            )
             lead_row = repository.get_lead_row(target['lead_id'])
             company_name = (lead_row or {}).get('company_name') or target.get('company') or 'A lead'
             if status == 'replied':
@@ -1428,6 +1496,53 @@ def update_campaign_target_status(target_id):
             elif status == 'meeting_booked':
                 mf_notifications.notify_meeting_booked(target['lead_id'], company_name, activity['id'])
 
+        return jsonify({'success': True, 'target': repository.get_campaign_target(target_id)})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/campaign-targets/<target_id>/touch', methods=['POST'])
+def mark_campaign_target_touch_route(target_id):
+    """Mark one Section 7 sequence step (touch_1_sent/connected/
+    touch_2_sent/called/breakup_sent) or the 'bounced' data-quality flag
+    with a timestamp — a SEPARATE axis from `status` (see
+    CAMPAIGN_TARGET_TOUCH_STEPS). Idempotent: re-marking the same step
+    just updates its timestamp. Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        target = repository.get_campaign_target(target_id)
+        if not target:
+            return jsonify({'error': 'Campaign target not found'}), 404
+        payload = request.get_json(silent=True) or {}
+        step = (payload.get('step') or '').strip()
+        if step not in CAMPAIGN_TARGET_TOUCH_STEPS:
+            return jsonify({'success': False, 'errors': [f'step must be one of {CAMPAIGN_TARGET_TOUCH_STEPS}']}), 400
+        repository.mark_campaign_target_touch(target_id, step)
+        return jsonify({'success': True, 'target': repository.get_campaign_target(target_id)})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/campaign-targets/<target_id>/renewal-month', methods=['POST'])
+def set_campaign_target_renewal_month_route(target_id):
+    """Capture a coarse ('YYYY-MM') renewal estimate an operator picked
+    up in conversation — used by the timing engine only when no precise
+    renewal_date_known signal exists on the linked lead. Login
+    required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        target = repository.get_campaign_target(target_id)
+        if not target:
+            return jsonify({'error': 'Campaign target not found'}), 404
+        payload = request.get_json(silent=True) or {}
+        renewal_month = (payload.get('renewalMonth') or payload.get('renewal_month') or '').strip()
+        if not re.match(r'^\d{4}-\d{2}$', renewal_month):
+            return jsonify({'success': False, 'errors': ["renewal_month must be in 'YYYY-MM' format"]}), 400
+        repository.set_campaign_target_renewal_month(target_id, renewal_month)
         return jsonify({'success': True, 'target': repository.get_campaign_target(target_id)})
 
     return _authorized()

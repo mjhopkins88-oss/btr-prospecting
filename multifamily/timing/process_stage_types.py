@@ -14,7 +14,7 @@ windows/urgency are time-dependent (a "renewal in 90 days" becomes "in
 30 days" without the lead ever being re-submitted).
 """
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 # ---- Process stages (the insurance opportunity lifecycle) ----
 PROCESS_STAGES = [
@@ -26,6 +26,7 @@ PROCESS_STAGES = [
     'construction_loan_closing',
     'construction_start',
     'completion_or_lease_up',
+    'post_renewal_active',
     'post_renewal',
     'general_watchlist',
 ]
@@ -39,9 +40,18 @@ PROCESS_STAGE_LABELS = {
     'construction_loan_closing': 'Construction Loan / Builder\'s Risk',
     'construction_start': 'Construction Start',
     'completion_or_lease_up': 'Completion / Lease-Up',
+    'post_renewal_active': 'Post-Renewal (Active Window)',
     'post_renewal': 'Post-Renewal',
     'general_watchlist': 'General Watchlist',
 }
+
+# Continuous, gapless renewal-urgency bands (Strategy Research §3/§8) —
+# a SEPARATE axis from outreach_window/urgency_label, used only for
+# MESSAGE POSTURE: 'open'/'decision' both read as analysis and
+# benchmarking (no rush, independent read); 'rescue' reads as speed and
+# market access (capacity/access is the story, not analysis). None when
+# no renewal date is known.
+RENEWAL_BANDS = ['open', 'decision', 'rescue']
 
 # ---- Outreach windows (how soon to reach out) ----
 OUTREACH_WINDOWS = [
@@ -84,6 +94,7 @@ CONTACT_ROLES = {
     'construction_loan_closing': ['Construction / Development', 'CFO / Finance', 'Project Executive'],
     'construction_start': ['Construction / Development', 'Project Executive', 'Risk Manager'],
     'completion_or_lease_up': ['Asset Management', 'Operations', 'Risk Manager'],
+    'post_renewal_active': ['Risk Manager', 'Owner / Principal'],
     'post_renewal': ['Risk Manager', 'Owner / Principal'],
     'general_watchlist': ['Owner / Principal', 'Risk Manager'],
 }
@@ -121,11 +132,24 @@ MESSAGE_ANGLES = {
         "Have you already mapped the transition from builder's risk to operating property and "
         "GL as buildings come online?"
     ),
+    'post_renewal_active': (
+        "Not looking to disrupt anything right after renewal, but did the insurance outcome land "
+        "cleanly enough that you'd repeat the same process next year?"
+    ),
     'post_renewal': (
         "Not looking to disrupt anything right after renewal, but did the insurance outcome land "
         "cleanly enough that you'd repeat the same process next year?"
     ),
 }
+
+# Rescue-band renewal angle (<=45 days to renewal) — speed and market
+# access posture, distinct from the standard renewal_window angle's
+# analysis/benchmarking posture (open/decision bands). Selected by
+# recommend_message_angle() when renewal_band == 'rescue'.
+RESCUE_MESSAGE_ANGLE = (
+    "With renewal this close, is the priority still a full pressure test, or would it help more "
+    "to know what capacity and options are actually available right now before anything locks in?"
+)
 
 # Neutral benchmark angle for inbound requests and watchlist leads with no
 # specific lifecycle context.
@@ -146,3 +170,4 @@ class ProcessStageResult:
     recommended_contact_roles: List[str] = field(default_factory=list)
     recommended_message_angle: str = DEFAULT_MESSAGE_ANGLE
     timing_confidence: str = 'medium'
+    renewal_band: Optional[str] = None  # one of RENEWAL_BANDS, only set for renewal_window leads

@@ -8163,6 +8163,44 @@ const MF_ACTIVITY_TYPES = [{
   value: 'follow_up_due',
   label: 'Follow-up due'
 }];
+const MF_DISQUALIFICATION_REASON_OPTIONS = [{
+  value: 'too_small',
+  label: 'Too small'
+}, {
+  value: 'institutional',
+  label: 'Institutional'
+}, {
+  value: 'incumbent_locked',
+  label: 'Incumbent locked in'
+}, {
+  value: 'sold_property',
+  label: 'Sold the property'
+}, {
+  value: 'wrong_contact',
+  label: 'Wrong contact'
+}, {
+  value: 'no_fit_geo',
+  label: 'Not the right geography'
+}, {
+  value: 'timing_far',
+  label: 'Timing too far out'
+}, {
+  value: 'hostile',
+  label: 'Hostile'
+}];
+const MF_REPLY_SENTIMENT_OPTIONS = [{
+  value: 'positive',
+  label: 'Positive'
+}, {
+  value: 'neutral',
+  label: 'Neutral'
+}, {
+  value: 'negative',
+  label: 'Negative'
+}, {
+  value: 'referral',
+  label: 'Referral'
+}];
 const MF_LEAD_SITUATION_LABELS = {
   renewal_date_known: 'Renewal',
   acquisition: 'Acquisition',
@@ -8919,7 +8957,9 @@ function MultifamilyLeadDrawer({
   const [actForm, setActForm] = useState({
     activity_type: 'called',
     note: '',
-    next_follow_up_date: ''
+    next_follow_up_date: '',
+    disqualification_reason: '',
+    reply_sentiment: ''
   });
   const [actResult, setActResult] = useState(null);
   const isAdmin = user && user.is_super_admin;
@@ -8980,7 +9020,9 @@ function MultifamilyLeadDrawer({
         setActForm({
           activity_type: 'called',
           note: '',
-          next_follow_up_date: ''
+          next_follow_up_date: '',
+          disqualification_reason: '',
+          reply_sentiment: ''
         });
         loadActivities();
       } else {
@@ -9305,6 +9347,34 @@ function MultifamilyLeadDrawer({
       activity_type: e.target.value
     }))
   }, MF_ACTIVITY_TYPES.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o.value,
+    value: o.value
+  }, o.label)))), actForm.activity_type === 'not_a_fit' && /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Disqualification reason", /*#__PURE__*/React.createElement("select", {
+    style: mfFieldStyle(),
+    value: actForm.disqualification_reason,
+    onChange: e => setActForm(s => ({
+      ...s,
+      disqualification_reason: e.target.value
+    }))
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "Select…"), MF_DISQUALIFICATION_REASON_OPTIONS.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o.value,
+    value: o.value
+  }, o.label)))), actForm.activity_type === 'replied' && /*#__PURE__*/React.createElement("label", {
+    style: mfLabelStyle()
+  }, "Reply sentiment", /*#__PURE__*/React.createElement("select", {
+    style: mfFieldStyle(),
+    value: actForm.reply_sentiment,
+    onChange: e => setActForm(s => ({
+      ...s,
+      reply_sentiment: e.target.value
+    }))
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "Select…"), MF_REPLY_SENTIMENT_OPTIONS.map(o => /*#__PURE__*/React.createElement("option", {
     key: o.value,
     value: o.value
   }, o.label)))), /*#__PURE__*/React.createElement("label", {
@@ -10254,6 +10324,95 @@ function mfCampaignRateTable(title, buckets, labelHeader) {
     }
   }, b.conversion_rate_pct, "%")))))));
 }
+function mfCampaignScorecardTable(buckets) {
+  const entries = Object.entries(buckets || {}).filter(([, b]) => b.touch_1_sent > 0).sort((a, b) => b[1].touch_1_sent - a[1].touch_1_sent);
+  const pct = v => v == null ? '—' : Math.round(v * 1000) / 10 + '%';
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.65rem',
+      color: '#475569',
+      fontFamily: "'Orbitron', sans-serif",
+      marginBottom: '0.5rem'
+    }
+  }, "PILOT SCORECARD BY CAMPAIGN"), entries.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#475569',
+      marginBottom: '1rem'
+    }
+  }, "No touches sent yet."), entries.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      overflowX: 'auto',
+      marginBottom: '1.25rem'
+    }
+  }, /*#__PURE__*/React.createElement("table", {
+    style: {
+      width: '100%',
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      borderCollapse: 'collapse'
+    }
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
+    style: {
+      color: '#64748b'
+    }
+  }, /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'left',
+      padding: '4px 8px'
+    }
+  }, "Campaign"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, "Delivery Rate"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, "Reply Rate"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, "Positive Share"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, "Meetings"))), /*#__PURE__*/React.createElement("tbody", null, entries.map(([key, b]) => /*#__PURE__*/React.createElement("tr", {
+    key: key,
+    style: {
+      borderTop: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      padding: '4px 8px',
+      color: '#cbd5e1'
+    }
+  }, b.name || key), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, pct(b.delivery_rate)), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, pct(b.reply_rate)), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, pct(b.positive_share)), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      padding: '4px 8px'
+    }
+  }, b.meetings ?? 0)))))));
+}
 function MultifamilySourcePerformanceCampaignSection({
   campaignPerformance
 }) {
@@ -10293,7 +10452,7 @@ function MultifamilySourcePerformanceCampaignSection({
       fontWeight: 700,
       color: '#f1f5f9'
     }
-  }, value ?? 0)))), mfCampaignRateTable('CONVERSION RATE BY CAMPAIGN', cp.conversion_rate_by_campaign, 'Campaign'), mfCampaignRateTable('CONVERSION RATE BY OFFER PAGE', cp.conversion_rate_by_page_variant, 'Offer Page'), mfCampaignRateTable('CONVERSION RATE BY SEGMENT', cp.conversion_rate_by_segment, 'Segment'), mfCampaignRateTable('CONVERSION RATE BY STATE', cp.conversion_rate_by_state, 'State'));
+  }, value ?? 0)))), mfCampaignScorecardTable(cp.conversion_rate_by_campaign), mfBreakdownTable('DISQUALIFICATION REASONS', cp.disqualification_reasons), mfCampaignRateTable('CONVERSION RATE BY CAMPAIGN', cp.conversion_rate_by_campaign, 'Campaign'), mfCampaignRateTable('CONVERSION RATE BY OFFER PAGE', cp.conversion_rate_by_page_variant, 'Offer Page'), mfCampaignRateTable('CONVERSION RATE BY SEGMENT', cp.conversion_rate_by_segment, 'Segment'), mfCampaignRateTable('CONVERSION RATE BY STATE', cp.conversion_rate_by_state, 'State'));
 }
 function MultifamilySourcePerformancePanel({
   activeTab,
@@ -11831,6 +11990,27 @@ const MF_CAMPAIGN_TARGET_STATUS_OPTIONS = [{
   value: 'nurture',
   label: 'Nurture'
 }];
+const MF_CAMPAIGN_TOUCH_STEP_OPTIONS = [{
+  step: 'touch_1_sent',
+  label: 'Touch 1 sent',
+  field: 'touch_1_sent_at'
+}, {
+  step: 'connected',
+  label: 'LinkedIn connect sent',
+  field: 'connected_at'
+}, {
+  step: 'touch_2_sent',
+  label: 'Touch 2 sent',
+  field: 'touch_2_sent_at'
+}, {
+  step: 'called',
+  label: 'Called',
+  field: 'called_at'
+}, {
+  step: 'breakup_sent',
+  label: 'Breakup sent',
+  field: 'breakup_sent_at'
+}];
 function mfTargetStatusColor(status) {
   if (status === 'converted') return '#34d399';
   if (status === 'meeting_booked') return '#60a5fa';
@@ -11848,6 +12028,10 @@ function MultifamilyCampaignTargetRow({
   const [notes, setNotes] = useState(target.notes || '');
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [touchBusy, setTouchBusy] = useState(null);
+  const [renewalMonth, setRenewalMonth] = useState(target.renewal_month || '');
+  const [disqualificationReason, setDisqualificationReason] = useState(target.disqualification_reason || '');
+  const [replySentiment, setReplySentiment] = useState(target.reply_sentiment || '');
   const save = async () => {
     setBusy(true);
     setSaved(false);
@@ -11859,7 +12043,9 @@ function MultifamilyCampaignTargetRow({
         },
         body: JSON.stringify({
           status,
-          notes
+          notes,
+          disqualificationReason: status === 'not_fit' ? disqualificationReason : undefined,
+          replySentiment: status === 'replied' ? replySentiment : undefined
         })
       });
       if (r.ok) {
@@ -11868,6 +12054,37 @@ function MultifamilyCampaignTargetRow({
       }
     } catch (e) {}
     setBusy(false);
+  };
+  const markTouch = async step => {
+    setTouchBusy(step);
+    try {
+      const r = await fetch(`/api/multifamily/campaign-targets/${target.id}/touch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          step
+        })
+      });
+      if (r.ok) onChanged();
+    } catch (e) {}
+    setTouchBusy(null);
+  };
+  const saveRenewalMonth = async () => {
+    if (!/^\d{4}-\d{2}$/.test(renewalMonth)) return;
+    try {
+      const r = await fetch(`/api/multifamily/campaign-targets/${target.id}/renewal-month`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          renewalMonth: renewalMonth
+        })
+      });
+      if (r.ok) onChanged();
+    } catch (e) {}
   };
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -11944,6 +12161,34 @@ function MultifamilyCampaignTargetRow({
   }, MF_CAMPAIGN_TARGET_STATUS_OPTIONS.map(o => /*#__PURE__*/React.createElement("option", {
     key: o.value,
     value: o.value
+  }, o.label))), status === 'not_fit' && /*#__PURE__*/React.createElement("select", {
+    value: disqualificationReason,
+    onChange: e => setDisqualificationReason(e.target.value),
+    style: {
+      ...mfFieldStyle(),
+      width: 'auto',
+      padding: '4px 6px',
+      fontSize: '0.72rem'
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "Reason…"), MF_DISQUALIFICATION_REASON_OPTIONS.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o.value,
+    value: o.value
+  }, o.label))), status === 'replied' && /*#__PURE__*/React.createElement("select", {
+    value: replySentiment,
+    onChange: e => setReplySentiment(e.target.value),
+    style: {
+      ...mfFieldStyle(),
+      width: 'auto',
+      padding: '4px 6px',
+      fontSize: '0.72rem'
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "Sentiment…"), MF_REPLY_SENTIMENT_OPTIONS.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o.value,
+    value: o.value
   }, o.label))), /*#__PURE__*/React.createElement("input", {
     value: notes,
     onChange: e => setNotes(e.target.value),
@@ -11975,7 +12220,71 @@ function MultifamilyCampaignTargetRow({
     }
   }, "Saved."), target.lead_id && /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle('#a78bfa')
-  }, "has lead")));
+  }, "has lead")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '10px',
+      marginTop: '8px',
+      flexWrap: 'wrap',
+      paddingTop: '8px',
+      borderTop: '1px solid rgba(255,255,255,0.05)'
+    }
+  }, MF_CAMPAIGN_TOUCH_STEP_OPTIONS.map(opt => /*#__PURE__*/React.createElement("label", {
+    key: opt.step,
+    title: target[opt.field] ? `Sent ${String(target[opt.field]).slice(0, 10)}` : 'Not yet sent',
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '4px',
+      fontSize: '0.68rem',
+      color: target[opt.field] ? '#34d399' : '#64748b',
+      cursor: touchBusy ? 'not-allowed' : 'pointer'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: !!target[opt.field],
+    disabled: !!touchBusy,
+    onChange: () => markTouch(opt.step)
+  }), opt.label)), /*#__PURE__*/React.createElement("label", {
+    title: target.bounced_at ? `Bounced ${String(target.bounced_at).slice(0, 10)}` : 'Mark this send as bounced',
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '4px',
+      fontSize: '0.68rem',
+      color: target.bounced_at ? '#ef4444' : '#64748b',
+      cursor: touchBusy ? 'not-allowed' : 'pointer'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: !!target.bounced_at,
+    disabled: !!touchBusy,
+    onChange: () => markTouch('bounced')
+  }), "Bounced")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px',
+      marginTop: '6px'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#64748b'
+    }
+  }, "Renewal month (if known):"), /*#__PURE__*/React.createElement("input", {
+    type: "month",
+    value: renewalMonth,
+    onChange: e => setRenewalMonth(e.target.value),
+    onBlur: saveRenewalMonth,
+    style: {
+      ...mfFieldStyle(),
+      width: 'auto',
+      padding: '3px 6px',
+      fontSize: '0.68rem'
+    }
+  })));
 }
 function MultifamilyCampaignDetailView({
   campaignId,
@@ -11987,6 +12296,9 @@ function MultifamilyCampaignDetailView({
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showNewTarget, setShowNewTarget] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const fileInputRef = useRef(null);
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -12002,6 +12314,45 @@ function MultifamilyCampaignDetailView({
   useEffect(() => {
     load();
   }, [load]);
+  const handleCsvFile = async e => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const r = await fetch(`/api/multifamily/campaigns/${campaignId}/targets/import`, {
+        method: 'POST',
+        body: formData
+      });
+      const j = await r.json();
+      if (r.ok && j.success) {
+        const parts = [`Imported ${j.created} target(s): ${j.leads_linked} linked to a lead`];
+        if (j.no_email_count) parts.push(`${j.no_email_count} cold prospect (no email)`);
+        if (j.lead_build_failed_count) parts.push(`${j.lead_build_failed_count} could not be validated`);
+        setImportResult({
+          ok: true,
+          message: parts.join(', ') + '.',
+          errors: j.errors || []
+        });
+        load();
+      } else {
+        setImportResult({
+          ok: false,
+          message: (j.errors || ['Import failed.']).join('; ')
+        });
+      }
+    } catch (err) {
+      setImportResult({
+        ok: false,
+        message: 'Network error: ' + err.message
+      });
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
   const campaign = data && data.campaign;
   const targets = data && data.targets || [];
   const contacted = targets.filter(t => t.status !== 'planned').length;
@@ -12122,7 +12473,33 @@ function MultifamilyCampaignDetailView({
       fontFamily: "'Orbitron', sans-serif",
       letterSpacing: '0.06em'
     }
-  }, "TARGETS"), /*#__PURE__*/React.createElement("button", {
+  }, "TARGETS"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    ref: fileInputRef,
+    type: "file",
+    accept: ".csv,text/csv",
+    style: {
+      display: 'none'
+    },
+    onChange: handleCsvFile
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: () => fileInputRef.current && fileInputRef.current.click(),
+    disabled: importing,
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.15)',
+      color: '#cbd5e1',
+      padding: '0.4rem 0.8rem',
+      borderRadius: '0.5rem',
+      fontWeight: 600,
+      cursor: importing ? 'not-allowed' : 'pointer',
+      fontSize: '0.74rem'
+    }
+  }, importing ? 'Importing\u2026' : 'Import CSV'), /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowNewTarget(true),
     style: {
       background: '#f59e0b',
@@ -12134,13 +12511,27 @@ function MultifamilyCampaignDetailView({
       cursor: 'pointer',
       fontSize: '0.74rem'
     }
-  }, "+ Add Target")), targets.length === 0 && /*#__PURE__*/React.createElement("div", {
+  }, "+ Add Target"))), importResult && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.76rem',
+      color: importResult.ok ? '#34d399' : '#ef4444',
+      background: 'rgba(255,255,255,0.03)',
+      borderRadius: '6px',
+      padding: '8px 10px',
+      marginBottom: '10px'
+    }
+  }, importResult.message, importResult.errors && importResult.errors.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#facc15',
+      marginTop: '4px'
+    }
+  }, importResult.errors.join(' \u00b7 '))), targets.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       color: '#64748b',
       fontSize: '0.8rem',
       padding: '1rem 0'
     }
-  }, "No targets yet \u2014 add prospects to start tracking outreach."), targets.map(t => /*#__PURE__*/React.createElement(MultifamilyCampaignTargetRow, {
+  }, "No targets yet \u2014 add prospects to start tracking outreach, or Import CSV above."), targets.map(t => /*#__PURE__*/React.createElement(MultifamilyCampaignTargetRow, {
     key: t.id,
     target: t,
     onChanged: load

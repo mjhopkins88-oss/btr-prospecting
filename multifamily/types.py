@@ -108,6 +108,34 @@ CAMPAIGN_TARGET_STATUSES = [
     'planned', 'contacted', 'replied', 'converted', 'meeting_booked', 'not_fit', 'nurture',
 ]
 
+# The Section 7 sequence cadence (Day 0 email / Day 2 LinkedIn connect /
+# Day 5 email 2 / Day 9 call / Day 16 breakup) tracked as a SEPARATE axis
+# from CAMPAIGN_TARGET_STATUSES — a target can be status='contacted' while
+# only touch_1_sent is marked and the rest of the sequence hasn't run yet.
+# Each step is a nullable timestamp on multifamily_campaign_targets (when
+# it happened), not a boolean. 'connected' means the LinkedIn connection
+# REQUEST was sent — acceptance, if ever tracked, belongs on an activity,
+# not this column. 'bounced' is a data-quality event (the send failed),
+# not a sequence step or a disqualification — kept in this same set only
+# because it's marked the same mechanical way (one timestamp, one action).
+CAMPAIGN_TARGET_TOUCH_STEPS = [
+    'touch_1_sent', 'connected', 'touch_2_sent', 'called', 'breakup_sent', 'bounced',
+]
+
+# A human-logged reason an operator marks a campaign target/lead as not a
+# fit — distinct from MultifamilyLeadScore.disqualifier_codes (LOW_CONFIDENCE,
+# MISSING_STATE, etc.), which are scoring-quality flags computed by the
+# scoring engine. This is CRM metadata only; it never feeds scoring math.
+DISQUALIFICATION_REASONS = [
+    'too_small', 'institutional', 'incumbent_locked', 'sold_property',
+    'wrong_contact', 'no_fit_geo', 'timing_far', 'hostile',
+]
+
+# How a reply reads, logged by the operator on the 'replied' activity —
+# feeds the pilot scorecard's "positive replies" share (Campaign Phase 5:
+# real logged sentiment, not a status proxy).
+REPLY_SENTIMENTS = ['positive', 'neutral', 'negative', 'referral']
+
 # Whether a lead row is the live survivor or has been merged away.
 MERGE_STATUSES = ['active', 'merged']
 
@@ -349,7 +377,16 @@ class MultifamilyCampaignTarget:
     target's own unique token (distinct from multifamily_outbound_links'
     token, which is for one-off ad-hoc drawer-generated links) — the
     campaign's tracked URL is derived from campaign.page_variant +
-    this token + the campaign's utm_* fields, never stored redundantly."""
+    this token + the campaign's utm_* fields, never stored redundantly.
+
+    The 6 *_at fields below track the Section 7 sequence cadence
+    (see CAMPAIGN_TARGET_TOUCH_STEPS) — a SEPARATE axis from `status`,
+    each a nullable timestamp set once via
+    repository.mark_campaign_target_touch(). `renewal_month` is a
+    coarse, operator-captured fallback ('YYYY-MM') for a prospect who
+    gave a rough renewal timeframe without a specific date — used by
+    the timing engine only when no precise renewal_date_known signal
+    exists; it's never a substitute once a real one does."""
     id: str
     campaign_id: str
     tracking_token: str
@@ -367,6 +404,15 @@ class MultifamilyCampaignTarget:
     created_at: str = field(default_factory=utc_now_iso)
     last_activity_at: Optional[str] = None
     converted_at: Optional[str] = None
+    touch_1_sent_at: Optional[str] = None
+    connected_at: Optional[str] = None  # LinkedIn connection REQUEST sent, not acceptance
+    touch_2_sent_at: Optional[str] = None
+    called_at: Optional[str] = None
+    breakup_sent_at: Optional[str] = None
+    bounced_at: Optional[str] = None  # data-quality event, distinct from disqualification
+    renewal_month: Optional[str] = None  # 'YYYY-MM', coarse fallback
+    disqualification_reason: Optional[str] = None  # one of DISQUALIFICATION_REASONS, set with status='not_fit'
+    reply_sentiment: Optional[str] = None  # one of REPLY_SENTIMENTS, set with status='replied'
 
 
 @dataclass
@@ -381,6 +427,8 @@ class MultifamilyActivity:
     next_follow_up_date: Optional[str] = None  # ISO date (YYYY-MM-DD)
     user_email: Optional[str] = None
     created_at: str = field(default_factory=utc_now_iso)
+    disqualification_reason: Optional[str] = None  # one of DISQUALIFICATION_REASONS, set with activity_type='not_a_fit'
+    reply_sentiment: Optional[str] = None  # one of REPLY_SENTIMENTS, set with activity_type='replied'
 
 
 @dataclass

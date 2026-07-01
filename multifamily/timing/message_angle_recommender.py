@@ -11,7 +11,7 @@ present. Otherwise we fall back to a neutral benchmark angle.
 from typing import Optional
 
 from multifamily.types import MultifamilyLead
-from multifamily.timing.process_stage_types import MESSAGE_ANGLES, DEFAULT_MESSAGE_ANGLE
+from multifamily.timing.process_stage_types import MESSAGE_ANGLES, DEFAULT_MESSAGE_ANGLE, RESCUE_MESSAGE_ANGLE
 
 # Signal type -> the lifecycle stage whose angle best fits it. Used only
 # to refine inbound_request leads that ALSO carry a lifecycle trigger.
@@ -45,7 +45,12 @@ def _inbound_context_angle(lead: MultifamilyLead) -> Optional[str]:
     return None
 
 
-def recommend_message_angle(process_stage: str, lead: MultifamilyLead) -> str:
+def recommend_message_angle(process_stage: str, lead: MultifamilyLead, renewal_band: Optional[str] = None) -> str:
+    # Rescue-band renewals (<=45 days) get a speed/market-access posture,
+    # distinct from the standard renewal_window angle's analysis/
+    # benchmarking posture (open/decision bands) — see Strategy Research §3/§8.
+    if process_stage == 'renewal_window' and renewal_band == 'rescue':
+        return RESCUE_MESSAGE_ANGLE
     if process_stage in MESSAGE_ANGLES:
         return MESSAGE_ANGLES[process_stage]
     if process_stage == 'inbound_request':

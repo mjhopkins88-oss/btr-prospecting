@@ -44,9 +44,10 @@ def test_stage_detection():
         ('quote_request', {}, 'inbound_request', 'immediate'),
         ('renewal_date_known', {'days_until_renewal': 30}, 'renewal_window', 'this_week'),
         ('renewal_date_known', {'days_until_renewal': 90}, 'renewal_window', 'next_30_days'),
-        ('renewal_date_known', {'days_until_renewal': 140}, 'renewal_window', 'next_60_days'),
+        ('renewal_date_known', {'days_until_renewal': 140}, 'renewal_window', 'next_90_days'),
         ('renewal_date_known', {'days_until_renewal': 170}, 'renewal_window', 'next_90_days'),
-        ('renewal_date_known', {'days_until_renewal': -10}, 'post_renewal', 'nurture'),
+        ('renewal_date_known', {'days_until_renewal': -10}, 'post_renewal_active', 'next_30_days'),
+        ('renewal_date_known', {'days_until_renewal': -60}, 'post_renewal', 'nurture'),
         ('acquisition', {}, 'acquisition_due_diligence', 'this_week'),
         ('refinance', {}, 'refinance_or_financing', 'this_week'),
         ('permit_filed', {}, 'entitlement_or_permit', 'next_30_days'),
@@ -93,6 +94,59 @@ def test_inbound_uses_underlying_context_angle():
     check('inbound+renewal uses the renewal angle', 'renewal' in r.recommended_message_angle.lower())
 
 
+def test_renewal_band_and_message_posture():
+    rescue = detect_process_stage(_lead('renewal_date_known', 'crm', {'days_until_renewal': 30}))
+    check('rescue band for <=45 days', rescue.renewal_band == 'rescue')
+    check('rescue message angle uses speed/market-access posture, not the standard pressure-test copy',
+          'capacity' in rescue.recommended_message_angle.lower() or 'options' in rescue.recommended_message_angle.lower())
+
+    decision = detect_process_stage(_lead('renewal_date_known', 'crm', {'days_until_renewal': 70}))
+    check('decision band for 46-90 days', decision.renewal_band == 'decision')
+    check('decision message angle uses the standard analysis/benchmarking copy',
+          'pressure test' in decision.recommended_message_angle.lower())
+
+    open_band = detect_process_stage(_lead('renewal_date_known', 'crm', {'days_until_renewal': 120}))
+    check('open band for >90 days', open_band.renewal_band == 'open')
+    check('open message angle uses the standard analysis/benchmarking copy',
+          'pressure test' in open_band.recommended_message_angle.lower())
+
+    check('boundary: exactly 45 days is rescue',
+          detect_process_stage(_lead('renewal_date_known', 'crm', {'days_until_renewal': 45})).renewal_band == 'rescue')
+    check('boundary: exactly 46 days is decision',
+          detect_process_stage(_lead('renewal_date_known', 'crm', {'days_until_renewal': 46})).renewal_band == 'decision')
+    check('boundary: exactly 90 days is decision',
+          detect_process_stage(_lead('renewal_date_known', 'crm', {'days_until_renewal': 90})).renewal_band == 'decision')
+    check('boundary: exactly 91 days is open',
+          detect_process_stage(_lead('renewal_date_known', 'crm', {'days_until_renewal': 91})).renewal_band == 'open')
+
+    non_renewal = detect_process_stage(_lead('quote_request', 'form'))
+    check('renewal_band is None for non-renewal stages', non_renewal.renewal_band is None)
+
+
+def test_post_renewal_active_window_and_softer_reason():
+    just_signed = detect_process_stage(_lead('renewal_date_known', 'crm', {'days_until_renewal': -5}))
+    check('just-signed (day 5) is post_renewal_active', just_signed.process_stage == 'post_renewal_active')
+    check('just-signed (day 5) outreach_window is next_30_days (active, not nurture)',
+          just_signed.outreach_window == 'next_30_days')
+    check('just-signed gets the softer "light touch" reason', 'light touch' in just_signed.timing_reason.lower())
+
+    boundary_soft = detect_process_stage(_lead('renewal_date_known', 'crm', {'days_until_renewal': -13}))
+    check('day 13 still gets the softer reason', 'light touch' in boundary_soft.timing_reason.lower())
+
+    past_soft = detect_process_stage(_lead('renewal_date_known', 'crm', {'days_until_renewal': -14}))
+    check('day 14 gets the more assertive (but still gentle) reason, not the softest one',
+          'light touch' not in past_soft.timing_reason.lower())
+    check('day 14 is still post_renewal_active (within the 42-day window)',
+          past_soft.process_stage == 'post_renewal_active')
+
+    boundary_active = detect_process_stage(_lead('renewal_date_known', 'crm', {'days_until_renewal': -42}))
+    check('day 42 is the last day of the active window', boundary_active.process_stage == 'post_renewal_active')
+
+    stale = detect_process_stage(_lead('renewal_date_known', 'crm', {'days_until_renewal': -43}))
+    check('day 43 falls back to the stale post_renewal stage', stale.process_stage == 'post_renewal')
+    check('stale post_renewal outreach_window is nurture', stale.outreach_window == 'nurture')
+
+
 def test_does_not_affect_scoring():
     base = _lead('quote_request', 'form', pain=['premium_increase'])
     before = score_lead(base)
@@ -107,6 +161,8 @@ def main():
     test_construction_loan_with_builders_risk()
     test_result_fields_present()
     test_inbound_uses_underlying_context_angle()
+    test_renewal_band_and_message_posture()
+    test_post_renewal_active_window_and_softer_reason()
     test_does_not_affect_scoring()
     print()
     if _FAILURES:

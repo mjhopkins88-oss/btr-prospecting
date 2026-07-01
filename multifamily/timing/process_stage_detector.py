@@ -14,7 +14,9 @@ from multifamily.stage_timing import compute_stage_timing
 from multifamily.timing.process_stage_types import (
     ProcessStageResult, PROCESS_STAGE_LABELS,
 )
-from multifamily.timing.outreach_window_engine import window_with_urgency
+from multifamily.timing.outreach_window_engine import (
+    window_with_urgency, renewal_band as _renewal_band, POST_RENEWAL_ACTIVE_MAX_DAYS,
+)
 from multifamily.timing.timing_reason_builder import build_timing_reason
 from multifamily.timing.contact_role_recommender import recommend_contact_roles
 from multifamily.timing.message_angle_recommender import recommend_message_angle
@@ -67,6 +69,7 @@ def _confidence(lead: MultifamilyLead, driving_signal_types: set) -> str:
 
 def _result(lead, stage, context, driving_signals) -> ProcessStageResult:
     window, urgency = window_with_urgency(stage, context)
+    band = _renewal_band(context.get('days_until_renewal')) if stage == 'renewal_window' else None
     return ProcessStageResult(
         process_stage=stage,
         stage_label=PROCESS_STAGE_LABELS.get(stage, stage),
@@ -74,8 +77,9 @@ def _result(lead, stage, context, driving_signals) -> ProcessStageResult:
         urgency_label=urgency,
         timing_reason=build_timing_reason(stage, window, context),
         recommended_contact_roles=recommend_contact_roles(stage),
-        recommended_message_angle=recommend_message_angle(stage, lead),
+        recommended_message_angle=recommend_message_angle(stage, lead, renewal_band=band),
         timing_confidence=_confidence(lead, driving_signals),
+        renewal_band=band,
     )
 
 
@@ -106,7 +110,14 @@ def detect_process_stage(lead: MultifamilyLead) -> ProcessStageResult:
     # Rule 2/3 & 11 — renewal timing.
     if 'renewal_date_known' in types:
         if renewal_days is not None and renewal_days < 0:
-            return _result(lead, 'post_renewal', {}, {'renewal_date_known'})  # Rule 11
+            days_since_renewal = -renewal_days
+            if days_since_renewal <= POST_RENEWAL_ACTIVE_MAX_DAYS:
+                # Active relationship-building window (Rule 11 refined) —
+                # no deadline pressure, but a real window, not a cooldown.
+                return _result(
+                    lead, 'post_renewal_active', {'days_since_renewal': days_since_renewal}, {'renewal_date_known'},
+                )
+            return _result(lead, 'post_renewal', {}, {'renewal_date_known'})  # Rule 11 (stale)
         return _result(lead, 'renewal_window', {'days_until_renewal': renewal_days}, {'renewal_date_known'})
 
     # Rules 7-10 — construction lifecycle (refined via compute_stage_timing).

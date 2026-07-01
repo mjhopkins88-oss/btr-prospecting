@@ -22,6 +22,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from multifamily import repository
+from multifamily.timing.first_renewal_estimator import estimate_first_renewal
 
 SEVERITIES = ['info', 'warning', 'critical']
 
@@ -29,7 +30,7 @@ NOTIFICATION_TYPES = [
     'new_call_today_lead', 'new_benchmark_submission', 'new_form_submission',
     'converted_from_outbound', 'campaign_conversion', 'hot_lead_stale',
     'followup_due_today', 'followup_overdue', 'lead_replied', 'meeting_booked',
-    'high_confidence_merge', 'fuzzy_match_review', 'spam_spike',
+    'high_confidence_merge', 'fuzzy_match_review', 'spam_spike', 'first_renewal_window_open',
 ]
 
 # Funnel Phase 5: per-offer SLA — severity/response-time copy driven by
@@ -212,6 +213,22 @@ def check_spam_spike() -> Optional[Dict[str, Any]]:
     return None
 
 
+def notify_first_renewal_window_open(lead_id: str, company_name: str, first_renewal_estimate: str) -> Optional[Dict[str, Any]]:
+    """Fired once per lead, from sweep() below, when an acquisition-
+    origin lead crosses close_date + 8 months (Strategy Research §3/§8)
+    — the point where first-renewal outreach should actually start.
+    Deduped by lead id so it only ever fires once, even though sweep()
+    re-checks every real lead on every call."""
+    return emit(
+        'first_renewal_window_open', lead_id=lead_id, severity='info',
+        title='First-renewal window open',
+        message=f'{company_name} is now in the first-renewal outreach window (est. renewal {first_renewal_estimate}).',
+        action_url=f'/multifamily?lead={lead_id}',
+        metadata={'company': company_name, 'first_renewal_estimate': first_renewal_estimate},
+        dedupe_key=f'first_renewal_window_open:{lead_id}',
+    )
+
+
 # ---- Time-derived sweep -------------------------------------------------
 
 def sweep() -> List[Dict[str, Any]]:
@@ -266,5 +283,18 @@ def sweep() -> List[Dict[str, Any]]:
         )
         if n:
             created.append(n)
+
+    # First-renewal watchlist (Strategy Research §3/§8): an acquisition-
+    # origin lead's insurance decision already happened at close — this
+    # surfaces the scheduled outreach task at close+8mo (90-120 days
+    # before the estimated first renewal) instead of treating the
+    # acquisition as near-term hot forever. Deduped by lead id, so this
+    # only ever fires once per lead even though every sweep re-checks it.
+    for lead in repository.get_real_leads():
+        estimate = estimate_first_renewal(lead)
+        if estimate and estimate['window_is_open']:
+            n = notify_first_renewal_window_open(lead.id, lead.company.name, estimate['first_renewal_estimate'])
+            if n:
+                created.append(n)
 
     return created
