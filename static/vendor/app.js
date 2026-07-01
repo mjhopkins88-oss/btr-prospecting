@@ -12260,29 +12260,68 @@ function MultifamilyOutboundLinkView({
   const recommended = lead && lead.recommended_form_variant;
   const recommendedSlug = recommended && recommended.slug;
   const [pageVariant, setPageVariant] = useState(recommendedSlug || 'benchmark');
+  const [campaigns, setCampaigns] = useState([]);
+  const [campaignId, setCampaignId] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   useEffect(() => {
     if (recommendedSlug) setPageVariant(recommendedSlug);
   }, [recommendedSlug]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/multifamily/campaigns?status=active');
+        const j = r.ok ? await r.json() : {
+          campaigns: []
+        };
+        setCampaigns(j.campaigns || []);
+      } catch (e) {
+        setCampaigns([]);
+      }
+    })();
+  }, []);
+  const selectedCampaign = campaigns.find(c => c.id === campaignId);
   const generate = async () => {
     setBusy(true);
     setResult(null);
     try {
-      const r = await fetch(`/api/multifamily/leads/${leadId}/outbound-link`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          pageVariant
-        })
-      });
-      const j = await r.json();
+      let r, j, url;
+      if (campaignId) {
+        const contact = (lead.contacts || [])[0] || {};
+        r = await fetch(`/api/multifamily/campaigns/${campaignId}/targets`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            company: lead.company && lead.company.name,
+            contactName: contact.full_name,
+            email: contact.email,
+            phone: contact.phone,
+            city: lead.city,
+            state: lead.state,
+            leadId
+          })
+        });
+        j = await r.json();
+        url = j.target && j.target.tracked_url;
+      } else {
+        r = await fetch(`/api/multifamily/leads/${leadId}/outbound-link`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            pageVariant
+          })
+        });
+        j = await r.json();
+        url = j.url;
+      }
       if (r.ok && j.success) {
         setResult({
           ok: true,
-          url: window.location.origin + j.url
+          url: window.location.origin + url
         });
         if (onLinkGenerated) onLinkGenerated();
       } else {
@@ -12309,14 +12348,39 @@ function MultifamilyOutboundLinkView({
       color: '#94a3b8',
       marginBottom: '10px'
     }
-  }, recommended.reason), /*#__PURE__*/React.createElement("div", {
+  }, recommended.reason), campaigns.length > 0 && /*#__PURE__*/React.createElement("label", {
+    style: {
+      ...mfLabelStyle(),
+      display: 'block',
+      marginBottom: '6px'
+    }
+  }, "Send via campaign (optional)", /*#__PURE__*/React.createElement("select", {
+    style: mfFieldStyle(),
+    value: campaignId,
+    onChange: e => setCampaignId(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "No campaign \u2014 ad-hoc link"), campaigns.map(c => /*#__PURE__*/React.createElement("option", {
+    key: c.id,
+    value: c.id
+  }, c.name)))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: '8px',
       alignItems: 'center',
       marginBottom: '8px'
     }
-  }, /*#__PURE__*/React.createElement("select", {
+  }, campaignId ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      flex: '1 1 auto'
+    }
+  }, "Offer page: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#cbd5e1'
+    }
+  }, (MF_OFFER_PAGE_OPTIONS.find(o => o.slug === (selectedCampaign || {}).page_variant) || {}).label || (selectedCampaign || {}).page_variant), " (set by the campaign)") : /*#__PURE__*/React.createElement("select", {
     style: mfFieldStyle(),
     value: pageVariant,
     onChange: e => setPageVariant(e.target.value)
@@ -12341,7 +12405,7 @@ function MultifamilyOutboundLinkView({
       fontSize: '0.72rem',
       color: '#f97316'
     }
-  }, "This is demo data — links can't be generated."), result && result.ok && /*#__PURE__*/React.createElement("div", {
+  }, "This is demo data \u2014 links can't be generated."), result && result.ok && /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       justifyContent: 'space-between',
@@ -12401,7 +12465,7 @@ function MultifamilyOutboundLinkView({
     style: {
       color: '#cbd5e1'
     }
-  }, l.page_variant || '—', ' · ', l.created_at ? String(l.created_at).slice(0, 10) : '—'), /*#__PURE__*/React.createElement("span", {
+  }, l.page_variant || '—', " \xB7 ", l.created_at ? String(l.created_at).slice(0, 10) : '—'), /*#__PURE__*/React.createElement("span", {
     style: l.converted_at ? mfPillStyle('#34d399') : mfPillStyle('#64748b')
   }, l.converted_at ? 'converted' : 'sent')))));
 }

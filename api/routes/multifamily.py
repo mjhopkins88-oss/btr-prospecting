@@ -1332,8 +1332,12 @@ def update_campaign_status(campaign_id):
 def create_campaign_target(campaign_id):
     """Add one prospect to a campaign and mint their tracked link. A
     target may have no known lead yet (a cold prospect Max is about to
-    reach out to) — lead_id backfills once they convert. Login
-    required."""
+    reach out to) — lead_id backfills once they convert. An optional
+    `leadId` pre-links the target to an ALREADY-known lead (Campaign
+    Phase 4: the Outreach Workbench generating a campaign-tracked link
+    for a specific lead already sitting in the pipeline) — that target
+    then merges deterministically into this exact lead on conversion,
+    the same as an outbound-link one-off. Login required."""
     import app as _app
 
     @_app.require_auth
@@ -1354,6 +1358,10 @@ def create_campaign_target(campaign_id):
             segment=(payload.get('segment') or None),
             notes=(payload.get('notes') or None),
         )
+        lead_id = (payload.get('leadId') or payload.get('lead_id') or '').strip() or None
+        if lead_id:
+            repository.set_campaign_target_lead(row['id'], lead_id)
+            row['lead_id'] = lead_id
         row['tracked_url'] = _campaign_tracked_url(campaign, row['tracking_token'])
         return jsonify({'success': True, 'target': row}), 201
 
