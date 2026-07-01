@@ -33,6 +33,7 @@ from multifamily.outreach.outreach_bundle_builder import build_outreach_bundle
 from multifamily import matching as mf_matching
 from multifamily.snapshots import snapshot_lead, SNAPSHOT_REASONS
 from multifamily import notifications as mf_notifications
+from multifamily.sales_intelligence.engine import build_sales_intelligence
 
 multifamily_bp = Blueprint('multifamily', __name__, url_prefix='/api/multifamily')
 
@@ -79,6 +80,29 @@ def _signal_timeline(lead):
     return items
 
 
+def _sales_intelligence_summary(lead, stage_result, activities, outcomes):
+    """Compact Sales Intelligence snapshot for the drawer's "Sales
+    Intelligence" tab (Part 10) — not the full package (that's the
+    dedicated /sales-intelligence endpoint used by the Outreach
+    Workbench, which also includes messages + the objection playbook)."""
+    try:
+        pkg = build_sales_intelligence(lead, stage_result=stage_result, activities=activities, outcomes=outcomes)
+    except Exception:
+        return None
+    return {
+        'recommended_action': pkg.strategy.recommended_action,
+        'nepq_stage': pkg.strategy.starting_nepq_stage,
+        'buyer_awareness_level': pkg.context.buyer_awareness_level,
+        'resistance_risk': pkg.context.resistance_risk,
+        'likely_emotional_driver': pkg.context.likely_emotional_driver,
+        'primary_question': pkg.question_path.connection_question,
+        'message_angle': pkg.strategy.primary_objective,
+        'what_to_avoid': pkg.strategy.do_not,
+        'reasoning_summary': pkg.reasoning.why_this_stage,
+        'confidence_score': pkg.reasoning.confidence_score,
+    }
+
+
 def _serialize_lead(lead, is_admin, stage_result=None, with_history=False, current_outcome=None):
     """Serialize one lead, attaching LIVE timing intelligence (never
     persisted — it's time-dependent) and redacting admin-only fields for
@@ -112,10 +136,14 @@ def _serialize_lead(lead, is_admin, stage_result=None, with_history=False, curre
             }
             d['outcomes'] = []
             d['snapshots'] = []
+            activities, outcomes = [], []
         else:
             d['attribution'] = repository.get_attribution_summary(lead.id)
-            d['outcomes'] = repository.get_outcomes_for_lead(lead.id)
+            outcomes = repository.get_outcomes_for_lead(lead.id)
+            d['outcomes'] = outcomes
             d['snapshots'] = repository.get_snapshots_for_lead(lead.id)
+            activities = repository.get_activities_for_lead(lead.id)
+        d['sales_intelligence'] = _sales_intelligence_summary(lead, sr, activities, outcomes)
     if not is_admin:
         for f in _ADMIN_ONLY_LEAD_FIELDS:
             d.pop(f, None)
@@ -549,6 +577,39 @@ def get_lead_outreach(lead_id):
     if err:
         return err
     return jsonify({'lead_id': lead_id, 'company': lead.company.name, 'outreach': build_outreach_bundle(lead)})
+
+
+@multifamily_bp.route('/leads/<lead_id>/sales-intelligence', methods=['GET'])
+def get_lead_sales_intelligence(lead_id):
+    """Full NEPQ-based Sales Intelligence package for one lead: lead
+    context, conversation strategy, question path, message drafts, the
+    objection playbook, and the reasoning explainer. Used by the Outreach
+    Workbench and (a compact summary of it) the lead drawer. Real leads
+    only get activity/outcome history factored in; demo leads still get a
+    full package computed from their in-memory signals. `?variant=N`
+    rotates among equivalent phrasings for "Regenerate approach" — never
+    sends anything, drafts only. Never persists on demo leads."""
+    lead, err = _find_lead(lead_id)
+    if err:
+        return err
+    try:
+        variant = int(request.args.get('variant', 0))
+    except (TypeError, ValueError):
+        variant = 0
+    activities = [] if lead.is_demo else repository.get_activities_for_lead(lead_id)
+    outcomes = [] if lead.is_demo else repository.get_outcomes_for_lead(lead_id)
+    pkg = build_sales_intelligence(lead, activities=activities, outcomes=outcomes, variant=variant)
+    return jsonify({
+        'lead_id': lead_id,
+        'company': lead.company.name,
+        'variant': variant,
+        'context': dataclasses.asdict(pkg.context),
+        'strategy': dataclasses.asdict(pkg.strategy),
+        'question_path': dataclasses.asdict(pkg.question_path),
+        'messages': dataclasses.asdict(pkg.messages),
+        'objection_playbook': [dataclasses.asdict(o) for o in pkg.objection_playbook],
+        'reasoning': dataclasses.asdict(pkg.reasoning),
+    })
 
 
 def _admin_only(fn):

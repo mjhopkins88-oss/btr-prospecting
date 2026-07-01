@@ -270,6 +270,30 @@ def ensure_schema() -> None:
         )
     ''')
 
+    # Sales Intelligence decision log (NEPQ-based reasoning engine).
+    # Append-only, real-leads-only — records WHICH strategy/stage the
+    # engine selected at a point in time, for future calibration (which
+    # approach actually correlates with meetings/wins). Never stores the
+    # generated message text itself (that's cheap to regenerate live from
+    # the same lead+variant) — only the decision facets + reasoning.
+    execute('''
+        CREATE TABLE IF NOT EXISTS multifamily_sales_intelligence_events (
+            id TEXT PRIMARY KEY,
+            lead_id TEXT NOT NULL,
+            variant INTEGER NOT NULL DEFAULT 0,
+            lead_temperature TEXT,
+            lead_origin TEXT,
+            insurance_scenario TEXT,
+            buyer_awareness_level TEXT,
+            resistance_risk TEXT,
+            nepq_stage TEXT,
+            recommended_action TEXT,
+            confidence_score REAL,
+            reasoning_json TEXT,
+            created_at TIMESTAMP
+        )
+    ''')
+
     try:
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_leads_created ON multifamily_leads(created_at DESC)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_leads_state ON multifamily_leads(state)')
@@ -293,6 +317,7 @@ def ensure_schema() -> None:
         execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_multifamily_notifications_dedupe ON multifamily_notifications(dedupe_key)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_notifications_read ON multifamily_notifications(read_at, created_at DESC)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_notifications_lead ON multifamily_notifications(lead_id)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_sales_intel_lead ON multifamily_sales_intelligence_events(lead_id, created_at DESC)')
     except Exception:
         pass
 
@@ -1606,3 +1631,69 @@ def get_calibration_dataset() -> Dict[str, Any]:
         'disqualifier_code_outcome_mix': disqualifier_outcome_mix,
         'sample_size': len(lead_ids),
     }
+
+
+# ===========================================================================
+# Sales Intelligence decision log (NEPQ-based reasoning engine)
+# Append-only, real-leads-only. See multifamily/sales_intelligence/engine.py
+# for the reasoning logic; this module is pure CRUD, matching the
+# snapshot/outcome/notification tables' pattern.
+# ===========================================================================
+
+def log_sales_intelligence_event(
+    lead_id: str, *, variant: int = 0, lead_temperature: Optional[str] = None, lead_origin: Optional[str] = None,
+    insurance_scenario: Optional[str] = None, buyer_awareness_level: Optional[str] = None,
+    resistance_risk: Optional[str] = None, nepq_stage: Optional[str] = None,
+    recommended_action: Optional[str] = None, confidence_score: Optional[float] = None,
+    reasoning: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    ensure_schema()
+    from multifamily.types import new_id, utc_now_iso
+    row_id = new_id()
+    now = utc_now_iso()
+    execute(
+        'INSERT INTO multifamily_sales_intelligence_events '
+        '(id, lead_id, variant, lead_temperature, lead_origin, insurance_scenario, buyer_awareness_level, '
+        'resistance_risk, nepq_stage, recommended_action, confidence_score, reasoning_json, created_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+            row_id, lead_id, variant, lead_temperature, lead_origin, insurance_scenario, buyer_awareness_level,
+            resistance_risk, nepq_stage, recommended_action, confidence_score, json.dumps(reasoning or {}), now,
+        ],
+    )
+    return {
+        'id': row_id, 'lead_id': lead_id, 'variant': variant, 'lead_temperature': lead_temperature,
+        'lead_origin': lead_origin, 'insurance_scenario': insurance_scenario,
+        'buyer_awareness_level': buyer_awareness_level, 'resistance_risk': resistance_risk,
+        'nepq_stage': nepq_stage, 'recommended_action': recommended_action, 'confidence_score': confidence_score,
+        'reasoning': reasoning or {}, 'created_at': now,
+    }
+
+
+def _sales_intelligence_row_with_json(r: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        r['reasoning'] = json.loads(r['reasoning_json']) if r.get('reasoning_json') else {}
+    except Exception:
+        r['reasoning'] = {}
+    return r
+
+
+def get_sales_intelligence_history(lead_id: str) -> List[Dict[str, Any]]:
+    ensure_schema()
+    rows = fetch_all(
+        'SELECT id, lead_id, variant, lead_temperature, lead_origin, insurance_scenario, buyer_awareness_level, '
+        'resistance_risk, nepq_stage, recommended_action, confidence_score, reasoning_json, created_at '
+        'FROM multifamily_sales_intelligence_events WHERE lead_id = ? ORDER BY created_at DESC',
+        [lead_id],
+    )
+    return [_sales_intelligence_row_with_json(r) for r in rows]
+
+
+def get_latest_sales_intelligence_event(lead_id: str) -> Optional[Dict[str, Any]]:
+    rows = get_sales_intelligence_history(lead_id)
+    return rows[0] if rows else None
+
+
+def delete_sales_intelligence_events_for_lead(lead_id: str) -> None:
+    ensure_schema()
+    execute('DELETE FROM multifamily_sales_intelligence_events WHERE lead_id = ?', [lead_id])
