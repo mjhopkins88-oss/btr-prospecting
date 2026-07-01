@@ -9990,19 +9990,37 @@ function MultifamilyOutreachLeadRow({
   onOpen
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [bundle, setBundle] = useState(null);
+  const [intel, setIntel] = useState(null);
+  const [variant, setVariant] = useState(0);
+  const [loadingIntel, setLoadingIntel] = useState(false);
+  const [showObjections, setShowObjections] = useState(false);
+  const [showWhy, setShowWhy] = useState(false);
+  const loadIntel = useCallback(async v => {
+    setLoadingIntel(true);
+    try {
+      const r = await fetch(`/api/multifamily/leads/${lead.id}/sales-intelligence?variant=${v}`);
+      const j = await r.json();
+      setIntel(j);
+    } catch (e) {} finally {
+      setLoadingIntel(false);
+    }
+  }, [lead.id]);
   const toggle = async () => {
     const next = !expanded;
     setExpanded(next);
-    if (next && !bundle) {
-      try {
-        const r = await fetch(`/api/multifamily/leads/${lead.id}/outreach`);
-        const j = await r.json();
-        setBundle(j.outreach);
-      } catch (e) {}
+    if (next && !intel) {
+      loadIntel(variant);
     }
   };
+  const regenerate = () => {
+    const nextVariant = variant + 1;
+    setVariant(nextVariant);
+    loadIntel(nextVariant);
+  };
   const score = lead.score || {};
+  const messageFields = intel ? [['Call opener', intel.messages.call_opener], ['Email subject', intel.messages.first_email_subject], ['Email body', intel.messages.first_email_body], ['LinkedIn (manual)', intel.messages.linkedin_note_manual], ['Follow-up 1', intel.messages.follow_up_1], ['Follow-up 2', intel.messages.follow_up_2], ['Soft bump', intel.messages.soft_bump]] : [];
+  const qp = intel && intel.question_path;
+  const questionGroups = qp ? [['Situation', qp.situation_questions], ['Problem awareness', qp.problem_awareness_questions], ['Solution awareness', qp.solution_awareness_questions], ['Consequence', qp.consequence_questions], ['Qualifying', qp.qualifying_questions]] : [];
   return /*#__PURE__*/React.createElement("div", {
     style: {
       background: 'rgba(15,22,36,0.97)',
@@ -10062,7 +10080,7 @@ function MultifamilyOutreachLeadRow({
       fontSize: '0.72rem',
       fontWeight: 600
     }
-  }, expanded ? 'Hide' : 'Drafts'), onOpen && /*#__PURE__*/React.createElement("button", {
+  }, expanded ? 'Hide' : 'Sales Intelligence'), onOpen && /*#__PURE__*/React.createElement("button", {
     onClick: () => onOpen(lead.id),
     style: {
       background: 'transparent',
@@ -10077,12 +10095,96 @@ function MultifamilyOutreachLeadRow({
     style: {
       marginTop: '10px'
     }
-  }, !bundle && /*#__PURE__*/React.createElement("div", {
+  }, (loadingIntel || !intel) && /*#__PURE__*/React.createElement("div", {
     style: {
       color: '#64748b',
       fontSize: '0.8rem'
     }
-  }, "Loading drafts\u2026"), bundle && [['Call opener', bundle.call_opener], ['Email subject', bundle.email_draft.subject], ['Email body', bundle.email_draft.body], ['LinkedIn (manual)', bundle.linkedin_draft], ['Follow-up 1', bundle.follow_up_1], ['Follow-up 2', bundle.follow_up_2], ['Soft bump', bundle.soft_bump]].map(([label, text]) => /*#__PURE__*/React.createElement("div", {
+  }, "Loading sales intelligence…"), intel && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(129,140,248,0.08)',
+      border: '1px solid rgba(129,140,248,0.25)',
+      borderRadius: '6px',
+      padding: '8px 10px',
+      marginBottom: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: '6px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.78rem',
+      color: '#e2e8f0',
+      fontWeight: 600
+    }
+  }, "Recommended: ", intel.reasoning.selected_strategy), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '6px',
+      alignItems: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#818cf8')
+  }, "Stage: ", intel.reasoning.selected_nepq_stage), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowWhy(!showWhy),
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.1)',
+      color: '#94a3b8',
+      borderRadius: '4px',
+      padding: '1px 8px',
+      cursor: 'pointer',
+      fontSize: '0.65rem'
+    }
+  }, showWhy ? 'Hide why' : 'Why this approach?'), /*#__PURE__*/React.createElement("button", {
+    onClick: regenerate,
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(245,158,11,0.4)',
+      color: '#f59e0b',
+      borderRadius: '4px',
+      padding: '1px 8px',
+      cursor: 'pointer',
+      fontSize: '0.65rem'
+    }
+  }, "↻ Regenerate approach"))), showWhy && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '6px',
+      fontSize: '0.74rem',
+      color: '#94a3b8'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '4px'
+    }
+  }, intel.reasoning.why_this_stage), /*#__PURE__*/React.createElement("div", null, intel.reasoning.why_this_message), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '4px',
+      color: '#64748b'
+    }
+  }, "Confidence: ", Math.round(intel.reasoning.confidence_score * 100), "%"))), (intel.context.missing_information || []).length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#94a3b8',
+      fontWeight: 600,
+      marginBottom: '3px'
+    }
+  }, "Missing information to uncover"), intel.context.missing_information.map((m, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      fontSize: '0.74rem',
+      color: '#cbd5e1'
+    }
+  }, "• ", m))), messageFields.map(([label, text]) => /*#__PURE__*/React.createElement("div", {
     key: label,
     style: {
       marginBottom: '8px'
@@ -10119,20 +10221,91 @@ function MultifamilyOutreachLeadRow({
       padding: '8px',
       marginTop: '3px'
     }
-  }, text))), bundle && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, text))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '4px'
+    }
+  }, questionGroups.filter(([, qs]) => qs && qs.length > 0).map(([label, qs]) => /*#__PURE__*/React.createElement("div", {
+    key: label,
+    style: {
+      marginBottom: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '0.68rem',
       color: '#94a3b8',
       fontWeight: 600,
       marginBottom: '3px'
     }
-  }, "Discovery questions"), bundle.discovery_questions.map((q, i) => /*#__PURE__*/React.createElement("div", {
+  }, label, " questions"), qs.map((q, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     style: {
       fontSize: '0.76rem',
       color: '#cbd5e1'
     }
-  }, "\u2022 ", q)))));
+  }, "• ", q)))), qp && qp.questions_to_avoid && qp.questions_to_avoid.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#f97316',
+      fontWeight: 600,
+      marginBottom: '3px'
+    }
+  }, "Questions/angles to avoid"), qp.questions_to_avoid.map((q, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      fontSize: '0.74rem',
+      color: '#fca5a5'
+    }
+  }, "• ", q))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '6px'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowObjections(!showObjections),
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.12)',
+      color: '#94a3b8',
+      borderRadius: '4px',
+      padding: '3px 10px',
+      cursor: 'pointer',
+      fontSize: '0.68rem'
+    }
+  }, showObjections ? 'Hide objection guidance' : 'Show objection/resistance guidance'), showObjections && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '8px',
+      maxHeight: '260px',
+      overflowY: 'auto'
+    }
+  }, intel.objection_playbook.map(o => /*#__PURE__*/React.createElement("div", {
+    key: o.objection_key,
+    style: {
+      padding: '6px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.72rem',
+      color: '#e2e8f0',
+      fontWeight: 600
+    }
+  }, o.objection_key.replace(/_/g, ' ')), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.72rem',
+      color: '#cbd5e1',
+      marginTop: '2px'
+    }
+  }, o.response), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#64748b',
+      marginTop: '2px'
+    }
+  }, "Follow-up: ", o.follow_up_strategy)))))))));
 }
 function MultifamilyOutreachWorkbenchPanel({
   activeTab,
@@ -10195,7 +10368,7 @@ function MultifamilyOutreachWorkbenchPanel({
     }
   }, "LOADING OUTREACH WORKBENCH..."), !loading && leads.length === 0 && /*#__PURE__*/React.createElement(MultifamilyEmptyState, {
     title: "OUTREACH WORKBENCH",
-    what: "Call-Today, Hot, and Warm leads show up here with ready-to-use, stage-specific drafts: call opener, email, LinkedIn note, follow-ups, a soft bump, and discovery questions. Nothing is ever sent automatically.",
+    what: "Call-Today, Hot, and Warm leads show up here with a recommended approach from the Sales Intelligence engine — starting stage, call opener, email, LinkedIn note, follow-ups, a discovery question path, and objection guidance. Nothing is ever sent automatically.",
     onAddLead: () => setShowAdd(true)
   }), !loading && leads.map(l => /*#__PURE__*/React.createElement(MultifamilyOutreachLeadRow, {
     key: l.id,
