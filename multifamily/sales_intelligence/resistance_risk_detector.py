@@ -4,7 +4,7 @@ expect from a lead, so message tone/length can be softened accordingly.
 """
 from multifamily.types import MultifamilyLead
 
-_TRIGGER_ONLY_SOURCES = {'permit', 'news'}
+_TRIGGER_ONLY_SOURCES = {'permit', 'news', 'serp'}
 
 
 def detect_resistance_risk(lead: MultifamilyLead) -> str:
