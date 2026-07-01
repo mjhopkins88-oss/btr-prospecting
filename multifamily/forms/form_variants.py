@@ -118,7 +118,8 @@ FORM_VARIANTS: Dict[str, FormVariant] = {
         conditional_fields=[
             FormFieldSpec('targetCloseDate', 'Target close date', 'date', required=True),
             FormFieldSpec('propertyName', 'Property name (optional)', 'text'),
-            FormFieldSpec('numberOfUnits', 'Units (optional)', 'number'),
+            # numberOfUnits is already a universal optional field on every
+            # offer page — not repeated here.
             FormFieldSpec('relyingOnSellerNumbers', "Are you relying on the seller's insurance numbers?", 'select', options=[
                 {'value': 'yes', 'label': 'Yes, using seller numbers as-is'},
                 {'value': 'no', 'label': 'No, independently validating'},
@@ -176,7 +177,7 @@ FORM_VARIANTS: Dict[str, FormVariant] = {
     'completion-leaseup': FormVariant(
         slug='completion-leaseup',
         offer_type='completion_leaseup_review',
-        lead_situation='construction',
+        lead_situation='completion',
         headline="Map Your Builder's-Risk-to-Operating Transition",
         subheadline="Don't let the switch from builder's risk to an operating program create a coverage gap during lease-up.",
         cta='Map My Transition',

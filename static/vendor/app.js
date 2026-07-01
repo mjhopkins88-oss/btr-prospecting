@@ -8085,6 +8085,9 @@ const MF_LEAD_SITUATIONS = [{
   value: 'construction',
   label: 'Construction project'
 }, {
+  value: 'completion',
+  label: 'Completion / lease-up transition'
+}, {
   value: 'operating',
   label: 'Just operating — no specific trigger'
 }, {

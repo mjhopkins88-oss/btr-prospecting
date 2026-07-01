@@ -95,7 +95,7 @@ def _infer_scenario(lead: MultifamilyLead, process_stage: Optional[str]) -> str:
         return 'refinance_or_financing'
     if situation == 'construction' or process_stage in _CONSTRUCTION_STAGES:
         return 'builders_risk'
-    if process_stage == 'completion_or_lease_up':
+    if situation == 'completion' or process_stage == 'completion_or_lease_up':
         return 'completion_or_lease_up'
     if situation == 'benchmark':
         return 'just_benchmarking'

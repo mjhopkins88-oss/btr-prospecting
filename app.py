@@ -5639,6 +5639,16 @@ def spa_workspace_routes(subpath=None):
     on an incidental fallback."""
     return send_from_directory('static', 'index.html')
 
+@app.route('/mf-review/<slug>')
+def multifamily_offer_page(slug=None):
+    """Public, unauthenticated parameterized offer-page shell for the
+    multifamily funnel (Funnel Phase 2). One static page reads the slug
+    from window.location.pathname and fetches /api/multifamily/form-variants
+    to render the matching offer's copy/fields client-side — falls back to
+    the default 'benchmark' variant for an unrecognized slug, so this route
+    itself never needs to validate the slug server-side."""
+    return send_from_directory('static', 'mf-review.html')
+
 @app.route('/favicon.ico')
 def favicon():
     """Prevent favicon 404 errors"""

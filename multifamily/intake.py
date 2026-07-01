@@ -23,7 +23,7 @@ from multifamily.daily_brief.multifamily_next_best_action import next_best_actio
 from multifamily.pipeline import build_opener
 from multifamily.forms.form_variants import form_variant_for_offer_type
 
-LEAD_SITUATIONS = ['renewal', 'acquisition', 'refinance', 'construction', 'operating', 'benchmark']
+LEAD_SITUATIONS = ['renewal', 'acquisition', 'refinance', 'construction', 'completion', 'operating', 'benchmark']
 
 # Primary concern options map 1:1 to the scoring engine's pain-flag keys
 # (multifamily/scoring/multifamily_score_rules.py: PAIN_POINTS) so a real
@@ -49,6 +49,10 @@ MAX_FIELD_LENGTHS = {
     'utmSource': 200, 'utmMedium': 200, 'utmCampaign': 200,
     'utmTerm': 200, 'utmContent': 200, 'referrer': 500, 'landingPage': 500,
     'pageVariant': 100, 'campaignId': 200,
+    # Offer-page conditional fields (Funnel Phase 2) — free-text ones only;
+    # date/select fields are validated by their own <input type> client-side
+    # and are short enough not to need a separate cap.
+    'propertyName': 200, 'hardCosts': 100, 'softCosts': 100,
 }
 
 
@@ -122,8 +126,13 @@ def validate_intake(payload: Dict[str, Any]) -> List[str]:
 
 
 def _situation_signals(payload: Dict[str, Any], property_id: str, company_id: str) -> List[MultifamilySignal]:
-    """Translate leadSituation (+ renewalDate/projectStartDate) into the
-    secondary timing/trigger signal that feeds insurance_timing scoring."""
+    """Translate leadSituation (+ its offer-page conditional fields) into
+    the secondary timing/trigger signal that feeds insurance_timing
+    scoring. The extra conditional fields below (targetCloseDate,
+    lenderDeadline, hardCosts, etc.) ride in `detail` only — scoring never
+    reads `detail` for points, so none of this changes scoring math. They
+    exist for the timing/sales-intelligence layers and the funnel_urgency
+    layer (Funnel Phase 4) to read."""
     situation = _clean(payload.get('leadSituation')) or ''
     source = payload.get('source')
     signals = []
@@ -133,27 +142,63 @@ def _situation_signals(payload: Dict[str, Any], property_id: str, company_id: st
         detail = {'renewal_date': payload.get('renewalDate'), 'self_reported': True}
         if days is not None:
             detail['days_until_renewal'] = days
+        if payload.get('currentPremiumRange'):
+            detail['current_premium_range'] = _clean(payload.get('currentPremiumRange'))
         signals.append(MultifamilySignal(
             id=new_id(), signal_type='renewal_date_known', source=source, confidence=0.85,
             detail=detail, property_id=property_id, company_id=company_id,
         ))
     elif situation == 'acquisition':
+        detail = {'self_reported': True}
+        if payload.get('targetCloseDate'):
+            detail['target_close_date'] = _clean(payload.get('targetCloseDate'))
+        if payload.get('propertyName'):
+            detail['acquisition_property_name'] = _clean(payload.get('propertyName'))
+        if payload.get('relyingOnSellerNumbers'):
+            detail['relying_on_seller_numbers'] = _clean(payload.get('relyingOnSellerNumbers'))
         signals.append(MultifamilySignal(
             id=new_id(), signal_type='acquisition', source=source, confidence=0.8,
-            detail={'self_reported': True}, property_id=property_id, company_id=company_id,
+            detail=detail, property_id=property_id, company_id=company_id,
         ))
     elif situation == 'refinance':
+        detail = {'self_reported': True}
+        if payload.get('lenderDeadline'):
+            detail['lender_deadline'] = _clean(payload.get('lenderDeadline'))
+        if payload.get('issueType'):
+            detail['lender_issue_type'] = _clean(payload.get('issueType'))
         signals.append(MultifamilySignal(
             id=new_id(), signal_type='refinance', source=source, confidence=0.8,
-            detail={'self_reported': True}, property_id=property_id, company_id=company_id,
+            detail=detail, property_id=property_id, company_id=company_id,
         ))
     elif situation == 'construction':
         days = _days_until(payload.get('projectStartDate'))
         stage = 'vertical_construction' if (days is not None and days <= 0) else 'groundbreaking'
+        detail = {'project_start_date': payload.get('projectStartDate'), 'self_reported': True}
+        if payload.get('hardCosts'):
+            detail['hard_costs'] = _clean(payload.get('hardCosts'))
+        if payload.get('softCosts'):
+            detail['soft_costs'] = _clean(payload.get('softCosts'))
+        if payload.get('controlType'):
+            detail['control_type'] = _clean(payload.get('controlType'))
+        if payload.get('constructionStage'):
+            detail['construction_stage_selfreport'] = _clean(payload.get('constructionStage'))
         signals.append(MultifamilySignal(
             id=new_id(), signal_type=stage, source=source, confidence=0.75,
-            detail={'project_start_date': payload.get('projectStartDate'), 'self_reported': True},
-            property_id=property_id, company_id=company_id,
+            detail=detail, property_id=property_id, company_id=company_id,
+        ))
+    elif situation == 'completion':
+        detail = {'self_reported': True}
+        if payload.get('expectedCompletionDate'):
+            detail['expected_completion_date'] = _clean(payload.get('expectedCompletionDate'))
+        if payload.get('firstOccupancyDate'):
+            detail['first_occupancy_date'] = _clean(payload.get('firstOccupancyDate'))
+        if payload.get('phasing'):
+            detail['phasing'] = _clean(payload.get('phasing'))
+        if payload.get('operatingCoveragePlaced'):
+            detail['operating_coverage_placed'] = _clean(payload.get('operatingCoveragePlaced'))
+        signals.append(MultifamilySignal(
+            id=new_id(), signal_type='completion', source=source, confidence=0.8,
+            detail=detail, property_id=property_id, company_id=company_id,
         ))
     # 'operating' and 'benchmark' add no secondary timing signal — that's
     # honest: there's no known trigger driving urgency yet.
