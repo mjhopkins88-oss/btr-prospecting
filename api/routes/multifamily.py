@@ -25,12 +25,14 @@ from multifamily.daily_brief.multifamily_daily_brief_builder import build_daily_
 from multifamily.intake import build_lead_from_intake
 from multifamily import repository
 from multifamily import spam_guard
-from multifamily.types import ACTIVITY_TYPES
+from multifamily.types import ACTIVITY_TYPES, OUTCOME_TYPES
 from multifamily.stage_timing import compute_stage_timing
 from multifamily.timing import detect_process_stage
 from multifamily.timing.process_stage_types import OUTREACH_WINDOW_RANK
 from multifamily.outreach.outreach_bundle_builder import build_outreach_bundle
 from multifamily import matching as mf_matching
+from multifamily.snapshots import snapshot_lead, SNAPSHOT_REASONS
+from multifamily import notifications as mf_notifications
 
 multifamily_bp = Blueprint('multifamily', __name__, url_prefix='/api/multifamily')
 
@@ -77,11 +79,14 @@ def _signal_timeline(lead):
     return items
 
 
-def _serialize_lead(lead, is_admin, stage_result=None, with_history=False):
+def _serialize_lead(lead, is_admin, stage_result=None, with_history=False, current_outcome=None):
     """Serialize one lead, attaching LIVE timing intelligence (never
     persisted — it's time-dependent) and redacting admin-only fields for
     non-super-admins. With `with_history` (the single-lead drawer), also
-    attach the full attribution history (Phase C)."""
+    attach the full attribution history (Phase C) and outcome history
+    (outcome-tracking phase). `current_outcome` (a lightweight dict or
+    None) is bulk-fetched by the caller so list views don't cost one query
+    per lead — see _serialize_leads."""
     d = dataclasses.asdict(lead)
     d['stage_timing'] = compute_stage_timing(lead)
     sr = stage_result or detect_process_stage(lead)
@@ -90,6 +95,9 @@ def _serialize_lead(lead, is_admin, stage_result=None, with_history=False):
     # Signal architecture (Phase C): cheap, always-on.
     d['signal_count'] = len(lead.signals or [])
     d['signal_timeline'] = _signal_timeline(lead)
+    # Outcome tracking: cheap (bulk-fetched), always-on. Demo leads never
+    # carry a persisted outcome.
+    d['current_outcome'] = current_outcome
     if with_history:
         if lead.is_demo:
             # Demo leads aren't persisted; derive a one-touch summary from
@@ -102,8 +110,12 @@ def _serialize_lead(lead, is_admin, stage_result=None, with_history=False):
                 'conversion_source': lead.primary_source, 'touches': [],
                 'utm_history': [], 'landing_page_history': [], 'referrer_history': [],
             }
+            d['outcomes'] = []
+            d['snapshots'] = []
         else:
             d['attribution'] = repository.get_attribution_summary(lead.id)
+            d['outcomes'] = repository.get_outcomes_for_lead(lead.id)
+            d['snapshots'] = repository.get_snapshots_for_lead(lead.id)
     if not is_admin:
         for f in _ADMIN_ONLY_LEAD_FIELDS:
             d.pop(f, None)
@@ -113,7 +125,9 @@ def _serialize_lead(lead, is_admin, stage_result=None, with_history=False):
 
 def _serialize_leads(leads):
     is_admin = _requester_is_super_admin()
-    return [_serialize_lead(l, is_admin) for l in leads]
+    real_ids = [l.id for l in leads if not l.is_demo]
+    outcome_map = repository.get_current_outcomes_for_leads(real_ids) if real_ids else {}
+    return [_serialize_lead(l, is_admin, current_outcome=outcome_map.get(l.id)) for l in leads]
 
 
 def _real_and_mock():
@@ -181,6 +195,7 @@ def create_lead():
     if rate_limit_reason:
         event_type = 'rate_limited_ip' if rate_limit_reason == 'RATE_LIMIT_IP' else 'rate_limited_email'
         repository.record_intake_event(event_type, ip_hash, email)
+        mf_notifications.check_spam_spike()
         return jsonify({'success': False, 'errors': ['Too many submissions from this source. Please try again later.']}), 429
 
     spam_status, spam_reason_codes = spam_guard.classify_spam(payload)
@@ -192,6 +207,11 @@ def create_lead():
     if errors:
         repository.record_intake_event('invalid', ip_hash, email, {'errors': errors})
         return jsonify({'success': False, 'errors': errors}), 400
+
+    # Captured before any merge reassigns `lead` to the survivor — reflects
+    # THIS submission, not whatever the resolved lead ends up looking like.
+    raw_source = (payload.get('source') or '').strip()
+    incoming_signal_id = lead.signals[0].id if lead.signals else None
 
     # ---- Matching / merge (signal-architecture Phase B) ----
     # Rejected/spam submissions are persisted for audit but NEVER matched,
@@ -211,21 +231,31 @@ def create_lead():
             mf_matching.merge_incoming_on_intake(auto.lead, lead)
             merged_into = auto.lead.id
             lead = repository.get_lead_by_id(auto.lead.id) or auto.lead
+            snapshot_lead(lead, 'merged')
+            mf_notifications.notify_high_confidence_merge(lead.id, lead.company.name, incoming_signal_id)
         else:
             repository.insert_lead(lead)
             repository.persist_lead_signals(lead)
             repository.record_lead_attribution_touch(lead, touch_type='first')
             primary_sig_id = lead.signals[0].id if lead.signals else None
             for cand in result.get('review', []):
-                repository.insert_match_candidate(
+                candidate_row = repository.insert_match_candidate(
                     incoming_signal_id=primary_sig_id, candidate_lead_id=cand.lead.id,
                     match_tier='review', match_reasons=cand.reasons, score=cand.score,
                     incoming_lead_id=lead.id,
                 )
+                mf_notifications.notify_fuzzy_match_review(candidate_row['id'], lead.company.name, cand.lead.company.name, cand.lead.id)
                 review_count += 1
+            snapshot_lead(lead, 'created')
+
+        if raw_source == 'benchmark_form':
+            mf_notifications.notify_new_benchmark_submission(lead.id, lead.company.name, incoming_signal_id)
+        if lead.score and lead.score.category == 'call_today':
+            mf_notifications.notify_new_call_today_lead(lead.id, lead.company.name)
 
     if spam_status == 'rejected':
         event_type = 'rejected_honeypot' if 'HONEYPOT_FILLED' in spam_reason_codes else 'rejected_garbage'
+        mf_notifications.check_spam_spike()
     elif merged_into:
         event_type = 'accepted_merged'
     elif spam_status == 'suspicious':
@@ -503,7 +533,11 @@ def get_lead(lead_id):
     lead, err = _find_lead(lead_id)
     if err:
         return err
-    return jsonify({'lead': _serialize_lead(lead, _requester_is_super_admin(), with_history=True), 'is_demo': lead.is_demo})
+    current_outcome = None if lead.is_demo else repository.get_current_outcome(lead_id)
+    return jsonify({
+        'lead': _serialize_lead(lead, _requester_is_super_admin(), with_history=True, current_outcome=current_outcome),
+        'is_demo': lead.is_demo,
+    })
 
 
 @multifamily_bp.route('/leads/<lead_id>/outreach', methods=['GET'])
@@ -567,6 +601,7 @@ def merge_match_candidate(candidate_id):
         survivor = mf_matching.merge_existing(survivor_id, loser_id)
         if not survivor:
             return jsonify({'success': False, 'error': 'Merge failed (lead missing)'}), 422
+        snapshot_lead(survivor, 'merged')
         resolver = (g.user or {}).get('email') if getattr(g, 'user', None) else None
         repository.resolve_match_candidate(candidate_id, 'merged', resolved_by=resolver)
         return jsonify({'success': True, 'survivor_id': survivor_id, 'merged_lead_id': loser_id})
@@ -598,6 +633,34 @@ def get_source_performance():
     return jsonify(data)
 
 
+@multifamily_bp.route('/source-roi', methods=['GET'])
+def get_source_roi():
+    """Outcome-aware ROI report (outcome/snapshot/notification phase):
+    leads/signals/funnel milestones/revenue/quality metrics grouped by
+    source, source_page, offer_type, utm_source, utm_campaign,
+    first_touch_source, conversion_source, and latest_signal_source.
+    Login required — includes revenue/premium figures, more sensitive
+    than the public lead-count view at /source-performance."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        return jsonify({'roi': repository.get_source_roi()})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/admin/calibration', methods=['GET'])
+def get_admin_calibration():
+    """Descriptive-only (no ML) calibration dataset: score-band ->
+    meeting/win rate, timing-stage -> reply rate, process-stage -> win
+    rate, revenue by source, and disqualifier-code -> outcome mix. Super-
+    admin only (raw per-lead financials feed into this)."""
+    def _fn():
+        return jsonify(repository.get_calibration_dataset())
+    return _admin_only(_fn)
+
+
 @multifamily_bp.route('/leads/<lead_id>/activity', methods=['POST'])
 def log_activity(lead_id):
     """Log a manual activity / follow-up on a lead (Part 7). Login
@@ -618,6 +681,13 @@ def log_activity(lead_id):
             next_follow_up_date=(payload.get('next_follow_up_date') or None),
             user_email=user_email,
         )
+        if activity_type in ('replied', 'meeting_booked'):
+            lead_row = repository.get_lead_row(lead_id)
+            company_name = (lead_row or {}).get('company_name') or 'A lead'
+            if activity_type == 'replied':
+                mf_notifications.notify_lead_replied(lead_id, company_name, activity['id'])
+            else:
+                mf_notifications.notify_meeting_booked(lead_id, company_name, activity['id'])
         return jsonify({'success': True, 'activity': activity}), 201
 
     return _authorized()
@@ -631,6 +701,180 @@ def list_activities(lead_id):
     @_app.require_auth
     def _authorized():
         return jsonify({'lead_id': lead_id, 'activities': repository.get_activities_for_lead(lead_id)})
+
+    return _authorized()
+
+
+def _num_field(payload, key, errors):
+    """Coerce an optional numeric payload field, collecting a validation
+    error instead of raising (mirrors the activity endpoint's error-list
+    pattern)."""
+    v = payload.get(key)
+    if v in (None, ''):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        errors.append(f'{key} must be a number')
+        return None
+
+
+@multifamily_bp.route('/leads/<lead_id>/outcome', methods=['POST'])
+def record_lead_outcome(lead_id):
+    """Record a real business-outcome event on a lead (outcome-tracking
+    phase). Login required (internal operator action). Real leads only —
+    demo lead ids regenerate every pipeline run, so an outcome recorded
+    against one would silently vanish; reject with a clear error instead."""
+    import app as _app
+    from flask import g
+
+    @_app.require_auth
+    def _authorized():
+        lead, err = _find_lead(lead_id)
+        if err:
+            return err
+        if lead.is_demo:
+            return jsonify({'success': False, 'errors': ['Cannot record an outcome on demo data.']}), 400
+        payload = request.get_json(silent=True) or {}
+        outcome_type = (payload.get('outcome_type') or '').strip()
+        errors = []
+        if outcome_type not in OUTCOME_TYPES:
+            errors.append(f'outcome_type must be one of {OUTCOME_TYPES}')
+        estimated_premium = _num_field(payload, 'estimated_premium', errors)
+        estimated_revenue = _num_field(payload, 'estimated_revenue', errors)
+        quoted_premium = _num_field(payload, 'quoted_premium', errors)
+        bound_premium = _num_field(payload, 'bound_premium', errors)
+        if errors:
+            return jsonify({'success': False, 'errors': errors}), 400
+        user_email = (g.user or {}).get('email') if getattr(g, 'user', None) else None
+        outcome = repository.record_outcome(
+            lead_id, outcome_type,
+            outcome_date=(payload.get('outcome_date') or None),
+            estimated_premium=estimated_premium, estimated_revenue=estimated_revenue,
+            quoted_premium=quoted_premium, bound_premium=bound_premium,
+            effective_date=(payload.get('effective_date') or None),
+            renewal_date=(payload.get('renewal_date') or None),
+            lost_reason=(payload.get('lost_reason') or None),
+            won_reason=(payload.get('won_reason') or None),
+            notes=(payload.get('notes') or None),
+            created_by=user_email,
+        )
+        snapshot_lead(lead, 'outcome_changed')
+        if outcome_type == 'meeting_booked':
+            mf_notifications.notify_meeting_booked(lead_id, lead.company.name, outcome['id'])
+        return jsonify({
+            'success': True, 'outcome': outcome,
+            'current_outcome': repository.get_current_outcome(lead_id),
+        }), 201
+
+    return _authorized()
+
+
+@multifamily_bp.route('/leads/<lead_id>/outcomes', methods=['GET'])
+def list_lead_outcomes(lead_id):
+    """Full outcome history for one lead (newest first). Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        lead, err = _find_lead(lead_id)
+        if err:
+            return err
+        if lead.is_demo:
+            return jsonify({'lead_id': lead_id, 'outcomes': [], 'current_outcome': None})
+        return jsonify({
+            'lead_id': lead_id,
+            'outcomes': repository.get_outcomes_for_lead(lead_id),
+            'current_outcome': repository.get_current_outcome(lead_id),
+        })
+
+    return _authorized()
+
+
+@multifamily_bp.route('/leads/<lead_id>/snapshots', methods=['GET'])
+def list_lead_snapshots(lead_id):
+    """Score/timing snapshot history for one lead, newest first (drawer's
+    Score History tab). Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        lead, err = _find_lead(lead_id)
+        if err:
+            return err
+        if lead.is_demo:
+            return jsonify({'lead_id': lead_id, 'snapshots': []})
+        return jsonify({'lead_id': lead_id, 'snapshots': repository.get_snapshots_for_lead(lead_id)})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/leads/<lead_id>/snapshot', methods=['POST'])
+def create_lead_snapshot(lead_id):
+    """Force a fresh score/timing snapshot ('manual_rerun') — e.g. after an
+    operator manually reviews/corrects a lead's data. Login required. Real
+    leads only; never recomputes/changes scoring, just records the current
+    (already-computed) state."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        lead, err = _find_lead(lead_id)
+        if err:
+            return err
+        if lead.is_demo:
+            return jsonify({'success': False, 'errors': ['Cannot snapshot demo data.']}), 400
+        row = snapshot_lead(lead, 'manual_rerun')
+        return jsonify({'success': True, 'snapshot': row}), 201
+
+    return _authorized()
+
+
+@multifamily_bp.route('/notifications', methods=['GET'])
+def get_notifications():
+    """In-app notification feed (outcome/snapshot/notification phase).
+    Login required — any authenticated user, not admin-only (these are
+    operational alerts for whoever's working the dashboard). Runs the
+    time-derived sweep (follow-up due/overdue, hot-lead-stale) first —
+    there's no background scheduler, so this is the only clock those
+    notifications have; sweep() is idempotent so repeated calls are safe."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        mf_notifications.sweep()
+        unread_only = request.args.get('unread_only', '').lower() in ('1', 'true', 'yes')
+        limit = int(request.args.get('limit', 50))
+        return jsonify({
+            'notifications': repository.get_notifications(unread_only=unread_only, limit=limit),
+            'unread_count': repository.count_unread_notifications(),
+        })
+
+    return _authorized()
+
+
+@multifamily_bp.route('/notifications/<notification_id>/read', methods=['POST'])
+def mark_notification_read(notification_id):
+    """Mark one notification read. Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        repository.mark_notification_read(notification_id)
+        return jsonify({'success': True, 'unread_count': repository.count_unread_notifications()})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/notifications/read-all', methods=['POST'])
+def mark_all_notifications_read():
+    """Mark every notification read. Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        repository.mark_all_notifications_read()
+        return jsonify({'success': True, 'unread_count': repository.count_unread_notifications()})
 
     return _authorized()
 

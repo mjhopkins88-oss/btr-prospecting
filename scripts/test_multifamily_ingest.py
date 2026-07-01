@@ -140,6 +140,8 @@ def main():
             repository.delete_signals_for_lead(lid)
             repository.delete_attribution_for_lead(lid)
             repository.delete_match_candidates_for_lead(lid)
+            repository.delete_snapshots_for_lead(lid)
+            repository.delete_outcomes_for_lead(lid)
             try:
                 repository.delete_lead(lid)
             except Exception:
