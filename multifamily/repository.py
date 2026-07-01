@@ -250,6 +250,26 @@ def ensure_schema() -> None:
         )
     ''')
 
+    # In-app notifications (outcome/snapshot/notification phase). No
+    # external email/SMS — an in-app queue only. `dedupe_key` is UNIQUE so
+    # emit() is naturally idempotent via INSERT OR IGNORE (db.py translates
+    # this to ON CONFLICT DO NOTHING on Postgres).
+    execute('''
+        CREATE TABLE IF NOT EXISTS multifamily_notifications (
+            id TEXT PRIMARY KEY,
+            type TEXT NOT NULL,
+            lead_id TEXT,
+            severity TEXT NOT NULL DEFAULT 'info',
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            action_url TEXT,
+            metadata_json TEXT,
+            dedupe_key TEXT,
+            read_at TEXT,
+            created_at TIMESTAMP
+        )
+    ''')
+
     try:
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_leads_created ON multifamily_leads(created_at DESC)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_leads_state ON multifamily_leads(state)')
@@ -270,6 +290,9 @@ def ensure_schema() -> None:
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_leads_current_outcome ON multifamily_leads(current_outcome)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_snapshots_lead ON multifamily_lead_snapshots(lead_id, created_at DESC)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_snapshots_reason ON multifamily_lead_snapshots(reason)')
+        execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_multifamily_notifications_dedupe ON multifamily_notifications(dedupe_key)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_notifications_read ON multifamily_notifications(read_at, created_at DESC)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_notifications_lead ON multifamily_notifications(lead_id)')
     except Exception:
         pass
 
@@ -1190,3 +1213,101 @@ def get_creation_snapshot(lead_id: str) -> Optional[Dict[str, Any]]:
 def delete_snapshots_for_lead(lead_id: str) -> None:
     ensure_schema()
     execute('DELETE FROM multifamily_lead_snapshots WHERE lead_id = ?', [lead_id])
+
+
+# ===========================================================================
+# In-app notifications (outcome/snapshot/notification phase)
+# No external email/SMS — an in-app queue only. See multifamily/
+# notifications.py for emit()/sweep() (the business logic); this module is
+# pure CRUD. `dedupe_key` is UNIQUE, so insert_notification() is naturally
+# idempotent via INSERT OR IGNORE.
+# ===========================================================================
+
+def _notification_row_with_json(r: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        r['metadata'] = json.loads(r['metadata_json']) if r.get('metadata_json') else {}
+    except Exception:
+        r['metadata'] = {}
+    r['is_read'] = bool(r.get('read_at'))
+    return r
+
+
+def insert_notification(
+    type_: str, *, title: str, message: str, lead_id: Optional[str] = None, severity: str = 'info',
+    action_url: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, dedupe_key: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Insert one notification. If `dedupe_key` already exists, this is a
+    no-op (INSERT OR IGNORE) and returns None so callers can tell a fresh
+    notification was NOT created."""
+    ensure_schema()
+    from multifamily.types import new_id, utc_now_iso
+    row_id = new_id()
+    now = utc_now_iso()
+    execute(
+        'INSERT OR IGNORE INTO multifamily_notifications '
+        '(id, type, lead_id, severity, title, message, action_url, metadata_json, dedupe_key, created_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [row_id, type_, lead_id, severity, title, message, action_url, json.dumps(metadata or {}), dedupe_key, now],
+    )
+    if dedupe_key:
+        rows = fetch_all('SELECT * FROM multifamily_notifications WHERE dedupe_key = ?', [dedupe_key])
+        if not rows or rows[0]['id'] != row_id:
+            return None  # a notification with this dedupe_key already existed
+        return _notification_row_with_json(rows[0])
+    rows = fetch_all('SELECT * FROM multifamily_notifications WHERE id = ?', [row_id])
+    return _notification_row_with_json(rows[0]) if rows else None
+
+
+def get_notifications(unread_only: bool = False, limit: int = 100) -> List[Dict[str, Any]]:
+    ensure_schema()
+    sql = 'SELECT * FROM multifamily_notifications'
+    if unread_only:
+        sql += ' WHERE read_at IS NULL'
+    sql += ' ORDER BY created_at DESC LIMIT ?'
+    rows = fetch_all(sql, [limit])
+    return [_notification_row_with_json(r) for r in rows]
+
+
+def count_unread_notifications() -> int:
+    ensure_schema()
+    rows = fetch_all('SELECT COUNT(*) AS n FROM multifamily_notifications WHERE read_at IS NULL')
+    return int(rows[0]['n']) if rows else 0
+
+
+def mark_notification_read(notification_id: str) -> None:
+    ensure_schema()
+    from multifamily.types import utc_now_iso
+    execute(
+        'UPDATE multifamily_notifications SET read_at = ? WHERE id = ? AND read_at IS NULL',
+        [utc_now_iso(), notification_id],
+    )
+
+
+def mark_all_notifications_read() -> None:
+    ensure_schema()
+    from multifamily.types import utc_now_iso
+    execute('UPDATE multifamily_notifications SET read_at = ? WHERE read_at IS NULL', [utc_now_iso()])
+
+
+def count_recent_events_global(event_types: List[str], since_iso: str) -> int:
+    """System-wide count of intake events of the given type(s) since a
+    timestamp (unlike count_recent_events, not scoped to one ip/email) —
+    used for the spam/rate-limit-spike notification."""
+    ensure_schema()
+    placeholders = ', '.join(['?'] * len(event_types))
+    rows = fetch_all(
+        f'SELECT COUNT(*) AS n FROM multifamily_intake_events WHERE event_type IN ({placeholders}) AND created_at >= ?',
+        list(event_types) + [since_iso],
+    )
+    return int(rows[0]['n']) if rows else 0
+
+
+def delete_notifications_for_lead(lead_id: str) -> None:
+    ensure_schema()
+    execute('DELETE FROM multifamily_notifications WHERE lead_id = ?', [lead_id])
+
+
+def delete_notification(notification_id: str) -> None:
+    """Used by tests to clean up after themselves."""
+    ensure_schema()
+    execute('DELETE FROM multifamily_notifications WHERE id = ?', [notification_id])
