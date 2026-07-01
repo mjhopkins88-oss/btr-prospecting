@@ -169,7 +169,25 @@ def ensure_schema() -> None:
             records_rejected INTEGER DEFAULT 0,
             errors_json TEXT,
             warnings_json TEXT,
+            category TEXT,
+            state TEXT,
+            query TEXT,
             created_at TIMESTAMP
+        )
+    ''')
+    # SERP url-seen ledger — the authoritative idempotency check for the
+    # SERP collector (multifamily/serp/serp_collector.py): a URL already
+    # in here is skipped before it ever reaches matching, so a re-run of
+    # the same search never re-creates a signal or spams a review
+    # candidate for the same article (the matching engine's same_source_url
+    # reason is only review-tier, not auto-merge, so without this ledger a
+    # repeat run would queue a new review candidate every time).
+    execute('''
+        CREATE TABLE IF NOT EXISTS multifamily_serp_seen (
+            url TEXT PRIMARY KEY,
+            category TEXT,
+            state TEXT,
+            first_seen_at TIMESTAMP
         )
     ''')
     # Possible matches needing human review (auto-tier matches never queue here).
@@ -321,6 +339,7 @@ def ensure_schema() -> None:
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_notifications_read ON multifamily_notifications(read_at, created_at DESC)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_notifications_lead ON multifamily_notifications(lead_id)')
         execute('CREATE INDEX IF NOT EXISTS idx_multifamily_sales_intel_lead ON multifamily_sales_intelligence_events(lead_id, created_at DESC)')
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_serp_seen_category_state ON multifamily_serp_seen(category, state)')
     except Exception:
         pass
 
@@ -333,6 +352,11 @@ def ensure_schema() -> None:
     _safe_add_column('multifamily_sales_intelligence_events', 'conversation_mode', 'TEXT')
     _safe_add_column('multifamily_sales_intelligence_events', 'follow_up_type', 'TEXT')
     _safe_add_column('multifamily_sales_intelligence_events', 'guardrail_status', 'TEXT')
+
+    # SERP collection run metadata — added after the table's initial create.
+    _safe_add_column('multifamily_source_runs', 'category', 'TEXT')
+    _safe_add_column('multifamily_source_runs', 'state', 'TEXT')
+    _safe_add_column('multifamily_source_runs', 'query', 'TEXT')
 
     _backfill_signals_from_lead_json()
     _SCHEMA_READY = True
@@ -945,7 +969,8 @@ def get_source_runs(limit: int = 50) -> List[Dict[str, Any]]:
     ensure_schema()
     rows = fetch_all(
         'SELECT id, source, run_id, started_at, finished_at, status, records_found, records_created, '
-        'records_updated, records_merged, records_rejected, errors_json, warnings_json, created_at '
+        'records_updated, records_merged, records_rejected, errors_json, warnings_json, '
+        'category, state, query, created_at '
         'FROM multifamily_source_runs ORDER BY created_at DESC LIMIT ?',
         [limit],
     )
@@ -958,9 +983,61 @@ def get_source_runs(limit: int = 50) -> List[Dict[str, Any]]:
     return rows
 
 
+def set_source_run_query_metadata(
+    run_db_id: str, *, category: Optional[str] = None, state: Optional[str] = None,
+    query: Optional[str] = None, records_found: Optional[int] = None,
+) -> None:
+    """Attach SERP-specific run metadata after ingest_batch/ingest_trigger_batch
+    already logged the run (those generic functions don't know about
+    category/state/query). Also lets the SERP collector correct
+    records_found to the TOTAL raw search-result count — ingest_batch only
+    sees the already-filtered accepted-for-ingest count, which would
+    otherwise undercount once low-relevance results are filtered out
+    upstream of ingest."""
+    ensure_schema()
+    sets, params = [], []
+    if category is not None:
+        sets.append('category = ?'); params.append(category)
+    if state is not None:
+        sets.append('state = ?'); params.append(state)
+    if query is not None:
+        sets.append('query = ?'); params.append(query)
+    if records_found is not None:
+        sets.append('records_found = ?'); params.append(records_found)
+    if not sets:
+        return
+    params.append(run_db_id)
+    execute(f'UPDATE multifamily_source_runs SET {", ".join(sets)} WHERE id = ?', params)
+
+
 def delete_source_run(run_db_id: str) -> None:
     ensure_schema()
     execute('DELETE FROM multifamily_source_runs WHERE id = ?', [run_db_id])
+
+
+# ---- SERP url-seen ledger ---------------------------------------------------
+
+def is_serp_url_seen(url: str) -> bool:
+    ensure_schema()
+    rows = fetch_all('SELECT 1 FROM multifamily_serp_seen WHERE url = ?', [url])
+    return bool(rows)
+
+
+def mark_serp_url_seen(url: str, category: Optional[str] = None, state: Optional[str] = None) -> None:
+    """Idempotent — INSERT OR IGNORE so re-marking an already-seen URL
+    (e.g. a race between two concurrent runs) never raises."""
+    ensure_schema()
+    from multifamily.types import utc_now_iso
+    execute(
+        'INSERT OR IGNORE INTO multifamily_serp_seen (url, category, state, first_seen_at) VALUES (?, ?, ?, ?)',
+        [url, category, state, utc_now_iso()],
+    )
+
+
+def delete_serp_seen_url(url: str) -> None:
+    """Used by tests to clean up after themselves."""
+    ensure_schema()
+    execute('DELETE FROM multifamily_serp_seen WHERE url = ?', [url])
 
 
 # ---- Match candidates (review queue) --------------------------------------
