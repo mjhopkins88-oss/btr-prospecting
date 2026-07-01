@@ -196,7 +196,7 @@ def build_message_package(
     linkedin_note_manual = f"{greeting} — {hook}? No pitch, just curious."
 
     follow_up_1 = (
-        f"{greeting} — circling back in case this got buried. {question_path.fallback_question} "
+        f"{greeting} — didn't want this to get lost in the shuffle. {question_path.fallback_question} "
         f"Totally fine either way."
     )
 

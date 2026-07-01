@@ -42,14 +42,29 @@ NEPQ_STAGES = [
     'qualifying', 'transition', 'presentation', 'commitment', 'nurture',
 ]
 
+# Alias — same list, named to match the sales-stage-classifier module's vocabulary.
+SALES_STAGES = NEPQ_STAGES
+
 BUYER_AWARENESS_LEVELS = ['unaware', 'problem_aware', 'solution_aware', 'vendor_comparing', 'decision_ready', 'unknown']
 
 RESISTANCE_RISKS = ['low', 'medium', 'high']
 
 RECOMMENDED_ACTIONS = [
     'call_now', 'send_soft_email', 'send_linkedin_note_manual', 'ask_for_context',
-    'ask_for_renewal_timing', 'ask_for_current_program_details', 'ask_for_sov', 'ask_for_loss_runs',
-    'schedule_benchmark_call', 'nurture', 'do_not_contact_yet',
+    'ask_for_renewal_timing', 'ask_for_current_program_details', 'ask_for_lender_requirements',
+    'ask_for_sov', 'ask_for_loss_runs', 'schedule_benchmark_call', 'nurture', 'do_not_contact_yet',
+]
+
+# High-level "what kind of conversation is this" label, derived 1:1 from
+# which strategy rule matched (see conversation_strategy_engine.py's
+# _CONVERSATION_MODE_BY_RULE). objection_resolution and follow_up are not
+# reachable from select_strategy() alone — they're set by the objection
+# engine and follow_up_strategy_engine respectively.
+CONVERSATION_MODES = [
+    'inbound_response', 'warm_contextual_outreach', 'trigger_based_outbound',
+    'renewal_discovery', 'acquisition_discovery', 'lender_compliance_discovery',
+    'construction_discovery', 'completion_transition_discovery', 'nurture_check_in',
+    'objection_resolution', 'follow_up',
 ]
 
 
@@ -129,6 +144,7 @@ class ConversationStrategy:
     challenge_assumptions_carefully: bool = False
     move_toward_next_step: bool = False
     rule_applied: Optional[str] = None
+    conversation_mode: Optional[str] = None
 
 
 @dataclass

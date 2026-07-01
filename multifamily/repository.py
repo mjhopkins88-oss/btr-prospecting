@@ -290,6 +290,9 @@ def ensure_schema() -> None:
             recommended_action TEXT,
             confidence_score REAL,
             reasoning_json TEXT,
+            conversation_mode TEXT,
+            follow_up_type TEXT,
+            guardrail_status TEXT,
             created_at TIMESTAMP
         )
     ''')
@@ -324,6 +327,12 @@ def ensure_schema() -> None:
     # A match candidate references both the incoming lead and the existing
     # candidate lead (added after the table's initial create).
     _safe_add_column('multifamily_lead_match_candidates', 'incoming_lead_id', 'TEXT')
+
+    # Sales-intelligence decision log: conversation_mode/follow_up_type/
+    # guardrail_status added after the table's initial create.
+    _safe_add_column('multifamily_sales_intelligence_events', 'conversation_mode', 'TEXT')
+    _safe_add_column('multifamily_sales_intelligence_events', 'follow_up_type', 'TEXT')
+    _safe_add_column('multifamily_sales_intelligence_events', 'guardrail_status', 'TEXT')
 
     _backfill_signals_from_lead_json()
     _SCHEMA_READY = True
@@ -1645,7 +1654,8 @@ def log_sales_intelligence_event(
     insurance_scenario: Optional[str] = None, buyer_awareness_level: Optional[str] = None,
     resistance_risk: Optional[str] = None, nepq_stage: Optional[str] = None,
     recommended_action: Optional[str] = None, confidence_score: Optional[float] = None,
-    reasoning: Optional[Dict[str, Any]] = None,
+    reasoning: Optional[Dict[str, Any]] = None, conversation_mode: Optional[str] = None,
+    follow_up_type: Optional[str] = None, guardrail_status: Optional[str] = None,
 ) -> Dict[str, Any]:
     ensure_schema()
     from multifamily.types import new_id, utc_now_iso
@@ -1654,11 +1664,13 @@ def log_sales_intelligence_event(
     execute(
         'INSERT INTO multifamily_sales_intelligence_events '
         '(id, lead_id, variant, lead_temperature, lead_origin, insurance_scenario, buyer_awareness_level, '
-        'resistance_risk, nepq_stage, recommended_action, confidence_score, reasoning_json, created_at) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'resistance_risk, nepq_stage, recommended_action, confidence_score, reasoning_json, '
+        'conversation_mode, follow_up_type, guardrail_status, created_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
             row_id, lead_id, variant, lead_temperature, lead_origin, insurance_scenario, buyer_awareness_level,
-            resistance_risk, nepq_stage, recommended_action, confidence_score, json.dumps(reasoning or {}), now,
+            resistance_risk, nepq_stage, recommended_action, confidence_score, json.dumps(reasoning or {}),
+            conversation_mode, follow_up_type, guardrail_status, now,
         ],
     )
     return {
@@ -1666,7 +1678,8 @@ def log_sales_intelligence_event(
         'lead_origin': lead_origin, 'insurance_scenario': insurance_scenario,
         'buyer_awareness_level': buyer_awareness_level, 'resistance_risk': resistance_risk,
         'nepq_stage': nepq_stage, 'recommended_action': recommended_action, 'confidence_score': confidence_score,
-        'reasoning': reasoning or {}, 'created_at': now,
+        'reasoning': reasoning or {}, 'conversation_mode': conversation_mode, 'follow_up_type': follow_up_type,
+        'guardrail_status': guardrail_status, 'created_at': now,
     }
 
 
@@ -1682,7 +1695,8 @@ def get_sales_intelligence_history(lead_id: str) -> List[Dict[str, Any]]:
     ensure_schema()
     rows = fetch_all(
         'SELECT id, lead_id, variant, lead_temperature, lead_origin, insurance_scenario, buyer_awareness_level, '
-        'resistance_risk, nepq_stage, recommended_action, confidence_score, reasoning_json, created_at '
+        'resistance_risk, nepq_stage, recommended_action, confidence_score, reasoning_json, '
+        'conversation_mode, follow_up_type, guardrail_status, created_at '
         'FROM multifamily_sales_intelligence_events WHERE lead_id = ? ORDER BY created_at DESC',
         [lead_id],
     )
