@@ -2657,17 +2657,32 @@ _AUTH_EXEMPT_PREFIXES = (
     '/api/auth/login', '/api/auth/bootstrap', '/api/auth/has-users',
     '/api/auth/logout', '/api/auth/me',
     '/health', '/api/health',
+    # Public, read-only marketing config for the multifamily offer pages
+    # (benchmark form + funnel Phase 2 pages) — no lead/session data.
+    '/api/multifamily/form-variants',
+)
+
+# Multifamily public lead intake (the benchmark form + every funnel
+# offer page under /mf-review/<slug> POST here) — anonymous prospects
+# must be able to submit without a session. Method-scoped rather than a
+# path exemption because GET on this same path lists internal lead data
+# and must stay authenticated.
+_PUBLIC_POST_PATHS = (
+    '/api/multifamily/leads',
 )
 
 @app.before_request
 def _enforce_auth():
-    """Require a valid session for all /api/ routes except auth & health."""
+    """Require a valid session for all /api/ routes except auth, health,
+    and the multifamily public intake surface."""
     path = request.path
     if not path.startswith('/api/'):
         return  # static files, HTML pages — no auth needed
     for exempt in _AUTH_EXEMPT_PREFIXES:
         if path == exempt or path.startswith(exempt + '/'):
             return
+    if request.method == 'POST' and path in _PUBLIC_POST_PATHS:
+        return
     if not _has_users():
         g.user = None
         g.workspace_id = None

@@ -216,3 +216,30 @@ def form_variant_for_offer_type(offer_type: str) -> Optional[FormVariant]:
         if variant.offer_type == offer_type:
             return variant
     return None
+
+
+# Why each variant fits a given self-reported situation — surfaced by the
+# Outreach Workbench alongside the recommended page (Funnel Phase 3) so an
+# operator understands the reasoning, not just the slug.
+_RECOMMENDATION_REASON_BY_SLUG = {
+    'renewal-pressure': "This lead has a renewal coming up — this page pressure-tests it before they re-sign.",
+    'acquisition': "This lead is mid-acquisition — this page reviews the insurance numbers before they close.",
+    'lender-requirement': "This lead has a refinance/lender situation — this page clears the specific requirement fast.",
+    'builders-risk': "This lead has a construction project — this page locks in builder's risk before ground breaks.",
+    'completion-leaseup': "This lead is nearing completion/lease-up — this page maps the builder's-risk-to-operating transition.",
+    'benchmark': "No specific trigger identified yet — the general benchmark review is the safest fit.",
+}
+
+
+def recommend_form_variant_for_situation(lead_situation: Optional[str]) -> FormVariant:
+    """Forward lookup — given a lead's self-reported (or inferred)
+    situation, which offer page best fits sending them next? Falls back
+    to the benchmark variant for an unrecognized/absent situation."""
+    for variant in FORM_VARIANTS.values():
+        if variant.lead_situation == lead_situation:
+            return variant
+    return default_form_variant()
+
+
+def recommendation_reason_for_slug(slug: str) -> str:
+    return _RECOMMENDATION_REASON_BY_SLUG.get(slug, _RECOMMENDATION_REASON_BY_SLUG['benchmark'])

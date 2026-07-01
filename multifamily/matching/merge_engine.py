@@ -77,20 +77,25 @@ def apply_merge(survivor: MultifamilyLead, incoming: MultifamilyLead) -> List[Mu
     return new_signals
 
 
-def merge_incoming_on_intake(survivor: MultifamilyLead, incoming: MultifamilyLead) -> MultifamilyLead:
+def merge_incoming_on_intake(survivor: MultifamilyLead, incoming: MultifamilyLead, touch_type: str = 'touch') -> MultifamilyLead:
     """Auto-merge path: incoming was never persisted. Fold it into the
     survivor, persist the survivor + its new signals + an attribution
     touch (the survivor id, with the incoming's source context). No
-    tombstone (incoming never became a row)."""
+    tombstone (incoming never became a row). `touch_type` defaults to
+    'touch' (fuzzy/auto identity match); the outbound-link merge-back
+    path (Funnel Phase 3) passes 'conversion' since that merge is a
+    known, deliberate conversion event, not an incidental identity match."""
     new_signals = apply_merge(survivor, incoming)
     repository.update_lead(survivor)
     for sig in new_signals:
         repository.insert_signal(survivor.id, sig, is_demo=survivor.is_demo, spam_status=survivor.spam_status)
     repository.record_attribution(
-        survivor.id, 'touch', source=incoming.primary_source,
+        survivor.id, touch_type, source=incoming.primary_source,
         utm_source=incoming.utm_source, utm_medium=incoming.utm_medium, utm_campaign=incoming.utm_campaign,
         utm_term=incoming.utm_term, utm_content=incoming.utm_content, referrer=incoming.referrer,
-        landing_page=incoming.landing_page, offer_type=incoming.offer_type, occurred_at=incoming.last_verified_at,
+        landing_page=incoming.landing_page, offer_type=incoming.offer_type,
+        page_variant=getattr(incoming, 'page_variant', None), campaign_id=getattr(incoming, 'campaign_id', None),
+        occurred_at=incoming.last_verified_at,
     )
     return survivor
 

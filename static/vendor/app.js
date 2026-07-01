@@ -9257,7 +9257,11 @@ function MultifamilyLeadDrawer({
       color: '#cbd5e1',
       marginBottom: '3px'
     }
-  }, "\u2022 ", q)))), lead && section === 'activity' && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+  }, "\u2022 ", q)))), lead && section === 'outreach' && /*#__PURE__*/React.createElement(MultifamilyOutboundLinkView, {
+    lead: lead,
+    leadId: leadId,
+    onLinkGenerated: refreshLead
+  }), lead && section === 'activity' && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
     title: "NOTES / ACTIVITY"
   }, lead.is_demo && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -11141,6 +11145,178 @@ function MultifamilyAttributionView({
       padding: '2px 0'
     }
   }, rf))));
+}
+const MF_OFFER_PAGE_OPTIONS = [{
+  slug: 'benchmark',
+  label: 'Benchmark Review'
+}, {
+  slug: 'renewal-pressure',
+  label: 'Renewal Pressure Test'
+}, {
+  slug: 'acquisition',
+  label: 'Acquisition Assumption Review'
+}, {
+  slug: 'lender-requirement',
+  label: 'Lender Requirement Review'
+}, {
+  slug: 'builders-risk',
+  label: "Builder's Risk Review"
+}, {
+  slug: 'completion-leaseup',
+  label: 'Completion / Lease-Up Transition Review'
+}];
+function MultifamilyOutboundLinkView({
+  lead,
+  leadId,
+  onLinkGenerated
+}) {
+  const recommended = lead && lead.recommended_form_variant;
+  const recommendedSlug = recommended && recommended.slug;
+  const [pageVariant, setPageVariant] = useState(recommendedSlug || 'benchmark');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  useEffect(() => {
+    if (recommendedSlug) setPageVariant(recommendedSlug);
+  }, [recommendedSlug]);
+  const generate = async () => {
+    setBusy(true);
+    setResult(null);
+    try {
+      const r = await fetch(`/api/multifamily/leads/${leadId}/outbound-link`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          pageVariant
+        })
+      });
+      const j = await r.json();
+      if (r.ok && j.success) {
+        setResult({
+          ok: true,
+          url: window.location.origin + j.url
+        });
+        if (onLinkGenerated) onLinkGenerated();
+      } else {
+        setResult({
+          ok: false,
+          message: (j.errors || ['Failed to generate link.']).join('; ')
+        });
+      }
+    } catch (err) {
+      setResult({
+        ok: false,
+        message: 'Network error: ' + err.message
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const links = lead && lead.outbound_links || [];
+  return /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
+    title: "OUTBOUND-TO-FORM LINK"
+  }, recommended && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.75rem',
+      color: '#94a3b8',
+      marginBottom: '10px'
+    }
+  }, recommended.reason), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '8px',
+      alignItems: 'center',
+      marginBottom: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("select", {
+    style: mfFieldStyle(),
+    value: pageVariant,
+    onChange: e => setPageVariant(e.target.value)
+  }, MF_OFFER_PAGE_OPTIONS.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o.slug,
+    value: o.slug
+  }, o.label))), /*#__PURE__*/React.createElement("button", {
+    onClick: generate,
+    disabled: busy || lead && lead.is_demo,
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      borderRadius: '6px',
+      padding: '6px 12px',
+      fontWeight: 700,
+      fontSize: '0.75rem',
+      cursor: busy ? 'not-allowed' : 'pointer'
+    }
+  }, busy ? 'Generating…' : 'Generate Link')), lead && lead.is_demo && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.72rem',
+      color: '#f97316'
+    }
+  }, "This is demo data — links can't be generated."), result && result.ok && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: '8px',
+      background: 'rgba(255,255,255,0.03)',
+      borderRadius: '6px',
+      padding: '8px',
+      marginTop: '6px'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.72rem',
+      color: '#60a5fa',
+      wordBreak: 'break-all'
+    }
+  }, result.url), /*#__PURE__*/React.createElement("button", {
+    onClick: () => mfCopy(result.url),
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.1)',
+      color: '#64748b',
+      borderRadius: '4px',
+      padding: '1px 8px',
+      cursor: 'pointer',
+      fontSize: '0.65rem',
+      flexShrink: 0
+    }
+  }, "Copy")), result && !result.ok && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.72rem',
+      color: '#ef4444',
+      marginTop: '6px'
+    }
+  }, result.message), links.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '12px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#64748b',
+      marginBottom: '4px'
+    }
+  }, "LINKS SENT"), links.map((l, i) => /*#__PURE__*/React.createElement("div", {
+    key: l.token || i,
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: '8px',
+      fontSize: '0.72rem',
+      padding: '4px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#cbd5e1'
+    }
+  }, l.page_variant || '—', ' · ', l.created_at ? String(l.created_at).slice(0, 10) : '—'), /*#__PURE__*/React.createElement("span", {
+    style: l.converted_at ? mfPillStyle('#34d399') : mfPillStyle('#64748b')
+  }, l.converted_at ? 'converted' : 'sent')))));
 }
 function MultifamilyDataQualityView() {
   const [cands, setCands] = useState(null);

@@ -370,6 +370,28 @@ def ensure_schema() -> None:
     _safe_add_column('multifamily_source_attribution', 'page_variant', 'TEXT')
     _safe_add_column('multifamily_source_attribution', 'campaign_id', 'TEXT')
 
+    # Outbound-to-form merge-back tokens (Funnel Phase 3). token is the
+    # primary key so the public offer-page URL never has to encode lead_id
+    # directly (?mf_ref=<token>).
+    execute('''
+        CREATE TABLE IF NOT EXISTS multifamily_outbound_links (
+            token TEXT PRIMARY KEY,
+            lead_id TEXT NOT NULL,
+            offer_type TEXT,
+            page_variant TEXT,
+            campaign_id TEXT,
+            source TEXT,
+            created_by TEXT,
+            created_at TIMESTAMP,
+            converted_at TEXT,
+            converted_lead_id TEXT
+        )
+    ''')
+    try:
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_outbound_links_lead ON multifamily_outbound_links(lead_id, created_at DESC)')
+    except Exception:
+        pass
+
     _backfill_signals_from_lead_json()
     _SCHEMA_READY = True
 
@@ -379,6 +401,13 @@ def _lead_situation_of(lead: MultifamilyLead) -> str:
         if signal.detail and signal.detail.get('lead_situation'):
             return signal.detail['lead_situation']
     return ''
+
+
+def lead_situation_of(lead: MultifamilyLead) -> str:
+    """Public alias — the self-reported situation (e.g. 'renewal',
+    'acquisition') read from the lead's primary signal, used by the
+    Outreach Workbench's page-recommendation (Funnel Phase 3)."""
+    return _lead_situation_of(lead)
 
 
 def insert_lead(lead: MultifamilyLead) -> None:
@@ -946,6 +975,67 @@ def record_lead_attribution_touch(lead, touch_type: str = 'touch') -> None:
     )
 
 
+# ---- Outbound-to-form merge-back links (Funnel Phase 3) --------------------
+
+def create_outbound_link(lead_id: str, offer_type: Optional[str] = None,
+                          page_variant: Optional[str] = None, campaign_id: Optional[str] = None,
+                          source: Optional[str] = None, created_by: Optional[str] = None) -> Dict[str, Any]:
+    """Mint a token mapping back to `lead_id` — an operator sends the
+    prospect a link like /mf-review/<page_variant>?mf_ref=<token>; when
+    they submit it, create_lead() looks the token up and merges the
+    submission straight into this lead (see api/routes/multifamily.py)."""
+    ensure_schema()
+    import secrets
+    from multifamily.types import utc_now_iso
+    token = secrets.token_urlsafe(16)
+    now = utc_now_iso()
+    row = {
+        'token': token, 'lead_id': lead_id, 'offer_type': offer_type, 'page_variant': page_variant,
+        'campaign_id': campaign_id, 'source': source, 'created_by': created_by,
+        'created_at': now, 'converted_at': None, 'converted_lead_id': None,
+    }
+    execute(
+        'INSERT INTO multifamily_outbound_links (token, lead_id, offer_type, page_variant, campaign_id, '
+        'source, created_by, created_at, converted_at, converted_lead_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        list(row.values()),
+    )
+    return row
+
+
+def get_outbound_link(token: str) -> Optional[Dict[str, Any]]:
+    ensure_schema()
+    rows = fetch_all(
+        'SELECT token, lead_id, offer_type, page_variant, campaign_id, source, created_by, created_at, '
+        'converted_at, converted_lead_id FROM multifamily_outbound_links WHERE token = ?',
+        [token],
+    )
+    return rows[0] if rows else None
+
+
+def get_outbound_links_for_lead(lead_id: str) -> List[Dict[str, Any]]:
+    ensure_schema()
+    return fetch_all(
+        'SELECT token, lead_id, offer_type, page_variant, campaign_id, source, created_by, created_at, '
+        'converted_at, converted_lead_id FROM multifamily_outbound_links WHERE lead_id = ? ORDER BY created_at DESC',
+        [lead_id],
+    )
+
+
+def mark_outbound_link_converted(token: str, converted_lead_id: str) -> None:
+    ensure_schema()
+    from multifamily.types import utc_now_iso
+    execute(
+        'UPDATE multifamily_outbound_links SET converted_at = ?, converted_lead_id = ? WHERE token = ?',
+        [utc_now_iso(), converted_lead_id, token],
+    )
+
+
+def delete_outbound_links_for_lead(lead_id: str) -> None:
+    """Used by tests to clean up after themselves."""
+    ensure_schema()
+    execute('DELETE FROM multifamily_outbound_links WHERE lead_id = ?', [lead_id])
+
+
 def get_attribution_for_lead(lead_id: str) -> List[Dict[str, Any]]:
     ensure_schema()
     return fetch_all(
@@ -1182,6 +1272,28 @@ def get_lead_by_id(lead_id: str) -> Optional[MultifamilyLead]:
     """Reconstruct a single lead dataclass from its persisted lead_json."""
     row = get_lead_row(lead_id)
     if not row or not row.get('lead_json'):
+        return None
+    try:
+        return _dict_to_lead(json.loads(row['lead_json']))
+    except Exception:
+        return None
+
+
+def get_active_lead_by_id(lead_id: str, _hops: int = 0) -> Optional[MultifamilyLead]:
+    """Like get_lead_by_id, but follows merged_into_id if the given lead
+    was itself merged away since — used by the outbound-link merge-back
+    path (Funnel Phase 3), where the token's original lead_id may have
+    been folded into a survivor by an unrelated fuzzy/auto match in the
+    meantime. Bounded hop count as a defensive guard against a corrupt
+    merge cycle."""
+    if _hops > 5:
+        return None
+    row = get_lead_row(lead_id)
+    if not row:
+        return None
+    if row.get('merge_status') == 'merged' and row.get('merged_into_id'):
+        return get_active_lead_by_id(row['merged_into_id'], _hops + 1)
+    if not row.get('lead_json'):
         return None
     try:
         return _dict_to_lead(json.loads(row['lead_json']))

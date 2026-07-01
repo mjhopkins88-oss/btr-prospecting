@@ -279,6 +279,28 @@ class MultifamilyLeadMatchCandidate:
 
 
 @dataclass
+class MultifamilyOutboundLink:
+    """A token minted for outbound-to-form conversion (Funnel Phase 3):
+    an operator working `lead_id` generates a link to a specific offer
+    page for that prospect (e.g. an acquisition-review link to send by
+    email); when the prospect fills out that page carrying `?mf_ref=token`,
+    intake looks the token up and merges the submission straight into
+    `lead_id` deterministically — bypassing fuzzy matching entirely,
+    since the identity is already known. `token` is the primary key so
+    the URL never needs to encode `lead_id` directly."""
+    token: str
+    lead_id: str
+    offer_type: Optional[str] = None
+    page_variant: Optional[str] = None
+    campaign_id: Optional[str] = None
+    source: Optional[str] = None  # e.g. 'outbound_email' | 'outbound_call' | 'outbound_message'
+    created_by: Optional[str] = None
+    created_at: str = field(default_factory=utc_now_iso)
+    converted_at: Optional[str] = None
+    converted_lead_id: Optional[str] = None
+
+
+@dataclass
 class MultifamilyActivity:
     """A manually-logged outreach/follow-up activity on a lead (Part 7).
     Persisted in the multifamily_activities table. Never auto-generated —

@@ -12,6 +12,7 @@ responses) only when it has zero matching real leads.
 """
 import dataclasses
 from datetime import date, datetime, timedelta
+from typing import Any, Dict
 
 from flask import Blueprint, request, jsonify
 
@@ -40,7 +41,10 @@ from multifamily.sales_intelligence.follow_up_suggestions import (
 )
 from multifamily.sales_intelligence.tone_guardrails import check_message_package, worst_status
 from multifamily.serp.query_templates import SerpQueryConfig, SERP_CATEGORIES, SERP_LAUNCH_STATES, SERP_FUTURE_STATES
-from multifamily.forms.form_variants import FORM_VARIANTS, FORM_VARIANT_SLUGS, DEFAULT_FORM_VARIANT_SLUG
+from multifamily.forms.form_variants import (
+    FORM_VARIANTS, FORM_VARIANT_SLUGS, DEFAULT_FORM_VARIANT_SLUG,
+    recommend_form_variant_for_situation, recommendation_reason_for_slug,
+)
 from multifamily.serp.serp_collector import run_serp_collection
 
 multifamily_bp = Blueprint('multifamily', __name__, url_prefix='/api/multifamily')
@@ -159,11 +163,29 @@ def _serialize_lead(lead, is_admin, stage_result=None, with_history=False, curre
             d['snapshots'] = repository.get_snapshots_for_lead(lead.id)
             activities = repository.get_activities_for_lead(lead.id)
         d['sales_intelligence'] = _sales_intelligence_summary(lead, sr, activities, outcomes)
+        if not lead.is_demo:
+            d['recommended_form_variant'] = _recommended_form_variant(lead)
+            d['outbound_links'] = repository.get_outbound_links_for_lead(lead.id)
     if not is_admin:
         for f in _ADMIN_ONLY_LEAD_FIELDS:
             d.pop(f, None)
         d.pop('spam_status', None)  # internal triage state — admin only
     return d
+
+
+def _recommended_form_variant(lead) -> Dict[str, Any]:
+    """Which offer page best fits sending THIS lead next, and why —
+    surfaced by the Outreach Workbench alongside a "generate link"
+    action (Funnel Phase 3). Never auto-sent; just a recommendation an
+    operator acts on manually."""
+    situation = repository.lead_situation_of(lead)
+    variant = recommend_form_variant_for_situation(situation)
+    return {
+        'slug': variant.slug,
+        'headline': variant.headline,
+        'cta': variant.cta,
+        'reason': recommendation_reason_for_slug(variant.slug),
+    }
 
 
 def _serialize_leads(leads):
@@ -273,15 +295,41 @@ def create_lead():
     raw_source = (payload.get('source') or '').strip()
     incoming_signal_id = lead.signals[0].id if lead.signals else None
 
+    # ---- Outbound-to-form merge-back (Funnel Phase 3) ----
+    # A submission carrying ?mf_ref=<token> came from a link an operator
+    # generated for a SPECIFIC known lead — identity is already resolved,
+    # so this merges deterministically into that lead rather than running
+    # find_candidates() against the whole pool. An unknown/already-used
+    # token, or one whose target lead no longer resolves, silently falls
+    # through to the normal fuzzy-matching path below (never surfaced to
+    # the submitter).
+    outbound_token = (payload.get('mfRef') or '').strip() or None
+    outbound_link = repository.get_outbound_link(outbound_token) if outbound_token else None
+    outbound_target = None
+    if outbound_link and not outbound_link.get('converted_at'):
+        outbound_target = repository.get_active_lead_by_id(outbound_link['lead_id'])
+
     # ---- Matching / merge (signal-architecture Phase B) ----
     # Rejected/spam submissions are persisted for audit but NEVER matched,
     # merged, or used to strengthen an existing lead.
     merged_into = None
     review_count = 0
+    outbound_conversion = False
     if spam_status == 'rejected':
         repository.insert_lead(lead)
         repository.persist_lead_signals(lead)
         repository.record_lead_attribution_touch(lead, touch_type='first')
+    elif outbound_target:
+        mf_matching.merge_incoming_on_intake(outbound_target, lead, touch_type='conversion')
+        merged_into = outbound_target.id
+        outbound_conversion = True
+        lead = repository.get_lead_by_id(outbound_target.id) or outbound_target
+        repository.mark_outbound_link_converted(outbound_token, lead.id)
+        snapshot_lead(lead, 'merged')
+        if raw_source == 'benchmark_form':
+            mf_notifications.notify_new_benchmark_submission(lead.id, lead.company.name, incoming_signal_id)
+        if lead.score and lead.score.category == 'call_today':
+            mf_notifications.notify_new_call_today_lead(lead.id, lead.company.name)
     else:
         result = mf_matching.classify(lead, repository.get_real_leads())
         auto = result.get('auto')
@@ -316,6 +364,8 @@ def create_lead():
     if spam_status == 'rejected':
         event_type = 'rejected_honeypot' if 'HONEYPOT_FILLED' in spam_reason_codes else 'rejected_garbage'
         mf_notifications.check_spam_spike()
+    elif outbound_conversion:
+        event_type = 'accepted_converted_from_outbound'
     elif merged_into:
         event_type = 'accepted_merged'
     elif spam_status == 'suspicious':
@@ -324,6 +374,7 @@ def create_lead():
         event_type = 'accepted_clean'
     repository.record_intake_event(event_type, ip_hash, email, {
         'spam_reason_codes': spam_reason_codes, 'merged_into': merged_into, 'review_candidates': review_count,
+        'outbound_conversion': outbound_conversion,
     })
 
     # Always a normal-looking success — never reveal spam detection to the
@@ -1004,6 +1055,70 @@ def create_lead_snapshot(lead_id):
             return jsonify({'success': False, 'errors': ['Cannot snapshot demo data.']}), 400
         row = snapshot_lead(lead, 'manual_rerun')
         return jsonify({'success': True, 'snapshot': row}), 201
+
+    return _authorized()
+
+
+@multifamily_bp.route('/leads/<lead_id>/outbound-link', methods=['POST'])
+def create_lead_outbound_link(lead_id):
+    """Mint an outbound-to-form merge-back token for a specific lead
+    (Funnel Phase 3, part of the outbound-to-form lane of the funnel
+    strategy). An operator picks the offer page that best fits this
+    lead's situation, generates a link, and sends it manually through
+    whatever channel they'd already use (email, a call follow-up, a
+    LinkedIn message) — this never sends anything itself. When the
+    prospect submits that page carrying ?mf_ref=<token>, create_lead()
+    merges the submission straight into this lead. Login required."""
+    import app as _app
+    from flask import g
+
+    @_app.require_auth
+    def _authorized():
+        lead, err = _find_lead(lead_id)
+        if err:
+            return err
+        if lead.is_demo:
+            return jsonify({'success': False, 'errors': ['Cannot generate an outbound link for demo data.']}), 400
+
+        payload = request.get_json(silent=True) or {}
+        page_variant = (payload.get('pageVariant') or payload.get('page_variant') or '').strip() or None
+        variant = FORM_VARIANTS.get(page_variant) if page_variant else None
+        if page_variant and not variant:
+            return jsonify({'success': False, 'errors': [f'Unknown page_variant. Must be one of {FORM_VARIANT_SLUGS}']}), 400
+
+        campaign_id = (payload.get('campaignId') or payload.get('campaign_id') or '').strip() or None
+        source = (payload.get('source') or '').strip() or 'outbound_email'
+        user_email = (g.user or {}).get('email') if getattr(g, 'user', None) else None
+
+        row = repository.create_outbound_link(
+            lead_id=lead.id,
+            offer_type=(variant.offer_type if variant else None),
+            page_variant=page_variant,
+            campaign_id=campaign_id,
+            source=source,
+            created_by=user_email,
+        )
+        url = f'/mf-review/{page_variant}?mf_ref={row["token"]}' if page_variant else None
+        return jsonify({'success': True, 'link': row, 'url': url}), 201
+
+    return _authorized()
+
+
+@multifamily_bp.route('/leads/<lead_id>/outbound-links', methods=['GET'])
+def list_lead_outbound_links(lead_id):
+    """Every outbound link ever generated for this lead (newest first) —
+    lets the Outreach Workbench show "link already sent" instead of
+    minting a fresh token on every drawer open. Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        lead, err = _find_lead(lead_id)
+        if err:
+            return err
+        if lead.is_demo:
+            return jsonify({'lead_id': lead_id, 'links': []})
+        return jsonify({'lead_id': lead_id, 'links': repository.get_outbound_links_for_lead(lead_id)})
 
     return _authorized()
 
