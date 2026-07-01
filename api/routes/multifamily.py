@@ -46,6 +46,7 @@ from multifamily.forms.form_variants import (
     recommend_form_variant_for_situation, recommendation_reason_for_slug,
 )
 from multifamily.funnel.urgency import compute_funnel_urgency
+from multifamily.funnel.overview_widgets import best_inbound_handraiser, build_funnel_widgets
 from multifamily.serp.serp_collector import run_serp_collection
 
 multifamily_bp = Blueprint('multifamily', __name__, url_prefix='/api/multifamily')
@@ -639,6 +640,22 @@ def get_overview():
     }
     best_first_action = mission['best_first_call'] or mission['best_email_draft'] or mission['best_followup']
 
+    # --- Funnel widgets (Funnel Phase 7) ---
+    # `leads` is already priority-sorted (category > score > urgency), so
+    # the first real benchmark-form submission in it is the single best
+    # inbound hand-raiser to work right now.
+    stage_by_id = {l.id: sr for l, sr in staged}
+    handraiser = best_inbound_handraiser(leads)
+    best_handraiser = None
+    if handraiser:
+        activities, outcomes = _mission_activities_outcomes(handraiser)
+        best_handraiser = {
+            **_mission_item(handraiser, stage_by_id.get(handraiser.id), activities, outcomes),
+            'page_variant': handraiser.page_variant,
+            'offer_type': handraiser.offer_type,
+        }
+    funnel = {**build_funnel_widgets(perf), 'best_inbound_handraiser': best_handraiser}
+
     payload = {
         'total_leads': len(leads),
         'real_lead_count': len(real_leads),
@@ -655,6 +672,7 @@ def get_overview():
         'top_campaign': top_campaign,
         'best_first_action': best_first_action,
         'mission': mission,
+        'funnel': funnel,
     }
     # Suspicious/spam count — admin only (Part 3).
     if is_admin:

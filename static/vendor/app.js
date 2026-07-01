@@ -9784,6 +9784,9 @@ function MultifamilyOverviewPanel({
   }, [load]);
   const c = data && data.counts || {};
   const m = data && data.mission || {};
+  const funnel = data && data.funnel || {};
+  const newFormsByOffer = funnel.new_forms_by_offer || {};
+  const totalNewForms = Object.values(newFormsByOffer).reduce((sum, n) => sum + n, 0);
   const tiles = [['CALL TODAY', c.call_today || 0, '#ef4444'], ['HOT', c.hot || 0, '#f97316'], ['WARM', c.warm || 0, '#f59e0b'], ['NEW INBOUND', c.new_inbound || 0, '#34d399'], ['FOLLOW-UPS DUE', followupsDueCount ?? 0, '#38bdf8'], ['RENEWAL WINDOW', c.renewal_window || 0, '#3b82f6'], ["CONSTR / B-RISK", c.construction_buildersrisk || 0, '#22d3ee']];
   const primaryItem = data && data.best_first_action;
   const secondaryEntries = [['Best email draft', m.best_email_draft], ['Best follow-up', m.best_followup], ['Best nurture action', m.best_nurture_action]].filter(([, item]) => item && (!primaryItem || item.lead_id !== primaryItem.lead_id));
@@ -9870,7 +9873,55 @@ function MultifamilyOverviewPanel({
     key: title,
     title: title.toUpperCase(),
     item: item
-  }))), /*#__PURE__*/React.createElement(MultifamilyNeedsAttentionPanel, {
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#64748b',
+      fontFamily: "'Orbitron', sans-serif",
+      letterSpacing: '0.06em',
+      marginBottom: '8px'
+    }
+  }, "MULTIFAMILY FUNNEL"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+      gap: '10px',
+      marginBottom: '1.25rem'
+    }
+  }, /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+    label: "NEW FORMS (TOTAL)",
+    value: totalNewForms,
+    color: "#34d399"
+  }), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+    label: "TOP OFFER PAGE",
+    value: funnel.top_offer_page || '—',
+    color: "#f59e0b"
+  }), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+    label: "SERP NEEDS REVIEW",
+    value: funnel.serp_triggers_needing_review || 0,
+    color: "#facc15"
+  }), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+    label: "CONVERTED FROM OUTBOUND",
+    value: `${funnel.converted_from_outbound || 0} / ${funnel.outbound_links_sent || 0}`,
+    color: "#60a5fa"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+      gap: '8px',
+      marginBottom: '1.25rem'
+    }
+  }, /*#__PURE__*/React.createElement(MultifamilyMissionCard, {
+    title: "BEST INBOUND HAND-RAISER",
+    item: funnel.best_inbound_handraiser
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '8px',
+      padding: '12px 14px'
+    }
+  }, mfBreakdownTable('NEW FORMS BY OFFER', newFormsByOffer))), /*#__PURE__*/React.createElement(MultifamilyNeedsAttentionPanel, {
     user: user,
     leadNeedingInfo: m.lead_needing_info,
     onOpen: setDrawerId,
