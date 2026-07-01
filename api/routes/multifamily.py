@@ -330,7 +330,7 @@ def create_lead():
         repository.mark_outbound_link_converted(outbound_token, lead.id)
         snapshot_lead(lead, 'merged')
         if raw_source == 'benchmark_form':
-            mf_notifications.notify_new_benchmark_submission(lead.id, lead.company.name, incoming_signal_id)
+            mf_notifications.notify_outbound_conversion(lead.id, lead.company.name, lead.page_variant, outbound_token)
         if lead.score and lead.score.category == 'call_today':
             mf_notifications.notify_new_call_today_lead(lead.id, lead.company.name)
     else:
@@ -360,7 +360,12 @@ def create_lead():
             snapshot_lead(lead, 'created')
 
         if raw_source == 'benchmark_form':
-            mf_notifications.notify_new_benchmark_submission(lead.id, lead.company.name, incoming_signal_id)
+            variant = FORM_VARIANTS.get(lead.page_variant) if lead.page_variant else None
+            priority = variant.notification_priority if variant else 'same_day'
+            mf_notifications.notify_new_form_submission(
+                lead.id, lead.company.name, lead.page_variant, lead.offer_type,
+                priority=priority, signal_id=incoming_signal_id,
+            )
         if lead.score and lead.score.category == 'call_today':
             mf_notifications.notify_new_call_today_lead(lead.id, lead.company.name)
 

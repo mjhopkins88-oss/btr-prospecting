@@ -26,10 +26,21 @@ from multifamily import repository
 SEVERITIES = ['info', 'warning', 'critical']
 
 NOTIFICATION_TYPES = [
-    'new_call_today_lead', 'new_benchmark_submission', 'hot_lead_stale',
+    'new_call_today_lead', 'new_benchmark_submission', 'new_form_submission',
+    'converted_from_outbound', 'hot_lead_stale',
     'followup_due_today', 'followup_overdue', 'lead_replied', 'meeting_booked',
     'high_confidence_merge', 'fuzzy_match_review', 'spam_spike',
 ]
+
+# Funnel Phase 5: per-offer SLA — severity/response-time copy driven by
+# the submitted page's own notification_priority
+# (multifamily/forms/form_variants.py), not hardcoded per offer here.
+_SEVERITY_BY_PRIORITY = {'immediate': 'critical', 'same_day': 'warning', 'queued': 'info'}
+_SLA_TEXT_BY_PRIORITY = {
+    'immediate': 'Respond within the hour.',
+    'same_day': 'Respond today.',
+    'queued': 'No urgent SLA — queue for normal follow-up.',
+}
 
 # A Hot/Call-Today lead with no logged activity (and no more recent
 # merge/signal touch) in this many days is considered "stale".
@@ -76,6 +87,46 @@ def notify_new_benchmark_submission(lead_id: str, company_name: str, signal_id: 
         title='New benchmark form submission', message=f'{company_name} submitted the public benchmark form.',
         action_url=f'/multifamily?lead={lead_id}', metadata={'company': company_name},
         dedupe_key=f'new_benchmark_submission:{signal_id or lead_id}',
+    )
+
+
+def notify_new_form_submission(
+    lead_id: str, company_name: str, page_variant: Optional[str], offer_type: Optional[str],
+    priority: str = 'same_day', signal_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """A prospect submitted one of the funnel's public offer pages
+    (/mf-review/<page_variant>), including the original benchmark form
+    (page_variant='benchmark'). Severity and the SLA line come from the
+    offer's own notification_priority — set per-offer by the funnel
+    strategy (multifamily/forms/form_variants.py), never hardcoded here.
+    Not used for outbound-link conversions — see
+    notify_outbound_conversion for that distinct, more specific event."""
+    severity = _SEVERITY_BY_PRIORITY.get(priority, 'info')
+    sla_text = _SLA_TEXT_BY_PRIORITY.get(priority, _SLA_TEXT_BY_PRIORITY['queued'])
+    page_label = (page_variant or 'benchmark').replace('-', ' ')
+    return emit(
+        'new_form_submission', lead_id=lead_id, severity=severity,
+        title='New offer-page submission',
+        message=f'{company_name} submitted the "{page_label}" page. {sla_text}',
+        action_url=f'/multifamily?lead={lead_id}',
+        metadata={'company': company_name, 'page_variant': page_variant, 'offer_type': offer_type, 'priority': priority},
+        dedupe_key=f'new_form_submission:{signal_id or lead_id}',
+    )
+
+
+def notify_outbound_conversion(lead_id: str, company_name: str, page_variant: Optional[str], token: str) -> Optional[Dict[str, Any]]:
+    """A prospect converted through a link an operator generated for
+    them specifically (Funnel Phase 3's multifamily_outbound_links) —
+    distinct from a generic new_form_submission because it confirms the
+    outbound touch actually worked, not just that a form came in."""
+    page_label = (page_variant or 'benchmark').replace('-', ' ')
+    return emit(
+        'converted_from_outbound', lead_id=lead_id, severity='info',
+        title='Outbound link converted',
+        message=f'{company_name} converted through the outbound "{page_label}" link you sent.',
+        action_url=f'/multifamily?lead={lead_id}',
+        metadata={'company': company_name, 'page_variant': page_variant},
+        dedupe_key=f'converted_from_outbound:{token}',
     )
 
 
