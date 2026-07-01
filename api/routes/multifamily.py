@@ -646,6 +646,7 @@ def get_lead_sales_intelligence(lead_id):
         'question_path': dataclasses.asdict(pkg.question_path),
         'messages': dataclasses.asdict(pkg.messages),
         'objection_playbook': [dataclasses.asdict(o) for o in pkg.objection_playbook],
+        'follow_up_strategy': dataclasses.asdict(pkg.follow_up_strategy),
         'reasoning': dataclasses.asdict(pkg.reasoning),
     })
 
