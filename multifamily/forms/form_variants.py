@@ -32,6 +32,12 @@ DEFAULT_FORM_VARIANT_SLUG = 'benchmark'
 # to set notification priority, never to change scoring/timing math.
 NOTIFICATION_PRIORITIES = ['immediate', 'same_day', 'queued']
 
+# Section 8 item 5 — every offer's turnaround promise starts at this
+# placeholder until an operator confirms a real number per offer (or
+# overrides it). Deliberately visible/bracketed so it can never be
+# mistaken for a confirmed commitment if it ships unchanged.
+DEFAULT_TURNAROUND_PROMISE = '[TURNAROUND — default 5 business days pending operator confirmation]'
+
 
 @dataclass
 class FormFieldSpec:
@@ -57,6 +63,17 @@ class FormVariant:
     confirmation: str
     conditional_fields: List[FormFieldSpec] = field(default_factory=list)
     notification_priority: str = 'same_day'
+    # Section 8 item 5 — deliverable definition as config, rendered on the
+    # offer page as "What you get / What we need / How fast" and read by
+    # the Outreach Workbench (multifamily/outreach/outreach_bundle_builder.py)
+    # so generated copy can name the concrete artifact instead of speaking
+    # generically. required_inputs is documentation copy only — it does not
+    # drive form validation (see conditional_fields for the actual fields).
+    deliverable_name: str = ''
+    deliverable_description: str = ''
+    required_inputs: List[str] = field(default_factory=list)
+    artifact_type: str = ''
+    turnaround_promise: str = DEFAULT_TURNAROUND_PROMISE
 
 
 FORM_VARIANTS: Dict[str, FormVariant] = {
@@ -80,6 +97,11 @@ FORM_VARIANTS: Dict[str, FormVariant] = {
             ]),
         ],
         notification_priority='same_day',
+        deliverable_name='Multifamily Benchmark Snapshot',
+        deliverable_description='$/unit and rate-per-$100-TIV range vs. segment, plus 3 observations.',
+        required_inputs=['Property address', 'Unit count', 'Year built', 'Construction type', 'Current premium'],
+        artifact_type='Benchmark snapshot (range + written observations)',
+        turnaround_promise=DEFAULT_TURNAROUND_PROMISE,
     ),
     'renewal-pressure': FormVariant(
         slug='renewal-pressure',
@@ -106,6 +128,11 @@ FORM_VARIANTS: Dict[str, FormVariant] = {
             ]),
         ],
         notification_priority='same_day',
+        deliverable_name='Renewal Readiness Memo',
+        deliverable_description='Timeline read, market-appetite read, and a deductible-structure critique.',
+        required_inputs=['Renewal date', 'Current premium range (optional)', 'Main concern', 'Unit count', 'Asset type'],
+        artifact_type='Memo (PDF)',
+        turnaround_promise=DEFAULT_TURNAROUND_PROMISE,
     ),
     'acquisition': FormVariant(
         slug='acquisition',
@@ -127,6 +154,11 @@ FORM_VARIANTS: Dict[str, FormVariant] = {
             ]),
         ],
         notification_priority='immediate',
+        deliverable_name='Insurance Assumption Validation',
+        deliverable_description='A range vs. your pro-forma insurance assumption, plus any flagged risks.',
+        required_inputs=['Property address', 'Unit count', 'Vintage (year built)', 'Assumed insurance line', 'Target close date'],
+        artifact_type='Validation summary (range + flagged risks)',
+        turnaround_promise=DEFAULT_TURNAROUND_PROMISE,
     ),
     'lender-requirement': FormVariant(
         slug='lender-requirement',
@@ -148,6 +180,11 @@ FORM_VARIANTS: Dict[str, FormVariant] = {
             ]),
         ],
         notification_priority='immediate',
+        deliverable_name='Requirements Gap Check',
+        deliverable_description="A read on your term-sheet insurance clauses against your current or available program.",
+        required_inputs=['Lender deadline', 'Type of lender issue', 'Unit count', 'Asset type'],
+        artifact_type='Gap-check summary (PDF)',
+        turnaround_promise=DEFAULT_TURNAROUND_PROMISE,
     ),
     'builders-risk': FormVariant(
         slug='builders-risk',
@@ -173,6 +210,11 @@ FORM_VARIANTS: Dict[str, FormVariant] = {
             ]),
         ],
         notification_priority='immediate',
+        deliverable_name='BR Structure Review',
+        deliverable_description="A limits/soft-cost/delay/OCP checklist read against your loan requirements.",
+        required_inputs=['Project start date', 'Hard costs (optional)', 'Soft costs (optional)', 'Who controls the policy', 'Construction stage'],
+        artifact_type='Structure-review checklist (PDF)',
+        turnaround_promise=DEFAULT_TURNAROUND_PROMISE,
     ),
     'completion-leaseup': FormVariant(
         slug='completion-leaseup',
@@ -196,6 +238,11 @@ FORM_VARIANTS: Dict[str, FormVariant] = {
             ]),
         ],
         notification_priority='same_day',
+        deliverable_name='Transition Map',
+        deliverable_description="A milestone-keyed coverage map from builder's risk to your operating program, plus an operating-budget range.",
+        required_inputs=['Expected completion date', 'First occupancy date (optional)', 'Completion type', 'Is operating coverage already placed?'],
+        artifact_type='Transition map (milestone-keyed diagram + budget range)',
+        turnaround_promise=DEFAULT_TURNAROUND_PROMISE,
     ),
 }
 

@@ -9293,7 +9293,28 @@ function MultifamilyLeadDrawer({
       padding: '8px',
       marginTop: '4px'
     }
-  }, text))), outreach && /*#__PURE__*/React.createElement("div", {
+  }, text))), outreach && outreach.offer_deliverable && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '10px',
+      marginBottom: '10px',
+      background: 'rgba(245,158,11,0.06)',
+      border: '1px solid rgba(245,158,11,0.2)',
+      borderRadius: '6px',
+      padding: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#f59e0b',
+      fontWeight: 600,
+      marginBottom: '2px'
+    }
+  }, "Artifact this copy references"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.78rem',
+      color: '#cbd5e1'
+    }
+  }, outreach.offer_deliverable.deliverable_name, " — ", outreach.offer_deliverable.turnaround_promise)), outreach && /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: '10px'
     }

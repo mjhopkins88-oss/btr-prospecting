@@ -86,12 +86,85 @@
         overflow: hidden;
     }
     .consent { font-size: 0.72rem; color: #64748b; line-height: 1.5; margin-top: 0.75rem; }
+    .info-block {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.1rem 1.35rem;
+        margin-bottom: 1.25rem;
+    }
+    .info-block h2 {
+        font-family: 'Orbitron', sans-serif;
+        font-size: 0.75rem;
+        letter-spacing: 0.04em;
+        color: var(--accent);
+        margin: 0 0 0.75rem;
+        text-transform: uppercase;
+    }
+    .deliverable-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 0.4rem; }
+    .deliverable-col h3 { font-size: 0.72rem; color: var(--muted); margin: 0 0 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .deliverable-col p, .deliverable-col ul { font-size: 0.84rem; color: var(--text); margin: 0; line-height: 1.5; }
+    .deliverable-col ul { padding-left: 1.1rem; }
+    .turnaround-note { font-size: 0.72rem; color: #64748b; margin-top: 0.6rem; }
+    .credibility-line { font-size: 0.84rem; color: var(--text); line-height: 1.55; margin: 0 0 0.6rem; }
+    .credibility-line:last-child { margin-bottom: 0; }
+    .credibility-steps { counter-reset: step; list-style: none; padding: 0; margin: 0.3rem 0 0.9rem; }
+    .credibility-steps li { counter-increment: step; font-size: 0.84rem; color: var(--text); margin-bottom: 6px; padding-left: 1.6rem; position: relative; line-height: 1.45; }
+    .credibility-steps li::before {
+        content: counter(step);
+        position: absolute; left: 0; top: 0;
+        width: 1.15rem; height: 1.15rem;
+        border-radius: 50%;
+        background: rgba(245,158,11,0.15);
+        color: var(--accent);
+        font-size: 0.68rem;
+        font-weight: 700;
+        display: flex; align-items: center; justify-content: center;
+    }
+    .rep-row { display: flex; align-items: center; gap: 10px; margin: 0.6rem 0; }
+    .rep-photo { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; background: rgba(255,255,255,0.06); border: 1px solid var(--border); }
+    .rep-photo-placeholder { width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.06); border: 1px dashed var(--border); display: flex; align-items: center; justify-content: center; font-size: 0.6rem; color: #64748b; text-align: center; flex-shrink: 0; }
+    .credibility-facts { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.72rem; color: #64748b; margin-top: 0.5rem; }
+    .privacy-note { font-size: 0.72rem; color: #64748b; margin-top: 0.75rem; line-height: 1.5; }
 </style>
 </head>
 <body>
 <div class="wrap">
     <h1 id="page-headline">MULTIFAMILY INSURANCE REVIEW</h1>
     <p class="lede" id="page-subheadline">Loading…</p>
+
+    <div class="info-block" id="deliverable-block" style="display: none;">
+        <h2>What you get / What we need / How fast</h2>
+        <div class="deliverable-row">
+            <div class="deliverable-col">
+                <h3>What you get</h3>
+                <p id="deliverable-name"></p>
+                <p id="deliverable-description" style="margin-top: 4px; color: var(--muted);"></p>
+            </div>
+            <div class="deliverable-col">
+                <h3>What we need</h3>
+                <ul id="deliverable-inputs"></ul>
+            </div>
+            <div class="deliverable-col">
+                <h3>How fast</h3>
+                <p id="deliverable-turnaround"></p>
+            </div>
+        </div>
+        <p class="turnaround-note" id="deliverable-artifact"></p>
+    </div>
+
+    <div class="info-block" id="credibility-block" style="display: none;">
+        <h2>Why work with us</h2>
+        <p class="credibility-line" id="cred-proof-line"></p>
+        <p class="credibility-line" id="cred-market-access"></p>
+        <p class="credibility-line" id="cred-bor-line"></p>
+        <h3 style="font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin: 0.9rem 0 0;">What happens next</h3>
+        <ol class="credibility-steps" id="cred-next-steps"></ol>
+        <div class="rep-row" id="cred-rep-row"></div>
+        <div class="credibility-facts" id="cred-facts"></div>
+        <p class="privacy-note" id="cred-privacy"></p>
+    </div>
+
     <form id="offer-form">
         <div class="hp-wrap" aria-hidden="true">
             <label for="website_url">Leave this field blank</label>
@@ -193,8 +266,94 @@
     var variantFieldsContainer = document.getElementById('variant-fields-container');
     var headlineEl = document.getElementById('page-headline');
     var subheadlineEl = document.getElementById('page-subheadline');
+    var deliverableBlock = document.getElementById('deliverable-block');
+    var credibilityBlock = document.getElementById('credibility-block');
 
     var currentVariant = null;
+
+    // Section 8 item 5 — "What you get / What we need / How fast",
+    // populated per-variant from multifamily/forms/form_variants.py.
+    function renderDeliverableBlock(variant) {
+        if (!variant || !variant.deliverable_name) {
+            deliverableBlock.style.display = 'none';
+            return;
+        }
+        deliverableBlock.style.display = 'block';
+        document.getElementById('deliverable-name').textContent = variant.deliverable_name;
+        document.getElementById('deliverable-description').textContent = variant.deliverable_description || '';
+        var inputsEl = document.getElementById('deliverable-inputs');
+        inputsEl.innerHTML = '';
+        (variant.required_inputs || []).forEach(function (item) {
+            var li = document.createElement('li');
+            li.textContent = item;
+            inputsEl.appendChild(li);
+        });
+        document.getElementById('deliverable-turnaround').textContent = variant.turnaround_promise || '';
+        document.getElementById('deliverable-artifact').textContent = variant.artifact_type ?
+            ('Format: ' + variant.artifact_type) : '';
+    }
+
+    // Section 8 item 7 — shared credibility block, identical across all
+    // six offer pages (multifamily/credibility_config.py is the single
+    // source of truth an operator fills once).
+    function renderCredibilityBlock(cred) {
+        if (!cred) { credibilityBlock.style.display = 'none'; return; }
+        credibilityBlock.style.display = 'block';
+        document.getElementById('cred-proof-line').textContent = cred.proof_line || '';
+        document.getElementById('cred-market-access').textContent = cred.market_access_line || '';
+        document.getElementById('cred-bor-line').textContent = cred.no_bor_change_line || '';
+
+        var stepsEl = document.getElementById('cred-next-steps');
+        stepsEl.innerHTML = '';
+        (cred.what_happens_next_steps || []).forEach(function (step) {
+            var li = document.createElement('li');
+            li.textContent = step;
+            stepsEl.appendChild(li);
+        });
+
+        var repRow = document.getElementById('cred-rep-row');
+        repRow.innerHTML = '';
+        var photoUrl = cred.representative_photo_url || '';
+        if (photoUrl && photoUrl.indexOf('[PLACEHOLDER') === -1) {
+            var img = document.createElement('img');
+            img.className = 'rep-photo';
+            img.src = photoUrl;
+            img.alt = cred.representative_name || 'Representative photo';
+            repRow.appendChild(img);
+        } else {
+            var placeholder = document.createElement('div');
+            placeholder.className = 'rep-photo-placeholder';
+            placeholder.textContent = 'PHOTO';
+            repRow.appendChild(placeholder);
+        }
+        var repText = document.createElement('div');
+        var nameLine = document.createElement('div');
+        nameLine.style.fontSize = '0.84rem';
+        nameLine.style.color = 'var(--text)';
+        nameLine.textContent = cred.representative_name || '';
+        var titleLine = document.createElement('div');
+        titleLine.style.fontSize = '0.72rem';
+        titleLine.style.color = 'var(--muted)';
+        titleLine.textContent = cred.representative_title || '';
+        repText.appendChild(nameLine);
+        repText.appendChild(titleLine);
+        repRow.appendChild(repText);
+
+        var factsEl = document.getElementById('cred-facts');
+        factsEl.innerHTML = '';
+        if (cred.ca_license_number) {
+            var lic = document.createElement('span');
+            lic.textContent = 'CA License #: ' + cred.ca_license_number;
+            factsEl.appendChild(lic);
+        }
+        (cred.association_memberships || []).forEach(function (m) {
+            var span = document.createElement('span');
+            span.textContent = m;
+            factsEl.appendChild(span);
+        });
+
+        document.getElementById('cred-privacy').textContent = cred.privacy_note || '';
+    }
 
     function slugFromPath() {
         var parts = window.location.pathname.split('/').filter(Boolean);
@@ -278,6 +437,7 @@
         submitBtn.textContent = variant.cta;
         document.getElementById('offerType').value = variant.offer_type;
         document.getElementById('pageVariant').value = variant.slug;
+        renderDeliverableBlock(variant);
 
         variantFieldsContainer.innerHTML = '';
 
@@ -328,6 +488,7 @@
             if (!variant) { showLoadError(); return; }
             captureAttribution(variant.offer_type);
             applyVariant(variant);
+            renderCredibilityBlock(data.credibility);
         })
         .catch(showLoadError);
 

@@ -35,6 +35,7 @@ from multifamily.stage_timing import compute_stage_timing
 from multifamily.timing import detect_process_stage, estimate_first_renewal
 from multifamily.timing.process_stage_types import OUTREACH_WINDOW_RANK
 from multifamily.outreach.outreach_bundle_builder import build_outreach_bundle
+from multifamily.credibility_config import get_credibility_config
 from multifamily import matching as mf_matching
 from multifamily.snapshots import snapshot_lead, SNAPSHOT_REASONS
 from multifamily import notifications as mf_notifications
@@ -236,12 +237,18 @@ def get_form_variants():
     headline/subheadline/CTA/fields/confirmation without duplicating
     copy in multiple HTML files, and by the Outreach Workbench's
     page-recommendation (Phase 3). No auth — this is public marketing
-    copy, not lead data."""
+    copy, not lead data.
+
+    Section 8 item 7: also returns the single shared credibility-block
+    config (multifamily/credibility_config.py) — identical across all
+    six offer pages, so it's fetched once here rather than duplicated
+    per variant."""
     variants = {slug: dataclasses.asdict(v) for slug, v in FORM_VARIANTS.items()}
     return jsonify({
         'variants': variants,
         'default_slug': DEFAULT_FORM_VARIANT_SLUG,
         'slugs': FORM_VARIANT_SLUGS,
+        'credibility': get_credibility_config(),
     })
 
 
