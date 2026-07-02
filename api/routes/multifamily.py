@@ -1704,6 +1704,26 @@ def get_campaign_sequence_adherence_route(campaign_id):
     return _authorized()
 
 
+@multifamily_bp.route('/admin/export', methods=['GET'])
+def export_all_data():
+    """Phase F -- admin-only 'Export all data': a single timestamped zip
+    with one CSV per multifamily_* table (multifamily/data_export.py).
+    Never public. This is a convenience export for the operator's own
+    ad-hoc backup/analysis -- platform-level database backups (Railway's
+    own backup job) remain the operator's actual disaster-recovery
+    mechanism and are out of scope here."""
+    def _fn():
+        from multifamily.data_export import build_export_zip, export_filename
+        return send_file(
+            io.BytesIO(build_export_zip()),
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=export_filename(),
+        )
+
+    return _admin_only(_fn)
+
+
 @multifamily_bp.route('/notifications', methods=['GET'])
 def get_notifications():
     """In-app notification feed (outcome/snapshot/notification phase).

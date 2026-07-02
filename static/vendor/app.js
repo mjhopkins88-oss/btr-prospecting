@@ -10202,7 +10202,44 @@ function MultifamilyAdminPanel({
     activeTab: activeTab,
     setActiveTab: setActiveTab,
     user: user
-  }), data && data.ip_hash_salt_configured === false && /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '8px',
+      padding: '0.9rem 1rem',
+      marginBottom: '1rem',
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      color: '#f1f5f9',
+      fontSize: '0.85rem'
+    }
+  }, "Export all data"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.72rem',
+      color: '#64748b',
+      marginTop: '2px'
+    }
+  }, "A timestamped zip of one CSV per Multifamily table. Admin-only, for ad-hoc backup/analysis — not a substitute for the platform's own database backups.")), /*#__PURE__*/React.createElement("a", {
+    href: "/api/multifamily/admin/export",
+    style: {
+      background: '#f59e0b',
+      color: '#0f172a',
+      fontWeight: 700,
+      padding: '0.5rem 1rem',
+      borderRadius: '0.5rem',
+      fontSize: '0.8rem',
+      textDecoration: 'none',
+      whiteSpace: 'nowrap'
+    }
+  }, "⬇ Export All Data")), data && data.ip_hash_salt_configured === false && /*#__PURE__*/React.createElement("div", {
     style: {
       background: 'rgba(239,68,68,0.1)',
       border: '1px solid rgba(239,68,68,0.35)',
