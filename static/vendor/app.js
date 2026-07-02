@@ -8963,6 +8963,7 @@ function MultifamilyLeadDrawer({
     reply_sentiment: ''
   });
   const [actResult, setActResult] = useState(null);
+  const [showComposer, setShowComposer] = useState(false);
   const isAdmin = user && user.is_super_admin;
   const loadActivities = useCallback(async () => {
     try {
@@ -9253,7 +9254,26 @@ function MultifamilyLeadDrawer({
     attribution: lead.attribution
   }), lead && section === 'outreach' && /*#__PURE__*/React.createElement(MultifamilyDrawerSection, {
     title: "OUTREACH"
-  }, !outreach && /*#__PURE__*/React.createElement("div", {
+  }, isAdmin && !lead.is_demo && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '12px'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowComposer(true),
+    style: {
+      background: 'transparent',
+      border: '1px solid #f59e0b',
+      color: '#f59e0b',
+      borderRadius: '0.4rem',
+      padding: '0.4rem 0.9rem',
+      fontWeight: 700,
+      cursor: 'pointer',
+      fontSize: '0.75rem'
+    }
+  }, "Compose deliverable"), showComposer && /*#__PURE__*/React.createElement(MultifamilyDeliverableComposer, {
+    leadId: leadId,
+    onClose: () => setShowComposer(false)
+  })), !outreach && /*#__PURE__*/React.createElement("div", {
     style: {
       color: '#64748b'
     }
@@ -13502,6 +13522,261 @@ function MultifamilySourceRunsView() {
   }, /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle(statusColor[run.status] || '#64748b')
   }, run.status || 'unknown'), " ", run.source, (run.category ? ' · ' + run.category : ''), (run.state ? ' · ' + run.state : ''), run.started_at ? ' · ' + String(run.started_at).slice(0, 19).replace('T', ' ') : ''), /*#__PURE__*/React.createElement("span", null, 'found ' + (run.records_found || 0), ' · created ' + (run.records_created || 0), ' · merged ' + (run.records_merged || 0), ' · rejected ' + (run.records_rejected || 0)))));
+}
+// ---- Phase B: Deliverable Composer (admin-only) ----
+function MultifamilyDeliverableComposer({
+  leadId,
+  onClose
+}) {
+  const [meta, setMeta] = useState(null);
+  const [fields, setFields] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const [history, setHistory] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch(`/api/multifamily/leads/${leadId}/deliverable-prefill`);
+        const j = await r.json();
+        if (!alive) return;
+        if (r.ok) {
+          setMeta({
+            offer_type: j.offer_type,
+            deliverable_name: j.deliverable_name,
+            deliverable_description: j.deliverable_description,
+            artifact_type: j.artifact_type,
+            turnaround_promise: j.turnaround_promise
+          });
+          setFields(j.fields || {});
+        } else {
+          setResult({
+            ok: false,
+            message: j.message || 'Could not load deliverable template (admin access required).'
+          });
+        }
+      } catch (e) {
+        if (alive) setResult({
+          ok: false,
+          message: 'Network error: ' + e.message
+        });
+      } finally {
+        if (alive) setLoading(false);
+      }
+      try {
+        const r2 = await fetch(`/api/multifamily/leads/${leadId}/deliverables`);
+        if (r2.ok) {
+          const j2 = await r2.json();
+          if (alive) setHistory(j2.deliverables || []);
+        }
+      } catch (e) {}
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [leadId]);
+  const updateField = key => e => setFields(s => ({
+    ...s,
+    [key]: e.target.value
+  }));
+  const generate = async () => {
+    setBusy(true);
+    setResult(null);
+    try {
+      const res = await fetch(`/api/multifamily/leads/${leadId}/deliverable`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          fields,
+          offerType: meta && meta.offer_type
+        })
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const disposition = res.headers.get('Content-Disposition') || '';
+        const m = /filename="?([^";]+)"?/.exec(disposition);
+        const filename = m ? m[1] : 'deliverable.pdf';
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+        setResult({
+          ok: true,
+          message: 'PDF generated and downloaded.'
+        });
+        try {
+          const r2 = await fetch(`/api/multifamily/leads/${leadId}/deliverables`);
+          if (r2.ok) {
+            const j2 = await r2.json();
+            setHistory(j2.deliverables || []);
+          }
+        } catch (e) {}
+      } else {
+        const j = await res.json().catch(() => ({}));
+        setResult({
+          ok: false,
+          message: j.error || j.message || 'PDF generation failed.'
+        });
+      }
+    } catch (err) {
+      setResult({
+        ok: false,
+        message: 'Network error: ' + err.message
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0,0,0,0.6)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 2300
+    },
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: '12px',
+      padding: '1.5rem',
+      width: '620px',
+      maxWidth: '92vw',
+      maxHeight: '88vh',
+      overflowY: 'auto'
+    },
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: '1rem'
+    }
+  }, /*#__PURE__*/React.createElement("h3", {
+    style: {
+      fontFamily: "'Orbitron', sans-serif",
+      fontSize: '1rem',
+      color: '#f59e0b',
+      margin: 0
+    }
+  }, "COMPOSE DELIVERABLE"), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    style: {
+      background: 'transparent',
+      border: 'none',
+      color: '#64748b',
+      fontSize: '1.2rem',
+      cursor: 'pointer'
+    }
+  }, "\xD7")), loading && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#64748b',
+      fontSize: '0.85rem'
+    }
+  }, "Loading template…"), meta && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '12px',
+      background: 'rgba(245,158,11,0.06)',
+      border: '1px solid rgba(245,158,11,0.2)',
+      borderRadius: '6px',
+      padding: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.85rem',
+      fontWeight: 700,
+      color: '#f1f5f9'
+    }
+  }, meta.deliverable_name), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.78rem',
+      color: '#cbd5e1',
+      marginTop: '2px'
+    }
+  }, meta.deliverable_description), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#94a3b8',
+      marginTop: '4px'
+    }
+  }, meta.artifact_type, " \xB7 turnaround: ", meta.turnaround_promise)), fields && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '10px',
+      marginBottom: '12px'
+    }
+  }, Object.keys(fields).map(key => /*#__PURE__*/React.createElement("label", {
+    key: key,
+    style: mfLabelStyle()
+  }, key, /*#__PURE__*/React.createElement("input", {
+    style: mfFieldStyle(),
+    value: fields[key] == null ? '' : fields[key],
+    onChange: updateField(key)
+  })))), fields && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#64748b',
+      marginBottom: '10px'
+    }
+  }, "Every field is editable before generating. The PDF always carries the indicative-only / not-a-quote disclaimer — this never sends anything, it only downloads a PDF."), result && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.8rem',
+      marginBottom: '10px',
+      color: result.ok ? '#34d399' : '#ef4444'
+    }
+  }, result.message), fields && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'right'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    disabled: busy,
+    onClick: generate,
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      padding: '0.5rem 1.1rem',
+      borderRadius: '0.4rem',
+      fontWeight: 700,
+      cursor: busy ? 'default' : 'pointer',
+      fontSize: '0.8rem',
+      opacity: busy ? 0.6 : 1
+    }
+  }, busy ? 'Generating…' : 'Generate PDF')), history.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '16px',
+      borderTop: '1px solid rgba(255,255,255,0.08)',
+      paddingTop: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.7rem',
+      color: '#94a3b8',
+      fontWeight: 600,
+      marginBottom: '6px'
+    }
+  }, "PREVIOUSLY GENERATED"), history.map(d => /*#__PURE__*/React.createElement("div", {
+    key: d.id,
+    style: {
+      fontSize: '0.75rem',
+      color: '#cbd5e1',
+      padding: '4px 0',
+      borderBottom: '1px solid rgba(255,255,255,0.04)'
+    }
+  }, d.deliverable_name || d.offer_type, " — ", String(d.created_at).slice(0, 19), d.created_by ? ' · ' + d.created_by : '')))));
 }
 const MF_OUTCOME_TYPES = ['meeting_booked', 'submission_received', 'sov_received', 'loss_runs_received', 'application_received', 'quote_started', 'quote_sent', 'won', 'lost', 'not_a_fit', 'nurture', 'dead'];
 function mfOutcomeLabel(t) {
