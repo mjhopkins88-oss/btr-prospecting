@@ -10885,6 +10885,28 @@ function MultifamilyOutreachCopyButton({
     }
   }, copied ? 'Copied.' : label || 'Copy');
 }
+// Phase C — Workbench handoff buttons. Conservative cross-client-safe
+// mailto: URL length (Outlook's own limit is ~2083 chars for the whole
+// URL) -- if the encoded draft would exceed it, the body is truncated
+// with a note pointing at the Copy button fallback so nothing silently
+// gets cut off without the admin knowing. Never sends anything -- this
+// only ever builds a mailto: URL for the browser/OS mail client to open
+// as a normal, user-editable draft.
+const MF_MAILTO_SAFE_LENGTH = 1800;
+function _mfBuildMailtoUrl(email, subject, body) {
+  const enc = encodeURIComponent;
+  const prefix = `mailto:${enc(email || '')}?subject=${enc(subject || '')}&body=`;
+  let b = body || '';
+  let truncated = false;
+  while (b.length > 0 && prefix.length + enc(b).length > MF_MAILTO_SAFE_LENGTH) {
+    b = b.slice(0, Math.max(0, b.length - 200));
+    truncated = true;
+  }
+  if (truncated) {
+    b += '\n\n[Draft truncated for email client compatibility -- use the Copy button for the full text.]';
+  }
+  return prefix + enc(b);
+}
 function MultifamilyOutreachCollapsible({
   title,
   defaultOpen,
@@ -10916,6 +10938,43 @@ function MultifamilyOutreachLeadRow({
   const [intelError, setIntelError] = useState(null);
   const [showWhy, setShowWhy] = useState(false);
   const [activityMsg, setActivityMsg] = useState(null);
+  const [outreach, setOutreach] = useState(null);
+  const [loadingOutreach, setLoadingOutreach] = useState(false);
+  const [showDraftText, setShowDraftText] = useState(false);
+  const ensureOutreach = useCallback(async () => {
+    if (outreach || loadingOutreach) return outreach;
+    setLoadingOutreach(true);
+    try {
+      const r = await fetch(`/api/multifamily/leads/${lead.id}/outreach`);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      setOutreach(j.outreach || j);
+      return j.outreach || j;
+    } catch (e) {
+      setActivityMsg('Could not load draft — try again.');
+      setTimeout(() => setActivityMsg(null), 2500);
+      return null;
+    } finally {
+      setLoadingOutreach(false);
+    }
+  }, [lead.id, outreach, loadingOutreach]);
+  const openEmailDraft = async () => {
+    const contact = (lead.contacts || [])[0] || {};
+    if (!contact.email) return;
+    const bundle = outreach || (await ensureOutreach());
+    const draft = bundle && bundle.email_draft;
+    window.location.href = _mfBuildMailtoUrl(contact.email, draft && draft.subject, draft && draft.body);
+  };
+  const openLinkedIn = () => {
+    const contact = (lead.contacts || [])[0] || {};
+    if (!contact.linkedin_url) return;
+    window.open(contact.linkedin_url, '_blank', 'noopener,noreferrer');
+    if (!outreach && !loadingOutreach) ensureOutreach();
+  };
+  const toggleDraftText = () => {
+    setShowDraftText(!showDraftText);
+    if (!outreach && !loadingOutreach) ensureOutreach();
+  };
   const loadIntel = useCallback(async (v, isRegenerate) => {
     if (isRegenerate) setRegenerating(true);else setLoadingIntel(true);
     setIntelError(null);
@@ -10973,6 +11032,7 @@ function MultifamilyOutreachLeadRow({
     });
   };
   const score = lead.score || {};
+  const contact = (lead.contacts || [])[0] || {};
   const strategy = intel && intel.strategy;
   const context = intel && intel.context;
   const reasoning = intel && intel.reasoning;
@@ -10981,6 +11041,7 @@ function MultifamilyOutreachLeadRow({
   const tg = intel && intel.tone_guardrail;
   const questionGroups = qp ? [['Connection', qp.connection_question ? [qp.connection_question] : []], ['Situation', qp.situation_questions], ['Problem awareness', qp.problem_awareness_questions], ['Solution awareness', qp.solution_awareness_questions], ['Consequence', qp.consequence_questions], ['Qualifying', qp.qualifying_questions], ['Transition', qp.transition_question ? [qp.transition_question] : []], ['Commitment', qp.commitment_question ? [qp.commitment_question] : []], ['Fallback', qp.fallback_question ? [qp.fallback_question] : []]] : [];
   const hasAvoidContent = intel && (strategy.do_not && strategy.do_not.length > 0 || qp.questions_to_avoid && qp.questions_to_avoid.length > 0 || tg && tg.warnings && tg.warnings.length > 0);
+  const hasAnyHandoff = !!(contact.email || contact.phone || contact.linkedin_url);
   return /*#__PURE__*/React.createElement("div", {
     style: {
       background: 'rgba(15,22,36,0.97)',
@@ -11051,7 +11112,106 @@ function MultifamilyOutreachLeadRow({
       cursor: 'pointer',
       fontSize: '0.72rem'
     }
-  }, "Details"))), expanded && /*#__PURE__*/React.createElement("div", {
+  }, "Details"))), hasAnyHandoff && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '8px',
+      display: 'flex',
+      gap: '6px',
+      flexWrap: 'wrap',
+      alignItems: 'center'
+    }
+  }, contact.email && /*#__PURE__*/React.createElement("button", {
+    onClick: openEmailDraft,
+    disabled: loadingOutreach,
+    style: {
+      ..._siActivityBtnStyle,
+      border: '1px solid rgba(52,211,153,0.35)',
+      color: '#34d399',
+      opacity: loadingOutreach ? 0.6 : 1
+    }
+  }, loadingOutreach ? 'Loading draft…' : '✉ Open Email Draft'), contact.phone && /*#__PURE__*/React.createElement("a", {
+    href: `tel:${contact.phone}`,
+    style: {
+      ..._siActivityBtnStyle,
+      textDecoration: 'none',
+      display: 'inline-block'
+    }
+  }, "☎ Call ", contact.phone), contact.linkedin_url && /*#__PURE__*/React.createElement("button", {
+    onClick: openLinkedIn,
+    style: _siActivityBtnStyle
+  }, "Open LinkedIn"), /*#__PURE__*/React.createElement("button", {
+    onClick: toggleDraftText,
+    style: _siToggleBtnStyle
+  }, showDraftText ? 'Hide draft text' : 'Show draft text')), showDraftText && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '6px'
+    }
+  }, loadingOutreach && !outreach && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#64748b',
+      fontSize: '0.78rem'
+    }
+  }, "Loading draft text…"), outreach && /*#__PURE__*/React.createElement(React.Fragment, null, outreach.call_opener && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '6px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#64748b',
+      marginBottom: '2px',
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center'
+    }
+  }, "CALL OPENER", /*#__PURE__*/React.createElement(MultifamilyOutreachCopyButton, {
+    text: outreach.call_opener
+  })), /*#__PURE__*/React.createElement("div", {
+    style: _siTextBoxStyle
+  }, outreach.call_opener)), outreach.email_draft && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '6px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#64748b',
+      marginBottom: '2px',
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center'
+    }
+  }, "EMAIL DRAFT", /*#__PURE__*/React.createElement(MultifamilyOutreachCopyButton, {
+    text: `${outreach.email_draft.subject || ''}\n\n${outreach.email_draft.body || ''}`
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      ..._siTextBoxStyle,
+      fontWeight: 600,
+      marginBottom: '2px'
+    }
+  }, outreach.email_draft.subject), /*#__PURE__*/React.createElement("div", {
+    style: {
+      ..._siTextBoxStyle,
+      whiteSpace: 'pre-wrap'
+    }
+  }, outreach.email_draft.body)), outreach.linkedin_draft && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '6px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#64748b',
+      marginBottom: '2px',
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center'
+    }
+  }, "LINKEDIN MESSAGE (paste manually — no auto-send)", /*#__PURE__*/React.createElement(MultifamilyOutreachCopyButton, {
+    text: outreach.linkedin_draft
+  })), /*#__PURE__*/React.createElement("div", {
+    style: _siTextBoxStyle
+  }, outreach.linkedin_draft)))), expanded && /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: '10px'
     }
