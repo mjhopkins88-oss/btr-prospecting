@@ -32,10 +32,11 @@ DEFAULT_FORM_VARIANT_SLUG = 'benchmark'
 # to set notification priority, never to change scoring/timing math.
 NOTIFICATION_PRIORITIES = ['immediate', 'same_day', 'queued']
 
-# Section 8 item 5 — every offer's turnaround promise starts at this
-# placeholder until an operator confirms a real number per offer (or
-# overrides it). Deliberately visible/bracketed so it can never be
-# mistaken for a confirmed commitment if it ships unchanged.
+# Section 8 item 5 — fallback turnaround promise for any FUTURE offer
+# variant added before its own turnaround is confirmed. Deliberately
+# visible/bracketed so it can never be mistaken for a confirmed
+# commitment if it ships unchanged (the six variants below all carry
+# real, operator-confirmed turnaround values instead of this default).
 DEFAULT_TURNAROUND_PROMISE = '[TURNAROUND — default 5 business days pending operator confirmation]'
 
 
@@ -101,7 +102,7 @@ FORM_VARIANTS: Dict[str, FormVariant] = {
         deliverable_description='$/unit and rate-per-$100-TIV range vs. segment, plus 3 observations.',
         required_inputs=['Property address', 'Unit count', 'Year built', 'Construction type', 'Current premium'],
         artifact_type='Benchmark snapshot (range + written observations)',
-        turnaround_promise=DEFAULT_TURNAROUND_PROMISE,
+        turnaround_promise='5 business days',
     ),
     'renewal-pressure': FormVariant(
         slug='renewal-pressure',
@@ -132,7 +133,7 @@ FORM_VARIANTS: Dict[str, FormVariant] = {
         deliverable_description='Timeline read, market-appetite read, and a deductible-structure critique.',
         required_inputs=['Renewal date', 'Current premium range (optional)', 'Main concern', 'Unit count', 'Asset type'],
         artifact_type='Memo (PDF)',
-        turnaround_promise=DEFAULT_TURNAROUND_PROMISE,
+        turnaround_promise='5 business days',
     ),
     'acquisition': FormVariant(
         slug='acquisition',
@@ -158,7 +159,7 @@ FORM_VARIANTS: Dict[str, FormVariant] = {
         deliverable_description='A range vs. your pro-forma insurance assumption, plus any flagged risks.',
         required_inputs=['Property address', 'Unit count', 'Vintage (year built)', 'Assumed insurance line', 'Target close date'],
         artifact_type='Validation summary (range + flagged risks)',
-        turnaround_promise=DEFAULT_TURNAROUND_PROMISE,
+        turnaround_promise='3 business days',
     ),
     'lender-requirement': FormVariant(
         slug='lender-requirement',
@@ -184,7 +185,7 @@ FORM_VARIANTS: Dict[str, FormVariant] = {
         deliverable_description="A read on your term-sheet insurance clauses against your current or available program.",
         required_inputs=['Lender deadline', 'Type of lender issue', 'Unit count', 'Asset type'],
         artifact_type='Gap-check summary (PDF)',
-        turnaround_promise=DEFAULT_TURNAROUND_PROMISE,
+        turnaround_promise='3 business days',
     ),
     'builders-risk': FormVariant(
         slug='builders-risk',
@@ -214,7 +215,7 @@ FORM_VARIANTS: Dict[str, FormVariant] = {
         deliverable_description="A limits/soft-cost/delay/OCP checklist read against your loan requirements.",
         required_inputs=['Project start date', 'Hard costs (optional)', 'Soft costs (optional)', 'Who controls the policy', 'Construction stage'],
         artifact_type='Structure-review checklist (PDF)',
-        turnaround_promise=DEFAULT_TURNAROUND_PROMISE,
+        turnaround_promise='5 business days',
     ),
     'completion-leaseup': FormVariant(
         slug='completion-leaseup',
@@ -242,7 +243,7 @@ FORM_VARIANTS: Dict[str, FormVariant] = {
         deliverable_description="A milestone-keyed coverage map from builder's risk to your operating program, plus an operating-budget range.",
         required_inputs=['Expected completion date', 'First occupancy date (optional)', 'Completion type', 'Is operating coverage already placed?'],
         artifact_type='Transition map (milestone-keyed diagram + budget range)',
-        turnaround_promise=DEFAULT_TURNAROUND_PROMISE,
+        turnaround_promise='5 business days',
     ),
 }
 

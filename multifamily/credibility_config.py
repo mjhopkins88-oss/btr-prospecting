@@ -1,23 +1,26 @@
 """
 Credibility block config — Section 8 item 7 of the strategy research
-doc. One config the operator fills once; all six /mf-review/<slug>
-offer pages render the same shared block from it (multifamily/forms/
-form_variants.py already owns the per-offer deliverable/turnaround
-copy from item 5 — this module owns the copy that is IDENTICAL across
-every offer page: proof line, market access, license, associations,
-who's behind it, and the privacy note).
+doc, now carrying the firm's real branding (Alkeme Insurance / Max
+Lyle). One config the operator fills once; all six /mf-review/<slug>
+offer pages render the same shared block from it.
 
-Every fact that must come from the operator (figures, license number,
-memberships, name/title/photo) is a clearly marked [PLACEHOLDER] string
-below — never invented. Copy that describes how the *process* works
-(no BOR change required, what happens next, the privacy commitment) is
-authored directly since it describes this app's actual behavior, not a
-claim about the operator that needs separate verification.
+Every fact that still needs real input (a photo, a confirmed license
+number, association memberships, the official logo asset, an approved
+boilerplate line) stays EMPTY or a clearly bracketed [PLACEHOLDER]
+string below — never invented — and the rendering layer (both
+public_credibility_view() here and static/mf-review.html's
+renderCredibilityBlock()) hides any such field entirely rather than
+showing "pending"/"coming soon" language. Once a real value is added
+(directly here, or via the env override), it renders automatically on
+every page — no code change needed on either side.
+
+The official ALKEME logo asset is NOT generated, drawn, or approximated
+anywhere in this codebase — company_logo_path stays empty until the
+real asset file is dropped into static/ and this path is pointed at it.
 
 Overridable at runtime via the MULTIFAMILY_CREDIBILITY_CONFIG_JSON env
-var (a JSON object shallow-merged on top of the defaults), so an
-operator can fill in the real facts via deploy config without a code
-change — mirrors signalstack/sender_persona.py's override pattern.
+var (a JSON object shallow-merged on top of the defaults) — mirrors
+signalstack/sender_persona.py's override pattern.
 """
 import json
 import os
@@ -25,20 +28,39 @@ from typing import Optional
 
 
 DEFAULT_CREDIBILITY_CONFIG: dict = {
-    "proof_line": "[PLACEHOLDER: e.g. '$XXM in multifamily TIV placed across CA/TX' — operator to confirm exact units/TIV figure]",
-    "market_access_line": "[PLACEHOLDER: E&S + admitted market access — operator to confirm carrier/market list]",
+    "company_name": "Alkeme Insurance",
+    # Empty until the official ALKEME logo asset is dropped into
+    # static/ — never generate/draw/approximate it here.
+    "company_logo_path": "",
+    # Empty until Alkeme marketing approves a one-line company
+    # boilerplate for use on these pages.
+    "company_boilerplate": "",
+    "proof_line": (
+        "Part of ALKEME, a Top 25 U.S. insurance brokerage — with a dedicated "
+        "build-to-rent program spanning 20+ carriers, from construction "
+        "through lease-up and stabilized operations."
+    ),
+    "market_access_line": "Admitted and E&S market access nationwide.",
     "no_bor_change_line": "No broker-of-record change required to run this.",
     "what_happens_next_steps": [
         "You share the handful of details on this page — nothing else needed to start.",
         "We put together your named deliverable and get it back to you within the promised turnaround.",
         "If it's useful, we schedule a short walkthrough — no obligation either way.",
     ],
-    "ca_license_number": "[PLACEHOLDER: CA license #]",
-    "association_memberships": [
-        "[PLACEHOLDER: e.g. CAA supplier/industry partner — confirm actual memberships]",
-    ],
-    "representative_name": "[PLACEHOLDER: representative name]",
-    "representative_title": "[PLACEHOLDER: representative title]",
+    # List of {"state": "..", "number": ".."}. Empty until a state's
+    # license is confirmed — the license line is intentionally absent
+    # from public pages until then; adding a real entry here (or via
+    # the env override) makes it render with no code change.
+    "licenses": [],
+    # Hidden entirely while empty.
+    "association_memberships": [],
+    "representative_name": "Max Lyle",
+    "representative_title": "Program Director, Build-to-Rent Insurance, Alkeme Insurance",
+    "representative_bio": (
+        "Max Lyle leads the Build-to-Rent insurance program at ALKEME — ground-up "
+        "rental communities from construction through lease-up and stabilized "
+        "operations — and brings the same playbook to conventional multifamily."
+    ),
     "representative_photo_url": "[PLACEHOLDER: representative photo URL/asset path]",
     "privacy_note": (
         "Requesting this review does not block your property from any market or carrier, "
@@ -47,6 +69,15 @@ DEFAULT_CREDIBILITY_CONFIG: dict = {
 }
 
 _ENV_VAR = "MULTIFAMILY_CREDIBILITY_CONFIG_JSON"
+
+# Simple string fields checked directly against public_credibility_view()'s
+# visibility rule (non-empty, no bracketed placeholder token).
+_TEXT_FIELDS = (
+    'company_name', 'company_logo_path', 'company_boilerplate',
+    'proof_line', 'market_access_line', 'no_bor_change_line',
+    'representative_name', 'representative_title', 'representative_bio',
+    'representative_photo_url', 'privacy_note',
+)
 
 
 def _load_env_override() -> Optional[dict]:
@@ -80,14 +111,56 @@ def get_credibility_config() -> dict:
     return _shallow_merge(DEFAULT_CREDIBILITY_CONFIG, override)
 
 
+def _is_visible_text(value) -> bool:
+    """A string is safe to render publicly only if it's non-empty and
+    carries no bracketed [PLACEHOLDER]-style token. This is the single
+    rule every field in the credibility block is filtered through."""
+    return isinstance(value, str) and bool(value.strip()) and '[' not in value
+
+
+def public_credibility_view(cfg: Optional[dict] = None) -> dict:
+    """The filtered projection actually safe to render publicly right
+    now — mirrors the exact hide-when-empty/hide-when-placeholder rules
+    implemented in static/mf-review.html's renderCredibilityBlock(), so
+    the invariant ("nothing bracketed or empty ever reaches a public
+    page") is unit-testable in Python without a browser."""
+    cfg = cfg or get_credibility_config()
+    view: dict = {}
+
+    for key in _TEXT_FIELDS:
+        if _is_visible_text(cfg.get(key)):
+            view[key] = cfg[key]
+
+    steps = [s for s in (cfg.get('what_happens_next_steps') or []) if _is_visible_text(s)]
+    if steps:
+        view['what_happens_next_steps'] = steps
+
+    licenses = [
+        lic for lic in (cfg.get('licenses') or [])
+        if isinstance(lic, dict) and _is_visible_text(lic.get('state')) and _is_visible_text(lic.get('number'))
+    ]
+    if licenses:
+        view['licenses'] = licenses
+
+    memberships = [m for m in (cfg.get('association_memberships') or []) if _is_visible_text(m)]
+    if memberships:
+        view['association_memberships'] = memberships
+
+    return view
+
+
 def placeholder_fields() -> list:
-    """Names of every field still holding a [PLACEHOLDER] value awaiting
-    operator input, in the currently active (possibly env-overridden)
-    config — used by the admin surface and by the build summary."""
+    """Names of every field still awaiting real operator input — either
+    a bracketed [PLACEHOLDER] string or an intentionally-empty
+    still-pending value (logo, boilerplate, licenses, memberships) —
+    in the currently active (possibly env-overridden) config."""
     cfg = get_credibility_config()
+    view = public_credibility_view(cfg)
     fields = []
-    for key, value in cfg.items():
-        values = value if isinstance(value, list) else [value]
-        if any(isinstance(v, str) and '[PLACEHOLDER' in v for v in values):
+    for key in (
+        'company_logo_path', 'company_boilerplate', 'representative_photo_url',
+        'licenses', 'association_memberships',
+    ):
+        if key not in view:
             fields.append(key)
     return fields
