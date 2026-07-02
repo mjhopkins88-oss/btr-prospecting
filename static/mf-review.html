@@ -4,76 +4,229 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Multifamily Insurance Review</title>
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
     :root {
-        --bg: #0b1220;
-        --card: rgba(15,22,36,0.95);
-        --border: rgba(255,255,255,0.1);
-        --accent: #f59e0b;
-        --text: #f1f5f9;
-        --muted: #94a3b8;
+        --ink: #17223b;
+        --ink-soft: #3c4a68;
+        --paper: #faf6ee;
+        --paper-card: #fffdf9;
+        --border: rgba(23,34,59,0.14);
+        --border-soft: rgba(23,34,59,0.08);
+        --muted: #5b6b85;
+        --accent-h: 32;
+        --accent: hsl(var(--accent-h), 68%, 42%);
+        --accent-soft: hsl(var(--accent-h), 68%, 94%);
+        --accent-ink: hsl(var(--accent-h), 60%, 22%);
+        --ok: #1f7a5c;
+        --ok-bg: rgba(31,122,92,0.1);
+        --err: #b3261e;
+        --err-bg: rgba(179,38,30,0.08);
+        --shadow: 0 1px 2px rgba(23,34,59,0.04), 0 8px 24px rgba(23,34,59,0.06);
+        --serif: 'Fraunces', Georgia, 'Times New Roman', serif;
+        --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     }
     * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
     body {
         margin: 0;
-        background: var(--bg);
-        color: var(--text);
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-        padding: 2.5rem 1rem;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: var(--sans);
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
     }
-    .wrap { max-width: 640px; margin: 0 auto; }
+    a { color: var(--accent-ink); }
+    :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+        border-radius: 3px;
+    }
+    .page { max-width: 720px; margin: 0 auto; padding: 0 1.25rem 4rem; }
+
+    /* ---------- Topbar / brand ---------- */
+    .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 1.5rem 0 0.5rem;
+    }
+    .brand-slot { display: flex; align-items: center; min-height: 28px; }
+    .brand-slot img { height: 28px; width: auto; display: block; }
+    .brand-slot .brand-name-text {
+        font-family: var(--serif);
+        font-weight: 600;
+        font-size: 0.95rem;
+        color: var(--ink-soft);
+        letter-spacing: 0.01em;
+    }
+    .eyebrow {
+        font-size: 0.68rem;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+        color: var(--muted);
+        font-weight: 600;
+    }
+
+    /* ---------- Hero ---------- */
+    .hero {
+        position: relative;
+        padding: 2.25rem 0 2rem;
+        overflow: hidden;
+    }
+    .hero-art {
+        position: absolute;
+        inset: -10% -5% auto -5%;
+        width: 110%;
+        height: 220px;
+        color: var(--ink);
+        opacity: 0.07;
+        pointer-events: none;
+        z-index: 0;
+    }
+    .hero-content { position: relative; z-index: 1; }
     h1 {
-        font-family: 'Orbitron', sans-serif;
-        font-size: 1.4rem;
-        font-weight: 900;
-        background: linear-gradient(135deg, var(--accent) 0%, #fbbf24 100%);
-        -webkit-background-clip: text;
-        background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 0 0 0.5rem;
+        font-family: var(--serif);
+        font-weight: 600;
+        font-size: clamp(1.7rem, 4.4vw, 2.5rem);
+        line-height: 1.15;
+        letter-spacing: -0.01em;
+        color: var(--ink);
+        margin: 0.5rem 0 0.75rem;
     }
-    p.lede { color: var(--muted); font-size: 0.9rem; margin: 0 0 1.75rem; line-height: 1.5; }
-    form { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-    label { font-size: 0.78rem; color: var(--muted); display: block; }
-    label.full { grid-column: 1 / -1; }
+    p.lede {
+        color: var(--ink-soft);
+        font-size: 1.05rem;
+        max-width: 46ch;
+        margin: 0 0 1rem;
+        line-height: 1.5;
+    }
+    .trust-line {
+        display: none;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.82rem;
+        color: var(--accent-ink);
+        font-weight: 600;
+        margin: 0;
+    }
+    .trust-line.visible { display: flex; }
+    .trust-line::before {
+        content: '';
+        width: 6px; height: 6px;
+        border-radius: 50%;
+        background: var(--accent);
+        flex-shrink: 0;
+    }
+
+    /* ---------- Section headings ---------- */
+    .section-label {
+        font-size: 0.7rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+        font-weight: 700;
+        margin: 0 0 0.9rem;
+    }
+
+    /* ---------- Deliverable cards ---------- */
+    .deliverable-cards {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 12px;
+        margin: 1.75rem 0;
+    }
+    @media (min-width: 720px) {
+        .deliverable-cards { grid-template-columns: repeat(3, 1fr); }
+    }
+    .delcard {
+        background: var(--paper-card);
+        border: 1px solid var(--border-soft);
+        border-radius: 14px;
+        padding: 1.1rem 1.2rem;
+        box-shadow: var(--shadow);
+    }
+    .delcard h3 {
+        font-size: 0.68rem;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        color: var(--accent-ink);
+        margin: 0 0 0.5rem;
+        font-weight: 700;
+    }
+    .delcard p { margin: 0; font-size: 0.92rem; color: var(--ink); }
+    .delcard p.muted { color: var(--muted); margin-top: 4px; font-size: 0.85rem; }
+    .delcard ul { margin: 0; padding-left: 1.1rem; font-size: 0.88rem; color: var(--ink); }
+    .delcard ul li { margin-bottom: 3px; }
+    .delcard .artifact-note { font-size: 0.76rem; color: var(--muted); margin-top: 0.6rem; }
+
+    /* ---------- Form card ---------- */
+    .form-card {
+        background: var(--paper-card);
+        border: 1px solid var(--border-soft);
+        border-radius: 18px;
+        padding: 1.75rem 1.5rem;
+        box-shadow: var(--shadow);
+        margin: 1.75rem 0;
+    }
+    .field-stack { display: flex; flex-direction: column; gap: 1.1rem; }
+    label {
+        font-size: 0.82rem;
+        color: var(--ink-soft);
+        font-weight: 600;
+        display: block;
+    }
     input, select, textarea {
         width: 100%;
-        background: rgba(255,255,255,0.04);
+        background: var(--paper);
         border: 1px solid var(--border);
-        border-radius: 6px;
-        padding: 0.6rem 0.7rem;
-        color: var(--text);
-        font-size: 0.9rem;
-        font-family: 'Inter', sans-serif;
-        margin-top: 5px;
+        border-radius: 10px;
+        padding: 0.75rem 0.85rem;
+        color: var(--ink);
+        font-size: 1rem;
+        font-family: var(--sans);
+        margin-top: 7px;
+        transition: border-color 0.15s ease;
     }
-    textarea { resize: vertical; }
-    .hint { font-size: 0.7rem; color: #64748b; margin-top: 4px; }
-    .actions { margin-top: 1.5rem; display: flex; justify-content: flex-end; }
-    button {
+    input:hover, select:hover, textarea:hover { border-color: var(--ink-soft); }
+    textarea { resize: vertical; min-height: 84px; }
+    .two-col { display: grid; grid-template-columns: 1fr; gap: 1.1rem; }
+    @media (min-width: 560px) {
+        .two-col { grid-template-columns: 1fr 1fr; }
+    }
+    .conditional { display: none; }
+    .hint { font-size: 0.74rem; color: var(--muted); margin-top: 5px; }
+    .actions { margin-top: 1.6rem; }
+    button#submit-btn {
+        width: 100%;
         background: var(--accent);
         border: none;
-        color: #0f172a;
-        padding: 0.7rem 1.4rem;
-        border-radius: 0.5rem;
+        color: #fff;
+        padding: 0.95rem 1.4rem;
+        border-radius: 10px;
         font-weight: 700;
-        font-size: 0.9rem;
+        font-size: 1rem;
         cursor: pointer;
+        font-family: var(--sans);
+        transition: background 0.15s ease, transform 0.05s ease;
     }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    button#submit-btn:hover { background: var(--accent-ink); }
+    button#submit-btn:active { transform: translateY(1px); }
+    button#submit-btn:disabled { opacity: 0.6; cursor: not-allowed; }
     .result {
         margin-top: 1rem;
         padding: 0.9rem 1.1rem;
-        border-radius: 8px;
-        font-size: 0.85rem;
+        border-radius: 10px;
+        font-size: 0.9rem;
         display: none;
+        line-height: 1.5;
     }
-    .result.ok { display: block; background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.3); color: #34d399; }
-    .result.err { display: block; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #ef4444; }
-    .conditional { display: none; }
-    .variant-hidden { display: none; }
+    .result.ok { display: block; background: var(--ok-bg); border: 1px solid rgba(31,122,92,0.25); color: var(--ok); }
+    .result.err { display: block; background: var(--err-bg); border: 1px solid rgba(179,38,30,0.25); color: var(--err); }
+    .consent { font-size: 0.74rem; color: var(--muted); line-height: 1.55; margin-top: 0.9rem; }
+
     /* Honeypot — visually hidden but still in the DOM/tab order's reach
        for naive bots that fill every input. Real users never see or
        focus it (off-screen, aria-hidden, no tabstop, no autofill). */
@@ -85,87 +238,118 @@
         height: 1px;
         overflow: hidden;
     }
-    .consent { font-size: 0.72rem; color: #64748b; line-height: 1.5; margin-top: 0.75rem; }
-    .info-block {
-        background: var(--card);
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        padding: 1.1rem 1.35rem;
-        margin-bottom: 1.25rem;
+
+    /* ---------- What happens next (quiet numbered strip) ---------- */
+    .next-steps {
+        margin: 2rem 0;
+        padding: 1.25rem 0 0;
+        border-top: 1px solid var(--border-soft);
     }
-    .info-block h2 {
-        font-family: 'Orbitron', sans-serif;
-        font-size: 0.75rem;
-        letter-spacing: 0.04em;
-        color: var(--accent);
-        margin: 0 0 0.75rem;
-        text-transform: uppercase;
+    .next-steps-list { counter-reset: step; list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+    .next-steps-list li {
+        counter-increment: step;
+        font-size: 0.9rem;
+        color: var(--ink-soft);
+        padding-left: 2.1rem;
+        position: relative;
+        line-height: 1.5;
     }
-    .deliverable-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 0.4rem; }
-    .deliverable-col h3 { font-size: 0.72rem; color: var(--muted); margin: 0 0 4px; text-transform: uppercase; letter-spacing: 0.03em; }
-    .deliverable-col p, .deliverable-col ul { font-size: 0.84rem; color: var(--text); margin: 0; line-height: 1.5; }
-    .deliverable-col ul { padding-left: 1.1rem; }
-    .turnaround-note { font-size: 0.72rem; color: #64748b; margin-top: 0.6rem; }
-    .credibility-line { font-size: 0.84rem; color: var(--text); line-height: 1.55; margin: 0 0 0.6rem; }
-    .credibility-line:last-child { margin-bottom: 0; }
-    .credibility-steps { counter-reset: step; list-style: none; padding: 0; margin: 0.3rem 0 0.9rem; }
-    .credibility-steps li { counter-increment: step; font-size: 0.84rem; color: var(--text); margin-bottom: 6px; padding-left: 1.6rem; position: relative; line-height: 1.45; }
-    .credibility-steps li::before {
+    .next-steps-list li::before {
         content: counter(step);
-        position: absolute; left: 0; top: 0;
-        width: 1.15rem; height: 1.15rem;
+        position: absolute; left: 0; top: -1px;
+        width: 1.5rem; height: 1.5rem;
         border-radius: 50%;
-        background: rgba(245,158,11,0.15);
-        color: var(--accent);
-        font-size: 0.68rem;
+        background: var(--accent-soft);
+        color: var(--accent-ink);
+        font-family: var(--serif);
+        font-size: 0.8rem;
         font-weight: 700;
         display: flex; align-items: center; justify-content: center;
     }
-    .rep-row { display: flex; align-items: center; gap: 10px; margin: 0.6rem 0; }
-    .rep-photo { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; background: rgba(255,255,255,0.06); border: 1px solid var(--border); }
-    .rep-photo-placeholder { width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.06); border: 1px dashed var(--border); display: flex; align-items: center; justify-content: center; font-size: 0.6rem; color: #64748b; text-align: center; flex-shrink: 0; }
-    .credibility-facts { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.72rem; color: #64748b; margin-top: 0.5rem; }
-    .privacy-note { font-size: 0.72rem; color: #64748b; margin-top: 0.75rem; line-height: 1.5; }
+
+    /* ---------- Credibility band ---------- */
+    .credibility-band {
+        background: var(--ink);
+        color: #eef1f6;
+        border-radius: 18px;
+        padding: 1.75rem 1.5rem;
+        margin: 2rem 0;
+    }
+    .credibility-band .brand-slot .brand-name-text { color: #eef1f6; }
+    .credibility-band .section-label { color: hsl(var(--accent-h), 60%, 68%); }
+    .credibility-line { font-size: 0.94rem; color: #dbe1ec; line-height: 1.6; margin: 0 0 0.75rem; }
+    .credibility-line:last-of-type { margin-bottom: 0; }
+    .boilerplate-line { display: none; font-size: 0.86rem; color: #b7c0d1; line-height: 1.55; margin: 0 0 0.9rem; }
+    .boilerplate-line.visible { display: block; }
+    .rep-row { display: none; align-items: flex-start; gap: 12px; margin: 1.1rem 0 0.4rem; padding-top: 1.1rem; border-top: 1px solid rgba(255,255,255,0.12); }
+    .rep-row.visible { display: flex; }
+    .rep-photo { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; background: rgba(255,255,255,0.08); flex-shrink: 0; }
+    .rep-text .rep-name { font-family: var(--serif); font-size: 1rem; font-weight: 600; color: #fff; }
+    .rep-text .rep-title { font-size: 0.8rem; color: #b7c0d1; margin-top: 2px; }
+    .rep-text .rep-bio { font-size: 0.86rem; color: #cdd4e1; margin-top: 8px; line-height: 1.55; max-width: 52ch; }
+    .credibility-facts { display: none; flex-wrap: wrap; gap: 6px 18px; font-size: 0.76rem; color: #9aa6bb; margin-top: 1rem; }
+    .credibility-facts.visible { display: flex; }
+
+    /* ---------- Footer ---------- */
+    .site-footer { margin-top: 2rem; padding-top: 1.25rem; border-top: 1px solid var(--border-soft); }
+    .privacy-note { font-size: 0.76rem; color: var(--muted); line-height: 1.55; margin: 0; }
 </style>
 </head>
 <body>
-<div class="wrap">
-    <h1 id="page-headline">MULTIFAMILY INSURANCE REVIEW</h1>
-    <p class="lede" id="page-subheadline">Loading…</p>
+<div class="page">
+    <header class="topbar">
+        <div class="brand-slot" id="brand-slot-header"></div>
+        <span class="eyebrow">Multifamily Insurance</span>
+    </header>
 
-    <div class="info-block" id="deliverable-block" style="display: none;">
-        <h2>What you get / What we need / How fast</h2>
-        <div class="deliverable-row">
-            <div class="deliverable-col">
+    <section class="hero">
+        <svg class="hero-art" viewBox="0 0 800 240" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+            <g stroke="currentColor" stroke-width="1" fill="none">
+                <path d="M0 40 H800" opacity="0.5"/>
+                <path d="M0 90 H800" opacity="0.5"/>
+                <path d="M0 140 H800" opacity="0.5"/>
+                <path d="M0 190 H800" opacity="0.5"/>
+                <path d="M70 220 L70 130 L130 100 L190 130 L190 220 Z"/>
+                <path d="M70 130 L130 100 L190 130"/>
+                <path d="M230 220 L230 90 L280 65 L330 90 L330 220 Z"/>
+                <path d="M230 90 L280 65 L330 90"/>
+                <path d="M370 220 L370 150 L420 125 L470 150 L470 220 Z"/>
+                <path d="M370 150 L420 125 L470 150"/>
+                <path d="M510 220 L510 105 L570 78 L630 105 L630 220 Z"/>
+                <path d="M510 105 L570 78 L630 105"/>
+                <path d="M660 220 L660 160 L710 138 L760 160 L760 220 Z"/>
+                <path d="M660 160 L710 138 L760 160"/>
+            </g>
+        </svg>
+        <div class="hero-content">
+            <p class="section-label" style="margin-bottom: 0.25rem;">Complimentary review</p>
+            <h1 id="page-headline">Multifamily Insurance Review</h1>
+            <p class="lede" id="page-subheadline">Loading…</p>
+            <p class="trust-line" id="hero-trust-line"></p>
+        </div>
+    </section>
+
+    <div>
+        <p class="section-label" id="deliverable-label" style="display: none;">What you get / What we need / How fast</p>
+        <div class="deliverable-cards" id="deliverable-block" style="display: none;">
+            <div class="delcard">
                 <h3>What you get</h3>
                 <p id="deliverable-name"></p>
-                <p id="deliverable-description" style="margin-top: 4px; color: var(--muted);"></p>
+                <p class="muted" id="deliverable-description"></p>
             </div>
-            <div class="deliverable-col">
+            <div class="delcard">
                 <h3>What we need</h3>
                 <ul id="deliverable-inputs"></ul>
             </div>
-            <div class="deliverable-col">
+            <div class="delcard">
                 <h3>How fast</h3>
                 <p id="deliverable-turnaround"></p>
+                <p class="artifact-note" id="deliverable-artifact"></p>
             </div>
         </div>
-        <p class="turnaround-note" id="deliverable-artifact"></p>
     </div>
 
-    <div class="info-block" id="credibility-block" style="display: none;">
-        <h2>Why work with us</h2>
-        <p class="credibility-line" id="cred-proof-line"></p>
-        <p class="credibility-line" id="cred-market-access"></p>
-        <p class="credibility-line" id="cred-bor-line"></p>
-        <h3 style="font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin: 0.9rem 0 0;">What happens next</h3>
-        <ol class="credibility-steps" id="cred-next-steps"></ol>
-        <div class="rep-row" id="cred-rep-row"></div>
-        <div class="credibility-facts" id="cred-facts"></div>
-        <p class="privacy-note" id="cred-privacy"></p>
-    </div>
-
-    <form id="offer-form">
+    <form id="offer-form" class="form-card">
         <div class="hp-wrap" aria-hidden="true">
             <label for="website_url">Leave this field blank</label>
             <input type="text" id="website_url" name="website_url" tabindex="-1" autocomplete="off">
@@ -182,47 +366,57 @@
         <input type="hidden" name="campaignId" id="campaignId">
         <input type="hidden" name="campaignToken" id="campaignToken">
         <input type="hidden" name="mfRef" id="mfRef">
-        <div class="grid">
-            <label>Name *
-                <input name="name" required>
-            </label>
-            <label>Company *
-                <input name="company" required>
-            </label>
-            <label>Email *
-                <input name="email" type="email" required>
-            </label>
-            <label>Phone
-                <input name="phone">
-            </label>
-            <label>Role / Title
-                <input name="role" placeholder="e.g. VP of Risk Management">
-            </label>
-            <label>State *
-                <select name="state" required>
-                    <option value="">Select...</option>
-                    <option value="TX">Texas</option>
-                    <option value="CA">California</option>
-                </select>
-            </label>
-            <label>City
-                <input name="city">
-            </label>
-            <label>Asset Type
-                <select name="assetType">
-                    <option value="">Select...</option>
-                    <option value="garden">Garden-style</option>
-                    <option value="mid_rise">Mid-rise</option>
-                    <option value="high_rise">High-rise</option>
-                    <option value="mixed_use">Mixed-use</option>
-                </select>
-            </label>
-            <label># of Units
-                <input name="numberOfUnits" type="number" min="0">
-            </label>
-            <label id="situation-label">What best describes your situation? *
-                <select name="leadSituation" id="leadSituation" required></select>
-            </label>
+        <div class="field-stack">
+            <div class="two-col">
+                <label>Name *
+                    <input name="name" required>
+                </label>
+                <label>Company *
+                    <input name="company" required>
+                </label>
+            </div>
+            <div class="two-col">
+                <label>Email *
+                    <input name="email" type="email" required>
+                </label>
+                <label>Phone
+                    <input name="phone">
+                </label>
+            </div>
+            <div class="two-col">
+                <label>Role / Title
+                    <input name="role" placeholder="e.g. VP of Risk Management">
+                </label>
+                <label>State *
+                    <select name="state" required>
+                        <option value="">Select...</option>
+                        <option value="TX">Texas</option>
+                        <option value="CA">California</option>
+                    </select>
+                </label>
+            </div>
+            <div class="two-col">
+                <label>City
+                    <input name="city">
+                </label>
+                <label>Asset Type
+                    <select name="assetType">
+                        <option value="">Select...</option>
+                        <option value="garden">Garden-style</option>
+                        <option value="mid_rise">Mid-rise</option>
+                        <option value="high_rise">High-rise</option>
+                        <option value="mixed_use">Mixed-use</option>
+                    </select>
+                </label>
+            </div>
+            <div class="two-col">
+                <label># of Units
+                    <input name="numberOfUnits" type="number" min="0">
+                </label>
+                <label id="situation-label">What best describes your situation? *
+                    <select name="leadSituation" id="leadSituation" required></select>
+                </label>
+            </div>
             <label class="conditional" id="renewalDateField">Renewal Date
                 <input name="renewalDate" type="date">
             </label>
@@ -230,11 +424,11 @@
                 <input name="projectStartDate" type="date">
             </label>
             <div id="variant-fields-container" style="display: contents;"></div>
-            <label class="full">Anything else we should know?
+            <label>Anything else we should know?
                 <textarea name="notes" rows="3"></textarea>
             </label>
         </div>
-        <div class="result" id="result"></div>
+        <div class="result" id="result" role="status" aria-live="polite"></div>
         <p class="consent">
             By submitting this form, you agree to be contacted about your multifamily insurance program by phone,
             email, or text. We don't sell your information to third parties.
@@ -243,9 +437,47 @@
             <button type="submit" id="submit-btn">Submit</button>
         </div>
     </form>
+
+    <div class="next-steps" id="next-steps-block" style="display: none;">
+        <p class="section-label">What happens next</p>
+        <ol class="next-steps-list" id="next-steps-list"></ol>
+    </div>
+
+    <div class="credibility-band" id="credibility-block" style="display: none;">
+        <div class="brand-slot" id="brand-slot-credibility" style="margin-bottom: 1.1rem;"></div>
+        <p class="boilerplate-line" id="cred-boilerplate"></p>
+        <p class="credibility-line" id="cred-proof-line"></p>
+        <p class="credibility-line" id="cred-market-access"></p>
+        <p class="credibility-line" id="cred-bor-line"></p>
+        <div class="rep-row" id="cred-rep-row">
+            <img class="rep-photo" id="cred-rep-photo" alt="" style="display: none;">
+            <div class="rep-text">
+                <div class="rep-name" id="cred-rep-name"></div>
+                <div class="rep-title" id="cred-rep-title"></div>
+                <div class="rep-bio" id="cred-rep-bio"></div>
+            </div>
+        </div>
+        <div class="credibility-facts" id="cred-facts"></div>
+    </div>
+
+    <footer class="site-footer">
+        <p class="privacy-note" id="cred-privacy"></p>
+    </footer>
 </div>
 <script>
 (function () {
+    var ACCENT_HUE_BY_SLUG = {
+        // Single place to swap in real brand colors later — one hue per
+        // offer, all within the warm amber/copper/terracotta family so
+        // the six pages read as related but distinct.
+        'benchmark': 32,
+        'renewal-pressure': 18,
+        'acquisition': 42,
+        'lender-requirement': 26,
+        'builders-risk': 14,
+        'completion-leaseup': 38,
+    };
+
     var BENCHMARK_SITUATION_OPTIONS = [
         { value: 'benchmark', label: 'Just want a general benchmark/review' },
         { value: 'renewal', label: 'Renewal coming up' },
@@ -266,98 +498,159 @@
     var variantFieldsContainer = document.getElementById('variant-fields-container');
     var headlineEl = document.getElementById('page-headline');
     var subheadlineEl = document.getElementById('page-subheadline');
+    var heroTrustLine = document.getElementById('hero-trust-line');
+    var deliverableLabel = document.getElementById('deliverable-label');
     var deliverableBlock = document.getElementById('deliverable-block');
+    var nextStepsBlock = document.getElementById('next-steps-block');
     var credibilityBlock = document.getElementById('credibility-block');
 
     var currentVariant = null;
 
-    // Section 8 item 5 — "What you get / What we need / How fast",
-    // populated per-variant from multifamily/forms/form_variants.py.
-    function renderDeliverableBlock(variant) {
-        if (!variant || !variant.deliverable_name) {
-            deliverableBlock.style.display = 'none';
-            return;
-        }
-        deliverableBlock.style.display = 'block';
-        document.getElementById('deliverable-name').textContent = variant.deliverable_name;
-        document.getElementById('deliverable-description').textContent = variant.deliverable_description || '';
-        var inputsEl = document.getElementById('deliverable-inputs');
-        inputsEl.innerHTML = '';
-        (variant.required_inputs || []).forEach(function (item) {
-            var li = document.createElement('li');
-            li.textContent = item;
-            inputsEl.appendChild(li);
-        });
-        document.getElementById('deliverable-turnaround').textContent = variant.turnaround_promise || '';
-        document.getElementById('deliverable-artifact').textContent = variant.artifact_type ?
-            ('Format: ' + variant.artifact_type) : '';
-    }
-
-    // Section 8 item 7 — shared credibility block, identical across all
-    // six offer pages (multifamily/credibility_config.py is the single
-    // source of truth an operator fills once).
-    function renderCredibilityBlock(cred) {
-        if (!cred) { credibilityBlock.style.display = 'none'; return; }
-        credibilityBlock.style.display = 'block';
-        document.getElementById('cred-proof-line').textContent = cred.proof_line || '';
-        document.getElementById('cred-market-access').textContent = cred.market_access_line || '';
-        document.getElementById('cred-bor-line').textContent = cred.no_bor_change_line || '';
-
-        var stepsEl = document.getElementById('cred-next-steps');
-        stepsEl.innerHTML = '';
-        (cred.what_happens_next_steps || []).forEach(function (step) {
-            var li = document.createElement('li');
-            li.textContent = step;
-            stepsEl.appendChild(li);
-        });
-
-        var repRow = document.getElementById('cred-rep-row');
-        repRow.innerHTML = '';
-        var photoUrl = cred.representative_photo_url || '';
-        if (photoUrl && photoUrl.indexOf('[PLACEHOLDER') === -1) {
-            var img = document.createElement('img');
-            img.className = 'rep-photo';
-            img.src = photoUrl;
-            img.alt = cred.representative_name || 'Representative photo';
-            repRow.appendChild(img);
-        } else {
-            var placeholder = document.createElement('div');
-            placeholder.className = 'rep-photo-placeholder';
-            placeholder.textContent = 'PHOTO';
-            repRow.appendChild(placeholder);
-        }
-        var repText = document.createElement('div');
-        var nameLine = document.createElement('div');
-        nameLine.style.fontSize = '0.84rem';
-        nameLine.style.color = 'var(--text)';
-        nameLine.textContent = cred.representative_name || '';
-        var titleLine = document.createElement('div');
-        titleLine.style.fontSize = '0.72rem';
-        titleLine.style.color = 'var(--muted)';
-        titleLine.textContent = cred.representative_title || '';
-        repText.appendChild(nameLine);
-        repText.appendChild(titleLine);
-        repRow.appendChild(repText);
-
-        var factsEl = document.getElementById('cred-facts');
-        factsEl.innerHTML = '';
-        if (cred.ca_license_number) {
-            var lic = document.createElement('span');
-            lic.textContent = 'CA License #: ' + cred.ca_license_number;
-            factsEl.appendChild(lic);
-        }
-        (cred.association_memberships || []).forEach(function (m) {
-            var span = document.createElement('span');
-            span.textContent = m;
-            factsEl.appendChild(span);
-        });
-
-        document.getElementById('cred-privacy').textContent = cred.privacy_note || '';
+    // A value is safe to render publicly only if it's a non-empty
+    // string with no bracketed [PLACEHOLDER]-style token — mirrors
+    // multifamily/credibility_config.py's _is_visible_text() exactly,
+    // so "hide anything not yet real" holds on both sides.
+    function isVisibleText(v) {
+        return typeof v === 'string' && v.trim().length > 0 && v.indexOf('[') === -1;
     }
 
     function slugFromPath() {
         var parts = window.location.pathname.split('/').filter(Boolean);
         return parts.length ? parts[parts.length - 1] : '';
+    }
+
+    // Apply this offer's accent hue immediately (doesn't need to wait
+    // on the /form-variants fetch) so first paint is already on-brand.
+    (function applyAccentForSlug() {
+        var slug = slugFromPath();
+        var hue = ACCENT_HUE_BY_SLUG[slug];
+        if (hue != null) {
+            document.documentElement.style.setProperty('--accent-h', hue);
+        }
+    })();
+
+    function renderBrandSlot(el, cred) {
+        el.innerHTML = '';
+        if (isVisibleText(cred.company_logo_path)) {
+            var img = document.createElement('img');
+            img.src = cred.company_logo_path;
+            img.alt = cred.company_name || 'Company logo';
+            el.appendChild(img);
+        } else if (isVisibleText(cred.company_name)) {
+            var span = document.createElement('span');
+            span.className = 'brand-name-text';
+            span.textContent = cred.company_name;
+            el.appendChild(span);
+        }
+    }
+
+    // Section 8 item 5 — "What you get / What we need / How fast",
+    // populated per-variant from multifamily/forms/form_variants.py.
+    function renderDeliverableBlock(variant) {
+        if (!variant || !isVisibleText(variant.deliverable_name)) {
+            deliverableLabel.style.display = 'none';
+            deliverableBlock.style.display = 'none';
+            return;
+        }
+        deliverableLabel.style.display = 'block';
+        deliverableBlock.style.display = 'grid';
+        document.getElementById('deliverable-name').textContent = variant.deliverable_name;
+        document.getElementById('deliverable-description').textContent =
+            isVisibleText(variant.deliverable_description) ? variant.deliverable_description : '';
+        var inputsEl = document.getElementById('deliverable-inputs');
+        inputsEl.innerHTML = '';
+        (variant.required_inputs || []).forEach(function (item) {
+            if (!isVisibleText(item)) return;
+            var li = document.createElement('li');
+            li.textContent = item;
+            inputsEl.appendChild(li);
+        });
+        document.getElementById('deliverable-turnaround').textContent =
+            isVisibleText(variant.turnaround_promise) ? variant.turnaround_promise : '';
+        document.getElementById('deliverable-artifact').textContent =
+            isVisibleText(variant.artifact_type) ? ('Format: ' + variant.artifact_type) : '';
+    }
+
+    // Section 8 item 7 — shared credibility block, identical across all
+    // six offer pages (multifamily/credibility_config.py is the single
+    // source of truth an operator fills once). Every field is filtered
+    // through isVisibleText()/list-filtering before it can render, so a
+    // still-placeholder or still-empty fact is hidden rather than shown
+    // as "pending" copy.
+    function renderCredibilityBlock(cred) {
+        cred = cred || {};
+
+        renderBrandSlot(document.getElementById('brand-slot-header'), cred);
+        renderBrandSlot(document.getElementById('brand-slot-credibility'), cred);
+
+        if (isVisibleText(cred.no_bor_change_line)) {
+            heroTrustLine.textContent = cred.no_bor_change_line;
+            heroTrustLine.classList.add('visible');
+        } else {
+            heroTrustLine.classList.remove('visible');
+        }
+
+        var hasCredibilityContent = isVisibleText(cred.proof_line) || isVisibleText(cred.market_access_line) ||
+            isVisibleText(cred.no_bor_change_line) || isVisibleText(cred.representative_name);
+        credibilityBlock.style.display = hasCredibilityContent ? 'block' : 'none';
+
+        var boilerplateEl = document.getElementById('cred-boilerplate');
+        if (isVisibleText(cred.company_boilerplate)) {
+            boilerplateEl.textContent = cred.company_boilerplate;
+            boilerplateEl.classList.add('visible');
+        } else {
+            boilerplateEl.classList.remove('visible');
+        }
+
+        document.getElementById('cred-proof-line').textContent = isVisibleText(cred.proof_line) ? cred.proof_line : '';
+        document.getElementById('cred-market-access').textContent = isVisibleText(cred.market_access_line) ? cred.market_access_line : '';
+        document.getElementById('cred-bor-line').textContent = isVisibleText(cred.no_bor_change_line) ? cred.no_bor_change_line : '';
+
+        var stepsEl = document.getElementById('next-steps-list');
+        stepsEl.innerHTML = '';
+        var steps = (cred.what_happens_next_steps || []).filter(isVisibleText);
+        steps.forEach(function (step) {
+            var li = document.createElement('li');
+            li.textContent = step;
+            stepsEl.appendChild(li);
+        });
+        nextStepsBlock.style.display = steps.length ? 'block' : 'none';
+
+        var repRow = document.getElementById('cred-rep-row');
+        var repPhoto = document.getElementById('cred-rep-photo');
+        var hasRep = isVisibleText(cred.representative_name) || isVisibleText(cred.representative_title) ||
+            isVisibleText(cred.representative_bio);
+        repRow.classList.toggle('visible', hasRep);
+        if (isVisibleText(cred.representative_photo_url)) {
+            repPhoto.src = cred.representative_photo_url;
+            repPhoto.alt = cred.representative_name || 'Representative photo';
+            repPhoto.style.display = 'block';
+        } else {
+            repPhoto.style.display = 'none';
+        }
+        document.getElementById('cred-rep-name').textContent = isVisibleText(cred.representative_name) ? cred.representative_name : '';
+        document.getElementById('cred-rep-title').textContent = isVisibleText(cred.representative_title) ? cred.representative_title : '';
+        document.getElementById('cred-rep-bio').textContent = isVisibleText(cred.representative_bio) ? cred.representative_bio : '';
+
+        var factsEl = document.getElementById('cred-facts');
+        factsEl.innerHTML = '';
+        var licenses = (cred.licenses || []).filter(function (lic) {
+            return lic && isVisibleText(lic.state) && isVisibleText(lic.number);
+        });
+        licenses.forEach(function (lic) {
+            var span = document.createElement('span');
+            span.textContent = 'Licensed: ' + lic.state + ' #' + lic.number;
+            factsEl.appendChild(span);
+        });
+        var memberships = (cred.association_memberships || []).filter(isVisibleText);
+        memberships.forEach(function (m) {
+            var span = document.createElement('span');
+            span.textContent = m;
+            factsEl.appendChild(span);
+        });
+        factsEl.classList.toggle('visible', licenses.length > 0 || memberships.length > 0);
+
+        document.getElementById('cred-privacy').textContent = isVisibleText(cred.privacy_note) ? cred.privacy_note : '';
     }
 
     // Populate UTM/referrer/landing-page hidden fields from the URL and

@@ -2,16 +2,22 @@
 """
 Section 8 items 5 and 7 tests: offer deliverable definitions as config
 (multifamily/forms/form_variants.py) and the shared credibility-block
-config (multifamily/credibility_config.py).
+config (multifamily/credibility_config.py), now carrying real values
+(Alkeme Insurance / Max Lyle / confirmed per-offer turnaround times).
 
 Covers: every one of the six FormVariants has a non-empty deliverable
-config with required_inputs kept to <=7; GET /api/multifamily/form-variants
+config with required_inputs kept to <=7 and its real, operator-
+confirmed turnaround_promise; GET /api/multifamily/form-variants
 returns both the per-variant deliverable fields and the shared
-credibility block; the Outreach Workbench (build_outreach_bundle)
+credibility block; public_credibility_view() never leaks a bracketed
+[PLACEHOLDER] token or an empty value — it's the exact filter
+static/mf-review.html's renderCredibilityBlock() mirrors, so this is
+the Python-side half of the "nothing unconfirmed ever renders
+publicly" invariant; the Outreach Workbench (build_outreach_bundle)
 references the concrete deliverable name in generated copy when a
 lead's offer_type matches a known variant, and falls back to the prior
-generic phrasing untouched when it doesn't (zero regression for leads
-with no offer_type); the credibility config's env-var override merges
+generic phrasing when it doesn't (zero regression for leads with no
+offer_type); the credibility config's env-var override merges
 correctly and exposes which fields are still awaiting operator input.
 """
 import json
@@ -20,9 +26,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from multifamily.forms.form_variants import FORM_VARIANTS, FORM_VARIANT_SLUGS, DEFAULT_TURNAROUND_PROMISE
+from multifamily.forms.form_variants import FORM_VARIANTS, FORM_VARIANT_SLUGS
 from multifamily.credibility_config import (
-    DEFAULT_CREDIBILITY_CONFIG, get_credibility_config, placeholder_fields, _ENV_VAR,
+    DEFAULT_CREDIBILITY_CONFIG, get_credibility_config, public_credibility_view,
+    placeholder_fields, _ENV_VAR,
 )
 from multifamily.intake import build_lead_from_intake
 from multifamily.outreach.outreach_bundle_builder import build_outreach_bundle
@@ -32,6 +39,15 @@ _FAILURES = []
 _M = '(OFFERDELIVERABLE TEST)'
 _lead_ids = []
 
+_EXPECTED_TURNAROUND = {
+    'benchmark': '5 business days',
+    'renewal-pressure': '5 business days',
+    'acquisition': '3 business days',
+    'lender-requirement': '3 business days',
+    'builders-risk': '5 business days',
+    'completion-leaseup': '5 business days',
+}
+
 
 def check(name, condition):
     print(('  PASS  ' if condition else '  FAIL  ') + name)
@@ -39,17 +55,27 @@ def check(name, condition):
         _FAILURES.append(name)
 
 
-def test_every_variant_has_a_deliverable_config():
+def _has_bracket_token(value):
+    if isinstance(value, str):
+        return '[' in value
+    if isinstance(value, list):
+        return any(_has_bracket_token(v) for v in value)
+    if isinstance(value, dict):
+        return any(_has_bracket_token(v) for v in value.values())
+    return False
+
+
+def test_every_variant_has_a_deliverable_config_with_real_turnaround():
     for slug in FORM_VARIANT_SLUGS:
         variant = FORM_VARIANTS[slug]
         check(f"'{slug}' has a non-empty deliverable_name", bool(variant.deliverable_name))
         check(f"'{slug}' has a non-empty deliverable_description", bool(variant.deliverable_description))
         check(f"'{slug}' has 1-7 required_inputs", 1 <= len(variant.required_inputs) <= 7)
         check(f"'{slug}' has a non-empty artifact_type", bool(variant.artifact_type))
-        check(f"'{slug}' turnaround_promise is the shared placeholder (pending operator confirmation)",
-              variant.turnaround_promise == DEFAULT_TURNAROUND_PROMISE)
-        check(f"'{slug}' turnaround_promise is visibly bracketed as a placeholder",
-              variant.turnaround_promise.startswith('[TURNAROUND'))
+        check(f"'{slug}' turnaround_promise matches the confirmed operator value",
+              variant.turnaround_promise == _EXPECTED_TURNAROUND[slug])
+        check(f"'{slug}' turnaround_promise carries no placeholder token (it's a real confirmed value)",
+              '[' not in variant.turnaround_promise)
 
 
 def test_form_variants_endpoint_shape_matches_config():
@@ -68,42 +94,65 @@ def test_form_variants_endpoint_shape_matches_config():
     credibility_json = json.dumps(get_credibility_config())
     reloaded_cred = json.loads(credibility_json)
     check('credibility config round-trips through JSON', isinstance(reloaded_cred, dict))
-    check('credibility config has no_bor_change_line', 'no bor change' in reloaded_cred['no_bor_change_line'].lower()
-          or 'no broker-of-record change' in reloaded_cred['no_bor_change_line'].lower())
+    check("credibility config has the real company_name 'Alkeme Insurance'",
+          reloaded_cred['company_name'] == 'Alkeme Insurance')
+    check('credibility config has no_bor_change_line', 'no broker-of-record change' in reloaded_cred['no_bor_change_line'].lower())
 
 
-def test_credibility_config_defaults_and_placeholders():
+def test_credibility_config_has_real_alkeme_values():
     cfg = get_credibility_config()
-    required_keys = [
-        'proof_line', 'market_access_line', 'no_bor_change_line', 'what_happens_next_steps',
-        'ca_license_number', 'association_memberships', 'representative_name',
-        'representative_title', 'representative_photo_url', 'privacy_note',
-    ]
-    for key in required_keys:
-        check(f"credibility config has key '{key}'", key in cfg)
-    check('what_happens_next_steps has exactly 3 steps', len(cfg['what_happens_next_steps']) == 3)
-    check('no_bor_change_line is not a placeholder (safe boilerplate, not an operator fact)',
-          '[PLACEHOLDER' not in cfg['no_bor_change_line'])
-    check('privacy_note is not a placeholder (safe boilerplate, not an operator fact)',
-          '[PLACEHOLDER' not in cfg['privacy_note'])
+    check("company_name is 'Alkeme Insurance'", cfg['company_name'] == 'Alkeme Insurance')
+    check("representative_name is 'Max Lyle'", cfg['representative_name'] == 'Max Lyle')
+    check("representative_title mentions Alkeme Insurance", 'Alkeme Insurance' in cfg['representative_title'])
+    check("proof_line mentions ALKEME and 20+ carriers", 'ALKEME' in cfg['proof_line'] and '20+ carriers' in cfg['proof_line'])
+    check("representative_bio mentions ALKEME, not a years-of-experience claim",
+          'ALKEME' in cfg['representative_bio'] and not any(tok in cfg['representative_bio'].lower()
+                                                             for tok in ('years of experience', 'years in', '+ years')))
+    check('company_logo_path defaults empty (no generated/approximated logo)', cfg['company_logo_path'] == '')
+    check('company_boilerplate defaults empty (pending marketing approval)', cfg['company_boilerplate'] == '')
+    check('licenses defaults to an empty list (no license line renders yet)', cfg['licenses'] == [])
+    check('association_memberships defaults to an empty list', cfg['association_memberships'] == [])
 
-    placeholders = placeholder_fields()
-    expected_placeholder_fields = {
-        'proof_line', 'market_access_line', 'ca_license_number', 'association_memberships',
-        'representative_name', 'representative_title', 'representative_photo_url',
-    }
-    check('every expected fact-dependent field is still flagged as a placeholder',
-          expected_placeholder_fields.issubset(set(placeholders)))
-    check('no_bor_change_line/privacy_note/what_happens_next_steps are NOT flagged as placeholders',
-          not ({'no_bor_change_line', 'privacy_note', 'what_happens_next_steps'} & set(placeholders)))
+
+def test_public_credibility_view_never_leaks_placeholder_tokens():
+    """The core invariant: whatever public_credibility_view() returns is
+    exactly what static/mf-review.html is allowed to render — assert
+    directly that no returned value (string, list, or nested dict)
+    contains a '[' character, mirroring the required "no rendered
+    placeholder tokens" check for the live pages."""
+    view = public_credibility_view()
+    check('public_credibility_view() returns a non-empty view (real content exists)', len(view) > 0)
+    check('no value in the public view carries a bracketed placeholder token', not _has_bracket_token(view))
+    check("company_logo_path is NOT in the public view (still empty)", 'company_logo_path' not in view)
+    check("company_boilerplate is NOT in the public view (still empty)", 'company_boilerplate' not in view)
+    check("representative_photo_url is NOT in the public view (still a placeholder)", 'representative_photo_url' not in view)
+    check("licenses is NOT in the public view (still empty)", 'licenses' not in view)
+    check("association_memberships is NOT in the public view (still empty)", 'association_memberships' not in view)
+    check("proof_line IS in the public view (real confirmed value)", 'proof_line' in view)
+    check("representative_bio IS in the public view (real confirmed value)", 'representative_bio' in view)
+
+    # Prove the filter actually filters, not just happens to pass today:
+    # feed it a config with a live placeholder and confirm it's excluded.
+    dirty_cfg = dict(DEFAULT_CREDIBILITY_CONFIG)
+    dirty_cfg['market_access_line'] = '[PLACEHOLDER: still pending]'
+    dirty_view = public_credibility_view(dirty_cfg)
+    check("a bracketed market_access_line is excluded from the view", 'market_access_line' not in dirty_view)
+    check('the filtered dirty view still carries no bracket tokens', not _has_bracket_token(dirty_view))
+
+    # And prove a real licenses entry DOES render once added (no code
+    # change needed — exactly the amendment's requirement).
+    licensed_cfg = dict(DEFAULT_CREDIBILITY_CONFIG)
+    licensed_cfg['licenses'] = [{'state': 'TX', 'number': '123456'}]
+    licensed_view = public_credibility_view(licensed_cfg)
+    check('a real licenses entry renders once added to config', licensed_view.get('licenses') == [{'state': 'TX', 'number': '123456'}])
 
 
 def test_credibility_config_env_override_merges():
-    override = {'ca_license_number': 'CA-0123456', 'proof_line': ''}
+    override = {'market_access_line': 'Admitted only, TX and CA.', 'proof_line': ''}
     os.environ[_ENV_VAR] = json.dumps(override)
     try:
         cfg = get_credibility_config()
-        check('env override applies a real license number', cfg['ca_license_number'] == 'CA-0123456')
+        check('env override applies a real market_access_line', cfg['market_access_line'] == 'Admitted only, TX and CA.')
         check('env override with an empty string does not blank out the default proof_line',
               cfg['proof_line'] == DEFAULT_CREDIBILITY_CONFIG['proof_line'])
         check('fields not present in the override are untouched',
@@ -111,7 +160,18 @@ def test_credibility_config_env_override_merges():
     finally:
         del os.environ[_ENV_VAR]
     check('override no longer applies once the env var is cleared',
-          get_credibility_config()['ca_license_number'] == DEFAULT_CREDIBILITY_CONFIG['ca_license_number'])
+          get_credibility_config()['market_access_line'] == DEFAULT_CREDIBILITY_CONFIG['market_access_line'])
+
+
+def test_placeholder_fields_report_matches_expectations():
+    fields = set(placeholder_fields())
+    check('company_logo_path is reported as still pending', 'company_logo_path' in fields)
+    check('company_boilerplate is reported as still pending', 'company_boilerplate' in fields)
+    check('representative_photo_url is reported as still pending', 'representative_photo_url' in fields)
+    check('licenses is reported as still pending', 'licenses' in fields)
+    check('association_memberships is reported as still pending', 'association_memberships' in fields)
+    check('proof_line is NOT reported as pending (real confirmed value)', 'proof_line' not in fields)
+    check('representative_name is NOT reported as pending (real confirmed value)', 'representative_name' not in fields)
 
 
 def test_outreach_copy_references_concrete_deliverable_when_offer_type_known():
@@ -131,8 +191,8 @@ def test_outreach_copy_references_concrete_deliverable_when_offer_type_known():
     check('offer_deliverable is populated', bundle['offer_deliverable'] is not None)
     check("offer_deliverable.page_variant matches the lead's page_variant",
           bundle['offer_deliverable']['page_variant'] == 'renewal-pressure')
-    check('offer_deliverable.turnaround_promise is present',
-          bool(bundle['offer_deliverable']['turnaround_promise']))
+    check("offer_deliverable.turnaround_promise is the real confirmed value",
+          bundle['offer_deliverable']['turnaround_promise'] == '5 business days')
     check('the protected NEPQ angle/hook text is still present and untouched (build_angle output)',
           len(bundle['recommended_message_angle'] or '') > 0)
 
@@ -161,10 +221,12 @@ def test_outreach_copy_falls_back_to_generic_phrasing_without_offer_type():
 
 def main():
     try:
-        test_every_variant_has_a_deliverable_config()
+        test_every_variant_has_a_deliverable_config_with_real_turnaround()
         test_form_variants_endpoint_shape_matches_config()
-        test_credibility_config_defaults_and_placeholders()
+        test_credibility_config_has_real_alkeme_values()
+        test_public_credibility_view_never_leaks_placeholder_tokens()
         test_credibility_config_env_override_merges()
+        test_placeholder_fields_report_matches_expectations()
         test_outreach_copy_references_concrete_deliverable_when_offer_type_known()
         test_outreach_copy_falls_back_to_generic_phrasing_without_offer_type()
     finally:
