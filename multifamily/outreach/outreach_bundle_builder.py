@@ -17,6 +17,7 @@ from multifamily.types import MultifamilyLead
 from multifamily.outreach.nepq_multifamily_angle_builder import build_angle
 from multifamily.timing.process_stage_types import ProcessStageResult
 from multifamily.timing.process_stage_detector import detect_process_stage
+from multifamily.forms.form_variants import form_variant_for_offer_type, FormVariant
 
 # Stage-specific discovery questions. Falls back to a neutral default set.
 _DISCOVERY_QUESTIONS = {
@@ -85,6 +86,17 @@ def _greeting(lead: MultifamilyLead) -> str:
     return f"Hi {name}" if name else "Hi there"
 
 
+def _deliverable_for_lead(lead: MultifamilyLead) -> Optional[FormVariant]:
+    """Section 8 item 5 — resolve the lead's matched offer deliverable
+    (if any) so generated copy can reference a concrete artifact instead
+    of speaking generically. Most leads still have no offer_type (e.g.
+    older submissions, manual adds) — those keep the prior generic
+    phrasing untouched, so this is purely additive."""
+    if not lead.offer_type:
+        return None
+    return form_variant_for_offer_type(lead.offer_type)
+
+
 def build_outreach_bundle(lead: MultifamilyLead, stage_result: Optional[ProcessStageResult] = None) -> Dict[str, Any]:
     stage_result = stage_result or detect_process_stage(lead)
     angle = stage_result.recommended_message_angle
@@ -92,6 +104,7 @@ def build_outreach_bundle(lead: MultifamilyLead, stage_result: Optional[ProcessS
     greeting = _greeting(lead)
     company = lead.company.name
     state = lead.state or 'your market'
+    deliverable = _deliverable_for_lead(lead)
 
     call_opener = (
         f"{greeting} — thanks for taking a second. I work with multifamily owners and operators "
@@ -99,14 +112,24 @@ def build_outreach_bundle(lead: MultifamilyLead, stage_result: Optional[ProcessS
         f"Would a quick, no-obligation read be useful, or is this bad timing?"
     )
 
+    if deliverable:
+        offer_paragraph = (
+            f"No obligation either way — if it's useful, I'll put together a {deliverable.deliverable_name} "
+            f"so you've got something concrete to look at. If the timing's off, just let me know."
+        )
+    else:
+        offer_paragraph = (
+            f"No obligation either way — if it's useful, I'm happy to share what we're seeing across "
+            f"comparable {state} multifamily risk this year. If the timing's off, just let me know."
+        )
+
     email_draft = {
         'subject': f"Quick multifamily insurance benchmark — {company}",
         'body': (
             f"{greeting},\n\n"
             f"{hook}\n\n"
             f"{angle}\n\n"
-            f"No obligation either way — if it's useful, I'm happy to share what we're seeing across "
-            f"comparable {state} multifamily risk this year. If the timing's off, just let me know.\n\n"
+            f"{offer_paragraph}\n\n"
             f"Best,\n[Your name]"
         ),
     }
@@ -135,6 +158,17 @@ def build_outreach_bundle(lead: MultifamilyLead, stage_result: Optional[ProcessS
 
     discovery_questions = list(_DISCOVERY_QUESTIONS.get(stage_result.process_stage, _DEFAULT_DISCOVERY_QUESTIONS))
 
+    offer_deliverable = None
+    if deliverable:
+        offer_deliverable = {
+            'page_variant': deliverable.slug,
+            'deliverable_name': deliverable.deliverable_name,
+            'deliverable_description': deliverable.deliverable_description,
+            'required_inputs': deliverable.required_inputs,
+            'artifact_type': deliverable.artifact_type,
+            'turnaround_promise': deliverable.turnaround_promise,
+        }
+
     return {
         'process_stage': stage_result.process_stage,
         'recommended_message_angle': angle,
@@ -145,4 +179,8 @@ def build_outreach_bundle(lead: MultifamilyLead, stage_result: Optional[ProcessS
         'follow_up_2': follow_up_2,
         'soft_bump': soft_bump,
         'discovery_questions': discovery_questions,
+        # Section 8 item 5 — the concrete artifact this lead's copy
+        # references, if their offer_type matched a known page variant.
+        # None for leads with no offer_type (generic phrasing above).
+        'offer_deliverable': offer_deliverable,
     }
