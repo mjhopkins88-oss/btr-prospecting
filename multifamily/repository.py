@@ -1485,9 +1485,13 @@ def get_campaign_performance() -> Dict[str, Any]:
 
     by_campaign = _rate_buckets(target_rows, lambda t: t['campaign_id'])
     campaign_scorecards = _campaign_scorecards(target_rows)
+    from multifamily.pilot_gate_config import evaluate_gates
     for cid, b in by_campaign.items():
         b['name'] = next((t['campaign_name'] for t in target_rows if t['campaign_id'] == cid), cid)
         b.update(campaign_scorecards.get(cid, {}))
+        # Phase E -- pilot launch gate status per campaign, thresholds
+        # from multifamily/pilot_gate_config.py (config, not code).
+        b['gates'] = evaluate_gates(b)
     best_campaign = _best(by_campaign, 'campaign_id')
 
     by_page_variant = _rate_buckets(target_rows, lambda t: t['campaign_page_variant'])
@@ -1516,6 +1520,20 @@ def get_campaign_performance() -> Dict[str, Any]:
             reason = t['disqualification_reason']
             disqualification_reasons[reason] = disqualification_reasons.get(reason, 0) + 1
 
+    # Phase E -- how many campaigns are all-green across the 4 pilot
+    # gates vs. carrying at least one red/amber, for the Overview funnel
+    # widget. A campaign with zero live data (every gate 'unknown')
+    # counts as neither -- it hasn't launched enough to grade yet.
+    pilot_gates_summary = {'all_green': 0, 'needs_attention': 0, 'not_enough_data': 0}
+    for b in by_campaign.values():
+        statuses = [g['status'] for g in b.get('gates', {}).values()]
+        if statuses and all(s == 'unknown' for s in statuses):
+            pilot_gates_summary['not_enough_data'] += 1
+        elif any(s in ('amber', 'red') for s in statuses):
+            pilot_gates_summary['needs_attention'] += 1
+        elif statuses:
+            pilot_gates_summary['all_green'] += 1
+
     return {
         'total_campaigns': len(campaigns),
         'total_active_campaigns': total_active_campaigns,
@@ -1531,6 +1549,7 @@ def get_campaign_performance() -> Dict[str, Any]:
         'conversion_rate_by_segment': conversion_rate_by_segment,
         'conversion_rate_by_state': conversion_rate_by_state,
         'disqualification_reasons': disqualification_reasons,
+        'pilot_gates_summary': pilot_gates_summary,
     }
 
 

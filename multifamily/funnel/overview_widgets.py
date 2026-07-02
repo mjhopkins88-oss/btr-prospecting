@@ -67,4 +67,8 @@ def build_funnel_widgets(
         'today_queue_total': len(tq),
         'today_queue_overdue': sum(1 for it in tq if it.get('is_overdue')),
         'today_queue_due_today': sum(1 for it in tq if it.get('is_due_today')),
+        # Phase E — pilot gate rollup (multifamily/pilot_gate_config.py's
+        # evaluate_gates(), already computed per-campaign inside
+        # get_campaign_performance() -- passed through here unchanged).
+        'pilot_gates_summary': cp.get('pilot_gates_summary', {'all_green': 0, 'needs_attention': 0, 'not_enough_data': 0}),
     }

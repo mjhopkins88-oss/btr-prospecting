@@ -9923,6 +9923,10 @@ const _MF_OVERVIEW_CAMPAIGN_SECTION = (funnel, setActiveTab) => /*#__PURE__*/Rea
   label: "BEST CAMPAIGN",
   value: funnel.best_campaign ? `${funnel.best_campaign.name || funnel.best_campaign.campaign_id} (${funnel.best_campaign.conversion_rate_pct}%)` : '—',
   color: "#a78bfa"
+}), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+  label: "PILOT GATES: NEEDS ATTENTION",
+  value: (funnel.pilot_gates_summary && funnel.pilot_gates_summary.needs_attention) || 0,
+  color: ((funnel.pilot_gates_summary && funnel.pilot_gates_summary.needs_attention) || 0) > 0 ? "#ef4444" : "#34d399"
 })), (funnel.best_performing_offer_page || funnel.recently_converted_campaign_target) && /*#__PURE__*/React.createElement("div", {
   style: {
     display: 'flex',
@@ -10408,6 +10412,30 @@ function mfCampaignRateTable(title, buckets, labelHeader) {
     }
   }, b.conversion_rate_pct, "%")))))));
 }
+// Phase E — pilot gate status chips. Colors match the same green/amber/
+// red/muted family every other status pill in this file already uses
+// (mfCategoryColor et al.), for visual consistency with the rest of the
+// Pilot Scorecard view.
+function _mfGateStatusColor(status) {
+  if (status === 'green') return '#34d399';
+  if (status === 'amber') return '#facc15';
+  if (status === 'red') return '#ef4444';
+  return '#64748b'; // 'unknown' — not enough data yet to grade
+}
+function _mfGateChip(label, gate) {
+  const g = gate || {
+    status: 'unknown'
+  };
+  const title = g.status === 'unknown' ? `${label}: not enough data yet` : `${label}: ${g.status}`;
+  return /*#__PURE__*/React.createElement("span", {
+    key: label,
+    title: title,
+    style: {
+      ...mfPillStyle(_mfGateStatusColor(g.status)),
+      marginRight: '4px'
+    }
+  }, label);
+}
 function mfCampaignScorecardTable(buckets) {
   const entries = Object.entries(buckets || {}).filter(([, b]) => b.touch_1_sent > 0).sort((a, b) => b[1].touch_1_sent - a[1].touch_1_sent);
   const pct = v => v == null ? '—' : Math.round(v * 1000) / 10 + '%';
@@ -10465,7 +10493,12 @@ function mfCampaignScorecardTable(buckets) {
       textAlign: 'right',
       padding: '4px 8px'
     }
-  }, "Meetings"))), /*#__PURE__*/React.createElement("tbody", null, entries.map(([key, b]) => /*#__PURE__*/React.createElement("tr", {
+  }, "Meetings"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'left',
+      padding: '4px 8px'
+    }
+  }, "Pilot Gates"))), /*#__PURE__*/React.createElement("tbody", null, entries.map(([key, b]) => /*#__PURE__*/React.createElement("tr", {
     key: key,
     style: {
       borderTop: '1px solid rgba(255,255,255,0.04)'
@@ -10495,7 +10528,12 @@ function mfCampaignScorecardTable(buckets) {
       textAlign: 'right',
       padding: '4px 8px'
     }
-  }, b.meetings ?? 0)))))));
+  }, b.meetings ?? 0), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'left',
+      padding: '4px 8px'
+    }
+  }, _mfGateChip('Delivery', b.gates && b.gates.delivery_rate), _mfGateChip('Reply', b.gates && b.gates.reply_rate), _mfGateChip('Positive', b.gates && b.gates.positive_share), _mfGateChip('Meetings', b.gates && b.gates.meetings))))))));
 }
 function MultifamilySourcePerformanceCampaignSection({
   campaignPerformance
