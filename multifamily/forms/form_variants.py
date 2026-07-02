@@ -12,10 +12,10 @@ intelligence handling — no variant changes scoring math. Conditional
 fields ride in the situation signal's `detail` (multifamily/intake.py),
 which scoring never reads for points.
 
-'benchmark' is the default variant and is deliberately identical in
-shape to the form that already exists (static/multifamily-benchmark-form.html)
-— this module documents/derives metadata for it, it does not change its
-behavior.
+'benchmark' is the default variant. It was originally shaped to match a
+standalone legacy form (static/multifamily-benchmark-form.html); that
+form has since been retired (Phase A visual overhaul) — its route now
+302s to /mf-review/benchmark, which is the only live 'benchmark' page.
 """
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional

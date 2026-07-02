@@ -1,0 +1,451 @@
+/* Section 8 / Phase A -- Multifamily Command visual overhaul.
+   Scoped ENTIRELY under body[data-workspace="multifamily"] -- BTR
+   pages never carry that attribute, so none of this can ever
+   affect BTR. Targets existing inline style values (both the hex
+   and browser-normalized rgb()/rgba() forms the DOM actually shows)
+   via attribute-substring selectors + !important, since inline
+   React styles otherwise always win over external CSS. This file
+   changes colors/typography only -- zero structural/layout/logic
+   changes, so every view renders identical data before and after. */
+
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  --mf-ink: #17223b;
+  --mf-ink-soft: #3c4a68;
+  --mf-muted: #5b6b85;
+  --mf-paper: #faf6ee;
+  --mf-paper-card: rgba(255, 253, 249, 0.72);
+  --mf-border: rgba(23, 34, 59, 0.12);
+  --mf-gold: #af8a4e;
+  --mf-gold-bright: #c9a35f;
+}
+
+body[data-workspace="multifamily"] {
+  background:
+    radial-gradient(1200px 600px at 15% -10%, rgba(175,138,78,0.10), transparent 60%),
+    radial-gradient(1000px 700px at 110% 10%, rgba(23,34,59,0.06), transparent 55%),
+    #faf6ee !important;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Panel/section titles: Orbitron -> Fraunces serif display */
+body[data-workspace="multifamily"] [style*="Orbitron"] {
+  font-family: 'Fraunces', Georgia, serif !important;
+  letter-spacing: 0.01em !important;
+}
+
+/* Glass card treatment for the primary card-container background
+   (rgba(15, 22, 36, 0.97/0.6) is the dark theme's actual card fill,
+   confirmed via live DOM sweep across every Multifamily view -- these
+   are the real card containers, now re-themed as translucent frosted
+   glass over the porcelain wash). */
+body[data-workspace="multifamily"] [style*="background: rgba(15, 22, 36, 0.97)"],
+body[data-workspace="multifamily"] [style*="background: rgba(23, 34, 59, 0.03)"],
+body[data-workspace="multifamily"] [style*="background: rgba(23, 34, 59, 0.04)"],
+body[data-workspace="multifamily"] [style*="background: rgba(23, 34, 59, 0.05)"] {
+  background: linear-gradient(180deg, rgba(255,255,255,0.78), rgba(255,253,249,0.6)) !important;
+  backdrop-filter: blur(14px) saturate(1.1) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(1.1) !important;
+  box-shadow: 0 1px 2px rgba(23,34,59,0.04), 0 8px 24px rgba(23,34,59,0.07) !important;
+}
+body[data-workspace="multifamily"] [style*="background: rgba(15, 22, 36, 0.6)"] {
+  background: linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,253,249,0.4)) !important;
+  backdrop-filter: blur(12px) saturate(1.1) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(1.1) !important;
+  box-shadow: 0 1px 2px rgba(23,34,59,0.04), 0 8px 24px rgba(23,34,59,0.06) !important;
+}
+
+/* Two base colors used in the compiled bundle that fell outside the
+   original hex sweep (confirmed via live DOM sweep): slate-700 body
+   text and blue-600 link/accent -- mapped into the same target
+   families as their sibling shades (#cbd5e1->ink-soft, #3b82f6->blue-slate). */
+body[data-workspace="multifamily"] [style*="color: #334155"],
+body[data-workspace="multifamily"] [style*="color: rgb(51, 65, 85)"] { color: #3c4a68 !important; }
+body[data-workspace="multifamily"] [style*="background: #2563eb"],
+body[data-workspace="multifamily"] [style*="background: rgb(37, 99, 235)"] { background: #4a6b8a !important; }
+body[data-workspace="multifamily"] [style*="color: #2563eb"],
+body[data-workspace="multifamily"] [style*="color: rgb(37, 99, 235)"] { color: #4a6b8a !important; }
+body[data-workspace="multifamily"] [style*="border-color: #2563eb"],
+body[data-workspace="multifamily"] [style*="border-color: rgb(37, 99, 235)"] { border-color: #4a6b8a !important; }
+
+/* Stray BTR-blue tint (#EAF2FB) reused on a badge/info element inside
+   the Multifamily section -- neutralized to a warm porcelain tint so
+   it doesn't read as BTR's signature light-blue inside this workspace. */
+body[data-workspace="multifamily"] [style*="background: #EAF2FB"],
+body[data-workspace="multifamily"] [style*="background: rgb(234, 242, 251)"] { background: #f2ecdf !important; }
+
+/* Translucent status-pill/badge backgrounds + borders (base hue at low
+   alpha, confirmed via live DOM sweep) -- remapped to the corresponding
+   target hue at the same alpha so chips stay legible on porcelain
+   instead of nearly-invisible pale-on-pale. */
+body[data-workspace="multifamily"] [style*="background: rgba(167, 139, 250, 0.08)"] { background: rgba(124, 107, 171, 0.14) !important; }
+body[data-workspace="multifamily"] [style*="background: rgba(245, 158, 11, 0.08)"] { background: rgba(175, 138, 78, 0.14) !important; }
+body[data-workspace="multifamily"] [style*="background: rgba(245, 158, 11, 0.12)"] { background: rgba(175, 138, 78, 0.18) !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgba(245, 158, 11, 0.3)"] { border-color: rgba(175, 138, 78, 0.4) !important; }
+body[data-workspace="multifamily"] [style*="background: rgba(249, 115, 22, 0.08)"] { background: rgba(194, 102, 14, 0.14) !important; }
+body[data-workspace="multifamily"] [style*="background: rgba(59, 130, 246, 0.08)"] { background: rgba(74, 107, 138, 0.14) !important; }
+body[data-workspace="multifamily"] [style*="background: rgba(37, 99, 235, 0.12)"] { background: rgba(74, 107, 138, 0.18) !important; }
+body[data-workspace="multifamily"] [style*="background: rgba(148, 163, 184, 0.08)"] { background: rgba(91, 107, 133, 0.14) !important; }
+body[data-workspace="multifamily"] [style*="background: rgba(100, 116, 139, 0.08)"] { background: rgba(91, 107, 133, 0.14) !important; }
+body[data-workspace="multifamily"] [style*="background: rgba(239, 68, 68, 0.08)"] { background: rgba(179, 38, 30, 0.14) !important; }
+body[data-workspace="multifamily"] [style*="background: rgba(250, 204, 21, 0.08)"] { background: rgba(184, 147, 90, 0.14) !important; }
+
+/* Tabular numerals for metric/stat displays. No stable className hook exists
+   on individual metric nodes in the compiled bundle (inline-style-only
+   components), so this applies workspace-wide -- harmless for non-numeric
+   text and guarantees every stat/count/currency figure gets fixed-width
+   digits without a JS/JSX edit to the shared bundle. */
+body[data-workspace="multifamily"] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Focus states */
+body[data-workspace="multifamily"] input:focus-visible,
+body[data-workspace="multifamily"] select:focus-visible,
+body[data-workspace="multifamily"] textarea:focus-visible,
+body[data-workspace="multifamily"] button:focus-visible,
+body[data-workspace="multifamily"] a:focus-visible {
+  outline: 2px solid var(--mf-gold) !important;
+  outline-offset: 2px !important;
+}
+
+/* ---- Color remapping: hex + browser-normalized rgb() forms ---- */
+body[data-workspace="multifamily"] [style*="background: #f59e0b"] { background: #af8a4e !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(245, 158, 11)"] { background: #af8a4e !important; }
+body[data-workspace="multifamily"] [style*="background-color: #f59e0b"] { background-color: #af8a4e !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(245, 158, 11)"] { background-color: #af8a4e !important; }
+body[data-workspace="multifamily"] [style*="color: #f59e0b"] { color: #af8a4e !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(245, 158, 11)"] { color: #af8a4e !important; }
+body[data-workspace="multifamily"] [style*="border-color: #f59e0b"] { border-color: #af8a4e !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(245, 158, 11)"] { border-color: #af8a4e !important; }
+body[data-workspace="multifamily"] [style*="fill: #f59e0b"] { fill: #af8a4e !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(245, 158, 11)"] { fill: #af8a4e !important; }
+body[data-workspace="multifamily"] [style*="stroke: #f59e0b"] { stroke: #af8a4e !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(245, 158, 11)"] { stroke: #af8a4e !important; }
+body[data-workspace="multifamily"] [style*="background: #fbbf24"] { background: #c9a35f !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(251, 191, 36)"] { background: #c9a35f !important; }
+body[data-workspace="multifamily"] [style*="background-color: #fbbf24"] { background-color: #c9a35f !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(251, 191, 36)"] { background-color: #c9a35f !important; }
+body[data-workspace="multifamily"] [style*="color: #fbbf24"] { color: #c9a35f !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(251, 191, 36)"] { color: #c9a35f !important; }
+body[data-workspace="multifamily"] [style*="border-color: #fbbf24"] { border-color: #c9a35f !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(251, 191, 36)"] { border-color: #c9a35f !important; }
+body[data-workspace="multifamily"] [style*="fill: #fbbf24"] { fill: #c9a35f !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(251, 191, 36)"] { fill: #c9a35f !important; }
+body[data-workspace="multifamily"] [style*="stroke: #fbbf24"] { stroke: #c9a35f !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(251, 191, 36)"] { stroke: #c9a35f !important; }
+body[data-workspace="multifamily"] [style*="background: #0f172a"] { background: #17223b !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(15, 23, 42)"] { background: #17223b !important; }
+body[data-workspace="multifamily"] [style*="background-color: #0f172a"] { background-color: #17223b !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(15, 23, 42)"] { background-color: #17223b !important; }
+body[data-workspace="multifamily"] [style*="color: #0f172a"] { color: #17223b !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(15, 23, 42)"] { color: #17223b !important; }
+body[data-workspace="multifamily"] [style*="border-color: #0f172a"] { border-color: #17223b !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(15, 23, 42)"] { border-color: #17223b !important; }
+body[data-workspace="multifamily"] [style*="fill: #0f172a"] { fill: #17223b !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(15, 23, 42)"] { fill: #17223b !important; }
+body[data-workspace="multifamily"] [style*="stroke: #0f172a"] { stroke: #17223b !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(15, 23, 42)"] { stroke: #17223b !important; }
+body[data-workspace="multifamily"] [style*="background: #f1f5f9"] { background: #17223b !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(241, 245, 249)"] { background: #17223b !important; }
+body[data-workspace="multifamily"] [style*="background-color: #f1f5f9"] { background-color: #17223b !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(241, 245, 249)"] { background-color: #17223b !important; }
+body[data-workspace="multifamily"] [style*="color: #f1f5f9"] { color: #17223b !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(241, 245, 249)"] { color: #17223b !important; }
+body[data-workspace="multifamily"] [style*="border-color: #f1f5f9"] { border-color: #17223b !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(241, 245, 249)"] { border-color: #17223b !important; }
+body[data-workspace="multifamily"] [style*="fill: #f1f5f9"] { fill: #17223b !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(241, 245, 249)"] { fill: #17223b !important; }
+body[data-workspace="multifamily"] [style*="stroke: #f1f5f9"] { stroke: #17223b !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(241, 245, 249)"] { stroke: #17223b !important; }
+body[data-workspace="multifamily"] [style*="background: #cbd5e1"] { background: #3c4a68 !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(203, 213, 225)"] { background: #3c4a68 !important; }
+body[data-workspace="multifamily"] [style*="background-color: #cbd5e1"] { background-color: #3c4a68 !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(203, 213, 225)"] { background-color: #3c4a68 !important; }
+body[data-workspace="multifamily"] [style*="color: #cbd5e1"] { color: #3c4a68 !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(203, 213, 225)"] { color: #3c4a68 !important; }
+body[data-workspace="multifamily"] [style*="border-color: #cbd5e1"] { border-color: #3c4a68 !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(203, 213, 225)"] { border-color: #3c4a68 !important; }
+body[data-workspace="multifamily"] [style*="fill: #cbd5e1"] { fill: #3c4a68 !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(203, 213, 225)"] { fill: #3c4a68 !important; }
+body[data-workspace="multifamily"] [style*="stroke: #cbd5e1"] { stroke: #3c4a68 !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(203, 213, 225)"] { stroke: #3c4a68 !important; }
+body[data-workspace="multifamily"] [style*="background: #94a3b8"] { background: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(148, 163, 184)"] { background: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="background-color: #94a3b8"] { background-color: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(148, 163, 184)"] { background-color: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="color: #94a3b8"] { color: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(148, 163, 184)"] { color: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="border-color: #94a3b8"] { border-color: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(148, 163, 184)"] { border-color: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="fill: #94a3b8"] { fill: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(148, 163, 184)"] { fill: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="stroke: #94a3b8"] { stroke: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(148, 163, 184)"] { stroke: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="background: #64748b"] { background: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(100, 116, 139)"] { background: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="background-color: #64748b"] { background-color: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(100, 116, 139)"] { background-color: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="color: #64748b"] { color: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(100, 116, 139)"] { color: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="border-color: #64748b"] { border-color: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(100, 116, 139)"] { border-color: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="fill: #64748b"] { fill: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(100, 116, 139)"] { fill: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="stroke: #64748b"] { stroke: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(100, 116, 139)"] { stroke: #5b6b85 !important; }
+body[data-workspace="multifamily"] [style*="background: #475569"] { background: #8a6d3a !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(71, 85, 105)"] { background: #8a6d3a !important; }
+body[data-workspace="multifamily"] [style*="background-color: #475569"] { background-color: #8a6d3a !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(71, 85, 105)"] { background-color: #8a6d3a !important; }
+body[data-workspace="multifamily"] [style*="color: #475569"] { color: #8a6d3a !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(71, 85, 105)"] { color: #8a6d3a !important; }
+body[data-workspace="multifamily"] [style*="border-color: #475569"] { border-color: #8a6d3a !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(71, 85, 105)"] { border-color: #8a6d3a !important; }
+body[data-workspace="multifamily"] [style*="fill: #475569"] { fill: #8a6d3a !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(71, 85, 105)"] { fill: #8a6d3a !important; }
+body[data-workspace="multifamily"] [style*="stroke: #475569"] { stroke: #8a6d3a !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(71, 85, 105)"] { stroke: #8a6d3a !important; }
+body[data-workspace="multifamily"] [style*="background: #e2e8f0"] { background: #e7e0d2 !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(226, 232, 240)"] { background: #e7e0d2 !important; }
+body[data-workspace="multifamily"] [style*="background-color: #e2e8f0"] { background-color: #e7e0d2 !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(226, 232, 240)"] { background-color: #e7e0d2 !important; }
+body[data-workspace="multifamily"] [style*="color: #e2e8f0"] { color: #e7e0d2 !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(226, 232, 240)"] { color: #e7e0d2 !important; }
+body[data-workspace="multifamily"] [style*="border-color: #e2e8f0"] { border-color: #e7e0d2 !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(226, 232, 240)"] { border-color: #e7e0d2 !important; }
+body[data-workspace="multifamily"] [style*="fill: #e2e8f0"] { fill: #e7e0d2 !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(226, 232, 240)"] { fill: #e7e0d2 !important; }
+body[data-workspace="multifamily"] [style*="stroke: #e2e8f0"] { stroke: #e7e0d2 !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(226, 232, 240)"] { stroke: #e7e0d2 !important; }
+body[data-workspace="multifamily"] [style*="background: #ef4444"] { background: #b3261e !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(239, 68, 68)"] { background: #b3261e !important; }
+body[data-workspace="multifamily"] [style*="background-color: #ef4444"] { background-color: #b3261e !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(239, 68, 68)"] { background-color: #b3261e !important; }
+body[data-workspace="multifamily"] [style*="color: #ef4444"] { color: #b3261e !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(239, 68, 68)"] { color: #b3261e !important; }
+body[data-workspace="multifamily"] [style*="border-color: #ef4444"] { border-color: #b3261e !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(239, 68, 68)"] { border-color: #b3261e !important; }
+body[data-workspace="multifamily"] [style*="fill: #ef4444"] { fill: #b3261e !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(239, 68, 68)"] { fill: #b3261e !important; }
+body[data-workspace="multifamily"] [style*="stroke: #ef4444"] { stroke: #b3261e !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(239, 68, 68)"] { stroke: #b3261e !important; }
+body[data-workspace="multifamily"] [style*="background: #34d399"] { background: #1f7a5c !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(52, 211, 153)"] { background: #1f7a5c !important; }
+body[data-workspace="multifamily"] [style*="background-color: #34d399"] { background-color: #1f7a5c !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(52, 211, 153)"] { background-color: #1f7a5c !important; }
+body[data-workspace="multifamily"] [style*="color: #34d399"] { color: #1f7a5c !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(52, 211, 153)"] { color: #1f7a5c !important; }
+body[data-workspace="multifamily"] [style*="border-color: #34d399"] { border-color: #1f7a5c !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(52, 211, 153)"] { border-color: #1f7a5c !important; }
+body[data-workspace="multifamily"] [style*="fill: #34d399"] { fill: #1f7a5c !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(52, 211, 153)"] { fill: #1f7a5c !important; }
+body[data-workspace="multifamily"] [style*="stroke: #34d399"] { stroke: #1f7a5c !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(52, 211, 153)"] { stroke: #1f7a5c !important; }
+body[data-workspace="multifamily"] [style*="background: #f97316"] { background: #c2660e !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(249, 115, 22)"] { background: #c2660e !important; }
+body[data-workspace="multifamily"] [style*="background-color: #f97316"] { background-color: #c2660e !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(249, 115, 22)"] { background-color: #c2660e !important; }
+body[data-workspace="multifamily"] [style*="color: #f97316"] { color: #c2660e !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(249, 115, 22)"] { color: #c2660e !important; }
+body[data-workspace="multifamily"] [style*="border-color: #f97316"] { border-color: #c2660e !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(249, 115, 22)"] { border-color: #c2660e !important; }
+body[data-workspace="multifamily"] [style*="fill: #f97316"] { fill: #c2660e !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(249, 115, 22)"] { fill: #c2660e !important; }
+body[data-workspace="multifamily"] [style*="stroke: #f97316"] { stroke: #c2660e !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(249, 115, 22)"] { stroke: #c2660e !important; }
+body[data-workspace="multifamily"] [style*="background: #facc15"] { background: #b8935a !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(250, 204, 21)"] { background: #b8935a !important; }
+body[data-workspace="multifamily"] [style*="background-color: #facc15"] { background-color: #b8935a !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(250, 204, 21)"] { background-color: #b8935a !important; }
+body[data-workspace="multifamily"] [style*="color: #facc15"] { color: #b8935a !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(250, 204, 21)"] { color: #b8935a !important; }
+body[data-workspace="multifamily"] [style*="border-color: #facc15"] { border-color: #b8935a !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(250, 204, 21)"] { border-color: #b8935a !important; }
+body[data-workspace="multifamily"] [style*="fill: #facc15"] { fill: #b8935a !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(250, 204, 21)"] { fill: #b8935a !important; }
+body[data-workspace="multifamily"] [style*="stroke: #facc15"] { stroke: #b8935a !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(250, 204, 21)"] { stroke: #b8935a !important; }
+body[data-workspace="multifamily"] [style*="background: #fca5a5"] { background: #d98c86 !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(252, 165, 165)"] { background: #d98c86 !important; }
+body[data-workspace="multifamily"] [style*="background-color: #fca5a5"] { background-color: #d98c86 !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(252, 165, 165)"] { background-color: #d98c86 !important; }
+body[data-workspace="multifamily"] [style*="color: #fca5a5"] { color: #d98c86 !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(252, 165, 165)"] { color: #d98c86 !important; }
+body[data-workspace="multifamily"] [style*="border-color: #fca5a5"] { border-color: #d98c86 !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(252, 165, 165)"] { border-color: #d98c86 !important; }
+body[data-workspace="multifamily"] [style*="fill: #fca5a5"] { fill: #d98c86 !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(252, 165, 165)"] { fill: #d98c86 !important; }
+body[data-workspace="multifamily"] [style*="stroke: #fca5a5"] { stroke: #d98c86 !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(252, 165, 165)"] { stroke: #d98c86 !important; }
+body[data-workspace="multifamily"] [style*="background: #f87171"] { background: #c25650 !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(248, 113, 113)"] { background: #c25650 !important; }
+body[data-workspace="multifamily"] [style*="background-color: #f87171"] { background-color: #c25650 !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(248, 113, 113)"] { background-color: #c25650 !important; }
+body[data-workspace="multifamily"] [style*="color: #f87171"] { color: #c25650 !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(248, 113, 113)"] { color: #c25650 !important; }
+body[data-workspace="multifamily"] [style*="border-color: #f87171"] { border-color: #c25650 !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(248, 113, 113)"] { border-color: #c25650 !important; }
+body[data-workspace="multifamily"] [style*="fill: #f87171"] { fill: #c25650 !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(248, 113, 113)"] { fill: #c25650 !important; }
+body[data-workspace="multifamily"] [style*="stroke: #f87171"] { stroke: #c25650 !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(248, 113, 113)"] { stroke: #c25650 !important; }
+body[data-workspace="multifamily"] [style*="background: #a78bfa"] { background: #7c6bab !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(167, 139, 250)"] { background: #7c6bab !important; }
+body[data-workspace="multifamily"] [style*="background-color: #a78bfa"] { background-color: #7c6bab !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(167, 139, 250)"] { background-color: #7c6bab !important; }
+body[data-workspace="multifamily"] [style*="color: #a78bfa"] { color: #7c6bab !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(167, 139, 250)"] { color: #7c6bab !important; }
+body[data-workspace="multifamily"] [style*="border-color: #a78bfa"] { border-color: #7c6bab !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(167, 139, 250)"] { border-color: #7c6bab !important; }
+body[data-workspace="multifamily"] [style*="fill: #a78bfa"] { fill: #7c6bab !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(167, 139, 250)"] { fill: #7c6bab !important; }
+body[data-workspace="multifamily"] [style*="stroke: #a78bfa"] { stroke: #7c6bab !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(167, 139, 250)"] { stroke: #7c6bab !important; }
+body[data-workspace="multifamily"] [style*="background: #60a5fa"] { background: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(96, 165, 250)"] { background: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="background-color: #60a5fa"] { background-color: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(96, 165, 250)"] { background-color: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="color: #60a5fa"] { color: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(96, 165, 250)"] { color: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="border-color: #60a5fa"] { border-color: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(96, 165, 250)"] { border-color: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="fill: #60a5fa"] { fill: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(96, 165, 250)"] { fill: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="stroke: #60a5fa"] { stroke: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(96, 165, 250)"] { stroke: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="background: #38bdf8"] { background: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(56, 189, 248)"] { background: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="background-color: #38bdf8"] { background-color: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(56, 189, 248)"] { background-color: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="color: #38bdf8"] { color: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(56, 189, 248)"] { color: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="border-color: #38bdf8"] { border-color: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(56, 189, 248)"] { border-color: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="fill: #38bdf8"] { fill: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(56, 189, 248)"] { fill: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="stroke: #38bdf8"] { stroke: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(56, 189, 248)"] { stroke: #5b7a9e !important; }
+body[data-workspace="multifamily"] [style*="background: #3b82f6"] { background: #4a6b8a !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(59, 130, 246)"] { background: #4a6b8a !important; }
+body[data-workspace="multifamily"] [style*="background-color: #3b82f6"] { background-color: #4a6b8a !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(59, 130, 246)"] { background-color: #4a6b8a !important; }
+body[data-workspace="multifamily"] [style*="color: #3b82f6"] { color: #4a6b8a !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(59, 130, 246)"] { color: #4a6b8a !important; }
+body[data-workspace="multifamily"] [style*="border-color: #3b82f6"] { border-color: #4a6b8a !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(59, 130, 246)"] { border-color: #4a6b8a !important; }
+body[data-workspace="multifamily"] [style*="fill: #3b82f6"] { fill: #4a6b8a !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(59, 130, 246)"] { fill: #4a6b8a !important; }
+body[data-workspace="multifamily"] [style*="stroke: #3b82f6"] { stroke: #4a6b8a !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(59, 130, 246)"] { stroke: #4a6b8a !important; }
+body[data-workspace="multifamily"] [style*="background: #818cf8"] { background: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(129, 140, 248)"] { background: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="background-color: #818cf8"] { background-color: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(129, 140, 248)"] { background-color: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="color: #818cf8"] { color: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(129, 140, 248)"] { color: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="border-color: #818cf8"] { border-color: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(129, 140, 248)"] { border-color: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="fill: #818cf8"] { fill: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(129, 140, 248)"] { fill: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="stroke: #818cf8"] { stroke: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(129, 140, 248)"] { stroke: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="background: #6366f1"] { background: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(99, 102, 241)"] { background: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="background-color: #6366f1"] { background-color: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(99, 102, 241)"] { background-color: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="color: #6366f1"] { color: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(99, 102, 241)"] { color: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="border-color: #6366f1"] { border-color: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(99, 102, 241)"] { border-color: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="fill: #6366f1"] { fill: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(99, 102, 241)"] { fill: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="stroke: #6366f1"] { stroke: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(99, 102, 241)"] { stroke: #6b5b95 !important; }
+body[data-workspace="multifamily"] [style*="background: #22d3ee"] { background: #a0522d !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(34, 211, 238)"] { background: #a0522d !important; }
+body[data-workspace="multifamily"] [style*="background-color: #22d3ee"] { background-color: #a0522d !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(34, 211, 238)"] { background-color: #a0522d !important; }
+body[data-workspace="multifamily"] [style*="color: #22d3ee"] { color: #a0522d !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(34, 211, 238)"] { color: #a0522d !important; }
+body[data-workspace="multifamily"] [style*="border-color: #22d3ee"] { border-color: #a0522d !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(34, 211, 238)"] { border-color: #a0522d !important; }
+body[data-workspace="multifamily"] [style*="fill: #22d3ee"] { fill: #a0522d !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(34, 211, 238)"] { fill: #a0522d !important; }
+body[data-workspace="multifamily"] [style*="stroke: #22d3ee"] { stroke: #a0522d !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(34, 211, 238)"] { stroke: #a0522d !important; }
+body[data-workspace="multifamily"] [style*="background: #0f1624"] { background: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(15, 22, 36)"] { background: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="background-color: #0f1624"] { background-color: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(15, 22, 36)"] { background-color: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="color: #0f1624"] { color: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(15, 22, 36)"] { color: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="border-color: #0f1624"] { border-color: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(15, 22, 36)"] { border-color: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="fill: #0f1624"] { fill: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(15, 22, 36)"] { fill: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="stroke: #0f1624"] { stroke: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(15, 22, 36)"] { stroke: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="background: #0d1422"] { background: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(13, 20, 34)"] { background: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="background-color: #0d1422"] { background-color: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(13, 20, 34)"] { background-color: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="color: #0d1422"] { color: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(13, 20, 34)"] { color: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="border-color: #0d1422"] { border-color: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(13, 20, 34)"] { border-color: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="fill: #0d1422"] { fill: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(13, 20, 34)"] { fill: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="stroke: #0d1422"] { stroke: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(13, 20, 34)"] { stroke: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="background: #f8fafc"] { background: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="background: rgb(248, 250, 252)"] { background: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="background-color: #f8fafc"] { background-color: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgb(248, 250, 252)"] { background-color: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="color: #f8fafc"] { color: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="color: rgb(248, 250, 252)"] { color: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="border-color: #f8fafc"] { border-color: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgb(248, 250, 252)"] { border-color: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="fill: #f8fafc"] { fill: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="fill: rgb(248, 250, 252)"] { fill: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="stroke: #f8fafc"] { stroke: #fffdf9 !important; }
+body[data-workspace="multifamily"] [style*="stroke: rgb(248, 250, 252)"] { stroke: #fffdf9 !important; }
+
+/* ---- White-alpha borders/backgrounds (dark-theme) -> ink-alpha (light-theme) ---- */
+body[data-workspace="multifamily"] [style*="background: rgba(255, 255, 255, 0.02)"] { background: rgba(23, 34, 59, 0.03) !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgba(255, 255, 255, 0.02)"] { background-color: rgba(23, 34, 59, 0.03) !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgba(255, 255, 255, 0.02)"] { border-color: rgba(23, 34, 59, 0.03) !important; }
+body[data-workspace="multifamily"] [style*="border: 1px solid rgba(255, 255, 255, 0.02)"] { border-color: rgba(23, 34, 59, 0.03) !important; }
+body[data-workspace="multifamily"] [style*="background: rgba(255, 255, 255, 0.03)"] { background: rgba(23, 34, 59, 0.04) !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgba(255, 255, 255, 0.03)"] { background-color: rgba(23, 34, 59, 0.04) !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgba(255, 255, 255, 0.03)"] { border-color: rgba(23, 34, 59, 0.04) !important; }
+body[data-workspace="multifamily"] [style*="border: 1px solid rgba(255, 255, 255, 0.03)"] { border-color: rgba(23, 34, 59, 0.04) !important; }
+body[data-workspace="multifamily"] [style*="background: rgba(255, 255, 255, 0.04)"] { background: rgba(23, 34, 59, 0.05) !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgba(255, 255, 255, 0.04)"] { background-color: rgba(23, 34, 59, 0.05) !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgba(255, 255, 255, 0.04)"] { border-color: rgba(23, 34, 59, 0.05) !important; }
+body[data-workspace="multifamily"] [style*="border: 1px solid rgba(255, 255, 255, 0.04)"] { border-color: rgba(23, 34, 59, 0.05) !important; }
+body[data-workspace="multifamily"] [style*="background: rgba(255, 255, 255, 0.05)"] { background: rgba(23, 34, 59, 0.06) !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgba(255, 255, 255, 0.05)"] { background-color: rgba(23, 34, 59, 0.06) !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgba(255, 255, 255, 0.05)"] { border-color: rgba(23, 34, 59, 0.06) !important; }
+body[data-workspace="multifamily"] [style*="border: 1px solid rgba(255, 255, 255, 0.05)"] { border-color: rgba(23, 34, 59, 0.06) !important; }
+body[data-workspace="multifamily"] [style*="background: rgba(255, 255, 255, 0.06)"] { background: rgba(23, 34, 59, 0.08) !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgba(255, 255, 255, 0.06)"] { background-color: rgba(23, 34, 59, 0.08) !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgba(255, 255, 255, 0.06)"] { border-color: rgba(23, 34, 59, 0.08) !important; }
+body[data-workspace="multifamily"] [style*="border: 1px solid rgba(255, 255, 255, 0.06)"] { border-color: rgba(23, 34, 59, 0.08) !important; }
+body[data-workspace="multifamily"] [style*="background: rgba(255, 255, 255, 0.08)"] { background: rgba(23, 34, 59, 0.1) !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgba(255, 255, 255, 0.08)"] { background-color: rgba(23, 34, 59, 0.1) !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgba(255, 255, 255, 0.08)"] { border-color: rgba(23, 34, 59, 0.1) !important; }
+body[data-workspace="multifamily"] [style*="border: 1px solid rgba(255, 255, 255, 0.08)"] { border-color: rgba(23, 34, 59, 0.1) !important; }
+body[data-workspace="multifamily"] [style*="background: rgba(255, 255, 255, 0.1)"] { background: rgba(23, 34, 59, 0.12) !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgba(255, 255, 255, 0.1)"] { background-color: rgba(23, 34, 59, 0.12) !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgba(255, 255, 255, 0.1)"] { border-color: rgba(23, 34, 59, 0.12) !important; }
+body[data-workspace="multifamily"] [style*="border: 1px solid rgba(255, 255, 255, 0.1)"] { border-color: rgba(23, 34, 59, 0.12) !important; }
+body[data-workspace="multifamily"] [style*="background: rgba(255, 255, 255, 0.12)"] { background: rgba(23, 34, 59, 0.16) !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgba(255, 255, 255, 0.12)"] { background-color: rgba(23, 34, 59, 0.16) !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgba(255, 255, 255, 0.12)"] { border-color: rgba(23, 34, 59, 0.16) !important; }
+body[data-workspace="multifamily"] [style*="border: 1px solid rgba(255, 255, 255, 0.12)"] { border-color: rgba(23, 34, 59, 0.16) !important; }
+body[data-workspace="multifamily"] [style*="background: rgba(255, 255, 255, 0.15)"] { background: rgba(23, 34, 59, 0.18) !important; }
+body[data-workspace="multifamily"] [style*="background-color: rgba(255, 255, 255, 0.15)"] { background-color: rgba(23, 34, 59, 0.18) !important; }
+body[data-workspace="multifamily"] [style*="border-color: rgba(255, 255, 255, 0.15)"] { border-color: rgba(23, 34, 59, 0.18) !important; }
+body[data-workspace="multifamily"] [style*="border: 1px solid rgba(255, 255, 255, 0.15)"] { border-color: rgba(23, 34, 59, 0.18) !important; }

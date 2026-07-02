@@ -1047,6 +1047,7 @@ function App({
     setActiveWorkspace(isMultifamily ? 'multifamily' : 'btr');
     document.title = isMultifamily ? 'Multifamily Command' : 'BTR Command';
     document.body.style.background = isMultifamily ? '#EAF2FB' : '';
+    document.body.dataset.workspace = isMultifamily ? 'multifamily' : 'btr';
     var targetPath = isMultifamily ? '/multifamily' + (MF_TAB_TO_SUBPATH[activeTab] ? '/' + MF_TAB_TO_SUBPATH[activeTab] : '') : '/command';
     if (window.location.pathname !== targetPath) {
       window.history.pushState(null, '', targetPath);
@@ -8494,7 +8495,7 @@ function MultifamilyHeader({
       flexWrap: 'wrap'
     }
   }, /*#__PURE__*/React.createElement("a", {
-    href: "/static/multifamily-benchmark-form.html",
+    href: "/mf-review/benchmark",
     target: "_blank",
     rel: "noreferrer",
     style: {
@@ -8575,7 +8576,7 @@ function MultifamilyEmptyState({
       fontSize: '0.8rem'
     }
   }, "+ Add a lead manually"), /*#__PURE__*/React.createElement("a", {
-    href: "/static/multifamily-benchmark-form.html",
+    href: "/mf-review/benchmark",
     target: "_blank",
     rel: "noreferrer",
     style: {

@@ -3,7 +3,7 @@ BTR Prospecting System - Backend Server
 Flask API with Claude AI integration for automated prospect discovery
 """
 
-from flask import Flask, request, jsonify, send_from_directory, send_file, g, make_response
+from flask import Flask, request, jsonify, send_from_directory, send_file, g, make_response, redirect
 from flask_cors import CORS
 from functools import wraps
 import os
@@ -5666,6 +5666,20 @@ def multifamily_offer_page(slug=None):
     the default 'benchmark' variant for an unrecognized slug, so this route
     itself never needs to validate the slug server-side."""
     return send_from_directory('static', 'mf-review.html')
+
+@app.route('/static/multifamily-benchmark-form.html')
+def legacy_multifamily_benchmark_form_redirect():
+    """Retired legacy dark-theme benchmark form (Phase A visual overhaul
+    + audit 1b disposition: two in-app links have been repointed to
+    /mf-review/benchmark directly; this route is the safety net for any
+    already-shared/bookmarked link to the old path). 302, preserving the
+    full query string so UTM/tracking params on an old link still reach
+    the new page and get captured normally by its own attribution JS.
+    Registered ahead of Flask's catch-all static handler, so this exact
+    path is matched here instead of falling through to send_from_directory."""
+    query_string = request.query_string.decode('utf-8')
+    target = '/mf-review/benchmark' + (f'?{query_string}' if query_string else '')
+    return redirect(target, code=302)
 
 @app.route('/favicon.ico')
 def favicon():
