@@ -2674,7 +2674,14 @@ _PUBLIC_POST_PATHS = (
 @app.before_request
 def _enforce_auth():
     """Require a valid session for all /api/ routes except auth, health,
-    and the multifamily public intake surface."""
+    and the multifamily public intake surface.
+
+    Deliberately does NOT bypass auth when the users table is empty —
+    bootstrap mode is exposed ONLY through the already-exempt setup
+    paths (/api/auth/bootstrap, /api/auth/has-users, /api/auth/login,
+    /api/auth/logout, /api/auth/me). Every other route 401s regardless
+    of user count, so a botched migration or accidental full user-table
+    wipe can never leave the entire API open to anonymous callers."""
     path = request.path
     if not path.startswith('/api/'):
         return  # static files, HTML pages — no auth needed
@@ -2682,10 +2689,6 @@ def _enforce_auth():
         if path == exempt or path.startswith(exempt + '/'):
             return
     if request.method == 'POST' and path in _PUBLIC_POST_PATHS:
-        return
-    if not _has_users():
-        g.user = None
-        g.workspace_id = None
         return
     user, workspace_id = _get_session_user()
     if not user:

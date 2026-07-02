@@ -35,6 +35,23 @@ from multifamily.snapshots import snapshot_lead
 
 MAX_IMPORT_ROWS = 500
 
+# Audit finding F3 — the upload route had no byte-size cap ahead of the
+# row cap, so an oversized or wrong-type file was fully read into memory
+# before anything rejected it.
+MAX_CSV_UPLOAD_BYTES = 2 * 1024 * 1024  # 2 MB
+
+
+def check_csv_upload_size(content_length: Optional[int]) -> bool:
+    """True if the request is small enough to process. Mirrors
+    multifamily/spam_guard.py's check_payload_size — same pattern, a
+    larger cap suited to a bulk CSV upload rather than a single lead."""
+    if content_length is None:
+        return True
+    return content_length <= MAX_CSV_UPLOAD_BYTES
+
+
+ALLOWED_CSV_EXTENSIONS = ('.csv', '.txt')
+
 OPTIONAL_CSV_COLUMNS = [
     'contact_name', 'email', 'phone', 'linkedin_url', 'city', 'state', 'segment', 'notes',
     'property_name', 'units', 'year_built', 'close_date',

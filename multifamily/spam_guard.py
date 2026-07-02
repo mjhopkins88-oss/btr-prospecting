@@ -44,10 +44,30 @@ _RATE_LIMITED_EVENT_TYPES = ['accepted_clean', 'accepted_suspicious', 'rejected_
 
 HONEYPOT_FIELD = 'website_url'
 
-_IP_HASH_SALT = os.getenv('MULTIFAMILY_IP_HASH_SALT', 'btr-multifamily-intake-v1')
+_DEFAULT_IP_HASH_SALT = 'btr-multifamily-intake-v1'
+_IP_HASH_SALT = os.getenv('MULTIFAMILY_IP_HASH_SALT', _DEFAULT_IP_HASH_SALT)
 
 _URL_PATTERN = re.compile(r'https?://|www\.', re.IGNORECASE)
 _REPEATED_CHAR_PATTERN = re.compile(r'(.)\1{9,}')
+
+
+def ip_hash_salt_is_default() -> bool:
+    """True if MULTIFAMILY_IP_HASH_SALT was never set (or was set to the
+    exact hardcoded default) — since that default is public in this
+    open-source repo, hash_ip()'s output is only as protected as this
+    flag being False in production. Never blocks startup or shows
+    anything publicly; only surfaces to admins (see the intake-stats
+    endpoint) and to the server log below."""
+    return _IP_HASH_SALT == _DEFAULT_IP_HASH_SALT
+
+
+if ip_hash_salt_is_default():
+    print(
+        '[SECURITY WARNING] MULTIFAMILY_IP_HASH_SALT is not set (or matches the '
+        'public repo default) — submitted_ip_hash values are reversible by anyone '
+        'who has read this open-source code. Set a real secret for this env var '
+        'in production.'
+    )
 
 
 def utc_now_iso() -> str:

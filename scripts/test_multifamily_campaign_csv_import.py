@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from multifamily import repository
 from multifamily.campaigns.csv_import import (
     parse_csv_rows, import_row_as_target_and_lead, import_targets_from_csv, MAX_IMPORT_ROWS,
+    check_csv_upload_size, MAX_CSV_UPLOAD_BYTES, ALLOWED_CSV_EXTENSIONS,
 )
 from multifamily.forms.form_variants import FORM_VARIANTS
 
@@ -206,6 +207,18 @@ def test_max_import_rows_is_enforced():
     check('a truncation warning is reported', any('Only the first' in e for e in errors))
 
 
+def test_csv_upload_size_cap_audit_f3():
+    """Audit finding F3 — the import route had no byte-size cap ahead of
+    the row cap; confirm the cap constant and its check function are
+    correct at the boundary."""
+    check('2MB cap constant is exactly 2 * 1024 * 1024', MAX_CSV_UPLOAD_BYTES == 2 * 1024 * 1024)
+    check('a None content-length (no header) passes through', check_csv_upload_size(None) is True)
+    check('exactly at the cap is allowed', check_csv_upload_size(MAX_CSV_UPLOAD_BYTES) is True)
+    check('one byte over the cap is rejected', check_csv_upload_size(MAX_CSV_UPLOAD_BYTES + 1) is False)
+    check('a tiny upload is allowed', check_csv_upload_size(500) is True)
+    check("allowed extensions include '.csv'", '.csv' in ALLOWED_CSV_EXTENSIONS)
+
+
 def main():
     try:
         test_parse_csv_rows_skips_missing_company_with_clear_error()
@@ -218,6 +231,7 @@ def main():
         test_matching_engine_reused_exact_email_merges_not_duplicates()
         test_import_targets_from_csv_end_to_end_summary()
         test_max_import_rows_is_enforced()
+        test_csv_upload_size_cap_audit_f3()
     finally:
         for lid in _lead_ids:
             repository.delete_outbound_links_for_lead(lid)

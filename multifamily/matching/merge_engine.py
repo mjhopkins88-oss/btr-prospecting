@@ -64,8 +64,14 @@ def apply_merge(survivor: MultifamilyLead, incoming: MultifamilyLead) -> List[Mu
         survivor.last_verified_at = incoming.last_verified_at
 
     # Fill gaps only — keep the survivor's original identity/source.
+    # page_variant/campaign_id included per audit finding F5: without
+    # them, get_source_performance()'s leads_by_page_variant/
+    # leads_by_campaign_id (which read these lead-row columns, not the
+    # attribution touch history) could undercount a page-variant/
+    # campaign attributed only through a merged-in touch.
     for fld in ('source_url', 'source_page', 'utm_source', 'utm_medium', 'utm_campaign',
-                'utm_term', 'utm_content', 'referrer', 'landing_page', 'offer_type', 'notes'):
+                'utm_term', 'utm_content', 'referrer', 'landing_page', 'offer_type', 'notes',
+                'page_variant', 'campaign_id'):
         if not getattr(survivor, fld, None) and getattr(incoming, fld, None):
             setattr(survivor, fld, getattr(incoming, fld))
     if (survivor.property.unit_count is None) and incoming.property.unit_count is not None:
