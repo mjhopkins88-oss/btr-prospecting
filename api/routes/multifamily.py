@@ -736,7 +736,12 @@ def get_overview():
             'offer_type': handraiser.offer_type,
         }
     campaign_perf = repository.get_campaign_performance()
-    funnel = {**build_funnel_widgets(perf, campaign_perf), 'best_inbound_handraiser': best_handraiser}
+    from multifamily.campaigns.today_queue import get_today_queue
+    today_queue = get_today_queue()
+    funnel = {
+        **build_funnel_widgets(perf, campaign_perf, today_queue),
+        'best_inbound_handraiser': best_handraiser,
+    }
 
     payload = {
         'total_leads': len(leads),
@@ -1388,6 +1393,7 @@ def list_campaigns():
 
     @_app.require_auth
     def _authorized():
+        from multifamily.campaigns.today_queue import compute_sequence_adherence
         status = request.args.get('status')
         campaigns = repository.list_campaigns(status=status)
         for c in campaigns:
@@ -1398,6 +1404,9 @@ def list_campaigns():
             c['meeting_count'] = sum(1 for t in targets if t['status'] == 'meeting_booked')
             last_activity = [t['last_activity_at'] for t in targets if t.get('last_activity_at')]
             c['last_activity_at'] = max(last_activity) if last_activity else None
+            # Phase D — '% completed on/near schedule' for the Section 7
+            # sequence cadence, additive to the existing counts above.
+            c['sequence_adherence'] = compute_sequence_adherence(c['id'])
         return jsonify({'campaigns': campaigns})
 
     return _authorized()
@@ -1648,6 +1657,49 @@ def set_campaign_target_renewal_month_route(target_id):
             return jsonify({'success': False, 'errors': ["renewal_month must be in 'YYYY-MM' format"]}), 400
         repository.set_campaign_target_renewal_month(target_id, renewal_month)
         return jsonify({'success': True, 'target': repository.get_campaign_target(target_id)})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/today-queue', methods=['GET'])
+def get_today_queue_route():
+    """Phase D Today Queue: every campaign target that owes a Section 7
+    sequence touch (touch_1_sent/connected/touch_2_sent/called/
+    breakup_sent) today or is overdue, ordered by urgency (most overdue
+    first). Pure computation over existing multifamily_campaign_targets
+    rows (multifamily/campaigns/today_queue.py) — no new storage.
+    Optional ?campaign_id= scopes to one campaign; omitted, it spans
+    every campaign. Operational worklist — login required, same as
+    every other campaign-targets endpoint."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        from multifamily.campaigns.today_queue import get_today_queue
+        campaign_id = (request.args.get('campaign_id') or '').strip() or None
+        if campaign_id and not repository.get_campaign(campaign_id):
+            return jsonify({'error': 'Campaign not found'}), 404
+        queue = get_today_queue(campaign_id=campaign_id)
+        return jsonify({'queue': queue, 'generated_at': datetime.utcnow().isoformat()})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/campaigns/<campaign_id>/sequence-adherence', methods=['GET'])
+def get_campaign_sequence_adherence_route(campaign_id):
+    """Phase D per-campaign '% completed on/near schedule' stat for the
+    Section 7 sequence cadence (multifamily/campaigns/today_queue.py's
+    compute_sequence_adherence) — a small, additive companion to the
+    scorecard in get_campaign_performance(). Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        campaign = repository.get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({'error': 'Campaign not found'}), 404
+        from multifamily.campaigns.today_queue import compute_sequence_adherence
+        return jsonify({'campaign_id': campaign_id, **compute_sequence_adherence(campaign_id)})
 
     return _authorized()
 

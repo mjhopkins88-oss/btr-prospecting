@@ -973,6 +973,7 @@ const MF_SUBPATH_TO_TAB = {
   'nurture': 'multifamily_nurture',
   'source-performance': 'multifamily_source_performance',
   'outreach-workbench': 'multifamily_outreach',
+  'today-queue': 'multifamily_today_queue',
   'admin': 'multifamily_admin'
 };
 const MF_TAB_TO_SUBPATH = Object.fromEntries(Object.entries(MF_SUBPATH_TO_TAB).map(([subpath, tab]) => [tab, subpath]));
@@ -1526,7 +1527,11 @@ function App({
     activeTab: activeTab,
     setActiveTab: setActiveTab,
     user: user
-  }), activeTab.startsWith('multifamily_') && !['multifamily_admin', 'multifamily_source_performance', 'multifamily_outreach', 'multifamily_campaigns'].includes(activeTab) && /*#__PURE__*/React.createElement(MultifamilyLeadListView, {
+  }), activeTab === 'multifamily_today_queue' && /*#__PURE__*/React.createElement(MultifamilyTodayQueuePanel, {
+    activeTab: activeTab,
+    setActiveTab: setActiveTab,
+    user: user
+  }), activeTab.startsWith('multifamily_') && !['multifamily_admin', 'multifamily_source_performance', 'multifamily_outreach', 'multifamily_campaigns', 'multifamily_today_queue'].includes(activeTab) && /*#__PURE__*/React.createElement(MultifamilyLeadListView, {
     activeTab: activeTab,
     setActiveTab: setActiveTab,
     user: user
@@ -8077,6 +8082,11 @@ const MF_TABS = [{
   endpoint: '/api/multifamily/campaigns',
   kind: 'campaigns'
 }, {
+  id: 'multifamily_today_queue',
+  label: 'Today Queue',
+  endpoint: '/api/multifamily/today-queue',
+  kind: 'today_queue'
+}, {
   id: 'multifamily_admin',
   label: 'Multifamily Admin',
   endpoint: '/api/multifamily/admin/intake-stats',
@@ -9898,6 +9908,10 @@ const _MF_OVERVIEW_CAMPAIGN_SECTION = (funnel, setActiveTab) => /*#__PURE__*/Rea
   value: funnel.active_campaigns || 0,
   color: "#34d399"
 }), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+  label: "TOUCHES DUE/OVERDUE TODAY",
+  value: funnel.today_queue_total || 0,
+  color: (funnel.today_queue_overdue || 0) > 0 ? "#ef4444" : "#facc15"
+}), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
   label: "CAMPAIGN CONVERSIONS",
   value: funnel.campaign_conversions || 0,
   color: "#60a5fa"
@@ -9926,7 +9940,14 @@ const _MF_OVERVIEW_CAMPAIGN_SECTION = (funnel, setActiveTab) => /*#__PURE__*/Rea
   style: {
     color: '#34d399'
   }
-}, funnel.recently_converted_campaign_target.company, " via \"", funnel.recently_converted_campaign_target.campaign_name, "\""))), /*#__PURE__*/React.createElement("button", {
+}, funnel.recently_converted_campaign_target.company, " via \"", funnel.recently_converted_campaign_target.campaign_name, "\""))), /*#__PURE__*/React.createElement("div", {
+  style: {
+    display: 'flex',
+    gap: '8px',
+    flexWrap: 'wrap',
+    marginBottom: '1.25rem'
+  }
+}, /*#__PURE__*/React.createElement("button", {
   onClick: () => setActiveTab('multifamily_campaigns'),
   style: {
     background: 'transparent',
@@ -9935,10 +9956,21 @@ const _MF_OVERVIEW_CAMPAIGN_SECTION = (funnel, setActiveTab) => /*#__PURE__*/Rea
     padding: '0.4rem 0.8rem',
     borderRadius: '0.5rem',
     cursor: 'pointer',
-    fontSize: '0.74rem',
-    marginBottom: '1.25rem'
+    fontSize: '0.74rem'
   }
-}, "View Pilot Campaigns \u2192"));
+}, "View Pilot Campaigns \u2192"), /*#__PURE__*/React.createElement("button", {
+  onClick: () => setActiveTab('multifamily_today_queue'),
+  style: {
+    background: (funnel.today_queue_total || 0) > 0 ? 'rgba(239,68,68,0.12)' : 'transparent',
+    border: '1px solid ' + ((funnel.today_queue_total || 0) > 0 ? 'rgba(239,68,68,0.4)' : 'rgba(255,255,255,0.12)'),
+    color: (funnel.today_queue_total || 0) > 0 ? '#ef4444' : '#94a3b8',
+    padding: '0.4rem 0.8rem',
+    borderRadius: '0.5rem',
+    cursor: 'pointer',
+    fontSize: '0.74rem',
+    fontWeight: (funnel.today_queue_total || 0) > 0 ? 700 : 400
+  }
+}, `Today Queue (${funnel.today_queue_total || 0}) \u2192`)));
 function MultifamilyOverviewPanel({
   activeTab,
   setActiveTab,
@@ -11830,7 +11862,7 @@ function MultifamilyCampaignRow({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: mfPillStyle(campaign.status === 'active' ? '#34d399' : campaign.status === 'paused' ? '#facc15' : campaign.status === 'completed' ? '#64748b' : '#a78bfa')
-  }, campaign.status), [['Targets', campaign.target_count], ['Contacted', campaign.contacted_count], ['Converted', campaign.converted_count], ['Meetings', campaign.meeting_count]].map(([label, value]) => /*#__PURE__*/React.createElement("div", {
+  }, campaign.status), [['Targets', campaign.target_count], ['Contacted', campaign.contacted_count], ['Converted', campaign.converted_count], ['Meetings', campaign.meeting_count], ['On Schedule', campaign.sequence_adherence && campaign.sequence_adherence.completed_count ? `${campaign.sequence_adherence.adherence_pct}%` : '—']].map(([label, value]) => /*#__PURE__*/React.createElement("div", {
     key: label,
     style: {
       textAlign: 'center'
@@ -11917,7 +11949,25 @@ function MultifamilyCampaignsPanel({
       fontSize: '0.78rem',
       margin: 0
     }
-  }, "Pilot Campaigns \u2014 controlled outbound/manual prospecting efforts, each tied to one offer page. Generate tracked links, track conversion, learn what works."), /*#__PURE__*/React.createElement("button", {
+  }, "Pilot Campaigns \u2014 controlled outbound/manual prospecting efforts, each tied to one offer page. Generate tracked links, track conversion, learn what works."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '8px',
+      flexShrink: 0
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setActiveTab('multifamily_today_queue'),
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(255,255,255,0.12)',
+      color: '#94a3b8',
+      padding: '0.5rem 0.9rem',
+      borderRadius: '0.5rem',
+      cursor: 'pointer',
+      fontSize: '0.78rem',
+      whiteSpace: 'nowrap'
+    }
+  }, "Today Queue \u2192"), /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowNew(true),
     style: {
       background: '#f59e0b',
@@ -11930,7 +11980,7 @@ function MultifamilyCampaignsPanel({
       fontSize: '0.78rem',
       whiteSpace: 'nowrap'
     }
-  }, "+ New Campaign")), loading && !campaigns && /*#__PURE__*/React.createElement("div", {
+  }, "+ New Campaign"))), loading && !campaigns && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: 'center',
       padding: '3rem',
@@ -12748,6 +12798,302 @@ function MultifamilyCampaignDetailView({
     target: t,
     onChanged: load
   }))));
+}
+// ---- Phase D: Today Queue ---------------------------------------------
+// Daily cadence worklist: which campaign target owes which Section 7
+// sequence touch today or is overdue (multifamily/campaigns/
+// today_queue.py computes the day-math; this is display + three actions
+// only — mark done, open a draft, open the lead drawer).
+function _mfTodayQueueStepLabel(step) {
+  const opt = MF_CAMPAIGN_TOUCH_STEP_OPTIONS.find(o => o.step === step);
+  return opt ? opt.label : step;
+}
+// The NO-LEAD-YET draft path — deliberately separate from and much
+// simpler than the NEPQ Sales Intelligence Engine's build_outreach_bundle
+// (PROTECTED — never modified/diluted/repurposed here). This only ever
+// references the target's own company/contact_name/segment fields; it is
+// a plain, generic "checking in" note, not persuasive copy.
+function _mfGenericColdDraftFor(item) {
+  const who = item.contact_name || 'there';
+  const company = item.company || 'your team';
+  const segmentPhrase = item.segment ? ` for ${item.segment} properties` : '';
+  return {
+    subject: `Following up — ${company}`,
+    body: `Hi ${who},\n\nWanted to follow up and see if now's a reasonable time to connect${segmentPhrase}. Happy to work around your schedule — let me know what's convenient.\n\nThanks,`
+  };
+}
+function MultifamilyTodayQueueRow({
+  item,
+  onMarkDone,
+  onOpenDrawer
+}) {
+  const [busy, setBusy] = useState(false);
+  const [loadingDraft, setLoadingDraft] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const markDone = async () => {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/multifamily/campaign-targets/${item.id}/touch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          step: item.next_step
+        })
+      });
+      if (r.ok) {
+        onMarkDone(item.id);
+      } else {
+        setMsg('Could not mark done — try again.');
+        setTimeout(() => setMsg(null), 2500);
+      }
+    } catch (e) {
+      setMsg('Network error — try again.');
+      setTimeout(() => setMsg(null), 2500);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const openDraft = async () => {
+    if (!item.email) return;
+    if (item.lead_id) {
+      setLoadingDraft(true);
+      try {
+        const r = await fetch(`/api/multifamily/leads/${item.lead_id}/outreach`);
+        const j = r.ok ? await r.json() : null;
+        const draft = j && j.outreach && j.outreach.email_draft;
+        window.location.href = _mfBuildMailtoUrl(item.email, draft && draft.subject, draft && draft.body);
+      } catch (e) {
+        window.location.href = _mfBuildMailtoUrl(item.email, '', '');
+      } finally {
+        setLoadingDraft(false);
+      }
+    } else {
+      // No lead yet — the plain generic template, never the NEPQ engine.
+      const draft = _mfGenericColdDraftFor(item);
+      window.location.href = _mfBuildMailtoUrl(item.email, draft.subject, draft.body);
+    }
+  };
+  const urgencyColor = item.is_overdue ? '#ef4444' : '#f59e0b';
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(15,22,36,0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderLeft: `3px solid ${urgencyColor}`,
+      borderRadius: '8px',
+      padding: '11px 14px',
+      marginBottom: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.85rem',
+      fontWeight: 700,
+      color: '#f1f5f9'
+    }
+  }, item.company || '(no company)'), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '0.72rem',
+      color: '#94a3b8'
+    }
+  }, item.contact_name || 'no contact', item.campaign_name ? ` · ${item.campaign_name}` : '')), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '6px',
+      alignItems: 'center',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle(urgencyColor)
+  }, item.is_overdue ? `${item.days_overdue}d overdue` : 'Due today'), /*#__PURE__*/React.createElement("span", {
+    style: mfPillStyle('#60a5fa')
+  }, _mfTodayQueueStepLabel(item.next_step)))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      marginTop: '8px',
+      flexWrap: 'wrap',
+      paddingTop: '8px',
+      borderTop: '1px solid rgba(255,255,255,0.05)'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: markDone,
+    disabled: busy,
+    style: {
+      background: '#f59e0b',
+      border: 'none',
+      color: '#0f172a',
+      borderRadius: '4px',
+      padding: '4px 10px',
+      cursor: busy ? 'not-allowed' : 'pointer',
+      fontSize: '0.7rem',
+      fontWeight: 700
+    }
+  }, busy ? 'Saving…' : 'Mark Done'), item.email && /*#__PURE__*/React.createElement("button", {
+    onClick: openDraft,
+    disabled: loadingDraft,
+    style: _siActivityBtnStyle
+  }, loadingDraft ? 'Loading draft…' : '✉ Open Draft'), item.phone && /*#__PURE__*/React.createElement("a", {
+    href: `tel:${item.phone}`,
+    style: {
+      ..._siActivityBtnStyle,
+      textDecoration: 'none',
+      display: 'inline-block'
+    }
+  }, "☎ Call ", item.phone), item.lead_id ? /*#__PURE__*/React.createElement("button", {
+    onClick: () => onOpenDrawer(item.lead_id),
+    style: _siActivityBtnStyle
+  }, "Open Drawer") : /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#475569'
+    }
+  }, "no lead yet"), msg && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '0.68rem',
+      color: '#ef4444'
+    }
+  }, msg)));
+}
+function MultifamilyTodayQueuePanel({
+  activeTab,
+  setActiveTab,
+  user
+}) {
+  const [queue, setQueue] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [drawerId, setDrawerId] = useState(null);
+  const [campaignFilter, setCampaignFilter] = useState('');
+  const [adherence, setAdherence] = useState(null);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch('/api/multifamily/today-queue');
+      const j = r.ok ? await r.json() : {
+        queue: []
+      };
+      setQueue(j.queue || []);
+    } catch (e) {
+      setQueue([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
+  useEffect(() => {
+    if (!campaignFilter) {
+      setAdherence(null);
+      return;
+    }
+    (async () => {
+      try {
+        const r = await fetch(`/api/multifamily/campaigns/${campaignFilter}/sequence-adherence`);
+        setAdherence(r.ok ? await r.json() : null);
+      } catch (e) {
+        setAdherence(null);
+      }
+    })();
+  }, [campaignFilter]);
+  const allItems = queue || [];
+  const campaignOptions = Array.from(new Map(allItems.map(it => [it.campaign_id, it.campaign_name])).entries());
+  const items = campaignFilter ? allItems.filter(it => it.campaign_id === campaignFilter) : allItems;
+  const overdueCount = allItems.filter(it => it.is_overdue).length;
+  const dueTodayCount = allItems.filter(it => it.is_due_today).length;
+  const onMarkDone = id => {
+    setQueue(prev => (prev || []).filter(it => it.id !== id));
+    load();
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: '1040px',
+      margin: '0 auto'
+    }
+  }, /*#__PURE__*/React.createElement(MultifamilyHeader, {
+    onAddLead: () => {}
+  }), /*#__PURE__*/React.createElement(MultifamilyTabBar, {
+    activeTab: activeTab,
+    setActiveTab: setActiveTab,
+    user: user
+  }), drawerId && /*#__PURE__*/React.createElement(MultifamilyLeadDrawer, {
+    leadId: drawerId,
+    user: user,
+    onClose: () => setDrawerId(null)
+  }), /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: '#64748b',
+      fontSize: '0.78rem',
+      margin: '0 0 1rem'
+    }
+  }, "Every Pilot Campaign target that owes a sequence touch (Day 0 email / Day 2 LinkedIn connect / Day 5 email 2 / Day 9 call / Day 16 breakup) today or is overdue, most overdue first."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+      gap: '10px',
+      marginBottom: '1.25rem'
+    }
+  }, /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+    label: "TOTAL DUE / OVERDUE",
+    value: allItems.length,
+    color: "#f59e0b"
+  }), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+    label: "OVERDUE",
+    value: overdueCount,
+    color: "#ef4444"
+  }), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+    label: "DUE TODAY",
+    value: dueTodayCount,
+    color: "#facc15"
+  }), /*#__PURE__*/React.createElement(MultifamilyCountTile, {
+    label: "ON SCHEDULE (SELECTED CAMPAIGN)",
+    value: adherence ? `${adherence.adherence_pct}%` : '—',
+    color: "#34d399"
+  })), campaignOptions.length > 0 && /*#__PURE__*/React.createElement("select", {
+    value: campaignFilter,
+    onChange: e => setCampaignFilter(e.target.value),
+    style: {
+      ...mfFieldStyle(),
+      width: 'auto',
+      padding: '5px 8px',
+      fontSize: '0.74rem',
+      marginBottom: '1rem'
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "All campaigns"), campaignOptions.map(([id, name]) => /*#__PURE__*/React.createElement("option", {
+    key: id,
+    value: id
+  }, name || id))), loading && !queue && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'center',
+      padding: '3rem',
+      color: '#f59e0b',
+      fontFamily: "'Orbitron', sans-serif"
+    }
+  }, "LOADING TODAY QUEUE..."), !loading && items.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'center',
+      padding: '2.5rem 1.5rem',
+      background: 'rgba(15,22,36,0.6)',
+      border: '1px dashed rgba(255,255,255,0.12)',
+      borderRadius: '10px',
+      color: '#64748b'
+    }
+  }, "Nothing due or overdue right now — the queue is clear."), items.map(item => /*#__PURE__*/React.createElement(MultifamilyTodayQueueRow, {
+    key: item.id,
+    item: item,
+    onMarkDone: onMarkDone,
+    onOpenDrawer: setDrawerId
+  })));
 }
 function MultifamilyOutreachWorkbenchPanel({
   activeTab,

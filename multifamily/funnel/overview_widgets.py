@@ -23,6 +23,7 @@ def best_inbound_handraiser(leads: List[MultifamilyLead]) -> Optional[Multifamil
 
 def build_funnel_widgets(
     source_performance: Dict[str, Any], campaign_performance: Optional[Dict[str, Any]] = None,
+    today_queue: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Aggregate widgets derived purely from get_source_performance()'s
     existing rollups (Funnel Phase 6): new forms captured per offer
@@ -34,7 +35,13 @@ def build_funnel_widgets(
     `campaign_performance` (Campaign Phase 5, from
     repository.get_campaign_performance()) is optional and additive —
     a pipeline with zero campaigns yet still returns a complete,
-    zero-valued campaign section rather than omitting it."""
+    zero-valued campaign section rather than omitting it.
+
+    `today_queue` (Phase D, from
+    multifamily.campaigns.today_queue.get_today_queue()) is likewise
+    optional/additive — a plain list of queue-item dicts (already
+    computed by the caller, same convention as campaign_performance) so
+    this stays a pure aggregator with no repository access of its own."""
     page_variant_counts = {
         k: v for k, v in (source_performance.get('leads_by_page_variant') or {}).items() if k != 'none'
     }
@@ -42,6 +49,7 @@ def build_funnel_widgets(
     outbound_stats = source_performance.get('outbound_conversion_stats') or {}
     serp_stats = source_performance.get('serp') or {}
     cp = campaign_performance or {}
+    tq = today_queue or []
     return {
         'new_forms_by_offer': page_variant_counts,
         'top_offer_page': top_offer_page,
@@ -55,4 +63,8 @@ def build_funnel_widgets(
         'best_campaign': cp.get('best_campaign'),
         'best_performing_offer_page': cp.get('best_offer_page'),
         'recently_converted_campaign_target': cp.get('recently_converted'),
+        # Phase D — Today Queue summary counts for the Overview card.
+        'today_queue_total': len(tq),
+        'today_queue_overdue': sum(1 for it in tq if it.get('is_overdue')),
+        'today_queue_due_today': sum(1 for it in tq if it.get('is_due_today')),
     }
