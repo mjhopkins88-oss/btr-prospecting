@@ -462,6 +462,30 @@ def ensure_schema() -> None:
     _safe_add_column('multifamily_activities', 'disqualification_reason', 'TEXT')
     _safe_add_column('multifamily_activities', 'reply_sentiment', 'TEXT')
 
+    # Phase B — Deliverable Composer: one row per generated branded PDF
+    # deliverable (Multifamily Command's admin-only compose-and-download
+    # tool). Additive-only — no changes to any existing table/column.
+    # fields_json is the final, admin-edited field values actually baked
+    # into the generated PDF (not just the prefill) so a stored deliverable
+    # is a faithful record of what was sent, even if prefill logic changes
+    # later.
+    execute('''
+        CREATE TABLE IF NOT EXISTS multifamily_deliverables (
+            id TEXT PRIMARY KEY,
+            lead_id TEXT NOT NULL,
+            offer_type TEXT,
+            deliverable_name TEXT,
+            artifact_type TEXT,
+            fields_json TEXT,
+            created_by TEXT,
+            created_at TIMESTAMP
+        )
+    ''')
+    try:
+        execute('CREATE INDEX IF NOT EXISTS idx_multifamily_deliverables_lead ON multifamily_deliverables(lead_id, created_at DESC)')
+    except Exception:
+        pass
+
     _backfill_signals_from_lead_json()
     _SCHEMA_READY = True
 
@@ -1461,9 +1485,13 @@ def get_campaign_performance() -> Dict[str, Any]:
 
     by_campaign = _rate_buckets(target_rows, lambda t: t['campaign_id'])
     campaign_scorecards = _campaign_scorecards(target_rows)
+    from multifamily.pilot_gate_config import evaluate_gates
     for cid, b in by_campaign.items():
         b['name'] = next((t['campaign_name'] for t in target_rows if t['campaign_id'] == cid), cid)
         b.update(campaign_scorecards.get(cid, {}))
+        # Phase E -- pilot launch gate status per campaign, thresholds
+        # from multifamily/pilot_gate_config.py (config, not code).
+        b['gates'] = evaluate_gates(b)
     best_campaign = _best(by_campaign, 'campaign_id')
 
     by_page_variant = _rate_buckets(target_rows, lambda t: t['campaign_page_variant'])
@@ -1492,6 +1520,20 @@ def get_campaign_performance() -> Dict[str, Any]:
             reason = t['disqualification_reason']
             disqualification_reasons[reason] = disqualification_reasons.get(reason, 0) + 1
 
+    # Phase E -- how many campaigns are all-green across the 4 pilot
+    # gates vs. carrying at least one red/amber, for the Overview funnel
+    # widget. A campaign with zero live data (every gate 'unknown')
+    # counts as neither -- it hasn't launched enough to grade yet.
+    pilot_gates_summary = {'all_green': 0, 'needs_attention': 0, 'not_enough_data': 0}
+    for b in by_campaign.values():
+        statuses = [g['status'] for g in b.get('gates', {}).values()]
+        if statuses and all(s == 'unknown' for s in statuses):
+            pilot_gates_summary['not_enough_data'] += 1
+        elif any(s in ('amber', 'red') for s in statuses):
+            pilot_gates_summary['needs_attention'] += 1
+        elif statuses:
+            pilot_gates_summary['all_green'] += 1
+
     return {
         'total_campaigns': len(campaigns),
         'total_active_campaigns': total_active_campaigns,
@@ -1507,6 +1549,7 @@ def get_campaign_performance() -> Dict[str, Any]:
         'conversion_rate_by_segment': conversion_rate_by_segment,
         'conversion_rate_by_state': conversion_rate_by_state,
         'disqualification_reasons': disqualification_reasons,
+        'pilot_gates_summary': pilot_gates_summary,
     }
 
 
@@ -2448,3 +2491,56 @@ def get_latest_sales_intelligence_event(lead_id: str) -> Optional[Dict[str, Any]
 def delete_sales_intelligence_events_for_lead(lead_id: str) -> None:
     ensure_schema()
     execute('DELETE FROM multifamily_sales_intelligence_events WHERE lead_id = ?', [lead_id])
+
+
+# ===========================================================================
+# Deliverable Composer (Phase B) — admin-only, generated branded PDFs.
+# One row per generated deliverable; fields_json is the exact edited field
+# set actually baked into that PDF (a faithful record, not just a prefill).
+# ===========================================================================
+
+def insert_deliverable(
+    lead_id: str, offer_type: Optional[str], deliverable_name: Optional[str],
+    artifact_type: Optional[str], fields: Dict[str, Any], created_by: Optional[str] = None,
+) -> Dict[str, Any]:
+    ensure_schema()
+    from multifamily.types import new_id, utc_now_iso
+    row_id = new_id()
+    now = utc_now_iso()
+    execute(
+        'INSERT INTO multifamily_deliverables '
+        '(id, lead_id, offer_type, deliverable_name, artifact_type, fields_json, created_by, created_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [row_id, lead_id, offer_type, deliverable_name, artifact_type, json.dumps(fields or {}), created_by, now],
+    )
+    return {
+        'id': row_id, 'lead_id': lead_id, 'offer_type': offer_type, 'deliverable_name': deliverable_name,
+        'artifact_type': artifact_type, 'fields': fields or {}, 'created_by': created_by, 'created_at': now,
+    }
+
+
+def _deliverable_row_with_json(r: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        r['fields'] = json.loads(r['fields_json']) if r.get('fields_json') else {}
+    except Exception:
+        r['fields'] = {}
+    r.pop('fields_json', None)
+    return r
+
+
+def get_deliverables_for_lead(lead_id: str) -> List[Dict[str, Any]]:
+    """Previously composed deliverables for a lead, newest first — for the
+    drawer's deliverable history display."""
+    ensure_schema()
+    rows = fetch_all(
+        'SELECT id, lead_id, offer_type, deliverable_name, artifact_type, fields_json, created_by, created_at '
+        'FROM multifamily_deliverables WHERE lead_id = ? ORDER BY created_at DESC',
+        [lead_id],
+    )
+    return [_deliverable_row_with_json(r) for r in rows]
+
+
+def delete_deliverables_for_lead(lead_id: str) -> None:
+    """Used by tests to clean up after themselves."""
+    ensure_schema()
+    execute('DELETE FROM multifamily_deliverables WHERE lead_id = ?', [lead_id])

@@ -11,11 +11,12 @@ flagged via `is_demo` on each lead, and `is_demo_data` on aggregate
 responses) only when it has zero matching real leads.
 """
 import dataclasses
+import io
 import re
 from datetime import date, datetime, timedelta
 from typing import Any, Dict
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_file
 
 from multifamily.pipeline import (
     run_pipeline, filter_leads, website_intent_leads,
@@ -35,7 +36,8 @@ from multifamily.stage_timing import compute_stage_timing
 from multifamily.timing import detect_process_stage, estimate_first_renewal
 from multifamily.timing.process_stage_types import OUTREACH_WINDOW_RANK
 from multifamily.outreach.outreach_bundle_builder import build_outreach_bundle
-from multifamily.credibility_config import get_credibility_config
+from multifamily.credibility_config import get_credibility_config, public_credibility_view
+from multifamily import deliverable_composer
 from multifamily import matching as mf_matching
 from multifamily.snapshots import snapshot_lead, SNAPSHOT_REASONS
 from multifamily import notifications as mf_notifications
@@ -734,7 +736,12 @@ def get_overview():
             'offer_type': handraiser.offer_type,
         }
     campaign_perf = repository.get_campaign_performance()
-    funnel = {**build_funnel_widgets(perf, campaign_perf), 'best_inbound_handraiser': best_handraiser}
+    from multifamily.campaigns.today_queue import get_today_queue
+    today_queue = get_today_queue()
+    funnel = {
+        **build_funnel_widgets(perf, campaign_perf, today_queue),
+        'best_inbound_handraiser': best_handraiser,
+    }
 
     payload = {
         'total_leads': len(leads),
@@ -955,6 +962,89 @@ def dismiss_match_candidate(candidate_id):
         resolver = (g.user or {}).get('email') if getattr(g, 'user', None) else None
         repository.resolve_match_candidate(candidate_id, 'dismissed', resolved_by=resolver)
         return jsonify({'success': True})
+
+    return _admin_only(_fn)
+
+
+def _deliverable_filename(lead, offer_type):
+    company = re.sub(r'[^a-zA-Z0-9]+', '-', (lead.company.name if lead.company else 'lead')).strip('-').lower() or 'lead'
+    offer_slug = re.sub(r'[^a-zA-Z0-9]+', '-', (offer_type or 'deliverable')).strip('-').lower()
+    date_str = datetime.utcnow().strftime('%Y%m%d')
+    return f'{company}-{offer_slug}-deliverable-{date_str}.pdf'
+
+
+@multifamily_bp.route('/leads/<lead_id>/deliverable-prefill', methods=['GET'])
+def get_lead_deliverable_prefill(lead_id):
+    """Phase B Deliverable Composer — template + best-effort pre-filled
+    field values for this lead's offer type, for the admin composer form
+    to populate before the admin edits/generates the PDF. Super-admin
+    only (this is an internal ops tool, not a public/producer surface)."""
+    def _fn():
+        lead, err = _find_lead(lead_id)
+        if err:
+            return err
+        meta = deliverable_composer.deliverable_meta_for_lead(lead)
+        fields = deliverable_composer.build_prefill(lead)
+        return jsonify({**meta, 'fields': fields})
+
+    return _admin_only(_fn)
+
+
+@multifamily_bp.route('/leads/<lead_id>/deliverable', methods=['POST'])
+def create_lead_deliverable(lead_id):
+    """Phase B Deliverable Composer — generate the branded, print-ready
+    PDF deliverable from the admin's final edited field values, persist a
+    record of it (multifamily_deliverables), and return the PDF as a file
+    download. Never auto-sends anything — this only returns bytes for the
+    browser to download on explicit admin action. Super-admin only."""
+    from flask import g
+
+    def _fn():
+        lead, err = _find_lead(lead_id)
+        if err:
+            return err
+        payload = request.get_json(silent=True) or {}
+        fields = payload.get('fields')
+        if not isinstance(fields, dict):
+            return jsonify({'success': False, 'error': 'fields (object) is required'}), 400
+
+        meta = deliverable_composer.deliverable_meta_for_lead(lead)
+        offer_type = payload.get('offerType') or meta['offer_type']
+        credibility = public_credibility_view(get_credibility_config())
+
+        try:
+            pdf_bytes = deliverable_composer.render_pdf(lead, offer_type, fields, credibility)
+        except Exception as exc:
+            return jsonify({'success': False, 'error': f'PDF generation failed: {exc}'}), 500
+        if not pdf_bytes or not pdf_bytes.startswith(b'%PDF'):
+            return jsonify({'success': False, 'error': 'PDF generation failed'}), 500
+
+        created_by = (g.user or {}).get('email') if getattr(g, 'user', None) else None
+        if not lead.is_demo:
+            repository.insert_deliverable(
+                lead_id=lead_id, offer_type=offer_type, deliverable_name=meta['deliverable_name'],
+                artifact_type=meta['artifact_type'], fields=fields, created_by=created_by,
+            )
+
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=_deliverable_filename(lead, offer_type),
+        )
+
+    return _admin_only(_fn)
+
+
+@multifamily_bp.route('/leads/<lead_id>/deliverables', methods=['GET'])
+def get_lead_deliverables(lead_id):
+    """Phase B Deliverable Composer — history of previously composed
+    deliverables for this lead (drawer display). Super-admin only."""
+    def _fn():
+        lead, err = _find_lead(lead_id)
+        if err:
+            return err
+        return jsonify({'deliverables': repository.get_deliverables_for_lead(lead_id)})
 
     return _admin_only(_fn)
 
@@ -1303,6 +1393,7 @@ def list_campaigns():
 
     @_app.require_auth
     def _authorized():
+        from multifamily.campaigns.today_queue import compute_sequence_adherence
         status = request.args.get('status')
         campaigns = repository.list_campaigns(status=status)
         for c in campaigns:
@@ -1313,6 +1404,9 @@ def list_campaigns():
             c['meeting_count'] = sum(1 for t in targets if t['status'] == 'meeting_booked')
             last_activity = [t['last_activity_at'] for t in targets if t.get('last_activity_at')]
             c['last_activity_at'] = max(last_activity) if last_activity else None
+            # Phase D — '% completed on/near schedule' for the Section 7
+            # sequence cadence, additive to the existing counts above.
+            c['sequence_adherence'] = compute_sequence_adherence(c['id'])
         return jsonify({'campaigns': campaigns})
 
     return _authorized()
@@ -1565,6 +1659,69 @@ def set_campaign_target_renewal_month_route(target_id):
         return jsonify({'success': True, 'target': repository.get_campaign_target(target_id)})
 
     return _authorized()
+
+
+@multifamily_bp.route('/today-queue', methods=['GET'])
+def get_today_queue_route():
+    """Phase D Today Queue: every campaign target that owes a Section 7
+    sequence touch (touch_1_sent/connected/touch_2_sent/called/
+    breakup_sent) today or is overdue, ordered by urgency (most overdue
+    first). Pure computation over existing multifamily_campaign_targets
+    rows (multifamily/campaigns/today_queue.py) — no new storage.
+    Optional ?campaign_id= scopes to one campaign; omitted, it spans
+    every campaign. Operational worklist — login required, same as
+    every other campaign-targets endpoint."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        from multifamily.campaigns.today_queue import get_today_queue
+        campaign_id = (request.args.get('campaign_id') or '').strip() or None
+        if campaign_id and not repository.get_campaign(campaign_id):
+            return jsonify({'error': 'Campaign not found'}), 404
+        queue = get_today_queue(campaign_id=campaign_id)
+        return jsonify({'queue': queue, 'generated_at': datetime.utcnow().isoformat()})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/campaigns/<campaign_id>/sequence-adherence', methods=['GET'])
+def get_campaign_sequence_adherence_route(campaign_id):
+    """Phase D per-campaign '% completed on/near schedule' stat for the
+    Section 7 sequence cadence (multifamily/campaigns/today_queue.py's
+    compute_sequence_adherence) — a small, additive companion to the
+    scorecard in get_campaign_performance(). Login required."""
+    import app as _app
+
+    @_app.require_auth
+    def _authorized():
+        campaign = repository.get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({'error': 'Campaign not found'}), 404
+        from multifamily.campaigns.today_queue import compute_sequence_adherence
+        return jsonify({'campaign_id': campaign_id, **compute_sequence_adherence(campaign_id)})
+
+    return _authorized()
+
+
+@multifamily_bp.route('/admin/export', methods=['GET'])
+def export_all_data():
+    """Phase F -- admin-only 'Export all data': a single timestamped zip
+    with one CSV per multifamily_* table (multifamily/data_export.py).
+    Never public. This is a convenience export for the operator's own
+    ad-hoc backup/analysis -- platform-level database backups (Railway's
+    own backup job) remain the operator's actual disaster-recovery
+    mechanism and are out of scope here."""
+    def _fn():
+        from multifamily.data_export import build_export_zip, export_filename
+        return send_file(
+            io.BytesIO(build_export_zip()),
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=export_filename(),
+        )
+
+    return _admin_only(_fn)
 
 
 @multifamily_bp.route('/notifications', methods=['GET'])
