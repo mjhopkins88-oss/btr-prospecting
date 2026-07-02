@@ -21,3 +21,7 @@ copy only.
 - PROTECTED: the Sales Intelligence Engine's NEPQ-inspired question-led
   framework and its prospect-specific inputs — never modify, replace,
   or dilute
+- End-of-pass merge rule: every accepted work pass ends by merging the
+  feature branch to main (--no-ff, sanity-check, push) unless the
+  operator explicitly says to hold. The live app deploys from main;
+  unmerged work does not exist as far as the pilot is concerned.
