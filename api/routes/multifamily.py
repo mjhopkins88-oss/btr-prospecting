@@ -1411,7 +1411,9 @@ def import_campaign_targets(campaign_id):
     offer, so first_renewal_estimator can see it later. Login
     required."""
     import app as _app
-    from multifamily.campaigns.csv_import import import_targets_from_csv
+    from multifamily.campaigns.csv_import import (
+        import_targets_from_csv, check_csv_upload_size, MAX_CSV_UPLOAD_BYTES, ALLOWED_CSV_EXTENSIONS,
+    )
 
     @_app.require_auth
     def _authorized():
@@ -1419,13 +1421,23 @@ def import_campaign_targets(campaign_id):
         if not campaign:
             return jsonify({'error': 'Campaign not found'}), 404
 
+        if not check_csv_upload_size(request.content_length):
+            mb = MAX_CSV_UPLOAD_BYTES // (1024 * 1024)
+            return jsonify({'success': False, 'errors': [f'Upload exceeds the {mb}MB limit.']}), 400
+
         file_content = None
         uploaded = request.files.get('file')
         if uploaded:
+            filename = (uploaded.filename or '').lower()
+            if filename and not filename.endswith(ALLOWED_CSV_EXTENSIONS):
+                return jsonify({'success': False, 'errors': ['File must be a .csv (or .txt) file.']}), 400
             file_content = uploaded.read().decode('utf-8', errors='replace')
         else:
             payload = request.get_json(silent=True) or {}
-            file_content = payload.get('csv')
+            csv_value = payload.get('csv')
+            if csv_value is not None and not isinstance(csv_value, str):
+                return jsonify({'success': False, 'errors': ['csv must be a string.']}), 400
+            file_content = csv_value
 
         if not file_content:
             return jsonify({'success': False, 'errors': ['No CSV file or csv text provided.']}), 400
@@ -1669,6 +1681,11 @@ def get_intake_stats():
     @_app.require_auth
     @_app.require_super_admin
     def _authorized():
-        return jsonify(repository.get_intake_stats())
+        data = repository.get_intake_stats()
+        # Admin-only visibility into whether MULTIFAMILY_IP_HASH_SALT is
+        # actually configured in this environment (audit finding F2) —
+        # never surfaced anywhere non-admins can see.
+        data['ip_hash_salt_configured'] = not spam_guard.ip_hash_salt_is_default()
+        return jsonify(data)
 
     return _authorized()

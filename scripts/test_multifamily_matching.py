@@ -83,6 +83,41 @@ def test_merge_unions_and_rescores():
     check('survivor re-scored stronger after merge (was %s)' % before, survivor.score.category in ('call_today', 'hot'))
 
 
+def test_merge_gap_fill_includes_page_variant_and_campaign_id():
+    """Audit finding F5 — page_variant/campaign_id were missing from the
+    merge gap-fill list, so a survivor with no page_variant/campaign_id
+    yet never picked one up from a merged-in incoming lead, even though
+    offer_type and every UTM field already did."""
+    survivor = mk('Gapfill Holdings', email='ops@gapfill.com')
+    check('survivor starts with no page_variant', survivor.page_variant is None)
+    check('survivor starts with no campaign_id', survivor.campaign_id is None)
+
+    incoming = mk('Gapfill Holdings', email='second@gapfill.com')
+    incoming.page_variant = 'renewal-pressure'
+    incoming.campaign_id = 'test-campaign-id-123'
+    incoming.offer_type = 'renewal_pressure_test'
+
+    matching.apply_merge(survivor, incoming)
+    check('survivor picks up page_variant from the merged-in incoming lead',
+          survivor.page_variant == 'renewal-pressure')
+    check('survivor picks up campaign_id from the merged-in incoming lead',
+          survivor.campaign_id == 'test-campaign-id-123')
+
+    # And confirm gap-fill still respects "survivor's original identity
+    # wins" when the survivor ALREADY has a value.
+    survivor2 = mk('Gapfill Holdings Two', email='ops2@gapfill.com')
+    survivor2.page_variant = 'builders-risk'
+    survivor2.campaign_id = 'original-campaign-id'
+    incoming2 = mk('Gapfill Holdings Two', email='second2@gapfill.com')
+    incoming2.page_variant = 'renewal-pressure'
+    incoming2.campaign_id = 'different-campaign-id'
+    matching.apply_merge(survivor2, incoming2)
+    check("survivor's existing page_variant is NOT overwritten by the incoming lead's",
+          survivor2.page_variant == 'builders-risk')
+    check("survivor's existing campaign_id is NOT overwritten by the incoming lead's",
+          survivor2.campaign_id == 'original-campaign-id')
+
+
 def test_different_contacts_same_company_property_add_contact():
     survivor = mk('Skyline Residential', email='first@skyline.com')
     incoming = mk('Skyline Residential', email='second@skyline.com')  # same company+property, different contact
@@ -139,6 +174,7 @@ def main():
     try:
         test_classification_tiers()
         test_merge_unions_and_rescores()
+        test_merge_gap_fill_includes_page_variant_and_campaign_id()
         test_different_contacts_same_company_property_add_contact()
         test_different_property_same_company_stays_separate()
         test_on_intake_auto_merge_persists_one_lead()

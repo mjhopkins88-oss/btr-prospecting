@@ -10145,7 +10145,17 @@ function MultifamilyAdminPanel({
     activeTab: activeTab,
     setActiveTab: setActiveTab,
     user: user
-  }), loading && !data && /*#__PURE__*/React.createElement("div", {
+  }), data && data.ip_hash_salt_configured === false && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(239,68,68,0.1)',
+      border: '1px solid rgba(239,68,68,0.35)',
+      borderRadius: '8px',
+      padding: '0.75rem 1rem',
+      marginBottom: '1rem',
+      color: '#f87171',
+      fontSize: '0.82rem'
+    }
+  }, "⚠ MULTIFAMILY_IP_HASH_SALT is not configured for this environment — stored IP hashes are only as protected as this env var being set to a real secret. Admin-only visibility; not shown to prospects or non-admins."), loading && !data && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: 'center',
       padding: '3rem',
